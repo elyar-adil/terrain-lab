@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = ["crates/terrain-core", "crates/world-core", "crates/infrastructure", "crates/urban", "src-tauri"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
