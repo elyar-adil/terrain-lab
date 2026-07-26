@@ -682,11 +682,23 @@ fn analysis_previews(
         ]
     });
     let geology = analysis_image(terrain, size, |index| {
-        let value = terrain.geology[index].clamp(0.0, 1.0);
+        let base: [f32; 3] = match terrain.lithology[index] {
+            terrain_core::geology::Lithology::Shale => [82.0, 77.0, 69.0],
+            terrain_core::geology::Lithology::Sandstone => [174.0, 137.0, 91.0],
+            terrain_core::geology::Lithology::Limestone => [190.0, 187.0, 165.0],
+            terrain_core::geology::Lithology::Granite => [151.0, 142.0, 137.0],
+            terrain_core::geology::Lithology::Basalt => [58.0, 66.0, 70.0],
+            terrain_core::geology::Lithology::Metamorphic => [112.0, 106.0, 104.0],
+        };
+        let within_bed = terrain.stratigraphic_phase[index].rem_euclid(1.0);
+        let contact_distance = within_bed.min(1.0 - within_bed);
+        let contact = (1.0 - (contact_distance / 0.075).clamp(0.0, 1.0)) * 0.22;
+        let fault = terrain.fracture_intensity[index] * 0.18;
+        let tone = 1.0 - contact - fault;
         [
-            (62.0 + value * 151.0) as u8,
-            (72.0 + value * 94.0) as u8,
-            (88.0 - value * 38.0) as u8,
+            (base[0] * tone) as u8,
+            (base[1] * tone) as u8,
+            (base[2] * tone) as u8,
         ]
     });
     let soil_depth = analysis_image(terrain, size, |index| {

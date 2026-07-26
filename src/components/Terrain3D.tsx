@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { GenerationResult, SimulationConfig } from "../types";
 
 function decodeHeights(base64: string): Float32Array {
@@ -579,6 +580,78 @@ export function Terrain3D({ result, config, cameraMode }: { result: GenerationRe
       Math.max(0, sampleGrid(heights, worldX, worldZ) - result.stats.minElevation) * metresToScene
     );
 
+    // City generators provide real kilometre footprints and metre heights.
+    // Build those exact polygons rather than scattering illustrative boxes.
+    // Each style is merged into one draw call; geometry remains 1:1 because
+    // horizontal coordinates and extrusion depth use the same conversion.
+    const cityGroup = new THREE.Group();
+    const buildingGeometries: THREE.BufferGeometry[] = [];
+    const mergedBuildingGeometries: THREE.BufferGeometry[] = [];
+    const buildingMaterials = {
+      parisian: new THREE.MeshStandardMaterial({ color: 0xb8aa91, roughness: 0.91 }),
+      barcelonaEixample: new THREE.MeshStandardMaterial({ color: 0xb98769, roughness: 0.94 }),
+      manhattan: new THREE.MeshStandardMaterial({ color: 0x9da3a2, roughness: 0.87 }),
+    };
+    const geometriesByStyle: Record<keyof typeof buildingMaterials, THREE.BufferGeometry[]> = {
+      parisian: [],
+      barcelonaEixample: [],
+      manhattan: [],
+    };
+    const kilometreToScene = 1000 * metresToScene;
+    const cityHalfExtentKm = result.worldSizeKm * 0.5;
+    let buildingCount = 0;
+    for (const city of result.cities ?? []) {
+      const style = city.style;
+      if (!(style in geometriesByStyle)) continue;
+      for (const building of city.buildings) {
+        if (buildingCount >= 8_000 || building.footprint.length < 3) break;
+        const footprint = building.footprint.map((point) => ({
+          x: (point.x_km - cityHalfExtentKm) * kilometreToScene,
+          z: (point.y_km - cityHalfExtentKm) * kilometreToScene,
+        }));
+        const shape = new THREE.Shape();
+        shape.moveTo(footprint[0].x, -footprint[0].z);
+        for (const point of footprint.slice(1)) shape.lineTo(point.x, -point.z);
+        shape.closePath();
+        if (building.courtyard && building.courtyard.length >= 3) {
+          const hole = new THREE.Path();
+          const courtyard = building.courtyard.map((point) => ({
+            x: (point.x_km - cityHalfExtentKm) * kilometreToScene,
+            z: (point.y_km - cityHalfExtentKm) * kilometreToScene,
+          }));
+          hole.moveTo(courtyard[0].x, -courtyard[0].z);
+          for (const point of courtyard.slice(1)) hole.lineTo(point.x, -point.z);
+          hole.closePath();
+          shape.holes.push(hole);
+        }
+        const centreX = footprint.reduce((sum, point) => sum + point.x, 0) / footprint.length;
+        const centreZ = footprint.reduce((sum, point) => sum + point.z, 0) / footprint.length;
+        const buildingGeometry = new THREE.ExtrudeGeometry(shape, {
+          depth: building.height_metres * metresToScene,
+          bevelEnabled: false,
+          curveSegments: 1,
+          steps: 1,
+        });
+        buildingGeometry.rotateX(-Math.PI / 2);
+        buildingGeometry.translate(0, terrainHeightAt(centreX, centreZ) + 0.08 * metresToScene, 0);
+        buildingGeometry.computeVertexNormals();
+        buildingGeometries.push(buildingGeometry);
+        geometriesByStyle[style].push(buildingGeometry);
+        buildingCount += 1;
+      }
+    }
+    for (const style of Object.keys(geometriesByStyle) as Array<keyof typeof buildingMaterials>) {
+      const parts = geometriesByStyle[style];
+      if (parts.length === 0) continue;
+      const merged = mergeGeometries(parts, false);
+      if (!merged) continue;
+      merged.computeBoundingSphere();
+      mergedBuildingGeometries.push(merged);
+      cityGroup.add(new THREE.Mesh(merged, buildingMaterials[style]));
+    }
+    cityGroup.visible = false;
+    scene.add(cityGroup);
+
     // Roads remain vectors until this near-field LOD. Their physical widths
     // are converted with the same metres-to-scene factor as elevation, so a
     // 7.2 m collector is 7.2 m wide from both an overhead and street camera.
@@ -1087,6 +1160,7 @@ export function Terrain3D({ result, config, cameraMode }: { result: GenerationRe
       // take over when their real metre widths can occupy useful screen pixels.
       roadSurfaceGroup.visible = viewSpanMetres < 15_000;
       roadMarkingGroup.visible = viewSpanMetres < 3_200;
+      cityGroup.visible = viewSpanMetres < 20_000;
       renderer.render(scene, camera);
       frame = requestAnimationFrame(animate);
     };
@@ -1121,6 +1195,9 @@ export function Terrain3D({ result, config, cameraMode }: { result: GenerationRe
       cornCobMaterial.dispose();
       kernelMaterial.dispose();
       grassMaterial.dispose();
+      for (const buildingGeometry of buildingGeometries) buildingGeometry.dispose();
+      for (const mergedGeometry of mergedBuildingGeometries) mergedGeometry.dispose();
+      for (const material of Object.values(buildingMaterials)) material.dispose();
       for (const roadGeometry of roadGeometries) roadGeometry.dispose();
       asphaltMaterial.dispose();
       dirtRoadMaterial.dispose();

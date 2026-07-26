@@ -887,13 +887,13 @@ where
                 0.335 + wet * 0.07 + fine * 0.014,
                 0.185 + dry * 0.055,
             ];
-            let lithology_tint = match lithology {
-                geology::Lithology::Shale => -0.035,
-                geology::Lithology::Sandstone => 0.030,
-                geology::Lithology::Limestone => 0.045,
-                geology::Lithology::Granite => 0.018,
-                geology::Lithology::Basalt => -0.055,
-                geology::Lithology::Metamorphic => -0.005,
+            let lithology_color = match lithology {
+                geology::Lithology::Shale => [0.315, 0.305, 0.285],
+                geology::Lithology::Sandstone => [0.455, 0.395, 0.315],
+                geology::Lithology::Limestone => [0.485, 0.475, 0.425],
+                geology::Lithology::Granite => [0.435, 0.415, 0.395],
+                geology::Lithology::Basalt => [0.255, 0.270, 0.275],
+                geology::Lithology::Metamorphic => [0.355, 0.345, 0.335],
             };
             // This is the actual intersection of a finite-thickness 3D bed
             // with the topographic surface. Only the contact receives a small
@@ -935,9 +935,9 @@ where
                 + fine * 0.012
                 + fold_phase.sin() * 0.004;
             let rock_color = [
-                (0.385 + lithology_tint + geology * 0.018) * bedding_tone,
-                (0.380 + lithology_tint * 0.52 + weathering * 0.012) * bedding_tone,
-                (0.350 - lithology_tint * 0.18 + (1.0 - geology) * 0.010) * bedding_tone,
+                (lithology_color[0] + geology * 0.012 + weathering * 0.010) * bedding_tone,
+                (lithology_color[1] + weathering * 0.016) * bedding_tone,
+                (lithology_color[2] + (1.0 - geology) * 0.008) * bedding_tone,
             ];
             let sediment_color = if matches!(config.preset, TerrainPreset::Arid) {
                 [0.54, 0.46, 0.31]
