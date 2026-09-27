@@ -18,30 +18,42 @@ struct ProgressEvent {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct GenerationResult {
-    preview_data_url: String,
-    width: u32,
-    height: u32,
-    world_size_km: f32,
-    elapsed_ms: u128,
-    stats: TerrainStats,
-    mesh_size: usize,
-    water_data_size: usize,
-    height_data_base64: String,
-    forest_data_base64: String,
-    vegetation_exclusion_data_base64: String,
-    urban_data_base64: String,
-    cultivated_data_base64: String,
-    crop_data_base64: String,
-    road_data_base64: String,
-    roads: Vec<RenderRoad>,
-    cities: serde_json::Value,
-    water_height_data_base64: String,
-    water_mask_base64: String,
-    water_kind_base64: String,
-    flow_direction_base64: String,
-    flow_strength_base64: String,
-    analysis_previews: AnalysisPreviews,
+pub struct GenerationResult {
+    pub preview_data_url: String,
+    pub width: u32,
+    pub height: u32,
+    pub world_size_km: f32,
+    pub elapsed_ms: u128,
+    pub stats: TerrainStats,
+    pub mesh_size: usize,
+    pub water_data_size: usize,
+    pub height_data_base64: String,
+    pub forest_data_base64: String,
+    pub vegetation_exclusion_data_base64: String,
+    pub urban_data_base64: String,
+    pub cultivated_data_base64: String,
+    pub crop_data_base64: String,
+    pub road_data_base64: String,
+    pub roads: Vec<RenderRoad>,
+    pub cities: serde_json::Value,
+    /// Rich Chinese-city graph and parcel metadata. `cities` remains the
+    /// legacy UrbanModel projection for older renderers.
+    pub modern_cities: serde_json::Value,
+    /// The render-ready city layer: finished vertex buffers, instanced
+    /// prototype lists, baked textures, signal states and the initial traffic
+    /// pose. Derived entirely in Rust so the renderer never re-derives
+    /// geometry the traffic model also needs.
+    pub city_scenes: serde_json::Value,
+    /// Shared procedural assets emitted once per generation: L-System tree
+    /// prototypes and weathered material textures instanced across every city.
+    pub vegetation_prototypes: serde_json::Value,
+    pub material_textures: serde_json::Value,
+    pub water_height_data_base64: String,
+    pub water_mask_base64: String,
+    pub water_kind_base64: String,
+    pub flow_direction_base64: String,
+    pub flow_strength_base64: String,
+    pub analysis_previews: AnalysisPreviews,
     infrastructure_summary: InfrastructureSummary,
 }
 
@@ -804,30 +816,49 @@ async fn generate_terrain(
     config: SimulationConfig,
 ) -> Result<GenerationResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let started = Instant::now();
-        let terrain = generate(&config, |progress, stage| {
+        let (result, infrastructure) = build_payload(config, &|progress, stage| {
             emit_progress(&app, progress, stage)
-        })
+        })?;
+        install_traffic(&infrastructure);
+        Ok(result)
+    })
+    .await
+    .map_err(|error| format!("native generation task failed: {error}"))?
+}
+
+/// Pure payload assembly shared by the desktop command and headless render
+/// fixtures: terrain → infrastructure → satellite composites → the JSON the
+/// renderer consumes.  `progress` receives (fraction, stage) updates.
+///
+/// The infrastructure is returned alongside because the desktop command needs
+/// the live traffic fleets that hang off it; regenerating it here would mean
+/// running the whole settlement pass twice.
+pub fn build_payload(
+    config: SimulationConfig,
+    progress: &dyn Fn(f32, &str),
+) -> Result<(GenerationResult, InfrastructureData), String> {
+    let started = Instant::now();
+    let terrain = generate(&config, |value, stage| progress(value, stage))
         .map_err(|error| error.to_string())?;
-        let stats = terrain.stats.clone();
-        emit_progress(&app, 0.90, "计算聚落、农田与道路网络");
-        let infrastructure =
-            generate_infrastructure(&terrain, &config).map_err(|error| error.to_string())?;
-        let infrastructure_summary = InfrastructureSummary {
-            settlements: infrastructure.settlements.len(),
-            roads: infrastructure.roads.len(),
-            bridges: infrastructure
-                .crossings
-                .iter()
-                .filter(|crossing| crossing.kind == CrossingKind::Bridge)
-                .count(),
-            tunnels: infrastructure
-                .crossings
-                .iter()
-                .filter(|crossing| crossing.kind == CrossingKind::Tunnel)
-                .count(),
-        };
-        let analysis_previews = analysis_previews(&terrain, &infrastructure)?;
+    let stats = terrain.stats.clone();
+    progress(0.90, "计算聚落、农田与道路网络");
+    let infrastructure =
+        generate_infrastructure(&terrain, &config).map_err(|error| error.to_string())?;
+    let infrastructure_summary = InfrastructureSummary {
+        settlements: infrastructure.settlements.len(),
+        roads: infrastructure.roads.len(),
+        bridges: infrastructure
+            .crossings
+            .iter()
+            .filter(|crossing| crossing.kind == CrossingKind::Bridge)
+            .count(),
+        tunnels: infrastructure
+            .crossings
+            .iter()
+            .filter(|crossing| crossing.kind == CrossingKind::Tunnel)
+            .count(),
+    };
+    let analysis_previews = analysis_previews(&terrain, &infrastructure)?;
         let mesh_size = 512_usize.min(terrain.size);
         let height_bytes: Vec<u8> = downsample_height(&terrain, mesh_size)
             .into_iter()
@@ -895,8 +926,8 @@ async fn generate_terrain(
             }
         }
         let preview_size = 1024_usize.min(config.grid_size.max(512));
-        let mut image = render_satellite(&terrain, &config, preview_size, |progress, stage| {
-            emit_progress(&app, progress, stage)
+        let mut image = render_satellite(&terrain, &config, preview_size, |value, stage| {
+            progress(value, stage)
         })
         .map_err(|error| error.to_string())?;
         composite_world_surface(&mut image, &terrain, &infrastructure);
@@ -904,8 +935,8 @@ async fn generate_terrain(
         image
             .write_to(&mut png, ImageFormat::Png)
             .map_err(|error| error.to_string())?;
-        emit_progress(&app, 1.0, "卫星影像生成完成");
-        Ok(GenerationResult {
+        progress(1.0, "卫星影像生成完成");
+        let result = GenerationResult {
             preview_data_url: format!(
                 "data:image/png;base64,{}",
                 STANDARD.encode(png.into_inner())
@@ -927,6 +958,27 @@ async fn generate_terrain(
             roads: render_roads(&infrastructure),
             cities: serde_json::to_value(&infrastructure.cities)
                 .map_err(|error| error.to_string())?,
+            modern_cities: serde_json::to_value(&infrastructure.modern_cities)
+                .map_err(|error| error.to_string())?,
+            city_scenes: serde_json::to_value(&infrastructure.city_scenes)
+                .map_err(|error| error.to_string())?,
+            vegetation_prototypes: serde_json::to_value(
+                procedural::standard_prototype_set(2),
+            )
+            .map_err(|error| error.to_string())?,
+            material_textures: serde_json::Value::Array(
+                procedural::standard_texture_set(256)
+                    .into_iter()
+                    .map(|texture| {
+                        serde_json::json!({
+                            "name": texture.name,
+                            "width": texture.width,
+                            "height": texture.height,
+                            "data": STANDARD.encode(&texture.rgba),
+                        })
+                    })
+                    .collect(),
+            ),
             water_height_data_base64: STANDARD.encode(water_height_bytes),
             water_mask_base64: STANDARD.encode(water_mask_bytes),
             water_kind_base64: STANDARD.encode(water_kind_bytes),
@@ -934,10 +986,17 @@ async fn generate_terrain(
             flow_strength_base64: STANDARD.encode(flow_strength_bytes),
             analysis_previews,
             infrastructure_summary,
-        })
-    })
-    .await
-    .map_err(|error| format!("native generation task failed: {error}"))?
+        };
+    Ok((result, infrastructure))
+}
+
+/// The payload on its own, for callers that do not need the live traffic
+/// fleets (headless render fixtures, project export).
+pub fn build_generation_result(
+    config: SimulationConfig,
+    progress: &dyn Fn(f32, &str),
+) -> Result<GenerationResult, String> {
+    build_payload(config, progress).map(|(result, _)| result)
 }
 
 #[tauri::command]
@@ -993,6 +1052,85 @@ async fn load_project(input_path: String) -> Result<ProjectDocument, String> {
     Ok(project)
 }
 
+/// Live traffic state, kept out of the serialised payload and stepped by the
+/// renderer through a command.
+///
+/// The simulation lives here rather than in the browser because its routes are
+/// derived from the same lane and connector graph the road surface was drawn
+/// from.  A renderer-side copy would have to rebuild that graph from geometry
+/// and would eventually disagree with the paint on the road.
+static TRAFFIC: std::sync::Mutex<Option<Vec<Option<city_scene::traffic::TrafficSim>>>> =
+    std::sync::Mutex::new(None);
+
+/// Rebuild the traffic fleets for a set of cities.
+///
+/// Only the *network* is re-derived here — no geometry, no textures — so this is
+/// cheap enough to run once per generation.
+fn install_traffic(infrastructure: &InfrastructureData) {
+    let world: Vec<Option<city_scene::traffic::TrafficSim>> = infrastructure
+        .modern_cities
+        .iter()
+        .enumerate()
+        .map(|(index, city)| {
+            let network = city_scene::network::derive(
+                &city.nodes,
+                &city.sd_roads,
+                &city.hd_roads,
+                city.frame,
+                city_scene::JunctionSpec::default(),
+                city.seed,
+            );
+            let signals = infrastructure
+                .city_scenes
+                .get(index)
+                .map(|scene| scene.signals.clone())
+                .unwrap_or_default();
+            city_scene::traffic::simulate(&network, signals, city.seed, 44)
+        })
+        .collect();
+    if let Ok(mut slot) = TRAFFIC.lock() {
+        *slot = Some(world);
+    }
+}
+
+/// Advance one city's traffic by `dt` seconds and return the new poses and
+/// signal aspects.
+///
+/// The renderer calls this a few times a second rather than every frame: a
+/// round trip per frame is wasteful, and 20 Hz with client-side interpolation
+/// between samples is indistinguishable at 60 fps.
+#[tauri::command]
+fn traffic_step(city: usize, dt: f32) -> Result<serde_json::Value, String> {
+    let mut slot = TRAFFIC
+        .lock()
+        .map_err(|_| "traffic state is poisoned".to_string())?;
+    let Some(world) = slot.as_mut() else {
+        return Err("no traffic has been generated yet".into());
+    };
+    let Some(Some(sim)) = world.get_mut(city) else {
+        return Err(format!("city {city} has no traffic"));
+    };
+    let state = sim.step(dt);
+    serde_json::to_value(state).map_err(|error| error.to_string())
+}
+
+/// Total vehicle count per city, for the renderer's capacity check.
+#[tauri::command]
+fn traffic_capacities() -> Vec<usize> {
+    TRAFFIC
+        .lock()
+        .ok()
+        .and_then(|slot| {
+            slot.as_ref().map(|world| {
+                world
+                    .iter()
+                    .map(|sim| sim.as_ref().map(|sim| sim.agent_count()).unwrap_or(0))
+                    .collect()
+            })
+        })
+        .unwrap_or_default()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1001,7 +1139,9 @@ pub fn run() {
             generate_terrain,
             export_terrain,
             save_project,
-            load_project
+            load_project,
+            traffic_step,
+            traffic_capacities
         ])
         .run(tauri::generate_context!())
         .expect("error while running wind & water terrain lab");

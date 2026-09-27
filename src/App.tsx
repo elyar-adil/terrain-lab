@@ -92,6 +92,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("3d");
   const [analysisLayer, setAnalysisLayer] = useState<AnalysisLayer>("discharge");
+  const [cityFocus, setCityFocus] = useState<{ xKm: number; yKm: number; spanKm: number; nonce: number } | null>(null);
   const viewportRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -119,6 +120,30 @@ function App() {
     () => ((config.worldSizeKm * 1000) / config.gridSize).toFixed(1),
     [config.gridSize, config.worldSizeKm],
   );
+
+  // Settlement-centred viewpoints: the payload carries each city's graph in
+  // world kilometres, so the centre is the bounding-box mid of its nodes and
+  // a jump flies the camera straight there at a street-to-district span.
+  const cityOptions = useMemo(() => {
+    if (!result?.modernCities?.length) return [];
+    const labelled = result.modernCities.map((city, index) => {
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const node of city.nodes) {
+        minX = Math.min(minX, node.point.x_km); maxX = Math.max(maxX, node.point.x_km);
+        minY = Math.min(minY, node.point.y_km); maxY = Math.max(maxY, node.point.y_km);
+      }
+      const xKm = (minX + maxX) / 2;
+      const yKm = (minY + maxY) / 2;
+      const label = index === 0 ? "中心城（县城）"
+        : index < 4 ? `镇区 ${index}`
+        : `村庄 ${index - 3}`;
+      return { label, xKm, yKm, spanKm: index === 0 ? 6 : index < 4 ? 3.5 : 1.6 };
+    });
+    return [
+      { label: "全域视角", xKm: config.worldSizeKm / 2, yKm: config.worldSizeKm / 2, spanKm: config.worldSizeKm * 0.55 },
+      ...labelled,
+    ];
+  }, [result, config.worldSizeKm]);
 
   const update = <K extends keyof SimulationConfig>(key: K, value: SimulationConfig[K]) => {
     setConfig((current) => ({ ...current, [key]: value }));
@@ -283,8 +308,8 @@ function App() {
         </aside>
 
         <section className="viewport" ref={viewportRef}>
-          {result ? (viewMode === "analysis" ? <img className="terrain-preview" src={result.analysisPreviews[analysisLayer]} alt={`${ANALYSIS_LAYERS[analysisLayer]}分析图层`} /> : <Terrain3D result={result} config={config} cameraMode={viewMode} />) : <div className="empty-state"><div className="contour-art" /><span>80 × 80 KM SYNTHETIC EARTH</span><h2>创造一片不存在，却足够真实的土地</h2><p>原生 Rust 地貌演化 · 河网推演 · 多尺度卫星辐射合成</p><button className="primary large" onClick={runGeneration}>生成第一片地貌</button></div>}
-          {result && <div className="view-switcher"><button className={viewMode === "3d" ? "active" : ""} onClick={() => setViewMode("3d")}>3D 地形</button><button className={viewMode === "satellite" ? "active" : ""} onClick={() => setViewMode("satellite")}>动态卫星</button><select className={viewMode === "analysis" ? "active" : ""} value={analysisLayer} onChange={(event) => { setAnalysisLayer(event.target.value as AnalysisLayer); setViewMode("analysis"); }}><option disabled>分析图层</option>{(Object.keys(ANALYSIS_LAYERS) as AnalysisLayer[]).map((layer) => <option key={layer} value={layer}>{ANALYSIS_LAYERS[layer]}</option>)}</select><button onClick={toggleFullscreen}>全屏</button></div>}
+          {result ? (viewMode === "analysis" ? <img className="terrain-preview" src={result.analysisPreviews[analysisLayer]} alt={`${ANALYSIS_LAYERS[analysisLayer]}分析图层`} /> : <Terrain3D result={result} config={config} cameraMode={viewMode} cityFocus={cityFocus} />) : <div className="empty-state"><div className="contour-art" /><span>80 × 80 KM SYNTHETIC EARTH</span><h2>创造一片不存在，却足够真实的土地</h2><p>原生 Rust 地貌演化 · 河网推演 · 多尺度卫星辐射合成</p><button className="primary large" onClick={runGeneration}>生成第一片地貌</button></div>}
+          {result && <div className="view-switcher"><button className={viewMode === "3d" ? "active" : ""} onClick={() => setViewMode("3d")}>3D 地形</button><button className={viewMode === "satellite" ? "active" : ""} onClick={() => setViewMode("satellite")}>动态卫星</button><select className={viewMode === "analysis" ? "active" : ""} value={analysisLayer} onChange={(event) => { setAnalysisLayer(event.target.value as AnalysisLayer); setViewMode("analysis"); }}><option disabled>分析图层</option>{(Object.keys(ANALYSIS_LAYERS) as AnalysisLayer[]).map((layer) => <option key={layer} value={layer}>{ANALYSIS_LAYERS[layer]}</option>)}</select><select value="" className="city-jump" onChange={(event) => { const option = cityOptions[Number(event.target.value)]; if (option) setCityFocus({ xKm: option.xKm, yKm: option.yKm, spanKm: option.spanKm, nonce: Date.now() }); }}><option disabled value="">跳转城市</option>{cityOptions.map((option, index) => <option key={option.label} value={index}>{option.label}</option>)}</select><button onClick={toggleFullscreen}>全屏</button></div>}
           <div className="viewport-meta"><span>{viewMode === "3d" ? "3D TERRAIN · VERTICAL 1:1 · LIVE WEATHER" : viewMode === "analysis" ? `SEMANTIC LAYER · ${ANALYSIS_LAYERS[analysisLayer]}` : "LIVE ORTHOGRAPHIC · SAME WORLD · SAME TIME"}</span><span>{config.worldSizeKm} KM / {config.gridSize} PX</span></div>
           {busy && <div className="progress-overlay"><div><span>{status}</span><b>{Math.round(progress * 100)}%</b></div><progress value={progress} max={1} /></div>}
         </section>

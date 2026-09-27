@@ -1,432 +1,40 @@
-use serde::{Deserialize, Serialize};
-use std::f32::consts::TAU;
+mod compat;
+mod legacy;
+mod math;
+mod model;
+pub mod modern;
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Point {
-    pub x_km: f32,
-    pub y_km: f32,
-}
+pub use legacy::{BarcelonaGenerator, ManhattanGenerator, ParisianGenerator, UrbanGenerator};
+pub use model::{
+    ActionCandidate, ActionKind, ApproachSpec, ArrowStyle, BuildingFacade, BuildingMass, CityFrameInfo,
+    CityGraph, CityJunction, CitySpec, CityStyle, Compound, DrivingSide, GrowthState, HdLane, HdRoad,
+    JunctionKind, JunctionPhase, JurisdictionId, LaneMarking, LaneUse, MarkingKind,
+    ModelWeights, ModernBuilding, ModernChinaSpec, ModernCity, ModernRoadClass, MorphologyPrior,
+    MorphologyStats, Movement, Parcel, ParcelUse, Point, RoadConnector, RoadCrossSection, RoofStyle,
+    SdNode, SdRoad, SignalHead, SignalStyle, SplitMix64, StreetClass, StreetSegment, TreeInstance,
+    TreeSpecies, TrafficRules, TurnArrow, UrbanBlock, UrbanModel, cross_section, measure,
+    sample_action, synthesize_junction,
+};
+pub use modern::{generate_modern_chinese_city, hash_u32};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum CityStyle {
-    Parisian,
-    BarcelonaEixample,
-    Manhattan,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum StreetClass {
-    Boulevard,
-    Avenue,
-    Street,
-    Service,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum RoofStyle {
-    Mansard,
-    Terracotta,
-    Flat,
-    SetbackTower,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreetSegment {
-    pub from: Point,
-    pub to: Point,
-    pub class: StreetClass,
-    pub width_metres: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UrbanBlock {
-    pub boundary: Vec<Point>,
-    pub courtyard: Option<Vec<Point>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BuildingMass {
-    pub footprint: Vec<Point>,
-    pub courtyard: Option<Vec<Point>>,
-    pub height_metres: f32,
-    pub roof: RoofStyle,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UrbanModel {
-    pub style: CityStyle,
-    pub streets: Vec<StreetSegment>,
-    pub blocks: Vec<UrbanBlock>,
-    pub buildings: Vec<BuildingMass>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct CitySpec {
-    pub centre: Point,
-    pub radius_km: f32,
-    pub rotation_radians: f32,
-    pub seed: u32,
-    pub density: f32,
-}
-
-pub trait UrbanGenerator {
-    fn generate(&self, spec: CitySpec) -> UrbanModel;
-}
-
-pub struct ParisianGenerator;
-pub struct BarcelonaGenerator;
-pub struct ManhattanGenerator;
-
+/// Public style dispatcher. Modern Chinese generation stays in `modern`,
+/// legacy styles stay in `legacy`, and this API layer is the only place that
+/// knows both families exist.
 pub fn generate_city(style: CityStyle, spec: CitySpec) -> UrbanModel {
     match style {
+        CityStyle::ChineseModern => generate_modern_chinese_city(ModernChinaSpec {
+            centre: spec.centre,
+            radius_km: spec.radius_km,
+            rotation_radians: spec.rotation_radians,
+            seed: spec.seed,
+            density: spec.density,
+            ..ModernChinaSpec::default()
+        })
+        .urban_model(),
         CityStyle::Parisian => ParisianGenerator.generate(spec),
         CityStyle::BarcelonaEixample => BarcelonaGenerator.generate(spec),
         CityStyle::Manhattan => ManhattanGenerator.generate(spec),
     }
-}
-
-impl UrbanGenerator for BarcelonaGenerator {
-    fn generate(&self, spec: CitySpec) -> UrbanModel {
-        let spacing = 0.133;
-        let half = (spec.radius_km / spacing).floor() as i32;
-        let mut streets = Vec::new();
-        let mut blocks = Vec::new();
-        let mut buildings = Vec::new();
-        for index in -half..=half {
-            let offset = index as f32 * spacing;
-            streets.push(street(
-                spec,
-                Point {
-                    x_km: -spec.radius_km,
-                    y_km: offset,
-                },
-                Point {
-                    x_km: spec.radius_km,
-                    y_km: offset,
-                },
-                StreetClass::Street,
-                20.0,
-            ));
-            streets.push(street(
-                spec,
-                Point {
-                    x_km: offset,
-                    y_km: -spec.radius_km,
-                },
-                Point {
-                    x_km: offset,
-                    y_km: spec.radius_km,
-                },
-                StreetClass::Street,
-                20.0,
-            ));
-        }
-        for y in -half..half {
-            for x in -half..half {
-                let cx = (x as f32 + 0.5) * spacing;
-                let cy = (y as f32 + 0.5) * spacing;
-                if cx.hypot(cy) > spec.radius_km * 0.96 {
-                    continue;
-                }
-                let block = chamfered(spec, cx, cy, spacing * 0.82, spacing * 0.82, 0.018);
-                let courtyard = scale_polygon(&block, centroid(&block), 0.52);
-                blocks.push(UrbanBlock {
-                    boundary: block.clone(),
-                    courtyard: Some(courtyard.clone()),
-                });
-                buildings.push(BuildingMass {
-                    footprint: block,
-                    courtyard: Some(courtyard),
-                    height_metres: 18.0 + hash01(spec.seed, x, y) * 9.0,
-                    roof: RoofStyle::Terracotta,
-                });
-            }
-        }
-        UrbanModel {
-            style: CityStyle::BarcelonaEixample,
-            streets,
-            blocks,
-            buildings,
-        }
-    }
-}
-
-impl UrbanGenerator for ManhattanGenerator {
-    fn generate(&self, spec: CitySpec) -> UrbanModel {
-        let avenue_spacing = 0.285;
-        let street_spacing = 0.086;
-        let x_count = (spec.radius_km / avenue_spacing).ceil() as i32;
-        let y_count = (spec.radius_km / street_spacing).ceil() as i32;
-        let mut streets = Vec::new();
-        for x in -x_count..=x_count {
-            let offset = x as f32 * avenue_spacing;
-            streets.push(street(
-                spec,
-                Point {
-                    x_km: offset,
-                    y_km: -spec.radius_km,
-                },
-                Point {
-                    x_km: offset,
-                    y_km: spec.radius_km,
-                },
-                StreetClass::Avenue,
-                30.0,
-            ));
-        }
-        for y in -y_count..=y_count {
-            let offset = y as f32 * street_spacing;
-            streets.push(street(
-                spec,
-                Point {
-                    x_km: -spec.radius_km,
-                    y_km: offset,
-                },
-                Point {
-                    x_km: spec.radius_km,
-                    y_km: offset,
-                },
-                StreetClass::Street,
-                18.0,
-            ));
-        }
-        let mut blocks = Vec::new();
-        let mut buildings = Vec::new();
-        for y in -y_count..y_count {
-            for x in -x_count..x_count {
-                let cx = (x as f32 + 0.5) * avenue_spacing;
-                let cy = (y as f32 + 0.5) * street_spacing;
-                if cx.hypot(cy) > spec.radius_km {
-                    continue;
-                }
-                let boundary =
-                    rectangle(spec, cx, cy, avenue_spacing * 0.86, street_spacing * 0.70);
-                blocks.push(UrbanBlock {
-                    boundary: boundary.clone(),
-                    courtyard: None,
-                });
-                for parcel in 0..4 {
-                    let parcel_cx =
-                        cx - avenue_spacing * 0.30 + parcel as f32 * avenue_spacing * 0.20;
-                    let footprint = rectangle(
-                        spec,
-                        parcel_cx,
-                        cy,
-                        avenue_spacing * 0.16,
-                        street_spacing * 0.58,
-                    );
-                    let centrality =
-                        1.0 - (cx.hypot(cy) / spec.radius_km.max(0.01)).clamp(0.0, 1.0);
-                    buildings.push(BuildingMass {
-                        footprint,
-                        courtyard: None,
-                        height_metres: 18.0
-                            + centrality.powf(1.7) * spec.density * 210.0
-                            + hash01(spec.seed, x * 7 + parcel, y) * 22.0,
-                        roof: if centrality > 0.55 {
-                            RoofStyle::SetbackTower
-                        } else {
-                            RoofStyle::Flat
-                        },
-                    });
-                }
-            }
-        }
-        UrbanModel {
-            style: CityStyle::Manhattan,
-            streets,
-            blocks,
-            buildings,
-        }
-    }
-}
-
-impl UrbanGenerator for ParisianGenerator {
-    fn generate(&self, spec: CitySpec) -> UrbanModel {
-        // Haussmann boulevards are only the primary skeleton. Treating the
-        // space between nine rays as one building produced wedges hundreds of
-        // metres wide. Secondary streets keep ordinary Parisian blocks in the
-        // roughly 40--220 m range while every fourth ray remains a boulevard.
-        let ray_count = 36;
-        let ring_spacing = 0.18;
-        let rings = (spec.radius_km / ring_spacing).ceil() as usize;
-        let mut streets = Vec::new();
-        for ray in 0..ray_count {
-            let angle = ray as f32 / ray_count as f32 * TAU + hash01(spec.seed, ray, 3) * 0.16;
-            streets.push(street(
-                spec,
-                Point {
-                    x_km: 0.0,
-                    y_km: 0.0,
-                },
-                Point {
-                    x_km: angle.cos() * spec.radius_km,
-                    y_km: angle.sin() * spec.radius_km,
-                },
-                if ray % 4 == 0 {
-                    StreetClass::Boulevard
-                } else {
-                    StreetClass::Street
-                },
-                if ray % 4 == 0 { 30.0 } else { 14.0 },
-            ));
-        }
-        for ring in 1..=rings {
-            let radius = ring as f32 * ring_spacing;
-            let segments = 28;
-            for segment in 0..segments {
-                let a0 = segment as f32 / segments as f32 * TAU;
-                let a1 = (segment + 1) as f32 / segments as f32 * TAU;
-                streets.push(street(
-                    spec,
-                    polar(radius, a0),
-                    polar(radius, a1),
-                    StreetClass::Street,
-                    14.0,
-                ));
-            }
-        }
-        let mut blocks = Vec::new();
-        let mut buildings = Vec::new();
-        for ring in 0..rings {
-            let inner = ring as f32 * ring_spacing + 0.018;
-            let outer = ((ring + 1) as f32 * ring_spacing - 0.018).min(spec.radius_km);
-            for sector in 0..ray_count {
-                let jitter = (hash01(spec.seed, ring as i32, sector as i32) - 0.5) * 0.012;
-                // Angular setbacks correspond to a physical 7 m gap at the
-                // block midpoint, rather than expanding with distance.
-                let mean_radius = ((inner + outer) * 0.5).max(0.04);
-                let angular_gap = (0.007 / mean_radius).min(TAU / ray_count as f32 * 0.28);
-                let a0 = sector as f32 / ray_count as f32 * TAU + angular_gap + jitter;
-                let a1 = (sector + 1) as f32 / ray_count as f32 * TAU - angular_gap + jitter;
-                let boundary = vec![
-                    transform(spec, polar(inner, a0)),
-                    transform(spec, polar(inner, a1)),
-                    transform(spec, polar(outer, a1)),
-                    transform(spec, polar(outer, a0)),
-                ];
-                let courtyard = scale_polygon(&boundary, centroid(&boundary), 0.58);
-                blocks.push(UrbanBlock {
-                    boundary: boundary.clone(),
-                    courtyard: Some(courtyard.clone()),
-                });
-                buildings.push(BuildingMass {
-                    footprint: boundary,
-                    courtyard: Some(courtyard),
-                    height_metres: 17.0 + hash01(spec.seed, ring as i32, sector as i32) * 10.0,
-                    roof: RoofStyle::Mansard,
-                });
-            }
-        }
-        UrbanModel {
-            style: CityStyle::Parisian,
-            streets,
-            blocks,
-            buildings,
-        }
-    }
-}
-
-fn street(
-    spec: CitySpec,
-    from: Point,
-    to: Point,
-    class: StreetClass,
-    width_metres: f32,
-) -> StreetSegment {
-    StreetSegment {
-        from: transform(spec, from),
-        to: transform(spec, to),
-        class,
-        width_metres,
-    }
-}
-
-fn transform(spec: CitySpec, point: Point) -> Point {
-    let c = spec.rotation_radians.cos();
-    let s = spec.rotation_radians.sin();
-    Point {
-        x_km: spec.centre.x_km + point.x_km * c - point.y_km * s,
-        y_km: spec.centre.y_km + point.x_km * s + point.y_km * c,
-    }
-}
-
-fn polar(radius: f32, angle: f32) -> Point {
-    Point {
-        x_km: radius * angle.cos(),
-        y_km: radius * angle.sin(),
-    }
-}
-
-fn rectangle(spec: CitySpec, cx: f32, cy: f32, width: f32, height: f32) -> Vec<Point> {
-    [(-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)]
-        .into_iter()
-        .map(|(x, y)| {
-            transform(
-                spec,
-                Point {
-                    x_km: cx + x * width,
-                    y_km: cy + y * height,
-                },
-            )
-        })
-        .collect()
-}
-
-fn chamfered(spec: CitySpec, cx: f32, cy: f32, width: f32, height: f32, cut: f32) -> Vec<Point> {
-    let hw = width * 0.5;
-    let hh = height * 0.5;
-    [
-        (-hw + cut, -hh),
-        (hw - cut, -hh),
-        (hw, -hh + cut),
-        (hw, hh - cut),
-        (hw - cut, hh),
-        (-hw + cut, hh),
-        (-hw, hh - cut),
-        (-hw, -hh + cut),
-    ]
-    .into_iter()
-    .map(|(x, y)| {
-        transform(
-            spec,
-            Point {
-                x_km: cx + x,
-                y_km: cy + y,
-            },
-        )
-    })
-    .collect()
-}
-
-fn centroid(points: &[Point]) -> Point {
-    let n = points.len().max(1) as f32;
-    Point {
-        x_km: points.iter().map(|p| p.x_km).sum::<f32>() / n,
-        y_km: points.iter().map(|p| p.y_km).sum::<f32>() / n,
-    }
-}
-
-fn scale_polygon(points: &[Point], centre: Point, scale: f32) -> Vec<Point> {
-    points
-        .iter()
-        .map(|p| Point {
-            x_km: centre.x_km + (p.x_km - centre.x_km) * scale,
-            y_km: centre.y_km + (p.y_km - centre.y_km) * scale,
-        })
-        .collect()
-}
-
-fn hash01(seed: u32, x: i32, y: i32) -> f32 {
-    let mut value =
-        seed ^ (x as u32).wrapping_mul(0x9e37_79b9) ^ (y as u32).wrapping_mul(0x85eb_ca6b);
-    value ^= value >> 16;
-    value = value.wrapping_mul(0x7feb_352d);
-    value ^= value >> 15;
-    value as f32 / u32::MAX as f32
 }
 
 #[cfg(test)]
@@ -516,5 +124,102 @@ mod tests {
                     .all(|edge_metres| edge_metres <= 280.0)
             );
         }
+    }
+
+    #[test]
+    fn modern_chinese_city_keeps_sd_hd_and_parcel_identity() {
+        let city = generate_modern_chinese_city(ModernChinaSpec {
+            centre: Point {
+                x_km: 5.0,
+                y_km: 4.0,
+            },
+            radius_km: 1.4,
+            rotation_radians: 0.17,
+            seed: 42,
+            density: 0.82,
+            block_size_metres: 100.0,
+            organic: 0.68,
+            river_width_metres: 64.0,
+        });
+        assert_eq!(city.style, CityStyle::ChineseModern);
+        assert!(!city.nodes.is_empty());
+        assert!(city.nodes.iter().any(|node| node.role == "grade-crossing"));
+        assert!(city.sd_roads.len() > city.blocks.len());
+        assert_eq!(city.sd_roads.len(), city.hd_roads.len());
+        assert!(
+            city.hd_roads
+                .iter()
+                .any(|road| road.class == ModernRoadClass::Expressway)
+        );
+        assert!(!city.parcels.is_empty());
+        assert!(city.parcels.iter().all(|parcel| parcel.ring.len() >= 4));
+        assert!(
+            city.buildings
+                .iter()
+                .all(|building| building.height_metres.is_finite() && building.floors >= 3)
+        );
+        assert!(city.hd_roads.iter().any(|road| road.bridge));
+        assert!(city.hd_roads.iter().all(|road| !road.lanes.is_empty()));
+        assert!(
+            city.hd_roads
+                .iter()
+                .flat_map(|road| &road.lanes)
+                .any(|lane| {
+                    lane.markings.iter().any(|marking| {
+                        marking.kind == MarkingKind::Arrow && marking.arrow.is_some()
+                    })
+                })
+        );
+        assert!(!city.compounds.is_empty());
+        assert!(!city.trees.is_empty());
+        assert!(city.river.as_ref().is_some_and(|path| path.len() > 8));
+    }
+
+    #[test]
+    fn the_city_frame_inverts_the_generator_transform_exactly() {
+        let spec = ModernChinaSpec {
+            centre: Point {
+                x_km: 12.5,
+                y_km: -3.25,
+            },
+            rotation_radians: 0.41,
+            ..ModernChinaSpec::default()
+        };
+        let city = generate_modern_chinese_city(spec);
+        // A scene builder that converts kilometre payloads into city-local
+        // metres with a re-derived frame would drift; the frame travels with
+        // the payload precisely so it cannot.
+        for node in city.nodes.iter().take(64) {
+            let [x, z] = city.frame.to_local(node.point);
+            let back = city.frame.to_world(x, z);
+            assert!((back.x_km - node.point.x_km).abs() < 1.0e-4);
+            assert!((back.y_km - node.point.y_km).abs() < 1.0e-4);
+        }
+        let [x, z] = city.frame.to_local(spec.centre);
+        assert!(x.abs() < 1.0e-3 && z.abs() < 1.0e-3);
+    }
+
+    #[test]
+    fn modern_chinese_generation_is_reproducible() {
+        let spec = ModernChinaSpec {
+            seed: 90210,
+            ..ModernChinaSpec::default()
+        };
+        let first = generate_modern_chinese_city(spec);
+        let second = generate_modern_chinese_city(spec);
+        assert_eq!(first.nodes.len(), second.nodes.len());
+        assert_eq!(first.sd_roads.len(), second.sd_roads.len());
+        assert_eq!(first.parcels.len(), second.parcels.len());
+        assert_eq!(first.buildings.len(), second.buildings.len());
+        assert_eq!(
+            first
+                .buildings
+                .first()
+                .map(|building| building.height_metres.to_bits()),
+            second
+                .buildings
+                .first()
+                .map(|building| building.height_metres.to_bits())
+        );
     }
 }

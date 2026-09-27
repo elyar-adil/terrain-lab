@@ -1,0 +1,7 @@
+<!doctype html><meta charset="utf-8"><body>probe
+<script>
+  const c = document.createElement("canvas");
+  const gl = c.getContext("webgl2") || c.getContext("webgl");
+  console.log("GLPROBE result:", gl ? "OK " + gl.getParameter(gl.VERSION) : "FAILED");
+</script>
+</body>

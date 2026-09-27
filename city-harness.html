@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>City Scene Harness</title>
+    <style>
+      /* A mid grey, not white: a white page behind a canvas makes a blown-out
+         render indistinguishable from a correctly exposed one. */
+      html,body,#render-root{width:100%;height:100%;margin:0;overflow:hidden;background:#6b6b6b}
+    </style>
+  </head>
+  <body>
+    <div id="render-root"></div>
+    <script type="module" src="/src/cityHarness.tsx"></script>
+  </body>
+</html>

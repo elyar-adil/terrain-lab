@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "studio.windwater.terrainlab",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev -- --host 127.0.0.1 --port 5173",
+    "devUrl": "http://127.0.0.1:5173",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
@@ -33,4 +33,3 @@
     "longDescription": "使用原生 Rust 地貌模拟生成可重复的虚构自然卫星影像。"
   }
 }
-

@@ -1,0 +1,545 @@
+//! The city scene: everything a renderer needs, assembled and serialised.
+//!
+//! This is the boundary the rest of the project is built around.  `urban`
+//! decides *what* a city is; this module turns that plan into finished vertex
+//! buffers, instanced prototype lists, baked textures, signal states and a
+//! traffic fleet, and hands the renderer nothing it has to derive.
+//!
+//! # Why the payload is shaped the way it is
+//!
+//! Buffers are **base64 `f32`**, matching the heightfield and mask encoding the
+//! project already uses.  JSON arrays of floats cost roughly 1.5x the bytes and
+//! several times the parse time, and a city is tens of megabytes of vertex
+//! data — the difference between a payload that streams and one that does not.
+//!
+//! Instanced geometry is stored **once** and referenced by key.  Ten tree
+//! prototypes carry every tree in every city, so a leaf-detailed avenue costs
+//! two draw calls rather than one per tree.  This is the single biggest reason
+//! the previous port could not afford leaf-level foliage: it built every tree
+//! individually and then capped the whole world at 1 200 of them.
+
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use serde::Serialize;
+
+use urban::ModernCity;
+
+use crate::buildings;
+use crate::furniture::{self, FurnitureOutput};
+use crate::math::Rng;
+use crate::mesh::{Instance, MeshBuilder, SceneGeometry};
+use crate::network::{self, Network};
+use crate::spec::JunctionSpec;
+use crate::street::{self, SignalRig, StreetOutput};
+use crate::textures::BakedTexture;
+use crate::traffic::{self, TrafficState};
+use crate::trees::{self, TreePrototype, TreeOutput};
+
+/// Knobs that trade payload size against fidelity.
+///
+/// The defaults are chosen so a 1.8 km city with a few thousand buildings lands
+/// in the low tens of megabytes — the same order as the rest of the generation
+/// payload — while still being leaf-detailed and fully traffic-simulated.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneBudget {
+    /// Hard cap on buildings.  Beyond this the extras are dropped, not the
+    /// shells, so a skyline never develops a hole where the detail stopped.
+    pub max_buildings: usize,
+    /// Per-city tree budget.
+    pub max_trees: usize,
+    /// Facade texture bake resolution.
+    pub facade_texture_size: usize,
+    /// Ground texture bake resolution.
+    pub ground_texture_size: usize,
+    /// Vehicle count.
+    pub vehicles: usize,
+    /// Rooftop plant, balconies and signage are only worth generating for
+    /// buildings at least this large; below it they are sub-pixel.
+    pub detail_min_footprint_m2: f32,
+}
+
+impl Default for SceneBudget {
+    fn default() -> Self {
+        Self {
+            max_buildings: 4000,
+            max_trees: trees::TREE_BUDGET,
+            facade_texture_size: 256,
+            ground_texture_size: 256,
+            vehicles: 44,
+            detail_min_footprint_m2: 180.0,
+        }
+    }
+}
+
+/// One mesh group's buffers, base64 encoded.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncodedMesh {
+    pub material: String,
+    pub positions: String,
+    pub normals: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub colors: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uvs: Option<String>,
+    pub indices: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance_of: Option<String>,
+    pub vertex_count: usize,
+    pub triangle_count: usize,
+    pub cast_shadow: bool,
+    pub receive_shadow: bool,
+    pub alpha_cutout: bool,
+    pub dynamic: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncodedInstances {
+    pub key: String,
+    pub count: usize,
+    /// Ten floats per instance: `x, y, z, rotationY, scaleX, scaleY, scaleZ,
+    /// tintR, tintG, tintB`.
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncodedTexture {
+    pub name: String,
+    pub width: usize,
+    pub height: usize,
+    pub tile_width_m: f32,
+    pub tile_height_m: f32,
+    pub has_normal_source: bool,
+    /// `u8` RGBA.
+    pub data: String,
+}
+
+/// Everything a renderer needs for one city.  All coordinates are **city-local
+/// metres** relative to `origin`, so the renderer only has to add a single
+/// offset and a terrain height.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CityScene {
+    pub version: u32,
+    pub seed: u32,
+    /// World kilometre point the local frame's origin sits at.
+    pub origin: [f32; 2],
+    pub rotation_radians: f32,
+    /// Local extent, metres, so the renderer can frame the city without reading
+    /// every vertex.
+    pub extent_m: [f32; 4],
+    pub meshes: Vec<EncodedMesh>,
+    pub instances: Vec<EncodedInstances>,
+    pub textures: Vec<EncodedTexture>,
+    pub signals: Vec<SignalRig>,
+    pub traffic: TrafficState,
+    pub network: network::export::NetworkRecord,
+    pub stats: SceneStats,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneStats {
+    pub buildings: usize,
+    pub trees: usize,
+    pub tree_instances: usize,
+    pub tufts: usize,
+    pub parked_cars: usize,
+    pub vehicles: usize,
+    pub roads: usize,
+    pub lanes: usize,
+    pub connectors: usize,
+    pub junctions: usize,
+    pub signals: usize,
+    pub bollards: usize,
+    pub lamps: usize,
+    pub poles: usize,
+    pub railings: usize,
+    pub signs: usize,
+    pub shelters: usize,
+    pub shrubs: usize,
+    pub wire_spans: usize,
+    pub draw_calls: usize,
+    pub vertices: usize,
+    pub triangles: usize,
+    /// Engineering problems found while deriving.  Reported, never hidden.
+    pub warnings: Vec<String>,
+    pub tree_roles: Vec<(String, usize)>,
+}
+
+fn encode_f32(values: &[f32]) -> String {
+    let mut bytes = Vec::with_capacity(values.len() * 4);
+    for value in values {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    STANDARD.encode(bytes)
+}
+
+fn encode_u32(values: &[u32]) -> String {
+    let mut bytes = Vec::with_capacity(values.len() * 4);
+    for value in values {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    STANDARD.encode(bytes)
+}
+
+fn encode_bytes(values: &[u8]) -> String {
+    STANDARD.encode(values)
+}
+
+fn encode_geometry(geometry: SceneGeometry) -> (Vec<EncodedMesh>, Vec<EncodedInstances>) {
+    let mut meshes: Vec<EncodedMesh> = Vec::with_capacity(geometry.meshes.len());
+    let mut instances: Vec<EncodedInstances> = Vec::with_capacity(geometry.instances.len());
+    for group in geometry.meshes {
+        let vertex_count = group.positions.len() / 3;
+        meshes.push(EncodedMesh {
+            material: group.material,
+            positions: encode_f32(&group.positions),
+            normals: encode_f32(&group.normals),
+            colors: group.colors.as_deref().map(encode_bytes),
+            uvs: group.uvs.as_deref().map(|values| encode_f32(values)),
+            indices: encode_u32(&group.indices),
+            instance_of: group.instance_of.clone(),
+            vertex_count,
+            triangle_count: group.indices.len() / 3,
+            cast_shadow: group.cast_shadow,
+            receive_shadow: group.receive_shadow,
+            alpha_cutout: group.alpha_cutout,
+            dynamic: group.dynamic,
+        });
+    }
+    for list in geometry.instances {
+        let mut data = Vec::with_capacity(list.instances.len() * 10);
+        for instance in &list.instances {
+            data.extend_from_slice(&[
+                instance.x,
+                instance.y,
+                instance.z,
+                instance.rotation_y,
+                instance.scale_x,
+                instance.scale_y,
+                instance.scale_z,
+                instance.tint_r,
+                instance.tint_g,
+                instance.tint_b,
+            ]);
+        }
+        instances.push(EncodedInstances {
+            key: list.key,
+            count: list.instances.len(),
+            data: encode_f32(&data),
+        });
+    }
+    (meshes, instances)
+}
+
+fn encode_textures(textures: &[BakedTexture]) -> Vec<EncodedTexture> {
+    textures
+        .iter()
+        .map(|texture| EncodedTexture {
+            name: texture.name.clone(),
+            width: texture.width,
+            height: texture.height,
+            tile_width_m: texture.tile_width_m,
+            tile_height_m: texture.tile_height_m,
+            has_normal_source: texture.has_normal_source,
+            data: encode_bytes(&texture.rgba),
+        })
+        .collect()
+}
+
+fn extent_of(network: &Network) -> [f32; 4] {
+    let mut extent = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+    for junction in &network.junctions {
+        extent[0] = extent[0].min(junction.centre.x);
+        extent[1] = extent[1].min(junction.centre.y);
+        extent[2] = extent[2].max(junction.centre.x);
+        extent[3] = extent[3].max(junction.centre.y);
+    }
+    if extent[0] > extent[2] {
+        return [0.0, 0.0, 0.0, 0.0];
+    }
+    extent
+}
+
+/// Derive a whole city scene.
+pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
+    let spec = JunctionSpec::default();
+    let network = network::derive(
+        &city.nodes,
+        &city.sd_roads,
+        &city.hd_roads,
+        city.frame,
+        spec,
+        city.seed,
+    );
+
+    let mut builder = MeshBuilder::new();
+    // Prototypes first, so their groups exist and can be bound before anything
+    // instances into them.
+    let prototypes: Vec<TreePrototype> = trees::prototype_set();
+    trees::build_prototypes(&prototypes, &mut builder);
+    trees::build_shrub_prototype(&mut builder);
+    trees::build_tuft_prototype(&mut builder);
+    furniture::build_prototypes(&mut builder);
+
+    let StreetOutput {
+        signals,
+        traffic_lights_built: _,
+    } = street::build(&network, &mut builder, city.seed);
+    let FurnitureOutput {
+        lamps,
+        poles,
+        bollards,
+        railings,
+        signs,
+        shelters,
+        spans,
+    } = furniture::place(&network, &mut builder, city.seed);
+    let shrubs = trees::plant_median_shrubs(&network, &mut builder, city.seed);
+    let parked = furniture::park_cars(&network, &mut builder, city.seed);
+    let tree_output = trees::plant(
+        &network,
+        &city.parcels,
+        city.river.as_deref(),
+        city.frame,
+        &prototypes,
+        &mut builder,
+        city.seed,
+    );
+    let mut buildings = city.buildings.clone();
+    buildings.truncate(budget.max_buildings);
+    buildings::build(
+        &city.blocks,
+        &city.parcels,
+        &buildings,
+        &city.compounds,
+        city.frame,
+        &mut builder,
+    );
+
+    let geometry = builder.build();
+    let vertices = geometry
+        .meshes
+        .iter()
+        .map(|group| group.positions.len() / 3)
+        .sum();
+    let triangles = geometry
+        .meshes
+        .iter()
+        .map(|group| group.indices.len() / 3)
+        .sum();
+    let draw_calls = geometry.meshes.len();
+    let (meshes, instances) = encode_geometry(geometry);
+    let textures = encode_textures(&crate::bake::standard_set(
+        budget.facade_texture_size,
+        budget.ground_texture_size,
+    ));
+
+    let traffic = traffic::simulate(&network, signals.clone(), city.seed, budget.vehicles);
+    let traffic_state = match &traffic {
+        Some(sim) => traffic::initial_state(sim),
+        None => TrafficState::default(),
+    };
+    let vehicles = traffic.as_ref().map(|sim| sim.agent_count()).unwrap_or(0);
+    let signal_count = signals.len();
+
+    let mut warnings = network.warnings.clone();
+    if city.buildings.len() > budget.max_buildings {
+        warnings.push(format!(
+            "city has {} buildings; {} detail shells were dropped to stay inside the scene budget",
+            city.buildings.len(),
+            city.buildings.len() - budget.max_buildings
+        ));
+    }
+
+    CityScene {
+        version: 1,
+        seed: city.seed,
+        origin: [city.frame.origin.x_km, city.frame.origin.y_km],
+        rotation_radians: city.frame.rotation_radians,
+        extent_m: extent_of(&network),
+        meshes,
+        instances,
+        textures,
+        signals,
+        traffic: traffic_state,
+        network: network.record(),
+        stats: SceneStats {
+            buildings: buildings.len(),
+            trees: prototypes.len(),
+            tree_instances: tree_output.instances,
+            tufts: tree_output.tufts,
+            parked_cars: parked,
+            vehicles,
+            roads: network.roads.len(),
+            lanes: network.lanes.len(),
+            connectors: network.connectors.len(),
+            junctions: network.junctions.len(),
+            signals: signal_count,
+            bollards,
+            lamps,
+            poles,
+            railings,
+            signs,
+            shelters,
+            shrubs,
+            wire_spans: spans,
+            draw_calls,
+            vertices,
+            triangles,
+            warnings,
+            tree_roles: tree_output.by_role,
+        },
+    }
+}
+
+/// A tiny deterministic jitter source for callers that want to vary the scene
+/// without regenerating the city.
+pub fn scene_variant(seed: u32) -> u32 {
+    let mut rng = Rng::new(seed);
+    rng.next_u32()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use urban::{ModernChinaSpec, generate_modern_chinese_city};
+
+    fn city() -> urban::ModernCity {
+        generate_modern_chinese_city(ModernChinaSpec {
+            seed: 42,
+            radius_km: 0.4,
+            block_size_metres: 110.0,
+            ..ModernChinaSpec::default()
+        })
+    }
+
+    #[test]
+    fn a_city_scene_carries_everything_a_renderer_needs() {
+        let scene = build_city_scene(&city(), SceneBudget::default());
+        assert!(!scene.meshes.is_empty());
+        assert!(!scene.instances.is_empty());
+        assert!(!scene.textures.is_empty());
+        assert!(!scene.signals.is_empty());
+        assert!(!scene.traffic.agents.is_empty());
+        assert!(scene.network.junctions.iter().any(|j| j.ring.len() >= 27));
+        assert!(scene.network.connectors.len() > 100);
+        assert!(scene.stats.trees >= 10);
+        assert!(scene.stats.tree_instances > 500);
+        assert!(scene.stats.wire_spans > 5);
+        assert!(scene.extent_m[2] > scene.extent_m[0]);
+    }
+
+    #[test]
+    fn every_mesh_carries_a_decodable_buffer() {
+        let scene = build_city_scene(&city(), SceneBudget::default());
+        for mesh in &scene.meshes {
+            let positions = STANDARD
+                .decode(&mesh.positions)
+                .unwrap_or_else(|_| panic!("{} positions are not base64", mesh.material));
+            assert_eq!(positions.len(), mesh.vertex_count * 12);
+            let indices = STANDARD
+                .decode(&mesh.indices)
+                .unwrap_or_else(|_| panic!("{} indices are not base64", mesh.material));
+            assert_eq!(indices.len(), mesh.triangle_count * 12);
+            // Every index must address a real vertex, or the renderer silently
+            // drops triangles.
+            let count = mesh.vertex_count as u32;
+            for chunk in indices.chunks_exact(4) {
+                let value = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                assert!(value < count, "{} indexes past its buffer", mesh.material);
+            }
+        }
+    }
+
+    #[test]
+    fn instanced_groups_reference_a_known_instance_list() {
+        let scene = build_city_scene(&city(), SceneBudget::default());
+        let keys: Vec<&str> = scene.instances.iter().map(|list| list.key.as_str()).collect();
+        // A prototype this city happens not to use may legitimately have no
+        // instances — a small city has no bus shelter.  What must hold is that
+        // every *populated* list is consumed by some geometry, and that no
+        // geometry claims an instance list which does not exist.
+        for list in &scene.instances {
+            if list.count == 0 {
+                // A prototype this city does not use.  It must still be present
+                // so the renderer's `instanceOf` lookup never misses.
+                assert!(
+                    scene
+                        .meshes
+                        .iter()
+                        .any(|mesh| mesh.instance_of.as_deref() == Some(list.key.as_str())),
+                    "{} has no geometry at all",
+                    list.key
+                );
+                continue;
+            }
+            assert!(
+                scene
+                    .meshes
+                    .iter()
+                    .any(|mesh| mesh.instance_of.as_deref() == Some(list.key.as_str())),
+                "{} has instances but nothing draws them",
+                list.key
+            );
+            let bytes = STANDARD.decode(&list.data).unwrap();
+            assert_eq!(bytes.len(), list.count * 40);
+        }
+        for mesh in &scene.meshes {
+            if let Some(key) = &mesh.instance_of {
+                assert!(keys.contains(&key.as_str()), "{key} is not a known list");
+            }
+        }
+        // The whole point of the instancing design: trees are the bulk of the
+        // city and must ride on a handful of lists.
+        let tree_lists = keys.iter().filter(|key| key.starts_with("tree/")).count();
+        assert!(tree_lists >= 8, "only {tree_lists} tree prototypes");
+    }
+
+    #[test]
+    fn the_scene_stays_inside_a_sane_draw_call_budget() {
+        let scene = build_city_scene(&city(), SceneBudget::default());
+        // One group per material, plus one per instanced prototype.  A city that
+        // needs hundreds of draws has lost its batching somewhere.
+        assert!(
+            scene.meshes.len() < 80,
+            "the city needs {} draw calls",
+            scene.meshes.len()
+        );
+    }
+
+    #[test]
+    fn the_building_budget_drops_detail_not_shells() {
+        let mut budget = SceneBudget::default();
+        budget.max_buildings = 40;
+        let scene = build_city_scene(&city(), budget);
+        assert_eq!(scene.stats.buildings, 40);
+        assert!(
+            scene
+                .stats
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("scene budget")),
+            "dropping buildings must be reported, not hidden"
+        );
+    }
+
+    #[test]
+    fn generation_is_deterministic() {
+        let city = city();
+        let first = build_city_scene(&city, SceneBudget::default());
+        let second = build_city_scene(&city, SceneBudget::default());
+        assert_eq!(first.meshes.len(), second.meshes.len());
+        for (a, b) in first.meshes.iter().zip(second.meshes.iter()) {
+            assert_eq!(a.material, b.material);
+            assert_eq!(a.positions, b.positions);
+        }
+        for (a, b) in first.instances.iter().zip(second.instances.iter()) {
+            assert_eq!(a.key, b.key);
+            assert_eq!(a.data, b.data);
+        }
+    }
+}

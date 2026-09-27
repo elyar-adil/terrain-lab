@@ -328,6 +328,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "city-scene"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "procedural",
+ "serde",
+ "urban",
+]
+
+[[package]]
 name = "combine"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1514,6 +1524,7 @@ dependencies = [
 name = "infrastructure"
 version = "0.1.0"
 dependencies = [
+ "city-scene",
  "image",
  "rayon",
  "serde",
@@ -2323,6 +2334,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "procedural"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -3751,6 +3769,7 @@ checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 name = "urban"
 version = "0.1.0"
 dependencies = [
+ "procedural",
  "serde",
 ]
 
@@ -4069,14 +4088,17 @@ name = "wind-water-terrain-lab"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "city-scene",
  "image",
  "infrastructure",
+ "procedural",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "terrain-core",
+ "urban",
 ]
 
 [[package]]

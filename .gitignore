@@ -5,3 +5,16 @@ src-tauri/target/
 *.log
 /terrain-preview*.png
 .DS_Store
+
+# Generated render fixtures.
+#
+# These are build outputs, not sources. The full payload is ~170 MB and the
+# lean city scene ~25 MB, and both are reproduced exactly by:
+#   cargo run --release -p wind-water-terrain-lab --example city_fixture -- --cities 1
+#   cargo run --release -p wind-water-terrain-lab --example tiny_city
+# Committing them would put a quarter of a gigabyte of derived vertex data in the
+# history for no benefit, and every regeneration would rewrite them.
+/public/render-fixture.json
+/public/city-scenes.json
+/public/tiny-city.json
+/public/tiny-baseline.json

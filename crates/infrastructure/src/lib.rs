@@ -1,9 +1,12 @@
+use city_scene::{CityScene, SceneBudget, build_city_scene};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::BinaryHeap};
 use terrain_core::{SimulationConfig, TerrainData};
 use thiserror::Error;
-use urban::{CitySpec, CityStyle, Point as UrbanPoint, UrbanModel, generate_city};
+use urban::{
+    ModernChinaSpec, ModernCity, Point as UrbanPoint, UrbanModel, generate_modern_chinese_city,
+};
 use world_core::{GridPoint, ScalarLayer, WorldError, WorldGrid};
 
 #[derive(Debug, Error)]
@@ -129,6 +132,15 @@ pub struct InfrastructureData {
     pub settlements: Vec<SettlementSite>,
     pub roads: Vec<Road>,
     pub crossings: Vec<CrossingCandidate>,
+    /// Rich modern Chinese city payload.  `cities` below remains as a
+    /// compatibility projection for the existing renderer, while this field
+    /// preserves SD/HD roads, parcels, stable building ids and river geometry.
+    pub modern_cities: Vec<ModernCity>,
+    /// Everything a renderer needs, derived once in Rust: finished vertex
+    /// buffers, instanced prototype lists, baked textures, signal states and a
+    /// traffic fleet.  `modern_cities` is the *plan*; this is the scene.
+    #[serde(skip)]
+    pub city_scenes: Vec<CityScene>,
     pub cities: Vec<UrbanModel>,
 }
 
@@ -247,35 +259,63 @@ pub fn generate_infrastructure(
     let cultivated_land =
         realize_cultivated_land(grid, &agricultural_suitability, &urban_land, &settlements);
     let crossings = find_crossings(terrain, grid, &roads);
-    let cities = settlements
+    let modern_cities: Vec<ModernCity> = settlements
         .iter()
         .map(|settlement| {
-            let style = match (config.seed.wrapping_add(settlement.id)) % 3 {
-                0 => CityStyle::Parisian,
-                1 => CityStyle::BarcelonaEixample,
-                _ => CityStyle::Manhattan,
-            };
             let radius_km = match settlement.class {
-                SettlementClass::RegionalCentre => 2.4,
-                SettlementClass::Town => 1.25,
-                SettlementClass::Village => 0.38,
+                // Chinese settlement hierarchy on an 80 km map: the regional
+                // centre is a county-level city (县城, ~10 km² built-up area),
+                // towns (镇区) span roughly 2 km², villages stay compact.  The
+                // earlier 0.9 km cap made every city a neighbourhood dot that
+                // vanished at regional zoom.
+                SettlementClass::RegionalCentre => 1.8,
+                SettlementClass::Town => 0.8,
+                SettlementClass::Village => 0.30,
             };
-            generate_city(
-                style,
-                CitySpec {
-                    centre: UrbanPoint {
-                        x_km: settlement.location.x as f32 / (grid.size - 1) as f32
-                            * grid.world_size_km,
-                        y_km: settlement.location.y as f32 / (grid.size - 1) as f32
-                            * grid.world_size_km,
-                    },
-                    radius_km,
-                    rotation_radians: (config.seed ^ settlement.id.wrapping_mul(7919)) as f32
-                        * 0.000_013,
-                    seed: config.seed ^ settlement.id.wrapping_mul(0x9e37_79b9),
-                    density: settlement.score,
+            generate_modern_chinese_city(ModernChinaSpec {
+                centre: UrbanPoint {
+                    x_km: settlement.location.x as f32 / (grid.size - 1) as f32
+                        * grid.world_size_km,
+                    y_km: settlement.location.y as f32 / (grid.size - 1) as f32
+                        * grid.world_size_km,
                 },
-            )
+                radius_km,
+                rotation_radians: (config.seed ^ settlement.id.wrapping_mul(7919)) as f32
+                    * 0.000_013,
+                seed: config.seed ^ settlement.id.wrapping_mul(0x9e37_79b9),
+                density: (0.58 + settlement.score * 0.32).clamp(0.35, 0.92),
+                block_size_metres: 120.0,
+                organic: 0.68,
+                river_width_metres: 64.0,
+            })
+        })
+        .collect();
+    let cities = modern_cities.iter().map(ModernCity::urban_model).collect();
+    // The scene layer runs after the plan, per city, because a renderer must
+    // never re-derive geometry that the traffic model also needs.  Budgets
+    // scale with the settlement's class: a village does not need four thousand
+    // building shells.
+    let city_scenes: Vec<CityScene> = settlements
+        .iter()
+        .zip(modern_cities.iter())
+        .map(|(settlement, city)| {
+            let mut budget = SceneBudget::default();
+            match settlement.class {
+                SettlementClass::RegionalCentre => {}
+                SettlementClass::Town => {
+                    budget.max_buildings = 1600;
+                    budget.max_trees = 1400;
+                    budget.vehicles = 28;
+                }
+                SettlementClass::Village => {
+                    budget.max_buildings = 500;
+                    budget.max_trees = 500;
+                    budget.vehicles = 12;
+                    budget.facade_texture_size = 128;
+                    budget.ground_texture_size = 128;
+                }
+            }
+            build_city_scene(city, budget)
         })
         .collect();
     Ok(InfrastructureData {
@@ -292,6 +332,8 @@ pub fn generate_infrastructure(
         settlements,
         roads,
         crossings,
+        modern_cities,
+        city_scenes,
         cities,
     })
 }
@@ -932,6 +974,24 @@ mod tests {
         let second = generate_infrastructure(&terrain, &config).unwrap();
         assert_eq!(first.settlements.len(), second.settlements.len());
         assert_eq!(first.roads.len(), second.roads.len());
+        assert_eq!(first.modern_cities.len(), first.settlements.len());
+        assert_eq!(
+            first
+                .modern_cities
+                .iter()
+                .map(|city| city.sd_roads.len())
+                .collect::<Vec<_>>(),
+            second
+                .modern_cities
+                .iter()
+                .map(|city| city.sd_roads.len())
+                .collect::<Vec<_>>()
+        );
+        assert!(first.modern_cities.iter().all(|city| {
+            city.style == urban::CityStyle::ChineseModern
+                && !city.parcels.is_empty()
+                && !city.hd_roads.is_empty()
+        }));
         assert!(first.settlements.len() >= 3);
         assert!(first.roads.len() >= first.settlements.len() - 1);
         assert!(first.roads.len() <= first.settlements.len() + 4);

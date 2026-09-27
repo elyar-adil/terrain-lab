@@ -36,6 +36,44 @@ function Harness() {
   const mode = new URLSearchParams(window.location.search).get("mode") === "satellite"
     ? "satellite"
     : "3d";
+  // `focus=-1` frames the whole world; `focus=N` flies to city N the same way
+  // the app's "跳转城市" selector does, so screenshots audit the exact view a
+  // user lands on.
+  const params = new URLSearchParams(window.location.search);
+  const focusParam = Number(params.get("focus"));
+  const spanOverride = Number(params.get("span"));
+  const focus = fixture && Number.isFinite(focusParam) && focusParam !== 0
+    ? (() => {
+        const spanKm = Number.isFinite(spanOverride) && spanOverride > 0
+          ? spanOverride
+          : focusParam < 0
+          ? fixture.config.worldSizeKm * 0.55
+          : focusParam === 1 ? 6 : focusParam <= 4 ? 3.5 : 1.6;
+        if (focusParam < 0) {
+          return {
+            xKm: fixture.config.worldSizeKm / 2,
+            yKm: fixture.config.worldSizeKm / 2,
+            spanKm,
+            nonce: 1,
+          };
+        }
+        const city = fixture.result.modernCities?.[focusParam - 1];
+        if (!city?.nodes?.length) return null;
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const node of city.nodes) {
+          minX = Math.min(minX, node.point.x_km);
+          maxX = Math.max(maxX, node.point.x_km);
+          minY = Math.min(minY, node.point.y_km);
+          maxY = Math.max(maxY, node.point.y_km);
+        }
+        return {
+          xKm: (minX + maxX) / 2,
+          yKm: (minY + maxY) / 2,
+          spanKm,
+          nonce: 1,
+        };
+      })()
+    : null;
 
   useEffect(() => {
     fetch("/render-fixture.json")
@@ -53,7 +91,7 @@ function Harness() {
   }, [fixture]);
 
   return fixture
-    ? <Terrain3D result={fixture.result} config={fixture.config} cameraMode={mode} />
+    ? <Terrain3D result={fixture.result} config={fixture.config} cameraMode={mode} cityFocus={focus} />
     : null;
 }
 
