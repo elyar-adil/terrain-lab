@@ -10,7 +10,9 @@
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
-    "render:validate": "powershell -ExecutionPolicy Bypass -File scripts/headless-render.ps1"
+    "render:validate": "powershell -ExecutionPolicy Bypass -File scripts/headless-render.ps1",
+    "verify:city": "node scripts/verify-city.mjs",
+    "verify:city:quick": "node scripts/verify-city.mjs --quick"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

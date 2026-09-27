@@ -36,6 +36,24 @@ impl RoadCrossSection {
             + self.motor_lanes_per_direction as f32 * self.motor_lane_width
     }
 
+    /// The ribbon width the components actually occupy, kerb face to kerb face:
+    /// twice the half, counting median half, inner buffer, motor lanes,
+    /// shoulder, cycle lane and sidewalk on each side.
+    ///
+    /// This is the single source of truth for `width_metres` — a declared
+    /// total that disagrees with its own component sum lets the drawn road and
+    /// the furniture drift apart metre by metre, which is exactly the class of
+    /// silent inconsistency this module exists to prevent.
+    pub fn derived_width(&self) -> f32 {
+        2.0
+            * (self.median_metres * 0.5
+                + self.inner_shoulder
+                + self.motor_lanes_per_direction as f32 * self.motor_lane_width
+                + self.shoulder_width
+                + self.bike_lane_width
+                + self.sidewalk_metres)
+    }
+
     /// Distance from the geometric centre to the kerb face.
     pub fn half_width(&self) -> f32 {
         self.width_metres * 0.5
@@ -67,11 +85,17 @@ impl RoadCrossSection {
 }
 
 /// Cross-sections for the four Chinese road classes.
+///
+/// Every `width_metres` equals `derived_width()` for its own components — the
+/// test below locks that, so a future edit to a lane count or a sidewalk
+/// cannot silently desynchronise the total again. The values follow CJJ 37
+/// practice: 主干路 双向六车道 3.5 m + 独立非机动车道 3.5 m + 人行道 3.0 m,
+/// and so on down the hierarchy.
 pub fn cross_section(class: ModernRoadClass) -> RoadCrossSection {
     match class {
         // 快速路: 双向八车道 + 中央隔离带 + 硬路肩, no non-motorized traffic.
         ModernRoadClass::Expressway => RoadCrossSection {
-            width_metres: 36.0,
+            width_metres: 34.0,
             median_metres: 2.5,
             motor_lanes_per_direction: 4,
             motor_lane_width: 3.5,
@@ -82,7 +106,7 @@ pub fn cross_section(class: ModernRoadClass) -> RoadCrossSection {
         },
         // 主干路: 双向六车道 + 中央分隔带 + 机非分隔的非机动车道.
         ModernRoadClass::Arterial => RoadCrossSection {
-            width_metres: 32.0,
+            width_metres: 37.0,
             median_metres: 2.0,
             motor_lanes_per_direction: 3,
             motor_lane_width: 3.5,
@@ -93,7 +117,7 @@ pub fn cross_section(class: ModernRoadClass) -> RoadCrossSection {
         },
         // 次干路: 双向四车道 + 非机动车道, no median.
         ModernRoadClass::Collector => RoadCrossSection {
-            width_metres: 22.0,
+            width_metres: 24.8,
             median_metres: 0.0,
             motor_lanes_per_direction: 2,
             motor_lane_width: 3.25,
@@ -104,7 +128,7 @@ pub fn cross_section(class: ModernRoadClass) -> RoadCrossSection {
         },
         // 支路: 单车道双向混行, parking and shared non-motorized use.
         ModernRoadClass::Local => RoadCrossSection {
-            width_metres: 12.0,
+            width_metres: 11.3,
             median_metres: 0.0,
             motor_lanes_per_direction: 1,
             motor_lane_width: 3.25,
@@ -113,6 +137,25 @@ pub fn cross_section(class: ModernRoadClass) -> RoadCrossSection {
             inner_shoulder: 0.4,
             sidewalk_metres: 2.0,
         },
+    }
+}
+
+/// The declared ribbon width must equal the component sum for every class.
+#[test]
+fn cross_section_widths_match_components() {
+    for class in [
+        ModernRoadClass::Expressway,
+        ModernRoadClass::Arterial,
+        ModernRoadClass::Collector,
+        ModernRoadClass::Local,
+    ] {
+        let section = cross_section(class);
+        assert!(
+            (section.width_metres - section.derived_width()).abs() < 1.0e-3,
+            "{class:?} declares {} m but its components occupy {} m",
+            section.width_metres,
+            section.derived_width(),
+        );
     }
 }
 

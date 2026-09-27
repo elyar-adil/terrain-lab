@@ -165,6 +165,16 @@ export interface MaterialCatalogue {
   /** Signal lenses, one instanced sphere per aspect, all lamps in one draw. */
   readonly lamps: THREE.InstancedMesh[];
   readonly missing: Set<string>;
+  /**
+   * Material keys whose UV buffer did not match its vertex count.
+   *
+   * This is a real defect in the scene layer, not a rendering problem: a group
+   * that receives both `quad` (UVs optional) and `quad_uv` (UVs mandatory) ends
+   * up with fewer UVs than vertices, and the UVs that are present are silently
+   * attributed to the wrong vertices. The result is exactly the vertical-streak
+   * facades this renderer was written to eliminate.
+   */
+  readonly uvMismatch: Set<string>;
   dispose(): void;
 }
 
@@ -212,6 +222,20 @@ export function createMaterials(textures: SceneTexture[]): MaterialCatalogue {
     texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.generateMipmaps = true;
     texture.colorSpace = THREE.SRGBColorSpace;
+    /**
+     * `flipY = false` is load-bearing, and it is the default, which is exactly
+     * why it is stated here.
+     *
+     * A `DataTexture` built from a raw byte array samples **row 0** at `V = 0`.
+     * Rust bakes row 0 as the *top* of the image, so `V` counts downward through
+     * the image as `V` increases. Every facade's `V` coordinate therefore counts
+     * *down* the wall from its head — `buildings::facade_wall` anchors `V = 0` at
+     * the parapet for exactly this reason. Setting `flipY = true` here, or
+     * flipping the convention in Rust without flipping it here, renders every
+     * building upside down with its floor lines in the wrong place, and nothing
+     * errors.
+     */
+    texture.flipY = false;
     // UVs are metres; one tile covers the texture's physical size.
     texture.repeat.set(1 / source.tileWidthM, 1 / source.tileHeightM);
     texture.needsUpdate = true;
@@ -221,13 +245,19 @@ export function createMaterials(textures: SceneTexture[]): MaterialCatalogue {
   };
 
   /**
-   * Derive a normal map from a texture's luminance.
+   * Derive a normal map from a texture's height field.
    *
-   * The bake ships a height field in the colour channels rather than a second
-   * texture, because a second texture doubles the payload for something only
-   * ground and roof surfaces use. Differentiating it here is cheap and it is the
-   * difference between asphalt that reads as a surface and asphalt that reads as
-   * a flat grey fill.
+   * The height lives in the **alpha** channel, which is what `hasNormalSource`
+   * promises. It used to be read from luminance, which is a silent mismatch: the
+   * bake put the relief in alpha precisely so the albedo could stay independent of
+   * it, and reading luminance produced a normal map of whatever the roof's colour
+   * happened to be. Alpha is used when it carries variation, and luminance is
+   * accepted as a fallback so a texture that sets the flag without encoding a
+   * field still gets relief rather than a flat plane.
+   *
+   * Sampling is 4-connected rather than Sobel. The height field is already smooth
+   * at bake resolution, and a wide kernel over a low-resolution field flattens
+   * real relief into noise that shimmers under a moving sun.
    */
   const normalFor = (name: string, strength: number): THREE.DataTexture | null => {
     const source = sources.get(name);
@@ -239,25 +269,29 @@ export function createMaterials(textures: SceneTexture[]): MaterialCatalogue {
     if (!albedo) return null;
     const { width, height } = source;
     const pixels = albedo.image.data as Uint8Array;
-    const normal = new Uint8Array(width * height * 4);
-    const luma = (x: number, y: number) => {
+    // Decide once which channel carries the field, rather than per texel: mixing
+    // the two inside a single normal map produces a seam down the middle of it.
+    let lowest = 255;
+    let highest = 0;
+    for (let index = 3; index < pixels.length; index += 4) {
+      lowest = Math.min(lowest, pixels[index]);
+      highest = Math.max(highest, pixels[index]);
+    }
+    const alphaCarries = highest - lowest > 8;
+    const sample = (x: number, y: number) => {
       const xx = (x + width) % width;
       const yy = (y + height) % height;
       const index = (yy * width + xx) * 4;
-      return (pixels[index] * 0.2126 + pixels[index + 1] * 0.7152 + pixels[index + 2] * 0.0722) / 255;
+      if (alphaCarries) return pixels[index + 3] / 255;
+      return (pixels[index] * 0.2126
+        + pixels[index + 1] * 0.7152
+        + pixels[index + 2] * 0.0722) / 255;
     };
+    const normal = new Uint8Array(width * height * 4);
     for (let y = 0; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
-        // Sobel, so a normal map derived from a 4 m tile has real relief rather
-        // than per-texel noise that shimmers under a moving sun.
-        const dx =
-          luma(x - 1, y - 1) + 2 * luma(x - 1, y) + luma(x - 1, y + 1) -
-          (luma(x + 1, y - 1) + 2 * luma(x + 1, y) + luma(x + 1, y + 1));
-        const dy =
-          luma(x - 1, y - 1) + 2 * luma(x, y - 1) + luma(x + 1, y - 1) -
-          (luma(x - 1, y + 1) + 2 * luma(x, y + 1) + luma(x + 1, y + 1));
-        const nx = dx * strength;
-        const ny = dy * strength;
+        const nx = (sample(x - 1, y) - sample(x + 1, y)) * strength;
+        const ny = (sample(x, y - 1) - sample(x, y + 1)) * strength;
         const nz = 1.0;
         const length = Math.hypot(nx, ny, nz);
         const index = (y * width + x) * 4;
@@ -270,6 +304,7 @@ export function createMaterials(textures: SceneTexture[]): MaterialCatalogue {
     const map = new THREE.DataTexture(normal, width, height, THREE.RGBAFormat);
     map.wrapS = THREE.RepeatWrapping;
     map.wrapT = THREE.RepeatWrapping;
+    map.flipY = false;
     map.anisotropy = 8;
     map.minFilter = THREE.LinearMipmapLinearFilter;
     map.generateMipmaps = true;
@@ -529,12 +564,38 @@ export function createMaterials(textures: SceneTexture[]): MaterialCatalogue {
     textures: builtTextures,
     lamps,
     missing,
+    uvMismatch,
     dispose() {
       for (const material of built) material.dispose();
       for (const texture of builtTextures) texture.dispose();
       for (const lamp of lamps) lamp.geometry.dispose();
     },
   };
+}
+
+/**
+ * One foliage card texture, for the occlusion pass's alpha discard.
+ *
+ * The species do not all share a card layout, but the occlusion test only has
+ * to reject the empty corners of a quad, so any baked card's alpha is close
+ * enough — the same trade the reference project makes.
+ */
+export function foliageMaskTexture(textures: SceneTexture[]): THREE.DataTexture | null {
+  const source = textures.find((texture) => texture.name.startsWith("vegetation/leaf"));
+  if (!source) return null;
+  const texture = new THREE.DataTexture(
+    base64ToBytes(source.data),
+    source.width,
+    source.height,
+    THREE.RGBAFormat,
+  );
+  texture.magFilter = THREE.LinearFilter;
+  // No mipmaps: the discard test has to see the real texel, or distant cards
+  // fade to transparent in the G-buffer and stop occluding at all.
+  texture.minFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
 }
 
 // --- scene assembly ---------------------------------------------------------
@@ -545,6 +606,13 @@ export interface CityHandles {
   materials: MaterialCatalogue;
   /** One instanced mesh per prototype, keyed by instance-list key. */
   instanced: Map<string, THREE.InstancedMesh>;
+  /**
+   * The decoded prototype behind each instance list: the geometry and
+   * material the instanced meshes share. Read-only access for tools like the
+   * component gallery that want to place *one* of something; the resources
+   * stay owned (and disposed) by the handles.
+   */
+  prototypes: Map<string, { geometry: THREE.BufferGeometry; material: THREE.Material }>;
   /** The signal lens meshes, by aspect. */
   lamps: THREE.InstancedMesh[];
   /** The prototype geometry for the car, used for the moving traffic fleet. */
@@ -554,12 +622,23 @@ export interface CityHandles {
   dispose(): void;
 }
 
-function geometryFor(mesh: SceneMesh): THREE.BufferGeometry {
+function geometryFor(mesh: SceneMesh, uvMismatch: Set<string>): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
     "position",
     new THREE.BufferAttribute(decodeFloats(mesh.positions, mesh.vertexCount * 3), 3),
   );
+  // Foliage is drawn from alpha-cut cards, and the occlusion pass needs to
+  // know that per vertex: its G-buffer sees every quad as solid otherwise,
+  // which turns each canopy into a self-occluding blob. `post.ts` patches its
+  // override material to discard on this attribute; everything else omits it
+  // and the attribute defaults to zero.
+  if (mesh.alphaCutout && (mesh.material === "tuft" || mesh.material.startsWith("leaf"))) {
+    geometry.setAttribute(
+      "aLeafCard",
+      new THREE.BufferAttribute(new Float32Array(mesh.vertexCount).fill(1), 1),
+    );
+  }
   geometry.setAttribute(
     "normal",
     new THREE.BufferAttribute(decodeFloats(mesh.normals, mesh.vertexCount * 3), 3),
@@ -574,10 +653,33 @@ function geometryFor(mesh: SceneMesh): THREE.BufferGeometry {
   }
   if (mesh.uvs) {
     // In metres. The texture's `repeat` does the conversion.
-    geometry.setAttribute(
-      "uv",
-      new THREE.BufferAttribute(decodeFloats(mesh.uvs, mesh.vertexCount * 2), 2),
-    );
+    const expected = mesh.vertexCount * 2;
+    // base64 length -> bytes, without decoding twice: four bytes per float, and
+    // base64 expands by 4/3.
+    const bytes = (atob(mesh.uvs).length * 3) / 4;
+    if (Math.abs(bytes - expected * 4) > 2) {
+      /**
+       * A short UV buffer is a scene-layer defect, not a rendering one.
+       *
+       * `MeshBuilder::quad_uv` pushes UVs unconditionally while `MeshBuilder::quad`
+       * pushes them only when asked, so a material group that receives both ends
+       * up with fewer UVs than vertices — and the UVs that *are* present belong to
+       * whichever quads happened to be emitted first. Reinterpreting the array
+       * would smear one wall's texture across another.
+       *
+       * There is no way to recover which vertices are missing, so the honest
+       * recovery is to drop UVs for the whole group: the surface renders
+       * untextured, which is plainly wrong and therefore plainly visible, rather
+       * than subtly wrong. And it is reported, so the caller finds out which
+       * material is at fault instead of hunting a wall that looks striped.
+       */
+      uvMismatch.add(mesh.material);
+    } else {
+      geometry.setAttribute(
+        "uv",
+        new THREE.BufferAttribute(decodeFloats(mesh.uvs, expected), 2),
+      );
+    }
   }
   geometry.setIndex(new THREE.BufferAttribute(decodeIndices(mesh.indices, mesh.triangleCount * 3), 1));
   // The payload states the real extent, so the renderer does not have to walk
@@ -606,6 +708,10 @@ export function buildCityScene(scene: CityScene, materials: MaterialCatalogue): 
   const ownedGeometries: THREE.BufferGeometry[] = [];
   const ownedInstanced: THREE.InstancedMesh[] = [];
   const instanced = new Map<string, THREE.InstancedMesh>();
+  const prototypes = new Map<string, {
+    geometry: THREE.BufferGeometry;
+    material: THREE.Material;
+  }>();
 
   // Decode every instance list first: a prototype's geometry may be declared
   // before the list it draws, and the order in the payload is not a contract.
@@ -622,7 +728,7 @@ export function buildCityScene(scene: CityScene, materials: MaterialCatalogue): 
 
   for (const mesh of scene.meshes) {
     if (!mesh.vertexCount || !mesh.triangleCount) continue;
-    const geometry = geometryFor(mesh);
+    const geometry = geometryFor(mesh, materials.uvMismatch);
     const material = materials.get(mesh.material);
     const instanceKey = mesh.instanceOf;
 
@@ -663,6 +769,7 @@ export function buildCityScene(scene: CityScene, materials: MaterialCatalogue): 
       target.instanceMatrix.needsUpdate = true;
       if (target.instanceColor) target.instanceColor.needsUpdate = true;
       instanced.set(instanceKey, target);
+      prototypes.set(instanceKey, { geometry, material });
       ownedInstanced.push(target);
       group.add(target);
       continue;
@@ -693,6 +800,7 @@ export function buildCityScene(scene: CityScene, materials: MaterialCatalogue): 
     group,
     materials,
     instanced,
+    prototypes,
     lamps: materials.lamps,
     vehicleCount: scene.traffic.agents.length,
     carBody,

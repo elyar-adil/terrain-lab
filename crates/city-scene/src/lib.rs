@@ -10,7 +10,12 @@ pub mod bake;
 pub mod buildings;
 pub mod facades;
 pub mod furniture;
-pub mod leaf_cards;
+/// Facade for the leaf-card work, which lives in [`trees::cards`] with the
+/// rest of the tree pipeline. The re-export keeps the historical
+/// `leaf_cards::` paths — and [`bake`]'s re-exports of them — stable.
+pub mod leaf_cards {
+    pub use crate::trees::cards::*;
+}
 pub mod math;
 pub mod mesh;
 pub mod network;

@@ -38,7 +38,11 @@ function Harness() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/city-scenes.json")
+    // The fixture path is overridable so a component agent can render its own
+    // scratch scene (`?scene=audit-trees.json`) without clobbering the shared
+    // city fixture another audit may be reading.
+    const sceneUrl = params.get("scene") ?? "/city-scenes.json";
+    fetch(sceneUrl)
       .then((response) => {
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         return response.json();
@@ -48,7 +52,7 @@ function Harness() {
         setScenes(Array.isArray(data) ? data : [data]);
       })
       .catch((thrown: Error) => {
-        if (!cancelled) setError(thrown.message);
+        if (!cancelled) setError(`${sceneUrl}: ${thrown.message}`);
       });
     return () => {
       cancelled = true;

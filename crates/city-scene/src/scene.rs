@@ -65,7 +65,11 @@ impl Default for SceneBudget {
             max_trees: trees::TREE_BUDGET,
             facade_texture_size: 256,
             ground_texture_size: 256,
-            vehicles: 44,
+            // A Chinese arterial at midday carries wall-to-wall traffic in the
+            // reference photographs; a fleet that renders as forty scattered
+            // cars reads as an empty city. Poses cost ten floats each, so the
+            // budget is bounded by the simulation, not the payload.
+            vehicles: 160,
             detail_min_footprint_m2: 180.0,
         }
     }

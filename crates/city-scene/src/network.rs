@@ -339,7 +339,7 @@ pub fn derive(
             continue;
         }
         let section = hd.cross_section();
-        let mut path_points: Vec<Vec2> = hd
+        let path_points: Vec<Vec2> = hd
             .centreline
             .iter()
             .map(|point| {
@@ -690,12 +690,15 @@ pub fn derive(
                         (distance * 0.8).min((along_out.abs() * 0.55).max(1.5)),
                     )
                 };
+                // Twenty samples, exactly as the source kernel's connector
+                // derivation: fewer bends the shoulder of the fillet flat and
+                // the traffic kernel then cuts a corner no car could take.
                 let plan = cubic_points(
                     Vec2::new(a.x, a.z),
                     Vec2::new(a.x, a.z) + dir * handle,
                     Vec2::new(b.x, b.z) - out * handle_out,
                     Vec2::new(b.x, b.z),
-                    16,
+                    20,
                 );
                 let y_from = a.y;
                 let y_to = b.y;
@@ -832,13 +835,21 @@ pub fn derive(
             // Drop the two endpoints; they are already the port corners.
             for point in corner.iter().skip(1).take(7) {
                 ring.push(*point);
-                // The walk ring is the same fillet pushed radially outward.
-                // Refitting a fresh cubic out here folds the control-point sag
-                // back into the box and floods the junction with pavement, so
-                // the radial push is load-bearing, not cosmetic.
+                // The walk ring is the same fillet pushed radially outward by
+                // the approaching road's own sidewalk width plus 300 mm — the
+                // source kernel's `sidewalkWidth + 0.3`.  Refitting a fresh
+                // cubic out here folds the control-point sag back into the box
+                // and floods the junction with pavement, so the radial push is
+                // load-bearing, not cosmetic.  A fixed width would leave the
+                // collar of a wide arterial footway floating short of the
+                // block corner it has to meet.
+                let walk = network
+                    .road(port.road)
+                    .map(|road| road.section.sidewalk_metres)
+                    .unwrap_or(2.4);
                 let delta = *point - centre;
                 let distance = delta.length().max(0.01);
-                let scale = (distance + 2.4 + 0.3) / distance;
+                let scale = (distance + walk + 0.3) / distance;
                 walk_ring.push(centre + delta * scale);
             }
         }

@@ -447,11 +447,15 @@ fn mirror(outline: Outline) -> Vec<(f32, f32)> {
 
 /// Signed area of an `[lateral, forward]` outline, in mm².
 ///
-/// The stencils above are not all wound the same way: mirroring a polygon
-/// reverses it.  A renderer that picks one winding "by convention" therefore
-/// lights half the arrows from below, which is why the draw code asks this
-/// function instead of hard-coding a triangle order.  Positive is
-/// counter-clockwise in the stencil's own 2-D frame.
+/// Positive is counter-clockwise in the stencil's own 2-D frame.  Mirroring a
+/// polygon reverses its winding, so the signs of the tables above and of their
+/// mirrors are opposite — which is why a draw routine that picks one winding "by
+/// convention" lights half the arrows from below.
+///
+/// The draw code does **not** need this: it ear-clips, and
+/// [`crate::math::triangulate`] normalises the winding, so a stencil cannot be
+/// rendered inside-out.  The function is the cheapest way to *see* that a table
+/// has been transcribed inside-out, and it is what the tests assert.
 pub fn outline_signed_area(outline: &[(f32, f32)]) -> f32 {
     let mut total = 0.0;
     for index in 0..outline.len() {

@@ -1,3 +1,5 @@
+import type { CityScene } from "./city/cityScene";
+
 export type TerrainPreset = "arid" | "temperate" | "glacial";
 export type Landform = "mountainRange" | "hills" | "plains" | "plateau" | "coastal" | "archipelago";
 
@@ -49,6 +51,8 @@ export interface GenerationResult {
   cities: UrbanModel[];
   /** High-detail Chinese city graph emitted by the Rust urban generator. */
   modernCities?: ModernCityPayload[];
+  /** Render-ready metre-scale city scenes, index-parallel to `modernCities`. */
+  cityScenes?: CityScene[];
   /** Shared L-System tree prototypes (per species × variant × LOD). */
   vegetationPrototypes?: VegetationPrototypePayload[];
   /** CPU-baked weathered material textures shared by every surface. */

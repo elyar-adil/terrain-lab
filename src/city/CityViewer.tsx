@@ -20,7 +20,9 @@ import {
   buildCityScene,
   createMaterials,
   decodeFloats,
+  foliageMaskTexture,
 } from "./cityScene";
+import { createPost } from "./post";
 import {
   SUN_DIR,
   bakeSkyEnvironment,
@@ -265,6 +267,17 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
       sky.follow(camera);
       lighting.focus(lookAt, chosen.radius);
 
+      // The post chain (GTAO + bloom + ACES output) is where geometry stops
+      // reading as floating cardboard. It is the most expensive part of the
+      // frame after the environment bake, so the cheap audit path skips it.
+      const post = cheap
+        ? null
+        : createPost(renderer, world, {
+            camera,
+            foliageMask: foliageMaskTexture(scene.textures),
+          });
+      mark(post ? "post" : "post skipped (cheap)");
+
       // --- loop ---------------------------------------------------------------
       const dummy = new THREE.Object3D();
       const started = performance.now();
@@ -293,7 +306,8 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
         const elapsed = (performance.now() - started) / 1000;
         sky.update(elapsed);
         frame += 1;
-        renderer.render(world, camera);
+        if (post) post.render();
+        else renderer.render(world, camera);
         // The audit needs to know a frame has actually been composed, not that
         // the scene graph was populated. Under software WebGL those are seconds
         // apart, and reporting the second one produced blank screenshots.
@@ -327,11 +341,13 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
         renderer.setSize(host.clientWidth, host.clientHeight);
         camera.aspect = host.clientWidth / host.clientHeight;
         camera.updateProjectionMatrix();
+        post?.setSize(host.clientWidth, host.clientHeight);
       };
       window.addEventListener("resize", onResize);
 
       teardown = () => {
         window.removeEventListener("resize", onResize);
+        post?.dispose();
         handles.dispose();
         materials.dispose();
         sky.dispose();

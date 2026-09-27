@@ -55,16 +55,79 @@ fn declare(builder: &mut MeshBuilder) {
     }
 }
 
-/// A cantilever street lamp: pole, mast arm and luminaire, at unit height.
+/// Yaw that makes a prototype's **local `+X` axis** point along `direction`.
+///
+/// The renderer writes `dummy.rotation.set(0, yaw, 0)` and three.js maps a local
+/// `+X` axis to `(cos yaw, 0, -sin yaw)` in the `(x, z)` ground plane — so the
+/// yaw is `atan2(-z, x)`, *not* the plan bearing `atan2(z, x)`.  The two differ
+/// by the sign of the `z` component, which puts a car on a north-south street
+/// facing backwards and a railing on a diagonal at twice the error.  Every
+/// placement in this file goes through one of the two helpers below so the
+/// convention is stated once.
+pub fn yaw_along_x(direction: Vec2) -> f32 {
+    (-direction.y).atan2(direction.x)
+}
+
+/// Yaw that makes a prototype's **local `+Z` axis** point along `direction`.
+///
+/// three.js maps a local `+Z` axis to `(sin yaw, 0, cos yaw)`, so the yaw is
+/// `atan2(x, z)`.  A road lamp is authored this way — its bracket arm reaches
+/// out along `+Z` over the carriageway.
+pub fn yaw_along_z(direction: Vec2) -> f32 {
+    direction.x.atan2(direction.y)
+}
+
+/// A Chinese road lamp, at true metric size.
+///
+/// # Not a European swan neck
+///
+/// The bracket is a **short, straight, near-horizontal arm** — 2.4 m of reach at
+/// about 9 m of height — and the luminaire is a flat box slung under its tip.
+/// The graceful upswept swan neck is not what stands over a Chinese arterial, and
+/// the difference is visible in silhouette from 200 m away.
+///
+/// # Authored at true size, not unit height
+///
+/// The crate's other prototypes are authored at unit height and scaled by the
+/// instance matrix, which stretches *everything* vertically: a unit-height
+/// luminaire 0.08 m tall becomes 0.7 m of luminaire on a 9 m pole.  A lamp is
+/// the one object where that is not acceptable, because the arm and the luminaire
+/// are read as a shape rather than as a height.  So this prototype is at true
+/// metres and is placed with a scale of 1.0, which also means its silhouette is
+/// identical on every road class.
 fn street_lamp(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
-    let base = Vec3::new(0.0, 0.0, 0.0);
-    builder.tube(key, base, Vec3::new(0.0, 0.80, 0.0), 0.10, 0.06, 6, None);
-    // The mast arm rises and reaches out over the carriageway.
-    let elbow = Vec3::new(0.0, 0.78, 0.0);
-    let tip = Vec3::new(0.0, 0.95, 0.32);
-    builder.tube(key, elbow, tip, 0.055, 0.045, 5, None);
-    box_at(builder, key, Vec2::new(tip.x, tip.z), 0.93, 0.08, 0.10, 0.80, 0.0);
+    let pole_height = 9.0_f32;
+    let reach = 2.4_f32;
+    // A tapered column: 240 mm at the base, 120 mm at the head.
+    builder.tube(
+        key,
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.0, pole_height, 0.0),
+        0.12,
+        0.06,
+        8,
+        None,
+    );
+    // A short, straight, near-horizontal bracket.  It rises 350 mm over its
+    // reach — a lamp bracket, not a curve.
+    let shoulder = Vec3::new(0.0, pole_height - 0.35, 0.0);
+    let tip = Vec3::new(0.0, pole_height, reach);
+    builder.tube(key, shoulder, tip, 0.055, 0.045, 6, None);
+    // The luminaire: a shallow box slung under the tip, long axis across the arm.
+    box_at(
+        builder,
+        key,
+        Vec2::new(0.0, reach - 0.2),
+        pole_height - 0.16,
+        0.34,
+        0.13,
+        0.82,
+        0.0,
+    );
+    // A maintenance hatch at two metres, which is the detail that makes a pole
+    // read as a pole rather than as a line.
+    box_at(builder, key, Vec2::new(0.0, 0.0), 2.0, 0.26, 0.42, 0.22, 0.0);
 }
 
 /// A utility pole with two cross-arms and a transformer, at unit height.
@@ -93,6 +156,12 @@ fn utility_pole(builder: &mut MeshBuilder, key: &str) {
 
 /// A kerbside bollard: the thing that stops a pedestrian mount the carriageway
 /// at a junction mouth, and that the source renderer placed on the walk ring.
+///
+/// The two raised bands are retroreflective tape at the heights a driver's eye
+/// actually sweeps.  They are a separate ring of slightly larger radius so they
+/// catch a headlight as a bright dot rather than merging into the post, and they
+/// are the difference between a kerb line that reads at night and one that
+/// does not.
 fn bollard(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
     builder.tube(
@@ -104,6 +173,17 @@ fn bollard(builder: &mut MeshBuilder, key: &str) {
         8,
         None,
     );
+    for height in [0.60_f32, 0.70] {
+        builder.tube(
+            key,
+            Vec3::new(0.0, height, 0.0),
+            Vec3::new(0.0, height + 0.055, 0.0),
+            0.092,
+            0.092,
+            8,
+            None,
+        );
+    }
     builder.tube(
         key,
         Vec3::new(0.0, 0.78, 0.0),
@@ -113,6 +193,79 @@ fn bollard(builder: &mut MeshBuilder, key: &str) {
         8,
         None,
     );
+}
+
+/// A stainless-steel rubbish bin: a drum with a swing lid and a liner ring.
+///
+/// Bins are the single most numerous piece of street furniture in a Chinese
+/// district and the previous layer had none, which is a large part of why its
+/// footways read as empty corridors rather than as lived-in streets.  They come
+/// in pairs on most footways, which is what the placement does.
+fn rubbish_bin(builder: &mut MeshBuilder, key: &str) {
+    declare(builder);
+    // The drum, 700 mm across and 900 mm tall, with a slight taper.
+    builder.tube(
+        key,
+        Vec3::new(0.0, 0.06, 0.0),
+        Vec3::new(0.0, 0.88, 0.0),
+        0.30,
+        0.35,
+        12,
+        None,
+    );
+    // A foot ring and a rolled rim, so it is a bin and not a cylinder.
+    builder.tube(
+        key,
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.07, 0.0),
+        0.26,
+        0.26,
+        10,
+        None,
+    );
+    // The lid, tilted back on its hinge — the pose every street bin is in.
+    let lid = box_at(builder, key, Vec2::new(0.0, -0.10), 0.95, 0.76, 0.05, 0.34, 0.0);
+    let _ = lid;
+    // A liner bag collar showing above the rim.
+    builder.tube(
+        key,
+        Vec3::new(0.0, 0.86, 0.0),
+        Vec3::new(0.0, 0.90, 0.0),
+        0.30,
+        0.26,
+        12,
+        None,
+    );
+}
+
+/// A public telephone kiosk: the box-with-a-canopy form that lines a Chinese
+/// footway every 200 m or so, and one of the strongest "this is China, not
+/// anywhere else" cues in the whole scene at street level.
+///
+/// It is a separate prototype rather than a scaled bus shelter because the
+/// silhouettes are opposite — the kiosk is tall, narrow and opaque, the shelter is
+/// low, wide and glazed — and a scaled shelter reads as neither.
+fn phone_kiosk(builder: &mut MeshBuilder, key: &str) {
+    declare(builder);
+    // A 1.1 x 0.9 m cabin, closed on three sides, with a glazed front.
+    box_at(builder, key, Vec2::new(0.0, 0.0), 1.10, 1.10, 2.20, 0.90, 0.0);
+    // The canopy: a slab that oversails on all four sides, which is the whole
+    // silhouette.
+    box_at(builder, key, Vec2::new(0.0, 0.0), 2.28, 1.44, 0.10, 1.24, 0.0);
+    // A fascia under the canopy, and the light box the sign would be on.
+    box_at(builder, key, Vec2::new(0.0, 0.60), 2.16, 1.20, 0.16, 0.06, 0.0);
+    // Four feet, so it stands on the footway rather than being let into it.
+    for (x, z) in [(0.44, 0.34), (-0.44, 0.34), (0.44, -0.34), (-0.44, -0.34)] {
+        builder.tube(
+            key,
+            Vec3::new(x, 0.0, z),
+            Vec3::new(x, 0.14, z),
+            0.06,
+            0.06,
+            5,
+            None,
+        );
+    }
 }
 
 /// A three-metre pedestrian-railing segment: two rails and a post.
@@ -185,6 +338,89 @@ fn crossing_sign(builder: &mut MeshBuilder, key: &str) {
     );
 }
 
+/// An overhead gantry: the blue directional boards a Chinese arterial hangs
+/// across the carriageway on a steel truss before every signalised junction.
+///
+/// It is one of the strongest "this is a Chinese arterial" signals in a street
+/// photograph, which is why it earns two prototypes: the truss in galvanised
+/// steel and the sign boards in the same blue as the post-mounted guide signs.
+/// They are placed at the same transform, so together they read as one
+/// structure while keeping one material per instance key.
+///
+/// Authored at the arterial's true geometry (kerb face at 15.5 m from the
+/// centre, posts 1 m up the footway at ±16.5 m), with the truss at 6.6–7.45 m
+/// — above the 5.5 m clearance any road vehicle needs, low enough that the
+/// boards at 5.15–6.45 m read against the skyline rather than against the road.
+fn gantry_steel(builder: &mut MeshBuilder, key: &str) {
+    declare(builder);
+    let span = 16.5_f32;
+    for side in [-1.0_f32, 1.0] {
+        builder.tube(
+            key,
+            Vec3::new(side * span, 0.0, 0.0),
+            Vec3::new(side * span, 7.45, 0.0),
+            0.14,
+            0.10,
+            7,
+            None,
+        );
+    }
+    for y in [6.6_f32, 7.45] {
+        builder.tube(
+            key,
+            Vec3::new(-span, y, 0.0),
+            Vec3::new(span, y, 0.0),
+            0.07,
+            0.07,
+            2,
+            None,
+        );
+    }
+    let mut x = -span;
+    while x <= span + 0.01 {
+        builder.tube(
+            key,
+            Vec3::new(x, 6.6, 0.0),
+            Vec3::new(x, 7.45, 0.0),
+            0.05,
+            0.05,
+            4,
+            None,
+        );
+        x += 33.0 / 14.0;
+    }
+    // The boards' backs: plain aluminium to the reverse direction, so the
+    // gantry reads from both approaches instead of vanishing edge-on. One
+    // board over each direction's motor lanes, whose centres sit at ±6.5 m.
+    for centre in [-6.5_f32, 6.5] {
+        builder.quad(
+            key,
+            Vec3::new(centre - 1.75, 5.15, -0.02),
+            Vec3::new(centre + 1.75, 5.15, -0.02),
+            Vec3::new(centre + 1.75, 6.45, -0.02),
+            Vec3::new(centre - 1.75, 6.45, -0.02),
+            None,
+        );
+    }
+}
+
+/// The gantry's facing boards, in guide-sign blue. Same transform as
+/// [`gantry_steel`]; see that prototype for the structure. The boards hang
+/// over the two motor carriageways, centred at ±6.5 m.
+fn gantry_boards(builder: &mut MeshBuilder, key: &str) {
+    declare(builder);
+    for centre in [-6.5_f32, 6.5] {
+        builder.quad(
+            key,
+            Vec3::new(centre - 1.7, 5.15, 0.03),
+            Vec3::new(centre + 1.7, 5.15, 0.03),
+            Vec3::new(centre + 1.7, 6.45, 0.03),
+            Vec3::new(centre - 1.7, 6.45, 0.03),
+            None,
+        );
+    }
+}
+
 /// A bus shelter: platform, canopy, two posts and an ad panel.
 fn bus_shelter(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
@@ -243,7 +479,11 @@ pub fn build_prototypes(builder: &mut MeshBuilder) {
     railing_segment(builder, "furniture/railing");
     guide_sign(builder, "furniture/sign.guide");
     crossing_sign(builder, "furniture/sign.crossing");
+    gantry_steel(builder, "furniture/gantry.steel");
+    gantry_boards(builder, "furniture/gantry.board");
     bus_shelter(builder, "furniture/shelter");
+    rubbish_bin(builder, "furniture/bin");
+    phone_kiosk(builder, "furniture/kiosk");
     car_body(builder, "car/body");
     car_glass(builder, "car/glass");
     car_wheel(builder, "car/wheel");
@@ -255,12 +495,19 @@ pub fn build_prototypes(builder: &mut MeshBuilder) {
         "furniture/sign.guide",
         "furniture/sign.crossing",
         "furniture/shelter",
+        "furniture/bin",
+        "furniture/kiosk",
         "car/body",
         "car/glass",
         "car/wheel",
     ] {
         builder.bind(key, key);
     }
+    // The gantry shares existing materials rather than defining its own: the
+    // truss is the same galvanised section the railings are, and the boards
+    // are the guide signs' blue. One material per draw call either way.
+    builder.bind("furniture/gantry.steel", "steel");
+    builder.bind("furniture/gantry.board", "furniture/sign.guide");
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -271,6 +518,10 @@ pub struct FurnitureOutput {
     pub bollards: usize,
     pub railings: usize,
     pub signs: usize,
+    /// Everything that *encloses* something on the footway: bus shelters, public
+    /// telephone kiosks and rubbish-bin pairs.  They share one field because they
+    /// share one job — density of small structures along a footway — and because
+    /// the payload schema is shared with the renderer, so the field list is fixed.
     pub shelters: usize,
     pub spans: usize,
 }
@@ -305,7 +556,13 @@ pub fn place(
         }
         let section = road.section;
         let half = section.half_width();
+        // `half_width()` is the ribbon edge (the property line), and the
+        // sidewalk is *inside* it — so the kerb face sits at `half - sidewalk`.
+        // Every roadside object anchors to the kerb, not to the ribbon edge:
+        // anchoring to `half` pushed a whole generation of furniture metres
+        // into the buildings.
         let sidewalk = section.sidewalk_metres.max(2.0);
+        let kerb = half - sidewalk;
         let arterial = matches!(
             road.class,
             ModernRoadClass::Arterial | ModernRoadClass::Collector
@@ -321,15 +578,19 @@ pub fn place(
             let mut lamp_side = 1.0_f32;
             let mut station = 16.0;
             while station < length - 16.0 {
-                let offset = lamp_side * (half + sidewalk + 0.5);
+                let offset = lamp_side * (kerb + 0.55);
                 let point = path.offset_at(station, offset, 0.0);
+                // The bracket reaches *over the carriageway*, so the prototype's
+                // local `+Z` axis is pointed back at the road.  The prototype is
+                // at true metres, so the scale is 1.
+                let toward_road = path.tangent_at(station).left_normal() * -lamp_side;
                 builder.add_instance(
                     "furniture/lamp",
                     Instance::new(
                         point.x,
                         level::KERB,
                         point.z,
-                        if lamp_side > 0.0 { 0.0 } else { std::f32::consts::PI },
+                        yaw_along_z(toward_road),
                         1.0,
                         [1.0, 1.0, 1.0],
                     ),
@@ -344,7 +605,7 @@ pub fn place(
             // line, and the conductors hang between consecutive poles *in that
             // line*. Everything about the wires follows from this.
             let pole_side = 1.0_f32;
-            let pole_offset = pole_side * (half + sidewalk + 1.2);
+            let pole_offset = pole_side * (kerb + 1.9);
             let pole_height = 9.0_f32;
             let mut pole_station = 20.0_f32;
             while pole_station < length - 14.0 {
@@ -354,10 +615,16 @@ pub fn place(
                 // prototype authors its arms along local +X, and a rotation of
                 // `theta` about Y maps +X to `(cos t, 0, -sin t)`, so aligning
                 // with the road's lateral `(t.y, -t.x)` gives `atan2(t.x, t.y)`.
-                // It used to be `rng.unit() * TAU`, which pointed every arm in a
-                // different direction and made the wires look like a scribble.
+                //
+                // The code said that and then computed `atan2(t.y, t.x)`, which
+                // maps +X to `(t.x, 0, -t.y)` — the *tangent*. So the arms were
+                // lying along the road with the conductors strung on the pole
+                // axis line, and `PoleTop::conductor` then displaced each wire
+                // lengthwise by its own arm half-span, so successive spans were
+                // offset from each other by a metre. Both the comment and the
+                // code have to agree or the conductors do not meet the arms.
                 let tangent = path.tangent_at(pole_station);
-                let rotation = tangent.y.atan2(tangent.x);
+                let rotation = tangent.x.atan2(tangent.y);
                 builder.add_instance(
                     "furniture/pole",
                     Instance::new(
@@ -394,10 +661,19 @@ pub fn place(
                 previous_pole = Some(top);
                 pole_station += 34.0;
             }
-            // Pedestrian railings on an arterial's sidewalk.
+            // Pedestrian railings on an arterial's sidewalk, and the median
+            // guardrail that goes with them.
+            //
+            // The median rail is the same three-metre segment at a different
+            // height and tint, which is exactly what it is on a real road: a
+            // pedestrian railing and a median barrier are the same welded steel
+            // section.  It matters because a planted median with nothing on it
+            // reads as a strip of grass, and a median with a barrier on it reads
+            // as a divided carriageway — which is what stops a crossing driver
+            // from trying to cross six lanes.
             if road.class == ModernRoadClass::Arterial {
                 for side in [-1.0_f32, 1.0] {
-                    let offset = side * (half + sidewalk - 0.12);
+                    let offset = side * (kerb + 0.35);
                     let mut station = 8.0;
                     while station < length - 8.0 {
                         let point = path.offset_at(station, offset, 0.0);
@@ -407,7 +683,7 @@ pub fn place(
                                 point.x,
                                 level::KERB,
                                 point.z,
-                                path.tangent_at(station).angle(),
+                                yaw_along_x(path.tangent_at(station)),
                                 1.0,
                                 [1.0, 1.0, 1.0],
                             ),
@@ -415,6 +691,28 @@ pub fn place(
                         output.railings += 1;
                         station += 3.0;
                     }
+                }
+            }
+            if section.has_median() {
+                let offset = section.median_metres * 0.5 + 0.24;
+                let mut station = 6.0;
+                while station < length - 6.0 {
+                    let point = path.offset_at(station, offset, 0.0);
+                    builder.add_instance(
+                        "furniture/railing",
+                        Instance::new(
+                            point.x,
+                            level::MEDIAN + 0.02,
+                            point.z,
+                            yaw_along_x(path.tangent_at(station)),
+                            0.82,
+                            // Galvanised, and a touch warmer than the footway
+                            // railings so the two lines are distinguishable.
+                            [1.04, 1.02, 0.96],
+                        ),
+                    );
+                    output.railings += 1;
+                    station += 3.0;
                 }
             }
             // A guide sign and a crossing sign on the approach to each junction.
@@ -427,20 +725,48 @@ pub fn place(
                 }
                 let base = if at_start { 0.0 } else { length };
                 let toward = if at_start { 1.0_f32 } else { -1.0 };
+                // The gantry goes in first, 34 m upstream of the junction —
+                // past the 27 m guide signs, inside the 58 m approach taper,
+                // where a driver has already chosen a lane. Arterials only:
+                // collector junctions carry post-mounted signs, and the
+                // prototype's span is authored for the arterial cross-section.
+                if road.class == ModernRoadClass::Arterial && length > 78.0 {
+                    let station = (base + toward * 34.0).clamp(8.0, length - 8.0);
+                    let point = path.offset_at(station, 0.0, 0.0);
+                    // The boards face the approaching driver, like the guide
+                    // signs: local `+Z` along the opposing tangent.
+                    let yaw = yaw_along_z(-path.tangent_at(base) * toward);
+                    for key in ["furniture/gantry.steel", "furniture/gantry.board"] {
+                        builder.add_instance(
+                            key,
+                            Instance::new(
+                                point.x,
+                                level::KERB,
+                                point.z,
+                                yaw,
+                                1.0,
+                                [1.0, 1.0, 1.0],
+                            ),
+                        );
+                    }
+                    output.signs += 2;
+                }
                 for side in [-1.0_f32, 1.0] {
                     let guide = path.offset_at(
                         (base + toward * 27.0 + rng.unit() * 7.0).clamp(2.0, length - 2.0),
-                        side * (half + sidewalk + 0.55),
+                        side * (kerb + 0.55),
                         0.0,
                     );
                     let facing = -path.tangent_at(base) * toward;
+                    // The sign board is authored in the prototype's XY plane, so
+                    // its local `+Z` faces the driver.
                     builder.add_instance(
                         "furniture/sign.guide",
                         Instance::new(
                             guide.x,
                             level::KERB,
                             guide.z,
-                            facing.angle(),
+                            yaw_along_z(facing),
                             1.0,
                             [1.0, 1.0, 1.0],
                         ),
@@ -449,7 +775,7 @@ pub fn place(
                     if rng.chance(0.72) {
                         let crossing = path.offset_at(
                             (base + toward * 10.5).clamp(2.0, length - 2.0),
-                            side * (half + sidewalk + 0.55),
+                            side * (kerb + 0.55),
                             0.0,
                         );
                         builder.add_instance(
@@ -458,7 +784,7 @@ pub fn place(
                                 crossing.x,
                                 level::KERB,
                                 crossing.z,
-                                facing.angle(),
+                                yaw_along_z(facing),
                                 1.0,
                                 [1.0, 1.0, 1.0],
                             ),
@@ -467,21 +793,85 @@ pub fn place(
                     }
                 }
             }
-            // One shelter per arterial leg, halfway between junctions.
+            // One shelter per arterial leg, halfway between junctions, plus the
+            // phone kiosks and the bin pairs that actually make a footway look
+            // inhabited.
+            //
+            // Density matters more than variety here.  A Chinese footway carries
+            // a shelter every 300 m or so, a kiosk every 200 m, and a bin pair
+            // every 40 m; those are the numbers that produce the visual
+            // signature, and a scene with one shelter per block and nothing else
+            // reads as a render.
             if road.class == ModernRoadClass::Arterial && length > 120.0 {
-                let point = path.offset_at(length * 0.45, half + sidewalk + 1.7, 0.0);
+                let point = path.offset_at(length * 0.45, kerb + 1.7, 0.0);
                 builder.add_instance(
                     "furniture/shelter",
                     Instance::new(
                         point.x,
                         level::KERB,
                         point.z,
-                        path.tangent_at(length * 0.45).angle() + std::f32::consts::FRAC_PI_2,
+                        // The shelter's long axis is its local `X`, so it runs
+                        // along the street.
+                        yaw_along_x(path.tangent_at(length * 0.45)),
                         1.0,
                         [1.0, 1.0, 1.0],
                     ),
                 );
                 output.shelters += 1;
+            }
+            // Bins, in pairs, every 40 m along both footways.  Two, not one,
+            // because a single bin is a target for the one person who wants to
+            // put something in it, and nobody puts two bins side by side.
+            if arterial && section.sidewalk_metres >= 2.0 {
+                for side in [-1.0_f32, 1.0] {
+                    let offset = side * (kerb + 0.45);
+                    let mut bin_station = 22.0_f32;
+                    while bin_station < length - 22.0 {
+                        for pair in [-0.62_f32, 0.62] {
+                            let point = path.offset_at(bin_station + pair, offset, 0.0);
+                            let shade = 0.86 + rng.unit() * 0.22;
+                            builder.add_instance(
+                                "furniture/bin",
+                                Instance::new(
+                                    point.x,
+                                    level::KERB,
+                                    point.z,
+                                    rng.unit() * std::f32::consts::TAU,
+                                    1.0,
+                                    [shade, shade * 1.01, shade * 0.97],
+                                ),
+                            );
+                            output.shelters += 1;
+                        }
+                        bin_station += 40.0;
+                    }
+                }
+            }
+            // Phone kiosks, every 200 m, on the kerbside.  Not on a 300 m
+            // arterial only — a collector has them too, which is most of what
+            // makes a side street read as Chinese.
+            if arterial && length > 90.0 {
+                for side in [-1.0_f32, 1.0] {
+                    let offset = side * (kerb + 0.75);
+                    let mut kiosk_station = 30.0_f32;
+                    while kiosk_station < length - 30.0 {
+                        let point = path.offset_at(kiosk_station, offset, 0.0);
+                        builder.add_instance(
+                            "furniture/kiosk",
+                            Instance::new(
+                                point.x,
+                                level::KERB,
+                                point.z,
+                                // The kiosk's glazed front is its local `+Z`.
+                                yaw_along_z(path.tangent_at(kiosk_station) * -side),
+                                1.0,
+                                [0.94 + rng.unit() * 0.1, 0.95, 0.97],
+                            ),
+                        );
+                        output.shelters += 1;
+                        kiosk_station += 200.0;
+                    }
+                }
             }
         }
     }
@@ -660,14 +1050,16 @@ fn junction_bollards(
             }) {
                 continue;
             }
-            let angle = (next - current).angle();
             builder.add_instance(
                 "furniture/bollard",
                 Instance::new(
                     point.x,
                     level::KERB,
                     point.y,
-                    angle,
+                    // The bollard is radially symmetric, but its reflective bands
+                    // are the detail, and a bar laid across the kerb return
+                    // instead of along it is immediately wrong.
+                    yaw_along_x(next - current),
                     1.0,
                     [0.92 + rng.unit() * 0.12, 0.92, 0.90],
                 ),
@@ -678,8 +1070,18 @@ fn junction_bollards(
     }
 }
 
-/// Cars parked along the kerb of an arterial, which is both a large part of a
-/// Chinese street's visual density and a physical obstacle traffic must avoid.
+/// Cars parked along the kerb, which is both a large part of a Chinese street's
+/// visual density and a physical obstacle traffic must avoid.
+///
+/// # 违停 — illegally parked cars
+///
+/// The single most characteristic thing about a Chinese street at ground level
+/// is that cars are parked *in* the carriageway: on the running lane, on the
+/// crossing approach, half on the kerb, and often two deep.  A scene that only
+/// puts cars tidily in a lay-by reads as a different country.  So a fraction of
+/// the cars here are placed in the live lane and a fraction of *those* are placed
+/// on the footway itself — and the traffic model drives through them, which is
+/// both the honest outcome and a useful stress test of the follower logic.
 pub fn park_cars(network: &Network, builder: &mut MeshBuilder, seed: u32) -> usize {
     let mut rng = Rng::new(seed ^ 0x9a12);
     let mut count = 0;
@@ -694,39 +1096,86 @@ pub fn park_cars(network: &Network, builder: &mut MeshBuilder, seed: u32) -> usi
         }
         let section = road.section;
         let half = section.half_width();
-        let curb = half - 1.25;
+        // Same kerb-face anchor as `place`: the ribbon edge is the property
+        // line, and the kerb is one sidewalk width inside it.
+        let kerb = half - section.sidewalk_metres.max(2.0);
+        let curb = kerb - 0.85;
+        // How much of the kerb is a lay-by, a running lane or the footway.  A
+        // collector's kerbside lane is a running lane, so almost everything on it
+        // is 违停; on an arterial the lay-by is a real bay.
+        let layby = match road.class {
+            ModernRoadClass::Arterial => 0.55,
+            ModernRoadClass::Collector => 0.16,
+            _ => 0.05,
+        };
         for side in [1.0_f32, -1.0] {
             let mut station = 14.0 + rng.unit() * 20.0;
             while station < length - 14.0 {
-                // A lay-by rather than a lane, so parked cars do not block the
-                // running lanes the traffic model uses.
-                if rng.chance(0.55) {
+                let roll = rng.unit();
+                if roll < layby {
+                    // In the lay-by, or in the kerbside lane pretending to be one.
                     let point = path.offset_at(station, side * curb, 0.0);
+                    // The nose points the way the traffic on that side runs, and
+                    // `side > 0` is the `+1` direction, which runs forward.
+                    let heading = path.tangent_at(station) * if side > 0.0 { 1.0 } else { -1.0 };
+                    let yaw = yaw_along_x(heading);
                     let tint = 0.72 + rng.unit() * 0.5;
+                    let colour = [tint, tint * (0.92 + rng.unit() * 0.12), tint * 0.94];
                     builder.add_instance(
                         "car/body",
-                        Instance::new(
-                            point.x,
-                            level::ROAD,
-                            point.z,
-                            path.tangent_at(station).angle() + if side > 0.0 { 0.0 } else { std::f32::consts::PI },
-                            1.0,
-                            [tint, tint * (0.92 + rng.unit() * 0.12), tint * 0.94],
-                        ),
+                        Instance::new(point.x, level::ROAD, point.z, yaw, 1.0, colour),
                     );
                     builder.add_instance(
                         "car/glass",
-                        Instance::new(point.x, level::ROAD, point.z, 0.0, 1.0, [0.6, 0.7, 0.78]),
+                        Instance::new(point.x, level::ROAD, point.z, yaw, 1.0, [0.6, 0.7, 0.78]),
                     );
                     builder.add_instance(
                         "car/wheel",
-                        Instance::new(point.x, level::ROAD, point.z, 0.0, 1.0, [0.15, 0.15, 0.16]),
+                        Instance::new(point.x, level::ROAD, point.z, yaw, 1.0, [0.15, 0.15, 0.16]),
                     );
                     count += 1;
                     station += 6.4 + rng.unit() * 1.4;
-                } else {
-                    station += 8.0 + rng.unit() * 14.0;
+                    continue;
                 }
+                if roll < layby + 0.14 {
+                    // 违停: half on the footway, blocking nothing but the pavement.
+                    let point = path.offset_at(station, side * (kerb + 0.45), 0.0);
+                    let heading = path.tangent_at(station) * if side > 0.0 { 1.0 } else { -1.0 };
+                    let yaw = yaw_along_x(heading)
+                        + if rng.chance(0.5) { 0.0 } else { std::f32::consts::FRAC_PI_2 };
+                    let tint = 0.66 + rng.unit() * 0.46;
+                    let colour = [tint, tint * (0.90 + rng.unit() * 0.14), tint * 0.95];
+                    builder.add_instance(
+                        "car/body",
+                        Instance::new(point.x, level::KERB - 0.03, point.z, yaw, 1.0, colour),
+                    );
+                    builder.add_instance(
+                        "car/glass",
+                        Instance::new(
+                            point.x,
+                            level::KERB - 0.03,
+                            point.z,
+                            yaw,
+                            1.0,
+                            [0.6, 0.7, 0.78],
+                        ),
+                    );
+                    builder.add_instance(
+                        "car/wheel",
+                        Instance::new(
+                            point.x,
+                            level::KERB - 0.03,
+                            point.z,
+                            yaw,
+                            1.0,
+                            [0.15, 0.15, 0.16],
+                        ),
+                    );
+                    count += 1;
+                    station += 6.0 + rng.unit() * 3.0;
+                    continue;
+                }
+                station += 9.0 + rng.unit() * 16.0;
             }
         }
     }
@@ -784,7 +1233,32 @@ mod tests {
         let scene = builder.build();
         // Every prototype gets a list, so a renderer can look one up without a
         // special case for "this city placed none of those".
-        assert_eq!(scene.instances.len(), 10);
+        let prototypes = [
+            "furniture/lamp",
+            "furniture/pole",
+            "furniture/bollard",
+            "furniture/railing",
+            "furniture/sign.guide",
+            "furniture/sign.crossing",
+            "furniture/shelter",
+            "furniture/bin",
+            "furniture/kiosk",
+            "car/body",
+            "car/glass",
+            "car/wheel",
+        ];
+        assert_eq!(
+            scene.instances.len(),
+            prototypes.len(),
+            "one transform list per prototype; these are the prototypes, in the order \
+             they are built"
+        );
+        for key in prototypes {
+            assert!(
+                scene.instances.iter().any(|list| list.key == key),
+                "{key} has no instance list"
+            );
+        }
         let lamps = scene
             .instances
             .iter()
@@ -828,6 +1302,18 @@ mod tests {
     /// scanning the segments is both simpler and exact. The sign comes from the
     /// 2D cross product, which is what makes it a *signed* offset: a point left of
     /// the direction of travel is positive and one right is negative.
+    ///
+    /// A point that is not *beside* the path has no lateral offset, and must not
+    /// be given one. The obvious implementation — clamp the projection to the
+    /// segment, then take the cross product against the unclamped vector — is
+    /// wrong in a way that silently inverts the test that uses it: for a point
+    /// beyond the end of a straight run, `edge × (point − a)` is only the
+    /// perpendicular departure, because the longitudinal part cancels. So a
+    /// centreline ending at x = 346 reported a lateral of 1.0 m for a wire
+    /// standing at x = −456, eight hundred metres away, and every "beside this
+    /// road" filter downstream accepted it. Returning `None` unless the
+    /// perpendicular foot actually lands on the path is what makes the sign mean
+    /// what it says.
     fn signed_lateral(path: &crate::math::Path, point: Vec2) -> Option<f32> {
         let points = path.points();
         if points.len() < 2 {
@@ -842,7 +1328,14 @@ mod tests {
             if length_squared < 1.0e-9 {
                 continue;
             }
-            let t = ((point - a).dot(edge) / length_squared).clamp(0.0, 1.0);
+            let raw = (point - a).dot(edge) / length_squared;
+            // Outside the segment's span, this point is past the end of the road,
+            // not beside it. A hair of tolerance keeps a pole standing exactly on
+            // the last node from being discarded.
+            if !( -1.0e-3..=1.0 + 1.0e-3).contains(&raw) {
+                continue;
+            }
+            let t = raw.clamp(0.0, 1.0);
             let closest = a + edge * t;
             let distance = (point - closest).length();
             if best.is_none_or(|(current, _)| distance < current) {
@@ -941,6 +1434,26 @@ mod tests {
     /// eight metres up the pole against the ground it stands on, so every vertex
     /// is "unattached" and the test passes for the wrong reason or fails for a
     /// reason that has nothing to do with the arms.
+    /// The second half of the same defect: the wires were attached to points that
+    /// did not exist, so they also did not line up with the poles they appeared to
+    /// come from — the conductors floated about a metre inboard of the arm tips.
+    ///
+    /// Distance is measured **horizontally**, from the wire to a pole's *axis*.
+    /// Measuring three-dimensionally from the instance origin compares a point
+    /// eight metres up the pole against the ground it stands on, so every vertex
+    /// is "unattached" and the test passes for the wrong reason or fails for a
+    /// reason that has nothing to do with the arms.
+    ///
+    /// The assertion is per *span endpoint*, not a proportion of all vertices. A
+    /// proportion is not a testable quantity here and never was: a span is 34 m
+    /// long, sampled at 9 stations, so its interior stations are 4 m to 17 m from
+    /// the nearest pole no matter how correctly the wire is strung. Only 2 of the
+    /// 9 stations can ever be within reach of an arm, which caps the achievable
+    /// attachment rate at about 12% — and the old code's 88% "orphans" figure was
+    /// the same 88% you get from a *perfect* wire. What distinguishes a wire that
+    /// meets the arms from one that misses them is entirely in the endpoints, so
+    /// that is what is checked: every span must begin and end within an arm's
+    /// reach of a real pole, and those two poles must be different ones.
     #[test]
     fn every_wire_ends_at_a_pole_arm() {
         let (city, network) = city();
@@ -963,32 +1476,76 @@ mod tests {
         assert!(poles.len() > 10, "only {} poles to wire", poles.len());
         // The arm tip of a 9 m pole, plus a little for the insulator.
         let reach = 0.19 * 9.0 + 0.3;
-        let mut orphans = 0;
-        let mut total = 0;
-        for vertex in wires.positions.chunks_exact(3) {
-            total += 1;
-            let point = Vec2::new(vertex[0], vertex[2]);
-            let nearest = poles
+
+        // One conductor is 8 ribbon steps of 2 quads. Asserting on the internal
+        // layout of those quads would make the test a hostage to the ribbon's
+        // implementation, so the two hang points are found geometrically instead:
+        // within one conductor's own vertices, two of them must lie within an arm's
+        // reach of two *different* poles. That is the whole claim — the wire is
+        // strung from one arm to the next — and it does not care which corner of
+        // which quad the endpoints were emitted into.
+        const QUADS_PER_CONDUCTOR: usize = 16;
+        let quads: Vec<[f32; 12]> = wires
+            .positions
+            .chunks_exact(12)
+            .map(|quad| {
+                let mut out = [0.0_f32; 12];
+                out.copy_from_slice(quad);
+                out
+            })
+            .collect();
+        assert!(
+            quads.len() % QUADS_PER_CONDUCTOR == 0,
+            "{} wire quads is not a whole number of conductors; the span layout \
+             changed and this test is no longer looking at what it thinks",
+            quads.len()
+        );
+        // The index of the nearest pole to a point, and how far away it is.
+        let nearest_pole = |point: Vec2| -> (usize, f32) {
+            poles
                 .iter()
-                .map(|pole| (point - Vec2::new(pole.x, pole.z)).length())
-                .fold(f32::INFINITY, f32::min);
-            if nearest > reach {
-                orphans += 1;
+                .enumerate()
+                .map(|(index, pole)| (index, (point - Vec2::new(pole.x, pole.z)).length()))
+                .fold((usize::MAX, f32::INFINITY), |best, candidate| {
+                    if candidate.1 < best.1 {
+                        candidate
+                    } else {
+                        best
+                    }
+                })
+        };
+        let mut conductors = 0_usize;
+        let mut unstrung = 0_usize;
+        for block in quads.chunks_exact(QUADS_PER_CONDUCTOR) {
+            conductors += 1;
+            // Every corner of every quad in this conductor, as plan points.
+            let corners: Vec<Vec2> = block
+                .iter()
+                .flat_map(|quad| quad.iter().copied())
+                .collect::<Vec<f32>>()
+                .chunks_exact(3)
+                .map(|vertex| Vec2::new(vertex[0], vertex[2]))
+                .collect();
+            // The distinct poles this conductor's own vertices reach.
+            let mut attached: Vec<usize> = corners
+                .iter()
+                .map(|corner| nearest_pole(*corner))
+                .filter(|(_, distance)| *distance <= reach)
+                .map(|(index, _)| index)
+                .collect();
+            attached.sort_unstable();
+            attached.dedup();
+            // Fewer than two means the conductor is a stub hanging off a single
+            // arm, or is drawn to a point where no pole stands at all.
+            if attached.len() < 2 {
+                unstrung += 1;
             }
         }
-        // A span's middle is legitimately far from both poles — a 34 m span has
-        // its midpoint 17 m from each — so the assertion is on the *proportion*.
-        // A span is 9 steps, and the vertices within reach of an arm are the
-        // first and last step or two, so well under half can be attached. The
-        // old code put the conductors ~1 m inboard of the tips, which is why this
-        // threshold has to be tight enough to notice that.
-        let ratio = orphans as f32 / total.max(1) as f32;
-        assert!(
-            ratio < 0.55,
-            "{orphans} of {total} wire vertices are more than {reach:.2} m \
-             horizontally from any pole axis ({:.0}%); the conductors do not meet \
-             the cross-arms",
-            ratio * 100.0
+        assert!(conductors > 20, "only {conductors} conductors to check");
+        assert_eq!(
+            unstrung, 0,
+            "{unstrung} of {conductors} conductors do not reach two different pole \
+             arms within {reach:.2} m horizontally; the wires touch nothing"
         );
     }
 

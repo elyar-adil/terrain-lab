@@ -1,20 +1,42 @@
-//! The ornamental tree species a Chinese city actually plants.
+//! The sixteen common street trees of a Chinese city.
 //!
 //! # Why a species table and not a shape enum
 //!
 //! The previous port modelled a tree as one of four crown shapes — broad,
 //! conical, weeping, clump — which is why every street looked like the same
-//! four stamps. A city reads as a city because the *species* differ: a
-//! `紫花风铃木` in flower is a cloud of violet, a `落羽杉` is a narrow green
-//! spire, a `海棠` is a spreading pink cloud on a short trunk, and a `乌桕`
-//! turns scarlet in autumn. Those are different colours, different silhouettes,
-//! different branching habits and different seasonal states, and none of them
-//! is recoverable from a crown enum.
+//! four stamps. A city reads as a city because the *species* differ: a `银杏`
+//! turns gold while a `香樟` stays black-green, a `雪松` is a stack of drooping
+//! tiers, a `杨柳` falls to the ground in curtains, and a `合欢` carries a flat
+//! umbrella of feather foliage. Those are different colours, different
+//! silhouettes, different branching habits and different seasonal states, and
+//! none of them is recoverable from a crown enum.
+//!
+//! This table is the reference set of sixteen trees a Chinese city actually
+//! plants — the ones in the planting books from Harbin to Guangzhou:
+//!
+//! | key | 中文 | silhouette the eye reads |
+//! |---|---|---|
+//! | `xiang-zhang` | 香樟 | dense dark-green dome, stout trunk |
+//! | `yin-xing` | 银杏 | broad fan on a high clean leg, gold in November |
+//! | `wu-tong` | 梧桐 | tall open crown, pale mottled bark, huge leaves |
+//! | `huai-shu` | 槐树 | rounded crown of layered flat-topped clumps |
+//! | `yu-shu` | 榆树 | broad, dense, rounded |
+//! | `gui-hua` | 桂花 | small dense evergreen oval, orange-white bloom |
+//! | `xue-song` | 雪松 | conical, whorled horizontal tiers drooping at the tips |
+//! | `liu-shu` | 柳树 | weeping: shoots fall from the shoulder to the ground |
+//! | `song-shu` | 松树 | leaning tortuous trunk, flat needle clusters, gaps |
+//! | `shui-shan` | 水杉 | narrow feathery spire, straight leader |
+//! | `ci-huai` | 刺槐 | open irregular round crown, white June bloom |
+//! | `rong-shu` | 榕树 | very wide dense dome, aerial roots to the ground |
+//! | `tao-shu` | 桃树 | small spreading vase, pink blossom |
+//! | `sha-shu` | 杉树 | dense bluish cone |
+//! | `he-huan` | 合欢 | flat-topped umbrella of pinnate feather, pink powder-puffs |
+//! | `yang-shu` | 杨树 | fastigiate column, branches sweeping steeply up |
 //!
 //! So a species is a record: the botanical identity, the mature dimensions, the
 //! canopy architecture, the bark, the leaf shape and colour through the year,
-//! and the blossom state. Geometry and texture both read this table, so a tree's
-//! silhouette and its colour can never disagree.
+//! and the blossom state. Geometry and texture both read this table, so a
+//! tree's silhouette and its colour can never disagree.
 //!
 //! # What is *not* here
 //!
@@ -26,42 +48,68 @@
 
 /// How a species holds its canopy. This is the silhouette, and it is what the
 /// eye reads at a kilometre.
+///
+/// Every variant is planted in the table — an unexercised variant would be a
+/// branch of the generator nobody has run — and every variant has its own
+/// profile curve and its own numbers in [`crate::trees::forms`], which is what
+/// keeps a `雪松` and a `水杉` from being the same cone in different greens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Canopy {
-    /// A single dominant trunk rising clear of the canopy, then spreading
-    /// branches — the shape of a mature `桂花` or `柚子`.
-    Spreading,
-    /// Rounded to hemispherical, often low-branched — `麻楝`, `小叶紫薇`.
+    /// Broad, dense, rounded — the crown of a `香樟`, `榆树`, `槐树` or `刺槐`.
     Rounded,
-    /// A broad vase, widest at the top, on a straight trunk — `乌桕`, `黄皮`.
+    /// Tall, broad and *open*, branching high on a clean trunk, pale bark —
+    /// the `梧桐`.
+    Open,
+    /// A dense evergreen oval, taller than it is wide, on a small tree — the
+    /// `桂花`.
+    Oval,
+    /// A broad fan: narrow at the foot, wide through the middle, drawn in
+    /// again at the top — the `银杏`.
+    Fan,
+    /// A vase: narrow at the foot, widest at the lip, on a small tree — the
+    /// `桃树`.
     Vase,
-    /// Conical, whorled branches, narrow — `水杉`, `落羽杉`, `锦叶樱仁` as a
-    /// shrub-trained standard.
+    /// A narrow conical spire with a straight leader and short ascending
+    /// branches — `水杉`, `杉树`.
     Conical,
-    /// Drooping to the ground — a weeping form of `海棠` or `柳`.
+    /// Conical but layered: whorls of long horizontal tiers that droop at the
+    /// tips, widest at the foot — the `雪松`.
+    Layered,
+    /// Falling from a shoulder: limbs arch out and the shoots hang from them
+    /// to the ground — the `柳树`.
     Weeping,
-    /// A multi-stemmed clump — `红花鸡蛋花` grown as a shrub, `红花玉兰`.
-    MultiStem,
-    /// Horizontal tiers on a straight trunk — `锦叶樱仁`, `黄槿` as a standard.
-    Tiered,
+    /// A fastigiate column: branches sweep steeply upward, hugging the trunk —
+    /// the `杨树`.
+    Fastigiate,
+    /// A leaning, tortuous trunk carrying irregular flat clusters of needle
+    /// foliage with gaps between them — the `松树`.
+    Irregular,
+    /// Branches rise, then flatten out at the crown top into a wide, flat
+    /// umbrella — the `合欢`.
+    Umbrella,
+    /// A very wide dense dome on a thick trunk, with column-like aerial roots
+    /// dropping from the major limbs to the ground — the `榕树`.
+    Banyan,
 }
 
 /// Leaf form. This drives the leaf card's alpha silhouette, which is most of
-/// why a `樱花` and a `樟` read differently at close range.
+/// why a `柳树` and a `香樟` read differently at close range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeafForm {
-    /// Broad, ovate, smooth margin — `麻楝`, `柚子`.
+    /// Broad, ovate, smooth margin — `香樟`, `榆树`, `榕树`, `杨树`.
     Ovate,
-    /// Palmate, three to five lobes — `黄皮`, `红花玉兰`.
+    /// Palmate, three to five lobes — `梧桐`, with its huge plane leaves.
     Palmate,
-    /// Elliptic, finely serrate — `小叶樱仁`, `海棠`.
+    /// Elliptic, finely serrate — `桂花`, `桃树`.
     Elliptic,
-    /// Needle or scale, in dense sprays — `水杉`, `落羽杉`.
+    /// Needle or scale, in dense sprays — the conifers.
     Needle,
-    /// Pinnate, many leaflets on one rachis — `合欢`-like street trees.
+    /// Pinnate, many leaflets on one rachis — `槐树`, `刺槐`, `合欢`.
     Pinnate,
-    /// Cordate, heart-shaped, smooth — `紫荆`-like.
-    Cordate,
+    /// Long, narrow, fine-tipped — the `柳树`'s lance.
+    Lanceolate,
+    /// A fan: narrow petiole opening into a broad rounded blade — the `银杏`.
+    Fan,
 }
 
 /// What the canopy looks like when it is carrying flowers or fruit. A blossom
@@ -120,20 +168,20 @@ pub struct Species {
     /// Summer leaf colour, linear RGB.
     pub foliage: [f32; 3],
     /// Autumn colour. Some Chinese street trees are chosen *for* this — the
-    /// `乌桕` turning scarlet is the reason it is planted.
+    /// `银杏` turning gold is the reason it is planted.
     pub autumn: Option<[f32; 3]>,
     pub bloom: Bloom,
-    /// Mature height in metres, `(min, max)`.
+    /// Mature height in metres, `(min, max)`, for street planting.
     pub height_m: (f32, f32),
     /// Mature crown radius in metres, `(min, max)`.
     pub crown_m: (f32, f32),
     /// Mature trunk radius at breast height in metres, `(min, max)`.
     pub trunk_m: (f32, f32),
-    /// Fraction of total height below the first branch. A `红花玉兰` is
-    /// low-branched; a `水杉` carries a clear trunk most of its height.
+    /// Fraction of total height below the first branch. A `雪松` carries tiers
+    /// almost to the ground; a `梧桐` branches high on a clean leg.
     pub clear_stem: f32,
-    /// How densely the canopy is packed with leaf cards, 0..1. A `麻楝` is
-    /// open and see-through; a `柚子` is a solid mass.
+    /// How densely the canopy is packed with leaf cards, 0..1. A `梧桐` is
+    /// open and see-through; a `榕树` is a solid mass.
     pub density: f32,
     /// Card size as a fraction of crown radius. Small cards read as fine
     /// texture; large cards read as blobs.
@@ -153,324 +201,224 @@ const fn bark(colour: [f32; 3], fissure: f32, weathering: f32) -> Bark {
     }
 }
 
-/// The palette.
-///
-/// The first eight are the classic Chinese street trees — the ones that appear
-/// in every city from Harbin to Guangzhou, and the ones a Chinese viewer
-/// recognises without being told. The blossom trees and the conifers follow.
+/// The palette: the sixteen reference trees, in the order of the planting sheet.
 pub const SPECIES: &[Species] = &[
     Species {
-        key: "wu-jiu",
-        name_zh: "乌桕",
-        name_en: "Chinese tallow",
-        canopy: Canopy::Vase,
+        key: "xiang-zhang",
+        name_zh: "香樟",
+        name_en: "Camphor",
+        canopy: Canopy::Rounded,
         leaf: LeafForm::Ovate,
-        bark: bark([0.185, 0.178, 0.167], 0.55, 1.0),
-        // A deep, almost blue green: the tallow's summer foliage is the darkest
-        // in the palette, which is what makes its scarlet autumn so violent.
-        foliage: [0.078, 0.155, 0.059],
-        autumn: Some([0.235, 0.076, 0.052]),
-        bloom: Bloom::NONE,
-        height_m: (11.0, 15.0),
-        crown_m: (4.5, 6.5),
-        trunk_m: (0.22, 0.34),
-        clear_stem: 0.34,
-        density: 0.72,
-        leaf_scale: 0.30,
-        evergreen: false,
-        street_tolerant: true,
-    },
-    Species {
-        key: "cong-shu",
-        name_zh: "枞树",
-        name_en: "Chinese fir",
-        canopy: Canopy::Conical,
-        leaf: LeafForm::Needle,
-        bark: bark([0.135, 0.117, 0.105], 0.85, 0.9),
-        foliage: [0.063, 0.105, 0.097],
+        bark: bark([0.160, 0.152, 0.142], 0.55, 1.0),
+        // The darkest broadleaf green in the palette: a camphor's crown reads
+        // nearly black-green against everything else on the street, which is
+        // why it is the evergreen backbone of a southern Chinese avenue.
+        foliage: [0.052, 0.115, 0.052],
         autumn: None,
         bloom: Bloom::NONE,
-        height_m: (16.0, 24.0),
-        crown_m: (2.6, 4.0),
-        trunk_m: (0.20, 0.30),
-        clear_stem: 0.22,
-        density: 0.86,
-        leaf_scale: 0.22,
+        height_m: (10.0, 18.0),
+        crown_m: (5.5, 8.0),
+        trunk_m: (0.28, 0.42),
+        clear_stem: 0.30,
+        density: 0.88,
+        leaf_scale: 0.30,
         evergreen: true,
         street_tolerant: true,
     },
     Species {
-        key: "zi-hua-feng-jiao-mu",
-        name_zh: "紫花风铃木",
-        name_en: "Purple-flowered tabebia",
-        canopy: Canopy::Vase,
-        leaf: LeafForm::Palmate,
-        bark: bark([0.235, 0.229, 0.221], 0.20, 1.0),
-        foliage: [0.185, 0.215, 0.116],
-        autumn: Some([0.205, 0.126, 0.062]),
-        bloom: Bloom::of([0.455, 0.343, 0.520], 0.88, 0.22),
-        height_m: (10.0, 16.0),
-        crown_m: (4.0, 6.0),
-        trunk_m: (0.20, 0.30),
-        clear_stem: 0.38,
-        density: 0.68,
-        leaf_scale: 0.34,
+        key: "yin-xing",
+        name_zh: "银杏",
+        name_en: "Ginkgo",
+        canopy: Canopy::Fan,
+        leaf: LeafForm::Fan,
+        bark: bark([0.200, 0.190, 0.175], 0.30, 1.0),
+        // A fresh, light green — lighter than every other broadleaf here so its
+        // autumn has somewhere to go.
+        foliage: [0.115, 0.165, 0.062],
+        // The gold. A ginkgo avenue in November is the single loudest colour
+        // event in a Chinese city, and it is why the tree is planted.
+        autumn: Some([0.320, 0.225, 0.030]),
+        bloom: Bloom::NONE,
+        height_m: (12.0, 20.0),
+        crown_m: (4.5, 6.5),
+        trunk_m: (0.24, 0.38),
+        // Branches start at mid-height and spread elegantly, which is what
+        // gives the crown its fan shape on a clean leg.
+        clear_stem: 0.44,
+        density: 0.62,
+        leaf_scale: 0.26,
         evergreen: false,
         street_tolerant: true,
     },
     Species {
-        key: "xiao-ye-ying-ren",
-        name_zh: "小叶樱仁",
-        name_en: "Small-leaf cherry plum",
-        canopy: Canopy::Tiered,
-        leaf: LeafForm::Elliptic,
-        bark: bark([0.150, 0.133, 0.126], 0.30, 0.95),
-        // A plum's foliage is a dull olive, not a lawn. Held deliberately low in
-        // both value and chroma, because the tabebia is the palette's other
-        // yellow-green and two bright yellow-greens are one yellow-green.
-        foliage: [0.150, 0.149, 0.117],
-        autumn: Some([0.240, 0.121, 0.053]),
-        bloom: Bloom::of([0.660, 0.568, 0.598], 0.82, 0.16),
-        height_m: (6.0, 9.0),
-        crown_m: (3.2, 4.6),
-        trunk_m: (0.13, 0.20),
-        clear_stem: 0.30,
-        density: 0.74,
+        key: "wu-tong",
+        name_zh: "梧桐",
+        name_en: "Chinese parasol",
+        canopy: Canopy::Open,
+        leaf: LeafForm::Palmate,
+        // The pale mottled bark is half the tree's identity in winter.
+        bark: bark([0.255, 0.245, 0.228], 0.18, 1.0),
+        // A grey, dull green: the huge plane leaves are matte and the crown is
+        // open, so the tree reads lighter and thinner than an elm of the same
+        // size.
+        foliage: [0.130, 0.165, 0.115],
+        autumn: Some([0.200, 0.160, 0.085]),
+        bloom: Bloom::NONE,
+        height_m: (12.0, 20.0),
+        crown_m: (6.0, 9.0),
+        trunk_m: (0.30, 0.45),
+        // Branching high on a clean leg is the habit: the crown is all in the
+        // top half and the pale trunk is on show.
+        clear_stem: 0.45,
+        density: 0.54,
+        leaf_scale: 0.36,
+        evergreen: false,
+        street_tolerant: true,
+    },
+    Species {
+        key: "huai-shu",
+        name_zh: "槐树",
+        name_en: "Chinese scholar tree",
+        canopy: Canopy::Rounded,
+        leaf: LeafForm::Pinnate,
+        bark: bark([0.185, 0.175, 0.160], 0.60, 1.0),
+        // An olive cast between the camphor's black-green and the elm's mid
+        // green: the pagoda tree's pinnate foliage is never glossy.
+        foliage: [0.105, 0.155, 0.075],
+        autumn: Some([0.260, 0.190, 0.070]),
+        bloom: Bloom::NONE,
+        height_m: (10.0, 16.0),
+        crown_m: (5.5, 8.0),
+        trunk_m: (0.28, 0.40),
+        clear_stem: 0.34,
+        density: 0.68,
         leaf_scale: 0.28,
         evergreen: false,
         street_tolerant: true,
     },
     Species {
-        key: "huang-hua-feng-jiao-mu",
-        name_zh: "黄花风铃木",
-        name_en: "Golden trumpet tree",
-        canopy: Canopy::Vase,
-        leaf: LeafForm::Palmate,
-        bark: bark([0.245, 0.241, 0.233], 0.22, 1.0),
-        foliage: [0.242, 0.245, 0.142],
-        autumn: None,
-        bloom: Bloom::of([0.640, 0.535, 0.115], 0.86, 0.24),
-        height_m: (9.0, 14.0),
-        crown_m: (3.8, 5.6),
-        trunk_m: (0.20, 0.28),
-        clear_stem: 0.36,
-        density: 0.66,
-        leaf_scale: 0.34,
-        evergreen: false,
-        street_tolerant: true,
-    },
-    Species {
-        key: "ma-lian",
-        name_zh: "麻楝",
-        name_en: "Chinaberry",
-        canopy: Canopy::Rounded,
-        leaf: LeafForm::Pinnate,
-        bark: bark([0.215, 0.210, 0.198], 0.25, 1.0),
-        foliage: [0.144, 0.195, 0.109],
-        autumn: Some([0.290, 0.234, 0.081]),
-        bloom: Bloom::NONE,
-        height_m: (12.0, 18.0),
-        crown_m: (6.0, 8.5),
-        trunk_m: (0.32, 0.48),
-        clear_stem: 0.40,
-        density: 0.58,
-        leaf_scale: 0.26,
-        evergreen: false,
-        street_tolerant: true,
-    },
-    Species {
-        key: "xiao-ye-zi-wei",
-        name_zh: "小叶紫薇",
-        name_en: "Crape myrtle",
-        canopy: Canopy::MultiStem,
-        leaf: LeafForm::Elliptic,
-        bark: bark([0.265, 0.253, 0.239], 0.30, 0.85),
-        foliage: [0.079, 0.195, 0.066],
-        // Crape myrtle's autumn is a deep rose-crimson, and it is grown in China
-        // for exactly this: it is the loudest thing on a street in November.
-        autumn: Some([0.260, 0.073, 0.098]),
-        bloom: Bloom::of([0.500, 0.190, 0.345], 0.92, 0.52),
-        height_m: (4.5, 7.0),
-        crown_m: (2.4, 3.6),
-        trunk_m: (0.10, 0.17),
-        clear_stem: 0.26,
-        density: 0.76,
-        leaf_scale: 0.30,
-        evergreen: false,
-        street_tolerant: true,
-    },
-    Species {
-        key: "hai-tang",
-        name_zh: "海棠",
-        name_en: "Flowering crabapple",
-        canopy: Canopy::Spreading,
-        leaf: LeafForm::Elliptic,
-        bark: bark([0.180, 0.162, 0.155], 0.60, 0.95),
-        foliage: [0.126, 0.180, 0.140],
-        autumn: Some([0.245, 0.122, 0.069]),
-        bloom: Bloom::of([0.680, 0.571, 0.593], 0.90, 0.18),
-        height_m: (5.0, 8.0),
-        crown_m: (3.0, 4.8),
-        trunk_m: (0.14, 0.22),
-        clear_stem: 0.28,
-        density: 0.78,
-        leaf_scale: 0.30,
-        evergreen: false,
-        street_tolerant: true,
-    },
-    Species {
-        key: "you-zi",
-        name_zh: "柚子",
-        name_en: "Pomelo",
+        key: "yu-shu",
+        name_zh: "榆树",
+        name_en: "Elm",
         canopy: Canopy::Rounded,
         leaf: LeafForm::Ovate,
-        bark: bark([0.205, 0.199, 0.189], 0.28, 1.0),
-        foliage: [0.035, 0.125, 0.089],
-        autumn: None,
-        bloom: Bloom::of([0.720, 0.710, 0.648], 0.42, 0.30),
-        height_m: (8.0, 12.0),
-        crown_m: (3.6, 5.2),
-        trunk_m: (0.18, 0.26),
-        clear_stem: 0.30,
-        density: 0.88,
-        leaf_scale: 0.36,
-        evergreen: true,
-        street_tolerant: true,
-    },
-    Species {
-        key: "hong-hua-ji-dan-hua",
-        name_zh: "红花鸡蛋花",
-        name_en: "Red frangipani",
-        canopy: Canopy::MultiStem,
-        leaf: LeafForm::Elliptic,
-        bark: bark([0.230, 0.220, 0.207], 0.18, 0.9),
-        foliage: [0.136, 0.150, 0.066],
-        autumn: None,
-        bloom: Bloom::of([0.520, 0.192, 0.156], 0.78, 0.56),
-        height_m: (4.0, 6.5),
-        crown_m: (2.6, 3.8),
-        trunk_m: (0.10, 0.16),
-        clear_stem: 0.20,
-        density: 0.72,
-        leaf_scale: 0.38,
-        evergreen: true,
-        street_tolerant: false,
-    },
-    Species {
-        key: "luo-yu-shan",
-        name_zh: "落羽杉",
-        name_en: "Dawn redwood",
-        canopy: Canopy::Conical,
-        leaf: LeafForm::Needle,
-        bark: bark([0.185, 0.148, 0.130], 0.70, 0.9),
-        foliage: [0.102, 0.170, 0.131],
-        // A quiet bronze. Deliberately lower in chroma than every other autumn
-        // in the palette: a dawn redwood's autumn is a subtle thing, and letting
-        // it shout competes with the tallow's scarlet for attention.
-        autumn: Some([0.215, 0.122, 0.082]),
+        bark: bark([0.165, 0.150, 0.132], 0.75, 1.0),
+        // A deep forest green, sitting between the camphor's near-black and
+        // the scholar tree's olive.
+        foliage: [0.105, 0.160, 0.088],
+        // Butter yellow, the classic elm fall.
+        autumn: Some([0.285, 0.205, 0.058]),
         bloom: Bloom::NONE,
-        height_m: (14.0, 22.0),
-        crown_m: (2.2, 3.4),
-        trunk_m: (0.18, 0.26),
-        clear_stem: 0.55,
+        height_m: (12.0, 20.0),
+        crown_m: (6.0, 8.5),
+        trunk_m: (0.28, 0.42),
+        clear_stem: 0.36,
         density: 0.80,
-        leaf_scale: 0.20,
+        leaf_scale: 0.28,
         evergreen: false,
         street_tolerant: true,
     },
     Species {
-        key: "huang-pi",
-        name_zh: "黄皮",
-        name_en: "Wampee",
-        canopy: Canopy::MultiStem,
-        leaf: LeafForm::Palmate,
-        bark: bark([0.200, 0.195, 0.184], 0.22, 1.0),
-        foliage: [0.241, 0.245, 0.122],
+        key: "gui-hua",
+        name_zh: "桂花",
+        name_en: "Osmanthus",
+        canopy: Canopy::Oval,
+        leaf: LeafForm::Elliptic,
+        bark: bark([0.155, 0.148, 0.138], 0.35, 1.0),
+        // The glossiest, darkest small leaf in the palette: an osmanthus is a
+        // solid near-black-green oval even next to a camphor.
+        foliage: [0.038, 0.088, 0.052],
         autumn: None,
-        bloom: Bloom::of([0.660, 0.650, 0.515], 0.36, 0.28),
-        height_m: (4.5, 7.0),
-        crown_m: (2.4, 3.6),
-        trunk_m: (0.11, 0.18),
-        clear_stem: 0.24,
-        density: 0.80,
-        leaf_scale: 0.34,
+        // The flowers are the point of the tree and they are *tiny*: a scatter
+        // of orange-white over a still-dark canopy, not a cloud. A low density
+        // is the honest number and a quiet colour is the honest colour.
+        bloom: Bloom::of([0.550, 0.440, 0.280], 0.32, 0.70),
+        height_m: (4.0, 8.0),
+        crown_m: (2.2, 3.4),
+        trunk_m: (0.12, 0.20),
+        clear_stem: 0.26,
+        density: 0.90,
+        leaf_scale: 0.30,
         evergreen: true,
+        street_tolerant: true,
+    },
+    Species {
+        key: "xue-song",
+        name_zh: "雪松",
+        name_en: "Deodar cedar",
+        canopy: Canopy::Layered,
+        leaf: LeafForm::Needle,
+        bark: bark([0.145, 0.130, 0.115], 0.65, 0.95),
+        // Silver-green: paler and bluer than any other conifer here, which is
+        // what a deodar's foliage actually is.
+        foliage: [0.105, 0.145, 0.128],
+        autumn: None,
+        bloom: Bloom::NONE,
+        height_m: (12.0, 20.0),
+        crown_m: (4.5, 6.5),
+        trunk_m: (0.26, 0.40),
+        // A deodar carries its lowest tier almost to the lawn: the crown starts
+        // low and the tiers stack from there.
+        clear_stem: 0.18,
+        density: 0.78,
+        leaf_scale: 0.22,
+        evergreen: true,
+        street_tolerant: true,
+    },
+    Species {
+        key: "liu-shu",
+        name_zh: "柳树",
+        name_en: "Willow",
+        canopy: Canopy::Weeping,
+        leaf: LeafForm::Lanceolate,
+        bark: bark([0.140, 0.130, 0.112], 0.50, 0.95),
+        // The palest, most yellow-green broadleaf in the palette: a willow in
+        // leaf is fresh growth all over.
+        foliage: [0.165, 0.215, 0.098],
+        autumn: Some([0.245, 0.205, 0.080]),
+        bloom: Bloom::NONE,
+        height_m: (8.0, 14.0),
+        crown_m: (5.0, 7.5),
+        trunk_m: (0.22, 0.34),
+        clear_stem: 0.28,
+        density: 0.72,
+        leaf_scale: 0.30,
+        evergreen: false,
         street_tolerant: false,
     },
     Species {
-        key: "hong-hua-yu-lan",
-        name_zh: "红花玉兰",
-        name_en: "Red magnolia",
-        canopy: Canopy::Spreading,
-        leaf: LeafForm::Palmate,
-        bark: bark([0.225, 0.221, 0.216], 0.15, 0.9),
-        foliage: [0.142, 0.215, 0.147],
-        // Magnolia goes bronze-tan and *lighter*, which is unusual among the
-        // deciduous species here and is why it does not read as another
-        // version of the dawn redwood's autumn.
-        autumn: Some([0.170, 0.151, 0.112]),
-        bloom: Bloom::of([0.480, 0.163, 0.205], 0.86, 0.14),
-        height_m: (7.0, 11.0),
-        crown_m: (3.4, 5.0),
-        trunk_m: (0.16, 0.24),
-        clear_stem: 0.32,
-        density: 0.70,
-        leaf_scale: 0.32,
-        evergreen: false,
-        street_tolerant: true,
-    },
-    Species {
-        key: "jin-ye-ying-ren",
-        name_zh: "锦叶樱仁",
-        name_en: "Purple-leaf plum",
-        canopy: Canopy::Tiered,
-        leaf: LeafForm::Elliptic,
-        bark: bark([0.155, 0.133, 0.127], 0.35, 0.95),
-        // A plum whose defining feature is the colour, not the flower: the
-        // foliage itself is wine-purple all summer. It also barely turns —
-        // holding that colour through autumn is part of what it is for — so
-        // unlike every other deciduous species here it records no autumn.
-        foliage: [0.190, 0.076, 0.091],
+        key: "song-shu",
+        name_zh: "松树",
+        name_en: "Pine",
+        canopy: Canopy::Irregular,
+        leaf: LeafForm::Needle,
+        bark: bark([0.150, 0.128, 0.105], 0.90, 0.95),
+        // A dark, grey-green needle tone — the hue sits where a two-needle
+        // pine's actually sits, greener than the deodar and bluer than the
+        // metasequoia.
+        foliage: [0.075, 0.125, 0.062],
         autumn: None,
-        bloom: Bloom::of([0.600, 0.504, 0.536], 0.30, 0.15),
-        height_m: (4.5, 7.0),
-        crown_m: (2.2, 3.4),
-        trunk_m: (0.11, 0.18),
-        clear_stem: 0.28,
-        density: 0.80,
+        bloom: Bloom::NONE,
+        height_m: (9.0, 16.0),
+        crown_m: (4.0, 6.5),
+        trunk_m: (0.26, 0.42),
+        clear_stem: 0.35,
+        density: 0.58,
         leaf_scale: 0.26,
-        evergreen: false,
-        street_tolerant: true,
-    },
-    Species {
-        key: "huang-jin",
-        name_zh: "黄槿",
-        name_en: "Chinese hibiscus",
-        canopy: Canopy::Rounded,
-        leaf: LeafForm::Cordate,
-        bark: bark([0.215, 0.210, 0.200], 0.20, 1.0),
-        // A light, warm yellow-green: the hibiscus is grown for its big yellow
-        // flowers against a bright, open crown.
-        foliage: [0.285, 0.285, 0.091],
-        autumn: Some([0.290, 0.182, 0.058]),
-        bloom: Bloom::of([0.700, 0.620, 0.098], 0.58, 0.48),
-        height_m: (6.0, 10.0),
-        crown_m: (3.0, 4.4),
-        trunk_m: (0.14, 0.22),
-        clear_stem: 0.30,
-        density: 0.82,
-        leaf_scale: 0.38,
-        evergreen: false,
-        street_tolerant: true,
+        evergreen: true,
+        street_tolerant: false,
     },
     Species {
         key: "shui-shan",
         name_zh: "水杉",
-        name_en: "Metasequoia",
+        name_en: "Dawn redwood",
         canopy: Canopy::Conical,
         leaf: LeafForm::Needle,
         bark: bark([0.175, 0.153, 0.140], 0.60, 0.9),
         foliage: [0.141, 0.155, 0.124],
+        // A quiet bronze. Deliberately lower in chroma than every other autumn
+        // in the palette: a dawn redwood's autumn is a subtle thing, and letting
+        // it shout competes with the ginkgo's gold for attention.
         autumn: Some([0.200, 0.138, 0.076]),
         bloom: Bloom::NONE,
         height_m: (18.0, 30.0),
@@ -479,6 +427,141 @@ pub const SPECIES: &[Species] = &[
         clear_stem: 0.62,
         density: 0.78,
         leaf_scale: 0.20,
+        evergreen: false,
+        street_tolerant: true,
+    },
+    Species {
+        key: "ci-huai",
+        name_zh: "刺槐",
+        name_en: "Black locust",
+        canopy: Canopy::Rounded,
+        leaf: LeafForm::Pinnate,
+        bark: bark([0.175, 0.165, 0.150], 0.80, 1.0),
+        // A grey, matte green — the locust's pinnate foliage never reads as
+        // glossy, and the crown is open enough to see the sky through.
+        foliage: [0.118, 0.172, 0.098],
+        autumn: Some([0.270, 0.210, 0.062]),
+        // Locusts in white flower in late May are a real event and a visible
+        // one, but a scatter, not a cloud.
+        bloom: Bloom::of([0.550, 0.550, 0.520], 0.35, 0.40),
+        height_m: (10.0, 16.0),
+        crown_m: (4.5, 6.5),
+        trunk_m: (0.24, 0.36),
+        clear_stem: 0.40,
+        density: 0.55,
+        leaf_scale: 0.26,
+        evergreen: false,
+        street_tolerant: true,
+    },
+    Species {
+        key: "rong-shu",
+        name_zh: "榕树",
+        name_en: "Banyan",
+        canopy: Canopy::Banyan,
+        leaf: LeafForm::Ovate,
+        bark: bark([0.175, 0.162, 0.148], 0.45, 1.0),
+        // A deep, saturated green under which nothing much grows: the banyan's
+        // crown is the densest mass of shade in the palette.
+        foliage: [0.062, 0.130, 0.068],
+        autumn: None,
+        bloom: Bloom::NONE,
+        height_m: (10.0, 18.0),
+        crown_m: (8.0, 12.0),
+        trunk_m: (0.35, 0.55),
+        clear_stem: 0.24,
+        density: 0.86,
+        leaf_scale: 0.30,
+        evergreen: true,
+        street_tolerant: true,
+    },
+    Species {
+        key: "tao-shu",
+        name_zh: "桃树",
+        name_en: "Peach",
+        canopy: Canopy::Vase,
+        leaf: LeafForm::Elliptic,
+        bark: bark([0.190, 0.170, 0.150], 0.45, 0.95),
+        // A slightly blue-green fresh leaf, kept distinct from the scholar
+        // tree's olive and the locust's grey.
+        foliage: [0.085, 0.150, 0.098],
+        autumn: Some([0.235, 0.115, 0.075]),
+        // The pink cloud. A peach in March is blossom with a little foliage
+        // behind it, which is exactly what the density says.
+        bloom: Bloom::of([0.620, 0.295, 0.360], 0.88, 0.16),
+        height_m: (3.5, 6.5),
+        crown_m: (2.8, 4.2),
+        trunk_m: (0.12, 0.20),
+        clear_stem: 0.30,
+        density: 0.70,
+        leaf_scale: 0.32,
+        evergreen: false,
+        street_tolerant: false,
+    },
+    Species {
+        key: "sha-shu",
+        name_zh: "杉树",
+        name_en: "Fir",
+        canopy: Canopy::Conical,
+        leaf: LeafForm::Needle,
+        bark: bark([0.130, 0.118, 0.108], 0.55, 0.95),
+        // Bluish and dark: the fir is the coldest green in the palette, and it
+        // holds that colour all year.
+        foliage: [0.055, 0.108, 0.100],
+        autumn: None,
+        bloom: Bloom::NONE,
+        height_m: (14.0, 22.0),
+        crown_m: (2.4, 3.4),
+        trunk_m: (0.20, 0.30),
+        clear_stem: 0.40,
+        density: 0.85,
+        leaf_scale: 0.20,
+        evergreen: true,
+        street_tolerant: true,
+    },
+    Species {
+        key: "he-huan",
+        name_zh: "合欢",
+        name_en: "Silk tree",
+        canopy: Canopy::Umbrella,
+        leaf: LeafForm::Pinnate,
+        bark: bark([0.165, 0.152, 0.135], 0.40, 1.0),
+        // An olive, feathery green — the twice-cut pinnate leaves read as a
+        // haze rather than as a mass, warmer than the locust's grey.
+        foliage: [0.145, 0.168, 0.098],
+        autumn: None,
+        // Pink powder-puffs across the flat top of the umbrella through July.
+        bloom: Bloom::of([0.600, 0.270, 0.360], 0.55, 0.44),
+        height_m: (8.0, 14.0),
+        crown_m: (5.0, 7.5),
+        trunk_m: (0.20, 0.30),
+        // An umbrella on a clear leg: the trunk is on show, the crown is flat.
+        clear_stem: 0.42,
+        density: 0.62,
+        leaf_scale: 0.30,
+        evergreen: false,
+        street_tolerant: true,
+    },
+    Species {
+        key: "yang-shu",
+        name_zh: "杨树",
+        name_en: "Poplar",
+        canopy: Canopy::Fastigiate,
+        leaf: LeafForm::Ovate,
+        bark: bark([0.185, 0.175, 0.158], 0.50, 1.0),
+        // A grey-green, cooler than the elm and the willow, which is what a
+        // poplar's leaves shaking in the least wind actually read as.
+        foliage: [0.128, 0.172, 0.105],
+        // Clear gold, a shade warmer than the ginkgo's.
+        autumn: Some([0.300, 0.225, 0.055]),
+        bloom: Bloom::NONE,
+        height_m: (16.0, 26.0),
+        crown_m: (2.6, 4.0),
+        trunk_m: (0.24, 0.38),
+        // Fastigiate: the sweep of upward branches starts low, so there is no
+        // clear stem to speak of — the column is the tree.
+        clear_stem: 0.18,
+        density: 0.74,
+        leaf_scale: 0.26,
         evergreen: false,
         street_tolerant: true,
     },
@@ -500,8 +583,7 @@ pub fn street_list() -> Vec<&'static Species> {
 }
 
 /// A species chosen for a park, courtyard or compound: everything, including the
-/// subtropical species that would not survive a kerb but are ubiquitous in a
-/// Chinese garden.
+/// species that would not survive a kerb but are ubiquitous in a Chinese garden.
 pub fn garden_list() -> &'static [Species] {
     SPECIES
 }
@@ -595,6 +677,8 @@ mod tests {
                 species.key
             );
         }
+        // The reference sheet is sixteen trees and the palette is the sheet.
+        assert_eq!(SPECIES.len(), 16, "the reference set is sixteen species");
     }
 
     #[test]
@@ -658,17 +742,7 @@ mod tests {
             // bound is the one the hue itself implies — computed, not guessed.
             let [r, g, b] = species.foliage;
             let hue = hue_degrees([r, g, b]);
-            // The plum is the one species whose foliage is not green at all, and
-            // it is in the palette for exactly that reason. It is checked, not
-            // exempted: a wine-purple leaf must be red-dominant and in the red
-            // sector of the wheel.
-            if species.key == "jin-ye-ying-ren" {
-                assert!(r > b && r > g, "a purple plum has red above both");
-                assert!(
-                    hue > 330.0 || hue < 15.0,
-                    "the plum's foliage hue is {hue:.0} deg, which is not a wine red"
-                );
-            } else if species.leaf == LeafForm::Needle {
+            if species.leaf == LeafForm::Needle {
                 assert!(
                     (138.0..=185.0).contains(&hue) || (80.0..=115.0).contains(&hue),
                     "{} is a conifer but its foliage hue is {hue:.0} deg; a \
@@ -806,7 +880,8 @@ mod tests {
             turning.len()
         );
         // And a palette of evergreens would be a temperate conifer forest, not
-        // a Chinese city, which is roughly two-thirds evergreen.
+        // a Chinese city, which is roughly two-thirds evergreen. The reference
+        // sheet has six: camphor, osmanthus, deodar, pine, banyan, fir.
         let evergreen = SPECIES.iter().filter(|s| s.evergreen).count();
         assert!(
             evergreen >= 4 && evergreen <= 7,
@@ -815,8 +890,47 @@ mod tests {
         );
     }
 
+    /// The reference palette is a *street tree* palette, not an ornamental one,
+    /// so blossom is the exception and not the rule. What must hold is that the
+    /// three trees planted for their flowers are planted for the right flower:
+    /// a peach is a pink cloud, a silk tree is pink puffs over a flat top, an
+    /// osmanthus is a quiet orange-white scatter, and the locust's white June
+    /// dress is a real but minor event. Anything else flowers, if at all, below
+    /// the noise floor.
     #[test]
-    fn blossom_species_are_actually_showy() {
+    fn the_blossom_species_bloom_the_flowers_they_are_planted_for() {
+        let bloom_of = |key: &str| {
+            SPECIES
+                .iter()
+                .find(|species| species.key == key)
+                .unwrap_or_else(|| panic!("{key} is in the palette"))
+                .bloom
+        };
+        // Peach: the loud pink cloud of March.
+        let peach = bloom_of("tao-shu");
+        assert!(peach.density > 0.75, "a peach in blossom is mostly blossom");
+        // Silk tree: powder-puffs over the umbrella, present but not a cloud.
+        let silk = bloom_of("he-huan");
+        assert!(silk.density > 0.45, "a silk tree's puffs must be visible");
+        // Osmanthus: the quietest famous flower there is.
+        let osmanthus = bloom_of("gui-hua");
+        assert!(
+            osmanthus.density < 0.45,
+            "an osmanthus is a scatter of tiny flowers, not a canopy of them"
+        );
+        // Locust: white June bloom, a minor event.
+        let locust = bloom_of("ci-huai");
+        assert!(locust.density < 0.50, "a locust's bloom is a dress, not a cloud");
+        // And nobody else is showy: thirteen of the sixteen are foliage trees.
+        let blossoming = SPECIES
+            .iter()
+            .filter(|species| species.bloom.density > 0.5)
+            .count();
+        assert!(
+            blossoming == 2,
+            "{blossoming} species are showy in flower; the reference sheet has \
+             exactly two (peach, silk tree)"
+        );
         for species in SPECIES {
             if species.bloom.colour.is_some() {
                 assert!(
@@ -831,15 +945,6 @@ mod tests {
                 );
             }
         }
-        // The reference is a Chinese ornamental palette: blossom must dominate.
-        let blossoming = SPECIES
-            .iter()
-            .filter(|species| species.bloom.density > 0.5)
-            .count();
-        assert!(
-            blossoming >= 7,
-            "only {blossoming} species are showy in flower"
-        );
     }
 
     #[test]
@@ -893,8 +998,10 @@ mod tests {
         }
     }
 
+    /// Conifers are tall and narrow; the fastigiate poplar is the column the
+    /// reference sheet draws it as; the deodar is the wide-tiered exception.
     #[test]
-    fn the_conifers_are_tall_and_narrow_and_the_shrubs_are_short() {
+    fn the_conifers_are_tall_and_narrow_and_the_poplar_is_a_column() {
         for species in SPECIES {
             if species.canopy == Canopy::Conical {
                 assert!(
@@ -908,11 +1015,20 @@ mod tests {
                     species.key
                 );
             }
-            if species.canopy == Canopy::MultiStem {
+            if species.canopy == Canopy::Fastigiate {
                 assert!(
-                    species.height_m.1 < 9.0,
-                    "multi-stem {} should be a small tree",
-                    species.key
+                    species.crown_m.1 < species.height_m.0 * 0.25,
+                    "fastigiate {} should be a column, not a cone: crown {:?} \
+                     against a {:?} height",
+                    species.key,
+                    species.crown_m,
+                    species.height_m
+                );
+            }
+            if species.canopy == Canopy::Banyan {
+                assert!(
+                    species.trunk_m.0 > 0.30,
+                    "a banyan's trunk is the thickest thing on the street"
                 );
             }
         }

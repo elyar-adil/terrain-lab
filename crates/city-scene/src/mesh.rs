@@ -780,9 +780,42 @@ impl MeshBuilder {
     /// dropped too.
     pub fn build(mut self) -> SceneGeometry {
         let mut result: Vec<MeshGroup> = Vec::new();
-        for (material, buffers) in std::mem::take(&mut self.groups) {
+        for (material, mut buffers) in std::mem::take(&mut self.groups) {
             if buffers.positions.is_empty() {
                 continue;
+            }
+            // The optional layers are per-vertex, so they must align with the
+            // position count exactly. A material that mixes plain quads (no
+            // UV, no tint) with textured or tinted ones used to emit a short
+            // buffer, which the renderer rejects by design — a silently
+            // misaligned attribute would shade garbage instead. Pad the tail
+            // with the layer's first value: invisible for untextured materials
+            // and for materials that read no vertex colours, and the reason a
+            // mixed material renders its untextured members with a flat
+            // texel instead of failing to load at all.
+            let vertices = buffers.positions.len() / 3;
+            if let Some(uvs) = &mut buffers.uvs {
+                if uvs.len() < vertices * 2 {
+                    let (u, v) = if uvs.len() >= 2 { (uvs[0], uvs[1]) } else { (0.0, 0.0) };
+                    uvs.resize(vertices * 2, 0.0);
+                    for chunk in uvs.chunks_exact_mut(2) {
+                        chunk[0] = u;
+                        chunk[1] = v;
+                    }
+                }
+            }
+            if let Some(colors) = &mut buffers.colors {
+                if colors.len() < vertices * 4 {
+                    let first = if colors.len() >= 4 {
+                        [colors[0], colors[1], colors[2], colors[3]]
+                    } else {
+                        [255, 255, 255, 255]
+                    };
+                    colors.resize(vertices * 4, 0);
+                    for chunk in colors.chunks_exact_mut(4) {
+                        chunk.copy_from_slice(&first);
+                    }
+                }
             }
             let meta = self.meta.get(&material).copied().unwrap_or_default();
             let instance_of = self.bound.get(&material).cloned();

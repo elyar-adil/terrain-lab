@@ -10,9 +10,15 @@
     "signals": null,
     "lamps": null,
     "missingMaterials": null,
+    "trace": [
+      "begin",
+      "renderer",
+      "lights",
+      "environment",
+      "materials (37 textures)"
+    ],
     "problems": [
-      "console: Failed to load resource: the server responded with a status of 404 (Not Found)",
-      "renderer never reported ready"
+      "renderer never reported ready; reached: begin -> renderer -> lights -> environment -> materials (37 textures)\n  page said: city viewer failed: buffer is 78992 bytes, expected 93872"
     ]
   }
 ]
