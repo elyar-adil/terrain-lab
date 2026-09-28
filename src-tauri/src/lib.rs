@@ -43,7 +43,6 @@ pub struct GenerationResult {
     /// prototype lists, baked textures, signal states and the initial traffic
     /// pose. Derived entirely in Rust so the renderer never re-derives
     /// geometry the traffic model also needs.
-    pub city_scenes: serde_json::Value,
     /// Shared procedural assets emitted once per generation: L-System tree
     /// prototypes and weathered material textures instanced across every city.
     pub vegetation_prototypes: serde_json::Value,
@@ -820,10 +819,54 @@ async fn generate_terrain(
             emit_progress(&app, progress, stage)
         })?;
         install_traffic(&infrastructure);
+        // The city scenes are cached for `city_scene` to serve on demand, and
+        // deliberately **not** returned here.
+        //
+        // A scene is tens of megabytes of base64 vertex buffers per city. The
+        // renderer's current city view needs none of it — it reads the
+        // `modernCities` plan — so including it in the generate response handed
+        // the webview several hundred megabytes of JSON it never looked at, and
+        // the webview died on arrival. Serialising it across the IPC boundary is
+        // the expensive part, not building it, so a city is fetched when
+        // something asks to draw it.
+        install_city_scenes(&infrastructure);
         Ok(result)
     })
     .await
     .map_err(|error| format!("native generation task failed: {error}"))?
+}
+
+/// The scenes from the most recent generation, served one at a time.
+///
+/// Held rather than returned from `generate_terrain` because the payload is far
+/// too large to ship unconditionally: a three-city world is over 400 MB of
+/// base64, and it crosses the IPC boundary as one JSON document.
+static CITY_SCENES: std::sync::Mutex<Option<Vec<city_scene::CityScene>>> =
+    std::sync::Mutex::new(None);
+
+fn install_city_scenes(infrastructure: &InfrastructureData) {
+    *CITY_SCENES.lock().unwrap_or_else(|error| error.into_inner()) =
+        Some(infrastructure.city_scenes.clone());
+}
+
+/// One city's finished scene: vertex buffers, prototypes, textures, signals and
+/// a traffic state.
+///
+/// Fails with a clear message rather than an empty scene when asked before a
+/// generation has run, so a caller cannot mistake "not generated yet" for "this
+/// city is empty".
+#[tauri::command]
+async fn city_scene(index: usize) -> Result<city_scene::CityScene, String> {
+    let guard = CITY_SCENES
+        .lock()
+        .map_err(|_| "the city scene cache is poisoned")?;
+    let scenes = guard
+        .as_ref()
+        .ok_or_else(|| "no city scenes: generate the world first".to_owned())?;
+    scenes
+        .get(index)
+        .cloned()
+        .ok_or_else(|| format!("city {index} does not exist ({} cities)", scenes.len()))
 }
 
 /// Pure payload assembly shared by the desktop command and headless render
@@ -960,8 +1003,11 @@ pub fn build_payload(
                 .map_err(|error| error.to_string())?,
             modern_cities: serde_json::to_value(&infrastructure.modern_cities)
                 .map_err(|error| error.to_string())?,
-            city_scenes: serde_json::to_value(&infrastructure.city_scenes)
-                .map_err(|error| error.to_string())?,
+            // The city scenes are **not** part of this payload. They are tens of
+            // megabytes of base64 vertex buffers per city, and a three-city world
+            // serialises to several hundred megabytes of JSON. Handing that to a
+            // webview that does not read it kills the webview, so `city_scene`
+            // serves one city on demand instead. See `generate_terrain`.
             vegetation_prototypes: serde_json::to_value(
                 procedural::standard_prototype_set(2),
             )
@@ -1137,6 +1183,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             generate_terrain,
+            city_scene,
             export_terrain,
             save_project,
             load_project,

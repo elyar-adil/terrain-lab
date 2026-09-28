@@ -147,7 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // desktop command sends, and so truncating the city list also truncates the
     // scene list the renderer actually reads.  `GenerationResult` is camelCase.
     let mut payload = serde_json::to_value(&result)?;
-    for key in ["modernCities", "cities", "cityScenes"] {
+    for key in ["modernCities", "cities"] {
         if let Some(list) = payload
             .get_mut(key)
             .and_then(|value| value.as_array_mut())

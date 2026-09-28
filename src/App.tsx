@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { exportTerrain, generateTerrain, loadProject, saveProject } from "./api";
+import {
+  exportTerrain,
+  fetchCityScene,
+  generateTerrain,
+  loadProject,
+  saveProject,
+} from "./api";
 import type {
   GenerationProgress,
   GenerationResult,
@@ -9,6 +15,7 @@ import type {
   Landform,
   TerrainPreset,
 } from "./types";
+import type { CityScene } from "./city/cityScene";
 import { Terrain3D } from "./components/Terrain3D";
 import { CityViewer } from "./city/CityViewer";
 
@@ -157,20 +164,47 @@ function App() {
     ];
   }, [result, config.worldSizeKm]);
 
-  // The Rust city_scenes array is built in the same settlement pass as
-  // modern_cities, so cityOptions[i + 1] (i >= 0, skipping the 全域视角 entry)
-  // is exactly cityScenes[i].  The metre-scale view is entered through the same
-  // select as the terrain jump; the terrain focus is kept so returning to 3D
-  // lands where the user asked to go.
-  const activeCityScene = useMemo(() => {
-    if (viewMode !== "city" || citySceneIndex === null) return null;
-    return result?.cityScenes?.[citySceneIndex] ?? null;
-  }, [viewMode, citySceneIndex, result]);
+  /**
+   * The metre-scale city view fetches its scene on demand.
+   *
+   * A scene is roughly 160 MB of base64 vertex buffers — 2.4 M vertices for a
+   * 1.6 km city, before base64 — so it is no longer part of the `generate`
+   * response. Handing the webview three of those unconditionally killed it on
+   * arrival, which is what "click generate and it crashes" was.
+   *
+   * `cityOptions[i + 1]` (i >= 0, skipping the 全域视角 entry) is exactly
+   * `city_scene(i)`, because the scenes are built in the same settlement pass as
+   * the city list and in the same order.
+   */
+  const [activeCityScene, setActiveCityScene] = useState<CityScene | null>(null);
+  const [citySceneLoading, setCitySceneLoading] = useState(false);
+
+  useEffect(() => {
+    if (viewMode !== "city" || citySceneIndex === null) {
+      setActiveCityScene(null);
+      return;
+    }
+    let cancelled = false;
+    setCitySceneLoading(true);
+    fetchCityScene(citySceneIndex)
+      .then((scene) => {
+        if (!cancelled) setActiveCityScene(scene);
+      })
+      .catch((error: Error) => {
+        if (!cancelled) setError(error.message);
+      })
+      .finally(() => {
+        if (!cancelled) setCitySceneLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewMode, citySceneIndex]);
 
   const jumpToCityOption = (option: (typeof cityOptions)[number], optionIndex: number) => {
     setCityFocus({ xKm: option.xKm, yKm: option.yKm, spanKm: option.spanKm, nonce: Date.now() });
     const sceneIndex = optionIndex - 1;
-    if (sceneIndex >= 0 && result?.cityScenes?.[sceneIndex]) {
+    if (sceneIndex >= 0) {
       setCitySceneIndex(sceneIndex);
       setViewMode("city");
     }
