@@ -7,8 +7,13 @@ use super::Architecture;
 /// where the needle plates are, thinning both ways. The lumpiness is real
 /// profile, not noise on the cards — a pine's outline *is* irregular, and the
 /// `sin` term makes every tier's reach differ, which is what reads as gaps.
+///
+/// The wobble's amplitude is chosen so the curve peaks at **exactly 1.0** at the
+/// crown's foot: the trend term is already 1.0 there, so any wobble above zero
+/// would push the envelope past the crown the species table declares. A pine
+/// still has to fit inside its own `crown_m`.
 pub(super) fn profile(t: f32) -> f32 {
-    (1.0 - 0.42 * t).max(0.22) * (1.0 + 0.14 * (t * 9.0).sin())
+    (1.0 - 0.42 * t).max(0.22) * (1.0 + 0.075 * (t * 9.0).sin())
 }
 
 pub(super) fn architecture() -> Architecture {

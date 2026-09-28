@@ -77,3 +77,7 @@ pub const GROUND_STOREY_M: f32 = 4.5;
 /// right size in metres.
 pub const GROUND_FLOOR_TILE_W: f32 = 4.2;
 pub const GROUND_FLOOR_TILE_H: f32 = GROUND_STOREY_M;
+/// The physical size of one roof-tile texture, in metres.  A roof tile covers a
+/// 3 m square of the actual tile field, so the texture's resolution is its real
+/// texel density rather than an arbitrary number of pixels per roof.
+pub const ROOF_TILE_M: f32 = 3.0;

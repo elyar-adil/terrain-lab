@@ -503,11 +503,15 @@ pub fn build_prototypes(builder: &mut MeshBuilder) {
     ] {
         builder.bind(key, key);
     }
-    // The gantry shares existing materials rather than defining its own: the
-    // truss is the same galvanised section the railings are, and the boards
-    // are the guide signs' blue. One material per draw call either way.
-    builder.bind("furniture/gantry.steel", "steel");
-    builder.bind("furniture/gantry.board", "furniture/sign.guide");
+    // The gantry gets its own lists.  It cannot share the railings' or the guide
+    // signs': `bind` only says *which instance list* a group draws with, it does
+    // not change the group's own `material` key, so sharing would have left every
+    // gantry transform in a list nothing reads — and merging the geometry into
+    // those groups instead would draw a truss at every railing.  Two lists and
+    // two new material keys is the honest cost of one object; the renderer
+    // bindings are requested in the report.
+    builder.bind("furniture/gantry.steel", "furniture/gantry.steel");
+    builder.bind("furniture/gantry.board", "furniture/gantry.board");
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -1240,6 +1244,8 @@ mod tests {
             "furniture/railing",
             "furniture/sign.guide",
             "furniture/sign.crossing",
+            "furniture/gantry.steel",
+            "furniture/gantry.board",
             "furniture/shelter",
             "furniture/bin",
             "furniture/kiosk",
@@ -1247,16 +1253,26 @@ mod tests {
             "car/glass",
             "car/wheel",
         ];
+        // One list per prototype.  Report both sides on failure: a bare "13 != 14"
+        // does not say which prototype is missing.
+        let present: Vec<&str> = scene
+            .instances
+            .iter()
+            .map(|list| list.key.as_str())
+            .collect();
         assert_eq!(
-            scene.instances.len(),
+            present.len(),
             prototypes.len(),
-            "one transform list per prototype; these are the prototypes, in the order \
-             they are built"
+            "one transform list per prototype. Present: {present:?}. Missing: {:?}",
+            prototypes
+                .iter()
+                .filter(|key| !present.contains(&key.as_ref()))
+                .collect::<Vec<_>>()
         );
         for key in prototypes {
             assert!(
-                scene.instances.iter().any(|list| list.key == key),
-                "{key} has no instance list"
+                present.contains(&key),
+                "{key} has no instance list; present: {present:?}"
             );
         }
         let lamps = scene

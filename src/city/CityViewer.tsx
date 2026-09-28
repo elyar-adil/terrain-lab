@@ -24,6 +24,7 @@ import {
 } from "./cityScene";
 import { createPost } from "./post";
 import {
+  SKY_FOG,
   SUN_DIR,
   bakeSkyEnvironment,
   createFog,
@@ -141,7 +142,25 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
         preserveDrawingBuffer: true,
       });
       renderer.setPixelRatio(cheap ? 1 : Math.min(2, window.devicePixelRatio || 1));
-      renderer.setSize(host.clientWidth || 1280, host.clientHeight || 800);
+      /**
+       * Size from the window, not from the container.
+       *
+       * The container is laid out by React *after* this effect runs, so reading
+       * its box here gets a value that is about to change, and the canvas is then
+       * resized out from under a frame that has already been composed. Measuring
+       * the window instead removes the dependency entirely, and for a viewer
+       * that always fills the page it is also simply the correct box.
+       */
+      const viewportSize = () => ({
+        width: Math.max(1, window.innerWidth),
+        height: Math.max(1, window.innerHeight),
+      });
+      const initial = viewportSize();
+      renderer.setSize(initial.width, initial.height);
+      // The GL context, for the diagnostics. A screenshot that fills only part of
+      // the window is indistinguishable from a scene problem unless the drawing
+      // buffer and the viewport can be read directly.
+      const gl = renderer.getContext();
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       // ACES is the filmic curve. It rolls highlights off instead of clipping
       // them, which is the difference between a sunlit white render and a
@@ -157,9 +176,37 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
 
       const world = new THREE.Scene();
       world.fog = createFog(extent);
+      /**
+       * A background behind the sky dome, as insurance.
+       *
+       * The dome is a 9 km sphere drawn with `depthTest` off, so if it ever fails
+       * to cover the frame — a camera outside it, a clipping problem, a lost
+       * context — the result is opaque black, which reads as "the renderer is
+       * broken" rather than "the sky is missing". Clearing to the horizon colour
+       * makes that failure mode indistinguishable from a slightly flat sky.
+       */
+      world.background = new THREE.Color(SKY_FOG);
 
       const sky = createSky();
       world.add(sky.dome);
+
+      /**
+       * A bisect switch for the audit: `?hide=ground,sky,lamps,cars,trees`.
+       *
+       * A region of the frame that renders black while every buffer reports a
+       * sane size, every vertex a plausible coordinate and every instance a
+       * plausible transform, is being drawn by *something*. Rather than reason
+       * about which, this removes candidates one at a time so a single run
+       * identifies the culprit. It stays in the product because a renderer that
+       * cannot be taken apart is a renderer that cannot be debugged.
+       */
+      const problems: string[] = [];
+      const hidden = new Set(
+        (new URLSearchParams(window.location.search).get("hide") ?? "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean),
+      );
 
       const lighting = createLighting();
       if (cheap) lighting.sun.shadow.mapSize.set(1024, 1024);
@@ -178,11 +225,27 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
       }
       mark("environment");
 
-      const materials: MaterialCatalogue = createMaterials(scene.textures);
+      // Count the lamps first: an `InstancedMesh`'s capacity is fixed at
+      // construction, and under-sizing it does not draw fewer lamps, it makes the
+      // GPU read past the end of the instance buffer.
+      let lampTotal = 0;
+      for (const rig of scene.signals) lampTotal += rig.lamps.length;
+      const materials: MaterialCatalogue = createMaterials(scene.textures, lampTotal);
       mark(`materials (${materials.textures.length} textures)`);
       const handles: CityHandles = buildCityScene(scene, materials);
       world.add(handles.group);
-      world.add(createGround(extent));
+      if (hidden.has("ground")) mark("hiding the ground plane");
+      else world.add(createGround(extent));
+      if (hidden.has("sky")) {
+        mark("hiding the sky dome");
+        sky.dome.visible = false;
+      }
+      if (hidden.has("trees")) {
+        mark("hiding instanced foliage");
+        for (const [key, mesh] of handles.instanced) {
+          if (key.startsWith("tree/")) mesh.visible = false;
+        }
+      }
       mark("geometry");
 
       // --- traffic and signals ------------------------------------------------
@@ -229,8 +292,17 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
       for (let aspect = 0; aspect < lampsByAspect.length; aspect += 1) {
         const mesh = lampsByAspect[aspect];
         const slots = lampSlots[aspect];
-        mesh.count = slots.length / 3;
-        for (let index = 0; index < slots.length / 3; index += 1) {
+        const wanted = slots.length / 3;
+        if (wanted > mesh.count + mesh.instanceMatrix.count) {
+          // `setMatrixAt` past capacity is a silent no-op, so this is checked
+          // rather than assumed. See `createMaterials`.
+          problems.push(
+            `${wanted} signal lamps of aspect ${aspect} exceed the mesh capacity of ` +
+              `${mesh.instanceMatrix.count}`,
+          );
+        }
+        mesh.count = wanted;
+        for (let index = 0; index < wanted; index += 1) {
           lampDummy.position.set(slots[index * 3], slots[index * 3 + 1], slots[index * 3 + 2]);
           lampDummy.updateMatrix();
           mesh.setMatrixAt(index, lampDummy.matrix);
@@ -257,7 +329,7 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
       // --- camera -------------------------------------------------------------
       const camera = new THREE.PerspectiveCamera(
         chosen.fov,
-        (host.clientWidth || 1280) / (host.clientHeight || 800),
+        initial.width / initial.height,
         0.5,
         12000,
       );
@@ -282,15 +354,35 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
       const dummy = new THREE.Object3D();
       const started = performance.now();
       let frame = 0;
+      /**
+       * The frame number at the last resize.
+       *
+       * Readiness cannot simply be "three frames have been drawn": the container
+       * is laid out after this effect runs, so the first frames are composed at a
+       * fallback size and the canvas is resized afterwards. Reporting ready then
+       * lets the audit screenshot a frame that predates the resize, and the
+       * result looks like a scene that renders into a third of the frame.
+       * Requiring two clean frames *after* the last resize is what makes the
+       * screenshot match the window.
+       */
+      let sizedAt = 0;
 
       const drawFleet = (poses: CityScene["traffic"]["agents"]) => {
         if (!fleet) return;
         for (let index = 0; index < poses.length; index += 1) {
           const pose = poses[index];
           dummy.position.set(pose.x, pose.y, pose.z);
-          // The pose heading is a compass bearing in the local frame; the car
-          // prototype is authored facing +X, hence the quarter turn.
-          dummy.rotation.set(0, -pose.heading + Math.PI / 2, 0);
+          /**
+           * `heading` arrives as a three.js Y-Euler, derived in Rust as
+           * `atan2(-z, x)` to match this renderer's own axis convention.
+           *
+           * It used to arrive as a compass bearing, and this applied
+           * `-heading + PI/2` to convert. That compensation is now *wrong* — it
+           * rotated every vehicle a further quarter turn, so traffic drove along
+           * the kerb rather than in its lane. The conversion belongs in the layer
+           * that knows the frame, and it is now there.
+           */
+          dummy.rotation.set(0, pose.heading, 0);
           dummy.scale.set(1, 1, 1);
           dummy.updateMatrix();
           fleet.setMatrixAt(index, dummy.matrix);
@@ -311,7 +403,7 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
         // The audit needs to know a frame has actually been composed, not that
         // the scene graph was populated. Under software WebGL those are seconds
         // apart, and reporting the second one produced blank screenshots.
-        if (frame === 3 && !window.__CITY_READY__) {
+        if (frame >= 3 && frame > sizedAt + 1 && !window.__CITY_READY__) {
           mark("first frames");
           window.__CITY_DIAGNOSTICS__ = {
             preset,
@@ -322,11 +414,44 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
             geometries: renderer.info.memory.geometries,
             programs: renderer.info.programs?.length ?? 0,
             missingMaterials: [...materials.missing],
+            // A short UV buffer renders its whole group untextured. Naming the
+            // material is the difference between "a wall looks wrong somewhere"
+            // and a one-line fix in the scene layer.
+            uvMismatch: [...materials.uvMismatch],
             vehicles: agentCount,
             signals: scene.signals.length,
             lamps: lampsByAspect.map((mesh) => mesh.count),
             exposure: renderer.toneMappingExposure,
             sun: SUN_DIR.toArray(),
+            /**
+             * Canvas geometry, so a screenshot that is not full-bleed can be
+             * diagnosed rather than guessed at. A view that renders a third of
+             * the frame and leaves the rest blank looks like a scene problem and
+             * is a layout one.
+             */
+            canvas: {
+              bufferWidth: renderer.domElement.width,
+              bufferHeight: renderer.domElement.height,
+              cssWidth: renderer.domElement.clientWidth,
+              cssHeight: renderer.domElement.clientHeight,
+              rect: (() => {
+                const box = renderer.domElement.getBoundingClientRect();
+                return [box.x, box.y, box.width, box.height].map((v) => Math.round(v));
+              })(),
+              drawingBuffer: [gl.drawingBufferWidth, gl.drawingBufferHeight],
+              viewport: (() => {
+                const v = new THREE.Vector4();
+                renderer.getViewport(v);
+                return [v.x, v.y, v.z, v.w];
+              })(),
+              setSize: renderer.getSize(new THREE.Vector2()).toArray(),
+              hostWidth: host.clientWidth,
+              hostHeight: host.clientHeight,
+              windowWidth: window.innerWidth,
+              windowHeight: window.innerHeight,
+              pixelRatio: renderer.getPixelRatio(),
+              devicePixelRatio: window.devicePixelRatio,
+            },
           };
           window.__CITY_READY__ = true;
           document.documentElement.dataset.cityReady = "true";
@@ -337,15 +462,41 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
       window.requestAnimationFrame(tick);
 
       const onResize = () => {
-        if (!host.clientWidth || !host.clientHeight) return;
-        renderer.setSize(host.clientWidth, host.clientHeight);
-        camera.aspect = host.clientWidth / host.clientHeight;
+        const size = viewportSize();
+        renderer.setSize(size.width, size.height);
+        camera.aspect = size.width / size.height;
         camera.updateProjectionMatrix();
-        post?.setSize(host.clientWidth, host.clientHeight);
+        post?.setSize(size.width, size.height);
+        /**
+         * Draw immediately at the new size.
+         *
+         * Resizing a WebGL canvas discards its drawing buffer. Until the next
+         * animation frame the canvas holds whatever the compositor last had, and
+         * under SwiftShader a screenshot taken in that window captures a frame
+         * composed at the *previous* size — which is how a 1000 px viewport came
+         * back with the right-hand 57% blank white. Rendering synchronously here
+         * closes the window.
+         */
+        sizedAt = frame;
+        if (post) post.render();
+        else renderer.render(world, camera);
       };
       window.addEventListener("resize", onResize);
+      /**
+       * A `ResizeObserver`, not just the window `resize` event.
+       *
+       * The canvas is sized from its container, and the container is laid out by
+       * React *after* this effect runs — so reading `clientWidth` once at mount
+       * gets zero and falls through to a hard-coded 1280x800 that does not match
+       * the window. That produced a screenshot with the right-hand third of the
+       * frame empty and no error anywhere. The observer also fires on first
+       * layout, which is the case that matters.
+       */
+      const observer = new ResizeObserver(onResize);
+      observer.observe(host);
 
       teardown = () => {
+        observer.disconnect();
         window.removeEventListener("resize", onResize);
         post?.dispose();
         handles.dispose();

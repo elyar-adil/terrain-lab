@@ -438,6 +438,59 @@ mod tests {
     }
 
     #[test]
+    /**
+     * The regression test for the defect that made every textured surface in the
+     * city render untextured.
+     *
+     * `MeshBuilder::quad_uv` pushes UVs unconditionally while `MeshBuilder::quad`
+     * pushes them only when asked. Any material that received both ended up with
+     * fewer UVs than vertices, so the renderer attributed the UVs it *did* have to
+     * the wrong vertices — the vertical-streak facade, reproduced exactly.
+     *
+     * It is worth being precise about why this hid for so long. Every count in
+     * the payload was plausible, the base64 decoded cleanly, no index ran off the
+     * end of a buffer, and nothing threw. The scene simply rendered as flat
+     * colour, which looks like a *material* problem rather than a *geometry*
+     * problem, so it was investigated in the texture bakes for a long time before
+     * anyone compared a UV array's length to its vertex count.
+     */
+    #[test]
+    fn a_uv_buffer_is_never_shorter_than_its_vertex_count() {
+        let scene = build_city_scene(&city(), SceneBudget::default());
+        let mut short: Vec<String> = Vec::new();
+        for mesh in &scene.meshes {
+            let Some(uvs) = mesh.uvs.as_deref() else { continue };
+            let expected = mesh.vertex_count * 2;
+            if STANDARD.decode(uvs).map(|bytes| bytes.len() / 4) != Ok(expected) {
+                short.push(mesh.material.clone());
+            }
+        }
+        assert!(
+            short.is_empty(),
+            "these materials have a short UV buffer and render untextured: {}",
+            short.join(", ")
+        );
+    }
+
+    /**
+     * The same invariant for vertex colours, which the building layer had the
+     * same class of bug with.
+     */
+    #[test]
+    fn a_colour_buffer_is_never_shorter_than_its_vertex_count() {
+        let scene = build_city_scene(&city(), SceneBudget::default());
+        for mesh in &scene.meshes {
+            let Some(colors) = mesh.colors.as_deref() else { continue };
+            assert_eq!(
+                STANDARD.decode(colors).map(|bytes| bytes.len()),
+                Ok(mesh.vertex_count * 4),
+                "{} has a short colour buffer",
+                mesh.material
+            );
+        }
+    }
+
+    #[test]
     fn every_mesh_carries_a_decodable_buffer() {
         let scene = build_city_scene(&city(), SceneBudget::default());
         for mesh in &scene.meshes {

@@ -192,11 +192,20 @@ fn a_short_approach_shortens_the_arrow_instead_of_dropping_it() {
         .flat_map(|group| group.positions.chunks(3).map(|c| c[0]).collect::<Vec<f32>>())
         .collect();
     let length = xs.iter().copied().fold(f32::MIN, f32::max) - xs.iter().copied().fold(f32::MAX, f32::min);
-    let expected = 4.0_f32; // total - tip_gap - 1.5
+    // The reserved footprint is 4.0 m, but the *straight* stencil is only
+    // 3000 mm long — `ARROW_LENGTH_MM` (3050) is the longest stencil in the
+    // table, the turn arrow's reach, and it is what the draw code scales by.
+    // So a straight arrow in a 4.0 m footprint is 3000/3050 of it, which is the
+    // GB proportion: a straight-through stencil is 3.0 m, a turning one 3.05 m.
+    let reserved = 4.0_f32;
+    let expected = reserved * 3000.0 / ARROW_LENGTH_MM;
     assert!(
         (length - expected).abs() < 0.02,
         "a shortened arrow is {length} m, expected {expected}"
     );
+    // And it must still be shorter than the footprint it was fitted into, which
+    // is the whole point of the shortening.
+    assert!(length < reserved, "a {length} m arrow did not shrink into {reserved} m");
 }
 
 #[test]

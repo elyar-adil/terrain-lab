@@ -163,7 +163,7 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
     let shaft_material = format!("facade/{shaft_index:02}");
     let shaft_design = design(shaft_index);
     let storey = shaft_design.storey_m;
-    let glass = shaft_design.glass;
+    let glass = shaft_design.cladding.is_glass();
     if glass && massing == Massing::Tower {
         massing = Massing::CurtainTower;
     }

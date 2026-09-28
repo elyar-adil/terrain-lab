@@ -317,11 +317,11 @@ fn profile(form: LeafForm, t: f32) -> f32 {
             0.26 * (std::f32::consts::PI * t).sin().max(0.0).powf(0.55)
                 * (1.0 + 0.05 * (t * 24.0 * TAU).sin())
         }
-        // Lanceolate: long and narrow with a fine tip — a willow's blade is a
-        // sixth of its length across, and the exponents keep the taper even so
+        // Lanceolate: long and narrow with a fine tip — a willow's blade is four
+        // times as long as it is wide, and the exponents keep the taper even so
         // the blade never reads as a slimmed ovate.
         LeafForm::Lanceolate => {
-            0.16 * (std::f32::consts::PI * t.powf(0.9)).sin().max(0.0).powf(0.42)
+            0.125 * (std::f32::consts::PI * t.powf(0.9)).sin().max(0.0).powf(0.42)
         }
         // Fan: a thin petiole that opens in the outer half into a broad, rounded
         // blade.  The `0.035` foot keeps a petiole on the card; the dome term

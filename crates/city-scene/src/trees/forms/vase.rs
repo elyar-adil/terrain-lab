@@ -4,8 +4,14 @@ use super::Architecture;
 
 /// Narrow at the foot, widest at the lip: the one shape that gets *wider* as
 /// it rises. On a 4 m tree it reads as a spreading urn of blossom.
+/// A trumpet: almost nothing at the foot, opening steadily all the way up, and
+/// then **turning back in at the lip** — the last term closes the crown over in
+/// its top tenth. That closure is the whole difference between a vase and an
+/// umbrella. An umbrella's crown is a flat table that stays wide to its edge; a
+/// vase's is a vessel whose branches converge as they meet at the top, so its
+/// widest point sits below the crown's top and the top itself is narrower again.
 pub(super) fn profile(t: f32) -> f32 {
-    0.10 + 0.90 * t.powf(0.85)
+    (0.08 + 0.92 * t.powf(0.75)) * (1.0 - 0.52 * t.powf(9.0))
 }
 
 pub(super) fn architecture() -> Architecture {

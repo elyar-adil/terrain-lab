@@ -54,7 +54,7 @@ use crate::math::{Vec2, Vec3, inset_ring, point_in_ring, ring_centroid, signed_a
 use crate::mesh::{GroupStyle, MeshBuilder};
 use crate::spec::FACADE_TILES;
 
-pub use shell::building_shell;
+pub(crate) use shell::building_shell;
 
 /// Ground levels, against the sidewalk datum.
 pub mod level {
@@ -70,6 +70,7 @@ pub mod level {
 /// its code band and the tests assert the band, so an edit that drifts a
 /// dimension out of construction reality fails rather than shipping.
 pub mod rule {
+    use super::Massing;
     /// 阳台进深 — balcony slab depth.  GB practice is 1.2 – 1.5 m; 1.4 m is the
     /// common 生活阳台 that still fits a floor-standing rack.
     pub const BALCONY_DEPTH_M: f32 = 1.4;
@@ -89,7 +90,7 @@ pub mod rule {
     /// Whether a building class carries balconies at all: everything
     /// residential does — 板楼, 点式塔楼, 多层 walk-up — and nothing clad in
     /// curtain wall does, because a glass office has no 生活阳台.
-    pub fn has_balconies(massing: Massing, glass: bool) -> bool {
+    pub(crate) fn has_balconies(massing: Massing, glass: bool) -> bool {
         !glass && massing != Massing::CurtainTower
     }
 }
@@ -144,7 +145,7 @@ pub(crate) fn massing_of(building: &ModernBuilding, ring: &[Vec2], area: f32) ->
     // classifying it as a slab is how a skyline ends up without one.
     if building.floors >= 20 {
         let shaft = facade_tile_for(building, Massing::Tower);
-        if design(shaft).glass {
+        if design(shaft).cladding.is_glass() {
             return Massing::CurtainTower;
         }
         return Massing::Tower;
@@ -231,7 +232,7 @@ pub(crate) fn podium_tile_for(_shaft: usize) -> usize {
 /// A **crown of a different colour and material**, set back and often in a
 /// different family from the shaft.  A crown that matches its shaft is a lid.
 pub(crate) fn crown_tile_for(shaft: usize, id: u32) -> usize {
-    if design(shaft).glass {
+    if design(shaft).cladding.is_glass() {
         // A glass tower's crown is a pale stone cap — or, on every other block,
         // the mint-green glazing of the 2010s, which is the single most
         // recognisable residential-tower crown in the country.
@@ -703,7 +704,7 @@ mod tests {
             if ring.len() < 3 {
                 continue;
             }
-            let Some(extent) = shell::ring_extent(&ring) else { continue };
+            let Some(extent) = roofscape::ring_extent(&ring) else { continue };
             footprints.push((extent, ring));
         }
         let mut tops: Vec<f32> = vec![f32::MIN; footprints.len()];

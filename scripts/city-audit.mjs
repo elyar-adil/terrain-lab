@@ -62,7 +62,11 @@ const wanted = flag("all") ? PRESETS : [arg("preset", "street")];
 // and both are slow on a software rasteriser, and neither changes framing,
 // geometry, materials or tone — so an iteration loop that keeps them is a loop
 // nobody runs. Final shots go through without it.
-const cheap = flag("cheap") ? "1" : "0";
+//
+// This is a boolean, not the string "0"/"1". A non-empty string is truthy in
+// JavaScript, so a string flag made *every* run cheap while reporting the opposite
+// in the filename, which is worse than having no flag at all.
+const cheap = flag("cheap");
 const readyTimeout = Number(arg("ready-timeout", "240")) * 1000;
 
 const dist = path.join(root, "dist");
@@ -160,7 +164,8 @@ try {
 
     const url =
       `http://127.0.0.1:${port}/city-harness.html` +
-      `?preset=${preset}&city=${city}&fps=${fps}&cheap=${cheap}`;
+      `?preset=${preset}&city=${city}&fps=${fps}&cheap=${cheap}` +
+      (arg("hide", "") ? `&hide=${encodeURIComponent(arg("hide", ""))}` : "");
     await page.goto(url, { waitUntil: "domcontentloaded" });
 
     let ready = true;
@@ -184,13 +189,75 @@ try {
     }
     await sleep(settle);
 
+    let domInfo = null;
     const diagnostics = await page.evaluate(() => window.__CITY_DIAGNOSTICS__ ?? null);
     const out = path.join(outDir, `${preset}${cheap ? "-cheap" : ""}.png`);
     if (ready) {
-      // Software WebGL needs a long budget: one composed frame of a city costs
-      // seconds, and the render loop keeps queueing work while the screenshot
-      // waits for a stable frame.
-      await page.screenshot({ path: out, timeout: readyTimeout, animations: "disabled" });
+      /**
+       * Read the pixels out of the canvas rather than screenshotting the page.
+       *
+       * Every WebGL number is right — buffer, CSS box, drawing buffer, viewport
+       * and `setSize` all agreed at 1000x620 — and the render visibly fills that
+       * box, yet `page.screenshot` returned the left 430 px and a white margin.
+       * The loss is in the compositor's capture of a software-rendered WebGL
+       * surface, not in the renderer, and no amount of resizing fixes it.
+       *
+       * `toDataURL` reads the drawing buffer directly. `preserveDrawingBuffer` is
+       * on, so the buffer still holds the last composed frame. This captures
+       * exactly what WebGL produced, with nothing in between.
+       */
+      const dataUrl = await page.evaluate(() => {
+        const canvas = document.querySelector("canvas");
+        return canvas ? canvas.toDataURL("image/png") : null;
+      });
+      if (dataUrl?.startsWith("data:image/png;base64,")) {
+        await writeFile(out, Buffer.from(dataUrl.slice(22), "base64"));
+        // What is actually in the DOM, and what is on top of it. A black region
+        // that survives a sky-coloured background is being *drawn*, and the
+        // cheapest way to find out by what is to list the elements rather than
+        // to keep reasoning about WebGL.
+        const dom = await page.evaluate(() => ({
+          canvases: [...document.querySelectorAll("canvas")].map((c) => ({
+            w: c.width,
+            h: c.height,
+            css: [c.clientWidth, c.clientHeight],
+            rect: (() => {
+              const b = c.getBoundingClientRect();
+              return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)];
+            })(),
+            z: getComputedStyle(c).zIndex,
+            pos: getComputedStyle(c).position,
+            opacity: getComputedStyle(c).opacity,
+          })),
+          bodyChildren: [...document.body.children].map((el) => ({
+            tag: el.tagName,
+            id: el.id,
+            rect: (() => {
+              const b = el.getBoundingClientRect();
+              return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)];
+            })(),
+          })),
+          bodyBackground: getComputedStyle(document.body).backgroundColor,
+          rootChildren: [...(document.getElementById("render-root")?.children ?? [])].map(
+            (el) => {
+              const b = el.getBoundingClientRect();
+              return `${el.tagName}#${el.id || "-"} ${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.width)}x${Math.round(b.height)}`;
+            },
+          ),
+        }));
+        domInfo = dom;
+        if (dom.canvases.length > 1) {
+          problems.push(`${dom.canvases.length} canvases in the DOM; the top one is what is captured`);
+        }
+        for (const child of dom.rootChildren) {
+          problems.push(`  #render-root child: ${child}`);
+        }
+      } else {
+        // Fall back to the compositor, and say so, because a silent fallback to
+        // a partial image is exactly the failure this replaced.
+        problems.push("canvas.toDataURL unavailable; fell back to a page screenshot");
+        await page.screenshot({ path: out, timeout: readyTimeout, animations: "disabled" });
+      }
     }
     await page.close();
 
@@ -205,12 +272,26 @@ try {
       signals: diagnostics?.signals ?? null,
       lamps: diagnostics?.lamps ?? null,
       missingMaterials: diagnostics?.missingMaterials ?? null,
+      uvMismatch: diagnostics?.uvMismatch ?? null,
+      canvas: diagnostics?.canvas ?? null,
       trace,
+      dom: domInfo,
       problems,
     };
     report.push(line);
 
     const missing = line.missingMaterials ?? [];
+    const shortUvs = line.uvMismatch ?? [];
+    const box = line.canvas;
+    if (box && (box.cssWidth !== box.windowWidth || box.cssHeight !== box.windowHeight)) {
+      // A canvas that does not fill the window means the screenshot's blank
+      // margin is a layout problem, not a scene problem.
+      problems.push(
+        `canvas ${box.cssWidth}x${box.cssHeight} css in a ${box.windowWidth}x${box.windowHeight} ` +
+          `window (host ${box.hostWidth}x${box.hostHeight}, buffer ${box.bufferWidth}x${box.bufferHeight}, ` +
+          `dpr ${box.pixelRatio})`,
+      );
+    }
     console.log(
       `${preset.padEnd(9)} ${String(line.draws ?? "?").padStart(4)} draws ` +
         `${String(line.triangles ?? "?").padStart(9)} tris  ` +
@@ -220,6 +301,13 @@ try {
     if (trace.length) console.log(`  stages: ${trace.join(" -> ")}`);
     if (missing.length) {
       console.log(`  !! renderer has no material for: ${missing.join(", ")}`);
+    }
+    if (shortUvs.length) {
+      // The scene layer emitted a short UV buffer, so these materials rendered
+      // untextured. It is a scene-layer bug, not a rendering one.
+      console.log(
+        `  !! SHORT UV BUFFER (rendered untextured) in: ${shortUvs.join(", ")}`,
+      );
     }
     for (const problem of problems) console.log(`  !! ${problem}`);
   }

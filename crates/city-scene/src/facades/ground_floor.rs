@@ -9,7 +9,7 @@
 //! retail street.
 
 use crate::facades::{GROUND_FLOOR_TILE_H, GROUND_FLOOR_TILE_W, GROUND_STOREY_M};
-use crate::facades::tile::{srgb8, value_noise};
+use crate::facades::tile::{shade, srgb8, value_noise};
 use crate::textures::{BakedTexture, hash};
 
 /// The three ground-floor variants.  Each is one shop bay by one ground storey

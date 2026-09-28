@@ -2,11 +2,17 @@
 
 use super::Architecture;
 
-/// A parabola peaked *at the crown's top*: the branches climb and then run
-/// out flat, so the widest point is the top and the outline closes like an
-/// open umbrella rather than rounding over like a dome.
+/// A flat table that stays wide to its edge: the branches climb and then run out
+/// horizontally, so the crown holds almost its full width across a broad band
+/// near the top and the outline closes like an open umbrella rather than
+/// rounding over like a dome.
+///
+/// The exponent is above 1, which is what makes the sides *convex* — a silk
+/// tree's crown fills outward fast and then flattens — and it is exactly the
+/// opposite curvature to [`super::vase`], which is why the two are told apart by
+/// their shape rather than by a fudge factor.
 pub(super) fn profile(t: f32) -> f32 {
-    (1.0 - 0.85 * (1.0 - t) * (1.0 - t)).max(0.05)
+    (1.0 - 0.94 * (1.0 - t).powf(5.0)).max(0.04)
 }
 
 pub(super) fn architecture() -> Architecture {

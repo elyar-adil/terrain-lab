@@ -65,6 +65,15 @@ pub enum Cladding {
     CurtainWall,
 }
 
+impl Cladding {
+    /// Whether this cladding is a glass one — the question the *massing* asks
+    /// when it decides balconies and structural expression, and the reason the
+    /// design's `glass` field is a reflectance rather than a flag.
+    pub fn is_glass(self) -> bool {
+        matches!(self, Cladding::CurtainWall)
+    }
+}
+
 /// One facade tile, authored.
 ///
 /// Every length is in **metres**, not in tile fractions, so a design reads the

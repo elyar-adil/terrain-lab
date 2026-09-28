@@ -1,24 +1,92 @@
 [
   {
     "preset": "street",
-    "out": null,
-    "draws": null,
-    "triangles": null,
-    "geometries": null,
-    "textures": null,
-    "vehicles": null,
-    "signals": null,
-    "lamps": null,
-    "missingMaterials": null,
-    "trace": [
-      "begin",
-      "renderer",
-      "lights",
-      "environment",
-      "materials (37 textures)"
+    "out": "docs\\render-validation\\street.png",
+    "draws": 1,
+    "triangles": 1,
+    "geometries": 115,
+    "textures": 67,
+    "vehicles": 160,
+    "signals": 75,
+    "lamps": [
+      75,
+      75,
+      75
     ],
+    "missingMaterials": [],
+    "uvMismatch": [],
+    "canvas": {
+      "bufferWidth": 1100,
+      "bufferHeight": 680,
+      "cssWidth": 1100,
+      "cssHeight": 680,
+      "rect": [
+        0,
+        0,
+        1100,
+        680
+      ],
+      "drawingBuffer": [
+        1100,
+        680
+      ],
+      "viewport": [
+        0,
+        0,
+        1100,
+        680
+      ],
+      "setSize": [
+        1100,
+        680
+      ],
+      "hostWidth": 1100,
+      "hostHeight": 680,
+      "windowWidth": 1100,
+      "windowHeight": 680,
+      "pixelRatio": 1,
+      "devicePixelRatio": 1
+    },
+    "trace": [],
+    "dom": {
+      "canvases": [
+        {
+          "w": 1100,
+          "h": 680,
+          "css": [
+            1100,
+            680
+          ],
+          "rect": [
+            0,
+            0,
+            1100,
+            680
+          ],
+          "z": "auto",
+          "pos": "static",
+          "opacity": "1"
+        }
+      ],
+      "bodyChildren": [
+        {
+          "tag": "DIV",
+          "id": "render-root",
+          "rect": [
+            0,
+            0,
+            1100,
+            680
+          ]
+        }
+      ],
+      "bodyBackground": "rgb(107, 107, 107)",
+      "rootChildren": [
+        "DIV#- 0,0 1100x680"
+      ]
+    },
     "problems": [
-      "renderer never reported ready; reached: begin -> renderer -> lights -> environment -> materials (37 textures)\n  page said: city viewer failed: buffer is 78992 bytes, expected 93872"
+      "  #render-root child: DIV#- 0,0 1100x680"
     ]
   }
 ]

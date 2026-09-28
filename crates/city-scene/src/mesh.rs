@@ -463,13 +463,46 @@ impl MeshBuilder {
                 .normals
                 .extend_from_slice(&[normal.x, normal.y, normal.z]);
         }
-        if let Some(uv) = uv {
-            let store = buffers.uvs.get_or_insert_with(|| {
-                buffers.with_uvs = true;
-                Vec::with_capacity(INITIAL_VERTS * 2)
-            });
-            for corner in uv {
-                store.extend_from_slice(&[corner.0, corner.1]);
+        /**
+         * **A group's UV array is always complete, whether or not the caller
+         * supplied coordinates.**
+         *
+         * `quad_uv` pushes four UV pairs unconditionally while `quad` pushes them
+         * only when asked, so any material that received both ended up with fewer
+         * UVs than vertices — and the UVs that *were* present belonged to whichever
+         * quads happened to be emitted first. The renderer then attributed them to
+         * the wrong vertices, which is precisely the vertical-streak facade this
+         * whole exercise exists to remove. The counts looked plausible, nothing
+         * errored, and every textured surface in the city came out untextured.
+         *
+         * Synthesising a world projection for the quads that did not ask is the
+         * fix that does not depend on auditing every call site, which matters
+         * because a material legitimately mixes explicit and implicit quads: a
+         * carriageway is a UV'd ribbon and its kerb is a box, under the same
+         * `asphalt` key.
+         */
+        let store = buffers.uvs.get_or_insert_with(|| {
+            buffers.with_uvs = true;
+            Vec::with_capacity(INITIAL_VERTS * 2)
+        });
+        match uv {
+            Some(supplied) => {
+                for corner in supplied {
+                    store.extend_from_slice(&[corner.0, corner.1]);
+                }
+            }
+            None => {
+                // Project onto the plane the face most nearly faces, in metres, so
+                // the renderer's `1 / tile_metres` repeat still lands the texture
+                // at its real physical size.
+                let mut axis = (0.0_f32, 0.0_f32, 0.0_f32);
+                for (_, normal) in corners {
+                    axis = (axis.0 + normal.x, axis.1 + normal.y, axis.2 + normal.z);
+                }
+                for (position, _) in corners {
+                    let (u, v) = world_uv(position, axis);
+                    store.extend_from_slice(&[u, v]);
+                }
             }
         }
         if let Some(tint) = color {
@@ -908,6 +941,33 @@ fn pack_tint(tint: &[f32; 3]) -> [u8; 4] {
         (tint[2].clamp(0.0, 1.0) * 255.0) as u8,
         255,
     ]
+}
+
+/**
+ * A world-space texture coordinate for a vertex, in metres.
+ *
+ * Used for the quads whose caller supplied no UV. The projection is chosen by
+ * the face's dominant normal axis, so a road gets its texture laid out in plan,
+ * a wall gets it laid out in elevation, and neither stretches badly. This is
+ * triplanar with the blend removed: a hard choice per face rather than a blend,
+ * which is the right trade when the alternative is no texture at all.
+ *
+ * The result is in metres, matching every other UV in the crate, so the renderer
+ * applies one `1 / tile_metres` repeat to all of them and a texture always lands
+ * at its real physical size.
+ */
+fn world_uv(position: Vec3, axis: (f32, f32, f32)) -> (f32, f32) {
+    let (ax, ay, az) = (axis.0.abs(), axis.1.abs(), axis.2.abs());
+    if ay >= ax && ay >= az {
+        // Facing up or down: lay out in plan.
+        (position.x, position.z)
+    } else if ax >= az {
+        // Facing along X: lay out in the Z/Y plane.
+        (position.z, position.y)
+    } else {
+        // Facing along Z: lay out in the X/Y plane.
+        (position.x, position.y)
+    }
 }
 
 pub fn face_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {

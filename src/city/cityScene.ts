@@ -186,13 +186,24 @@ const TREE_LEAF_PREFIX = "leaf/";
 /**
  * Build every material the city binds.
  *
+ * `signalLampCapacity` must be at least the number of lamps the scene will place.
+ * An `InstancedMesh`'s capacity is fixed at construction, and `setMatrixAt` past
+ * it is a silent no-op — so an under-sized mesh does not draw fewer lamps, it
+ * asks the GPU to draw more instances than its attribute buffer holds, and reads
+ * past the end of it. That is undefined behaviour rather than an error: it
+ * produced a screen-filling dark polygon in front of the entire city, from a
+ * 0.17 m sphere, and nothing in the frame counter hinted at it.
+ *
  * The `repeat` of every texture is the reciprocal of its physical tile size,
  * because UVs arrive in metres. That one line is the whole reason a 30-storey
  * tower and a 4-storey slab both show correctly scaled windows, and it is exactly
  * what the previous renderer got wrong: it emitted UVs in scene units, so every
  * wall sampled a single near-uniform texel and came out as a vertical streak.
  */
-export function createMaterials(textures: SceneTexture[]): MaterialCatalogue {
+export function createMaterials(
+  textures: SceneTexture[],
+  signalLampCapacity = 64,
+): MaterialCatalogue {
   const sources = new Map<string, SceneTexture>();
   for (const texture of textures) sources.set(texture.name, texture);
 
@@ -200,6 +211,8 @@ export function createMaterials(textures: SceneTexture[]): MaterialCatalogue {
   const builtTextures: THREE.DataTexture[] = [];
   const cache = new Map<string, THREE.DataTexture>();
   const missing = new Set<string>();
+  /** Materials whose UV buffer is short; see `geometryFor`. */
+  const uvMismatch = new Set<string>();
   const table = new Map<string, THREE.Material>();
 
   const textureFor = (name: string): THREE.DataTexture | null => {
@@ -479,7 +492,31 @@ export function createMaterials(textures: SceneTexture[]): MaterialCatalogue {
   standard("furniture/sign.guide", { roughness: 0.45 }, 0x0f4c96);
   standard("furniture/sign.crossing", { roughness: 0.45 }, 0x0f4c96);
   standard("signal.body", { roughness: 0.55, metalness: 0.35 }, 0x1a1e21);
-  standard("car/body", { roughness: 0.3, metalness: 0.35, envMapIntensity: 1.0, vertexColors: true }, 0xffffff);
+  /**
+   * A cycle lane. Deliberately *untextured* and a flat dark blue-grey: the
+   * asphalt bake tiles every 4 m, and on a 2.5 m lane that shows as two visible
+   * seams per lane, which is worse than no aggregate at all.
+   *
+   * Note for the art direction: a Chinese cycle lane is very often surfaced in
+   * red asphalt, and the red strip is one of the most recognisable things about a
+   * Chinese street. That is a one-line change here, not a scene-layer one.
+   */
+  standard("asphalt.cycle", { roughness: 0.9 }, 0x3a3d42);
+  // Street furniture. Values come from the scene layer that authors the
+  // geometry, so the two cannot drift apart.
+  standard("furniture/bin", { roughness: 0.6, metalness: 0.05 }, 0x9aa0a2);
+  standard("furniture/kiosk", { roughness: 0.5, metalness: 0.2 }, 0x8a9096);
+  // A sign gantry is galvanised steel carrying an enamelled blue board — the
+  // colour the board is matters more than the steel, because the board is what
+  // you read at 200 m.
+  standard("furniture/gantry.steel", { roughness: 0.42, metalness: 0.7, envMapIntensity: 0.9 }, 0x9298a0);
+  standard("furniture/gantry.board", { roughness: 0.4, metalness: 0.1 }, 0x0f4c96);
+  // `car/body` deliberately has no per-vertex colours: the car is one shared
+  // prototype instanced 250 times, and its colour is the *instance* tint. Asking
+  // for `vertexColors` with no `color` attribute makes WebGL supply the default
+  // generic attribute, which is (0,0,0,1) — so every car renders pure black, and
+  // the draw-call counter is perfectly happy about it.
+  standard("car/body", { roughness: 0.3, metalness: 0.35, envMapIntensity: 1.0 }, 0xffffff);
   standard("car/glass", { roughness: 0.12, metalness: 0.5, envMapIntensity: 1.1 }, 0x1c2429);
   standard("car/wheel", { roughness: 0.9 }, 0x101012);
   standard("bark", { roughness: 0.95, flatShading: true, vertexColors: true }, 0xffffff);
@@ -535,24 +572,56 @@ export function createMaterials(textures: SceneTexture[]): MaterialCatalogue {
       roughness: 0.25,
     });
     built.push(material);
-    lamps.push(new THREE.InstancedMesh(geometry, material, 1));
-    lamps[aspect].count = 0;
-    lamps[aspect].frustumCulled = false;
+    const mesh = new THREE.InstancedMesh(
+      geometry,
+      material,
+      Math.max(1, signalLampCapacity),
+    );
+    mesh.count = 0;
+    mesh.frustumCulled = false;
+    lamps.push(mesh);
   }
 
   return {
     get(key: string): THREE.Material {
       const found = table.get(key);
       if (found) return found;
-      // A tree leaf material names its species: `leaf/<species-key>`.
-      if (key.startsWith(TREE_LEAF_PREFIX)) {
-        const species = key.slice(TREE_LEAF_PREFIX.length);
-        const card = textureFor(`vegetation/leaf/${species}`);
-        if (card) {
-          const made = leafMaterial(key, `vegetation/leaf/${species}`);
-          return made;
+
+      /**
+       * A prototype's parts are keyed `<instance-list-key>#<part>`, so a tree
+       * reads `tree/cong-shu/0#bark` and `tree/cong-shu/0#leaf`.
+       *
+       * The species is the segment after the prototype family and it selects the
+       * leaf card, `vegetation/leaf/<species>`. Matching on a `leaf/` prefix
+       * instead was simply wrong, and it rendered a magenta canopy for every tree
+       * in the city, because the real keys start with `tree/`.
+       */
+      const hash = key.indexOf("#");
+      if (hash > 0) {
+        const segments = key.slice(0, hash).split("/");
+        const part = key.slice(hash + 1);
+        const species = segments.length >= 2 ? segments[1] : "";
+        if (part === "leaf") {
+          const card = textureFor(`vegetation/leaf/${species}`);
+          if (card) return leafMaterial(key, `vegetation/leaf/${species}`);
+        }
+        if (part === "bark") {
+          // Bark is per species as well — a plum's near-black fissured bark and a
+          // plane tree's pale mottled bark are not one material — and the tint
+          // arrives per instance through the vertex colour.
+          return register(
+            key,
+            new THREE.MeshStandardMaterial({
+              color: 0xffffff,
+              roughness: 0.95,
+              metalness: 0,
+              flatShading: true,
+              vertexColors: true,
+            }),
+          );
         }
       }
+
       missing.add(key);
       // Loud on purpose. A silent fallback to white is how the previous renderer
       // produced a city of white monoliths without anybody noticing.
@@ -654,15 +723,20 @@ function geometryFor(mesh: SceneMesh, uvMismatch: Set<string>): THREE.BufferGeom
   if (mesh.uvs) {
     // In metres. The texture's `repeat` does the conversion.
     const expected = mesh.vertexCount * 2;
-    // base64 length -> bytes, without decoding twice: four bytes per float, and
-    // base64 expands by 4/3.
-    const bytes = (atob(mesh.uvs).length * 3) / 4;
+    /**
+     * `atob` returns a *binary string*: one character per decoded **byte**, not
+     * one per input character. Scaling its length by 3/4 to "recover" a byte
+     * count applies the base64 expansion factor twice, which reports every
+     * buffer in the payload as two-thirds of its real size — and then reports a
+     * healthy city as broken in its entirety.
+     */
+    const bytes = atob(mesh.uvs).length;
     if (Math.abs(bytes - expected * 4) > 2) {
       /**
        * A short UV buffer is a scene-layer defect, not a rendering one.
        *
        * `MeshBuilder::quad_uv` pushes UVs unconditionally while `MeshBuilder::quad`
-       * pushes them only when asked, so a material group that receives both ends
+       * pushes them only when asked, so a material group that received both ends
        * up with fewer UVs than vertices — and the UVs that *are* present belong to
        * whichever quads happened to be emitted first. Reinterpreting the array
        * would smear one wall's texture across another.
@@ -673,7 +747,9 @@ function geometryFor(mesh: SceneMesh, uvMismatch: Set<string>): THREE.BufferGeom
        * than subtly wrong. And it is reported, so the caller finds out which
        * material is at fault instead of hunting a wall that looks striped.
        */
-      uvMismatch.add(mesh.material);
+      uvMismatch.add(
+        `${mesh.material}: ${mesh.vertexCount} verts need ${expected * 4} B of UV, got ${bytes} B`,
+      );
     } else {
       geometry.setAttribute(
         "uv",

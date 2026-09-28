@@ -36,7 +36,7 @@ pub(super) fn srgb8(linear: f32) -> u8 {
 /// Smooth value noise on a 1 m lattice, so a wall has low-frequency blotching
 /// as well as high-frequency grain.  Two surfaces that both ask for "some
 /// weather" get the same character because they share the hash.
-fn value_noise(seed: u32, x: f32, y: f32) -> f32 {
+pub(super) fn value_noise(seed: u32, x: f32, y: f32) -> f32 {
     let (x0, y0) = (x.floor(), y.floor());
     let (fx, fy) = (x - x0, y - y0);
     let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
@@ -52,7 +52,7 @@ fn value_noise(seed: u32, x: f32, y: f32) -> f32 {
 
 /// Multiply a reflectance, for every element that is the same material seen
 /// under less or more sky: a reveal, a soffit, a shadow line.
-fn shade(colour: [f32; 3], factor: f32) -> [f32; 3] {
+pub(super) fn shade(colour: [f32; 3], factor: f32) -> [f32; 3] {
     [colour[0] * factor, colour[1] * factor, colour[2] * factor]
 }
 

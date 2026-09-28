@@ -15,6 +15,35 @@ use crate::math::{Rng, Vec2, Vec3};
 use crate::mesh::MeshBuilder;
 use crate::species::Species;
 
+/// The share of a full climb that the *lowest* limb on a trunk keeps.
+///
+/// A limb at the crown's foot has almost nothing to climb into — the crown
+/// above it is where the light is, and it has just as much room sideways — so
+/// it runs out nearly horizontally. A limb at the crown's top keeps all of it.
+/// This is the number that keeps the bottom of a canopy filled, and it is the
+/// difference between a tree and a lollipop.
+const CLIMB_FLOOR: f32 = 0.14;
+
+// The share of the canopy's card budget that one foliage cluster receives,
+// relative to a secondary's tip cluster which is the unit (1.0).  A primary limb
+// carries three clusters — at its tip and at two stations back along it — and a
+// secondary carries two.  These four numbers and `cluster_weight` below have to
+// agree, because `cluster_weight` is what the budget is divided by: if it drifts
+// from the calls, every canopy silently gains or loses cards.
+const TIP_FOLIAGE: f32 = 0.55;
+const MID_FOLIAGE: f32 = 0.34;
+const LOW_FOLIAGE: f32 = 0.30;
+const SECONDARY_TIP: f32 = 1.00;
+const SECONDARY_BACK: f32 = 0.45;
+
+/// Total foliage weight one primary limb spends, which is the divisor for the
+/// card budget.  Derived from the same constants the build uses, so it cannot
+/// disagree with them.
+fn limb_foliage_weight(fork: usize) -> f32 {
+    TIP_FOLIAGE + MID_FOLIAGE + LOW_FOLIAGE
+        + fork as f32 * (SECONDARY_TIP + SECONDARY_BACK)
+}
+
 /// Everything one prototype needs, derived from the species table alone.
 pub(super) struct Plan {
     /// Crown radius in unit-height space. The crown *is* this envelope, so a
@@ -82,7 +111,7 @@ impl Plan {
             Layout::Single => arch.primary,
             Layout::Whorled => arch.tiers * arch.per_tier,
         };
-        let cluster_weight = primaries as f32 * (0.55 + arch.fork as f32 * 1.45);
+        let cluster_weight = primaries as f32 * limb_foliage_weight(arch.fork);
         Self {
             radius,
             base,
@@ -102,9 +131,15 @@ impl Plan {
     }
 
     /// Crown half-width at a unit height, which is the species' own profile.
+    ///
+    /// The profile is clamped to 1.0 here, in one place, because the crown is a
+    /// hard envelope and a form whose curve happens to overshoot 1.0 — a sine
+    /// wobble, say — must not be able to push a card outside the crown the
+    /// species table declares. Every form is *authored* to peak at 1.0; this is
+    /// the statement that it has to stay true, not a licence to overshoot.
     fn radius_at(&self, arch: &Architecture, y: f32) -> f32 {
         let t = ((y - self.base) / (self.top - self.base)).clamp(0.0, 1.0);
-        self.radius * (arch.profile)(t)
+        self.radius * (arch.profile)(t).clamp(0.0, 1.0)
     }
 }
 
@@ -310,14 +345,31 @@ impl<'a, 'b> Grower<'a, 'b> {
                 }
                 self.branch(origin, origin + child * reach, radius * 0.5, 1);
             }
-            self.foliage(to, dir, 0.55);
+            // Foliage along the whole limb, not only at its end.  A real branch
+            // carries leaves from where it leaves the trunk out to its tip, and
+            // this is the difference between a crown that is a *volume* of
+            // leaves and a crown that is a shell of them with a hole through the
+            // middle.  Two stations back along the limb, the further one first.
+            self.foliage(to, dir, TIP_FOLIAGE, length);
+            self.foliage(
+                self.point_on(from, axis, bow, 0.70),
+                dir,
+                MID_FOLIAGE,
+                length * 0.70,
+            );
+            self.foliage(
+                self.point_on(from, axis, bow, 0.40),
+                dir,
+                LOW_FOLIAGE,
+                length * 0.40,
+            );
         } else {
             // A secondary carries foliage at its tip and partway back, which is
             // what stops a canopy from being a shell of cards on the outside with
             // a hole through the middle of it.
-            self.foliage(to, dir, 1.0);
+            self.foliage(to, dir, SECONDARY_TIP, length);
             let origin = self.point_on(from, axis, bow, 0.42);
-            self.foliage(origin, dir, 0.45);
+            self.foliage(origin, dir, SECONDARY_BACK, length);
         }
     }
 
@@ -349,11 +401,14 @@ impl<'a, 'b> Grower<'a, 'b> {
             let share = ((index as f32 + 0.5 + self.rng.range(-0.28, 0.28))
                 / self.arch.primary as f32)
                 .clamp(0.0, 1.0);
-            let height = self.plan.base + share.powf(self.arch.attach_bias)
-                * (self.plan.top - self.plan.base)
-                * 0.90;
+            // The limbs span the *whole* crown, foot to top. Capping the span
+            // short of the top leaves the leader's last few decimetres bare, and
+            // a tree whose canopy stops below its leader reads as two objects
+            // rather than one.
+            let height =
+                self.plan.base + share.powf(self.arch.attach_bias) * (self.plan.top - self.plan.base);
             let attach = self.spine(lean, height);
-            self.limb_from(lean, attach, height, self.plan.trunk_r, index);
+            self.limb_from(lean, attach, height, share, self.plan.trunk_r, index);
         }
     }
 
@@ -429,7 +484,24 @@ impl<'a, 'b> Grower<'a, 'b> {
 
     /// One primary limb: reached from the trunk, aimed at the crown profile's
     /// surface at the height it will end up at.
-    fn limb_from(&mut self, lean: Vec2, attach: Vec3, height: f32, radius: f32, index: usize) {
+    ///
+    /// `share` is the limb's normalised attachment height, and it decides how
+    /// hard the limb climbs. A tree's lowest branches are its most *horizontal*
+    /// ones: they are the branches that get least light, so they reach out for
+    /// it rather than up toward it — and they are the branches that fill the
+    /// crown's foot. Climbing is the upper crown's job. Give every limb the
+    /// same climb and the tips all pile up in the middle of the crown, which
+    /// leaves the bottom third of every canopy bare and makes a broad street
+    /// tree read as a mushroom on a stick.
+    fn limb_from(
+        &mut self,
+        lean: Vec2,
+        attach: Vec3,
+        height: f32,
+        share: f32,
+        radius: f32,
+        index: usize,
+    ) {
         let primary = self.arch.primary;
         // The phase carries the lean, so a leaning trunk does not produce a
         // symmetric crown.
@@ -437,7 +509,8 @@ impl<'a, 'b> Grower<'a, 'b> {
             + lean.angle() * 0.55
             + index as f32 / primary as f32 * TAU
             + self.rng.range(-0.26, 0.26);
-        let tip_y = height + self.arch.climb * (self.plan.top - height) * self.rng.range(0.70, 1.0);
+        let climb = self.arch.climb * (CLIMB_FLOOR + (1.0 - CLIMB_FLOOR) * share);
+        let tip_y = height + climb * (self.plan.top - height) * self.rng.range(0.70, 1.0);
         let reach = self.plan.radius_at(&self.arch, tip_y) * self.arch.reach
             * self.rng.range(0.84, 1.0);
         let tip = attach
@@ -469,7 +542,14 @@ impl<'a, 'b> Grower<'a, 'b> {
     fn clamp_into_crown(&self, point: &mut Vec3) {
         let limit = self.plan.radius_at(&self.arch, point.y);
         let flat = Vec2::new(point.x, point.z).length();
-        if flat > limit && limit > 1.0e-4 {
+        if limit <= 1.0e-4 {
+            // No room at this height at all: a fan's bare foot, the gap under a
+            // willow's skirt. The crown is an envelope, so a card with nowhere to
+            // go belongs *on* the axis — and "nowhere to go" has to be handled,
+            // because a scale by an infinite limit is not a clamp.
+            point.x = 0.0;
+            point.z = 0.0;
+        } else if flat > limit {
             let scale = limit / flat;
             point.x *= scale;
             point.z *= scale;
@@ -478,19 +558,29 @@ impl<'a, 'b> Grower<'a, 'b> {
     }
 
     /// A cluster of leaf cards on a shoot, `weight` share of the canopy's card
-    /// budget.
+    /// budget and `length` the length of the wood the cluster sits on.
     ///
     /// The budget is *divided*, not spent: a cluster that arrives late in the
     /// build gets the same share as one that arrived first, because a canopy
     /// whose upper half is empty is a different silhouette and not a cheaper
     /// one.
-    fn foliage(&mut self, tip: Vec3, shoot: Vec3, weight: f32) {
+    ///
+    /// The cluster is sized to its own shoot, not to a fixed multiple of the
+    /// card. A tuft on a short secondary is a tight tuft; a spray on a long
+    /// primary is a spray. Sizing every cluster to the card alone makes the ball
+    /// of foliage larger than the twig inside it, and a canopy built that way
+    /// stops being a distribution of leaves through a crown and becomes one
+    /// blurred mass centred on it — which reads as a solid ball, not a tree.
+    fn foliage(&mut self, tip: Vec3, shoot: Vec3, weight: f32, length: f32) {
         let count = ((self.plan.cards as f32 * weight) / self.plan.cluster_weight.max(0.1))
             .round()
             .max(1.0) as usize;
         // The cluster is a little over a card across, so consecutive clusters on
-        // a branch merge into one mass of foliage instead of reading as beads.
-        let spread = self.plan.card * 1.35;
+        // a branch merge into one mass of foliage instead of reading as beads —
+        // but never wider than the shoot it grows on.
+        let spread = (self.plan.card * 1.35)
+            .min(length * 0.60)
+            .max(self.plan.card * 0.55);
         let shoot = shoot.normalized_or_up();
         for _ in 0..count {
             // A leaf is arranged on a shoot, not on a sphere: the offset from the

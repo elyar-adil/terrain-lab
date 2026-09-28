@@ -13,7 +13,15 @@ pub(super) fn profile(t: f32) -> f32 {
 pub(super) fn architecture() -> Architecture {
     // Nine limbs attached all the way up a trunk that starts branching near
     // the ground (the table's `clear_stem` of 0.18), each climbing almost the
-    // whole remaining height at a fraction of the profile's reach, forking
-    // little and narrowly: everything hugs the trunk and points at the sky.
-    Architecture::single(profile, 9, 1.00, 0.50, 0.92, 0.05, 2, 0.38)
+    // whole remaining height and forking little and narrowly: everything hugs
+    // the trunk and points at the sky.
+    //
+    // `reach` is how much of the profile a limb actually uses, and it is *not*
+    // how narrow the tree looks. The narrowness is the profile's — a column
+    // 0.42 of the crown's width at its foot — and the table's `crown_m`, which
+    // for a fastigiate poplar is a genuinely small number for a genuinely tall
+    // tree. Halving the reach on top of that would build a tree half the width
+    // its own record claims, and no test would catch it if the record were
+    // loose; the profile and `crown_m` are enough to make the column.
+    Architecture::single(profile, 9, 1.00, 0.94, 0.92, 0.05, 2, 0.38)
 }

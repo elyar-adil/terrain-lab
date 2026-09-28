@@ -195,10 +195,18 @@ export interface Lighting {
 }
 
 export function createLighting(): Lighting {
-  // Sky above, bounced ground below. The ground colour is a desaturated olive
-  // because that is what a real city bounces back up, and it is what stops the
-  // undersides of balconies and canopies from going black.
-  const hemisphere = new THREE.HemisphereLight(0xbfd6f2, 0x3e4034, 0.55);
+  /**
+   * Sky above, city below.
+   *
+   * The ground half is a *light warm grey*, and the value matters more than
+   * anything else in this function. An urban scene's bounce comes off pale
+   * concrete, asphalt and paving — around 0.35-0.45 reflectance — not off soil.
+   * With a dark olive ground colour, every surface in shadow is lit by almost
+   * nothing, and the result is pure black tree trunks and black shadow sides on
+   * buildings. That is not a stylisation choice; it is a wrong assumption about
+   * what is underneath, and it reads as "unlit" rather than as "in shade".
+   */
+  const hemisphere = new THREE.HemisphereLight(0xbfd6f2, 0x8e8b82, 0.75);
   // Sunlight through a temperate sky is not white; it is warm, because the
   // atmosphere has taken the blue out of it on the way in.
   const sun = new THREE.DirectionalLight(0xfff0d4, 2.6);

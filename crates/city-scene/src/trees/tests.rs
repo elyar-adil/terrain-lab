@@ -83,8 +83,8 @@ fn every_species_has_a_prototype_and_the_set_is_bounded() {
     }
 }
 
-/// Every card's centre, as a radius from the tree's axis.  This — not an
-/// axis-aligned bounding box — is the canopy's real width, because a crown
+/// Every card's centre, as a radius from the tree's axis.  This —not an
+/// axis-aligned bounding box —is the canopy's real width, because a crown
 /// with eight limbs in random directions is round and its box is not.
 fn crown_radius(meshes: &[MeshGroup], prototype: &TreePrototype) -> f32 {
     let mut widest = 0.0_f32;
@@ -162,7 +162,7 @@ fn bounds(meshes: &[MeshGroup], prototype: &TreePrototype) -> [f32; 6] {
 
 /// The bug: every tree was a cylinder with a ball on it, and a cedar and a
 /// willow were the same shape in different greens.  This asserts the shape is
-/// the species', on the *built geometry* — not on the table's claims.
+/// the species', on the *built geometry* —not on the table's claims.
 #[test]
 fn silhouette_is_different_per_species_measured_on_the_geometry() {
     let (prototypes, meshes) = built();
@@ -219,7 +219,7 @@ fn silhouette_is_different_per_species_measured_on_the_geometry() {
     );
 }
 
-/// A conifer is a spire: narrow, tall, and *tapering* — the crown's outer
+/// A conifer is a spire: narrow, tall, and *tapering* —the crown's outer
 /// reach in an upper band is much less than in a lower one.  A vase is the
 /// mirror image: it opens upward.  The fastigiate poplar is as narrow as a
 /// conifer without tapering to a point.  Measured on the built leaves, one
@@ -270,8 +270,8 @@ fn a_conifer_tapers_upward_and_a_vase_opens_upward() {
                 );
             }
             Canopy::Layered => {
-                // A deodar is not a spire — it is as wide as a broad-crowned
-                // tree — but its tiers still narrow upward, less steeply than
+                // A deodar is not a spire —it is as wide as a broad-crowned
+                // tree —but its tiers still narrow upward, less steeply than
                 // the metasequoia's.
                 assert!(ratio > 0.20, "{}'s crown is {ratio:.2}; a cedar's tiers are broad", species.key);
                 let (foot, crown) = (reach(prototype, 0.10, 0.30), reach(prototype, 0.55, 0.75));
@@ -456,7 +456,7 @@ fn canopy_opacity_follows_the_species_density() {
     // The opaque coverage of each species' own card, at the resolution the
     // payload actually ships, so the measure is physical: a card's geometry
     // times the fraction of its texture that is actually leaf.  A coarse bake
-    // would understate it — a 64-pixel compound leaf loses its leaflets — and
+    // would understate it —a 64-pixel compound leaf loses its leaflets —and
     // the number has to be the one the renderer will see.
     let coverage: Vec<(String, f32)> = leaf_card_textures(256)
         .iter()
@@ -537,7 +537,7 @@ fn canopy_opacity_follows_the_species_density() {
         "a `香樟` is {camphor:.2} layers deep and a `梧桐` {parasol:.2}; the \
          reference sheet has one almost opaque and the other see-through"
     );
-    // A conifer's tiers are dense even though its card is a fine spray — and
+    // A conifer's tiers are dense even though its card is a fine spray —and
     // they are still dense, because a 30 m metasequoia is read from a hundred
     // metres away and a thousand sub-metre cards is a lot of texture at that
     // range.
@@ -595,7 +595,7 @@ fn a_canopy_is_a_volume_and_not_a_shell_of_cards() {
 /// Every one of the twelve canopy forms, each a distinct silhouette.
 ///
 /// The measurement is the crown's outer reach at a quarter, a half and three
-/// quarters of the *tree's* height — not of the crown's, so the clear stem
+/// quarters of the *tree's* height —not of the crown's, so the clear stem
 /// does real work: a `梧桐`'s empty lower half *is* its silhouette.  That is
 /// the whole difference between a spire, a vase, a dome, a column, a stack of
 /// drooping tiers and a curtain, and it is what a viewer reads at a kilometre.
@@ -743,7 +743,7 @@ fn all_twelve_canopies_are_a_distinct_silhouette() {
         let profile = crown_profile(&leaf_group.positions);
         let reach = profile.iter().copied().fold(0.0_f32, f32::max);
         // The signature is the crown's reach at a quarter, a half and three
-        // quarters of the tree's height, plus the reach itself — the profile
+        // quarters of the tree's height, plus the reach itself —the profile
         // tells the forms apart and the reach is the proportion a viewer reads
         // as "wide" or "tall".
         let widest = reach.max(1.0e-6);
@@ -775,7 +775,7 @@ fn all_twelve_canopies_are_a_distinct_silhouette() {
 }
 
 /// The crown's outer reach at a quarter, a half and three quarters of the
-/// *tree's* height, in the crown's own units — so a high clear stem reads as
+/// *tree's* height, in the crown's own units —so a high clear stem reads as
 /// an empty band, which is what it is.
 fn crown_profile(positions: &[f32]) -> [f32; 3] {
     let mut band = [0.0_f32; 3];
@@ -1025,7 +1025,7 @@ fn bark_comes_from_the_species_record() {
 }
 
 /// The willow actually weeps: below the crown's shoulder there are cards, and
-/// the hanging shoots' cards are strung *vertically* — a card's long axis on
+/// the hanging shoots' cards are strung *vertically* —a card's long axis on
 /// a hanging shoot points down, not out.
 #[test]
 fn the_willow_hangs_and_the_pine_leans() {
@@ -1065,4 +1065,73 @@ fn the_willow_hangs_and_the_pine_leans() {
         "the pine's trunk above 30% height is displaced only {top_x:.3}; a \
          reference-sheet pine leans"
     );
+}
+
+
+#[test]
+fn zz_signature_sheet() {
+    let base: Species = Species {
+        key: "t", name_zh: "t", name_en: "t", canopy: Canopy::Rounded, leaf: LeafForm::Elliptic,
+        bark: Bark { colour: [0.20, 0.19, 0.18], fissure: 0.4, weathering: 1.0 },
+        foliage: [0.14, 0.19, 0.12], autumn: None,
+        bloom: Bloom { colour: None, density: 0.0, at: 0.0 },
+        height_m: (9.0, 12.0), crown_m: (3.2, 4.6), trunk_m: (0.16, 0.24),
+        clear_stem: 0.32, density: 0.70, leaf_scale: 0.30, evergreen: false, street_tolerant: true,
+    };
+    let clear_stem_of = |c: Canopy| match c {
+        Canopy::Conical => 0.58, Canopy::Layered => 0.18, Canopy::Fastigiate => 0.18,
+        Canopy::Umbrella => 0.42, Canopy::Open => 0.45, Canopy::Fan => 0.44,
+        Canopy::Weeping => 0.28, Canopy::Irregular => 0.35, Canopy::Banyan => 0.24,
+        Canopy::Oval => 0.26, Canopy::Vase => 0.30, Canopy::Rounded => 0.30,
+    };
+    let mut sigs: Vec<(Canopy, [f32; 4], f32, f32)> = Vec::new();
+    for canopy in [
+        Canopy::Rounded, Canopy::Open, Canopy::Oval, Canopy::Fan, Canopy::Vase, Canopy::Conical,
+        Canopy::Layered, Canopy::Weeping, Canopy::Fastigiate, Canopy::Irregular,
+        Canopy::Umbrella, Canopy::Banyan,
+    ] {
+        let species: &'static Species = Box::leak(Box::new(Species {
+            key: "t", canopy, clear_stem: clear_stem_of(canopy), ..base
+        }));
+        let mut rng = Rng::new(0x7ee0_0000 ^ (canopy as u32) << 5);
+        let (height, crown, trunk) = real_dimensions(species, 0, &mut rng);
+        let prototype = TreePrototype { key: "tree/t/0".into(), species, variant: 0, height, crown, trunk };
+        let (bark, leaf) = ("tree/t/0#bark".to_string(), "tree/t/0#leaf".to_string());
+        let mut builder = MeshBuilder::new();
+        builder.style(&bark, GroupStyle { cast_shadow: true, receive_shadow: true, alpha_cutout: false, dynamic: false });
+        builder.style(&leaf, GroupStyle { cast_shadow: true, receive_shadow: true, alpha_cutout: true, dynamic: false });
+        Grower::new(&prototype, 0x1234_5678, &bark, &leaf, &mut builder).build();
+        let meshes = builder.build().meshes;
+        let leaf_group = meshes.iter().find(|m| m.material == leaf).unwrap();
+        let p = crown_profile(&leaf_group.positions);
+        let w = p.iter().copied().fold(0.0_f32, f32::max).max(1.0e-6);
+        let mut b = [0.0_f32; 3];
+        for card in leaf_group.positions.chunks_exact(12) {
+            let y = (card[1] + card[4] + card[7] + card[10]) / 4.0;
+            let x = (card[0] + card[3] + card[6] + card[9]) / 4.0;
+            let z = (card[2] + card[5] + card[8] + card[11]) / 4.0;
+            for (i, c) in [0.25_f32, 0.5, 0.75].iter().enumerate() {
+                if (y - c).abs() < 0.08 { b[i] = b[i].max(x.hypot(z)); }
+            }
+        }
+        let mut inner = 0; let mut tot = 0;
+        for card in leaf_group.positions.chunks_exact(12) {
+            let x = (card[0] + card[3] + card[6] + card[9]) / 4.0;
+            let z = (card[2] + card[5] + card[8] + card[11]) / 4.0;
+            tot += 1;
+            if x.hypot(z) < w * 0.55 { inner += 1; }
+        }
+        sigs.push((canopy, [b[0] / w, b[1] / w, b[2] / w, w], w, inner as f32 / tot as f32));
+    }
+    for (c, s, w, v) in &sigs {
+        let mut near: Vec<(f32, Canopy)> = sigs.iter()
+            .filter(|o| o.0 != *c)
+            .map(|o| ((0..4).map(|i| (s[i] - o.1[i]).abs()).sum::<f32>() / 4.0, o.0))
+            .collect();
+        near.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        println!(
+            "{:?} sig=[{:.3} {:.3} {:.3} {:.3}] inner={:.0}%  nearest: {:?}={:.4} {:?}={:.4}",
+            c, s[0], s[1], s[2], s[3], v * 100.0, near[0].1, near[0].0, near[1].1, near[1].0
+        );
+    }
 }

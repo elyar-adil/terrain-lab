@@ -16,7 +16,6 @@
 use crate::math::{Rng, Vec2, Vec3};
 use crate::mesh::{MeshBuilder, box_at};
 use crate::network::Network;
-use crate::spec::JunctionSpec;
 use urban::{JunctionKind, ModernRoadClass};
 
 /// A signal lamp that the renderer recolours as the phase advances.
