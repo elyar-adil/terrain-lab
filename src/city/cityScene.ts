@@ -250,7 +250,13 @@ export function createMaterials(
      */
     texture.flipY = false;
     // UVs are metres; one tile covers the texture's physical size.
-    texture.repeat.set(1 / source.tileWidthM, 1 / source.tileHeightM);
+    // U is metres along the wall for every material. V is metres too, except on
+    // the `facade/NN` tiles, whose V is already measured in *tile heights* (so
+    // that floor lines land on multiples of a quarter tile). Dividing that V by the
+    // tile's height again stretched each window column ~11x, which is the
+    // "striped building" defect.
+    const vInTiles = name.startsWith("facade/");
+    texture.repeat.set(1 / source.tileWidthM, vInTiles ? 1 : 1 / source.tileHeightM);
     texture.needsUpdate = true;
     cache.set(name, texture);
     builtTextures.push(texture);
