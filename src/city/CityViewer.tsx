@@ -270,6 +270,14 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
         fleet.receiveShadow = true;
         fleet.frustumCulled = false;
         fleet.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        // Body colour per vehicle: mostly white, black, silver and grey, as on a
+        // real Chinese road. Without it the whole fleet is one flat white.
+        const paints = [0xf1f1ee, 0xf1f1ee, 0xf1f1ee, 0x17181a, 0x17181a, 0x17181a, 0x9ea3a8, 0x9ea3a8, 0x5b5e63, 0x8c1c1c, 0x24406f, 0x6b5a44];
+        const paint = new THREE.Color();
+        for (let i = 0; i < agentCount; i += 1) {
+          fleet.setColorAt(i, paint.setHex(paints[(i * 7 + (i >> 2)) % paints.length]));
+        }
+        if (fleet.instanceColor) fleet.instanceColor.needsUpdate = true;
         world.add(fleet);
       }
       if (fleetGlass) {
