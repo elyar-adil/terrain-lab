@@ -342,7 +342,9 @@ pub fn build(
         if ring.len() < 3 {
             continue;
         }
-        let material = if matches!(parcel.use_type, ParcelUse::Park) {
+        // Residential compounds are landscaped (lawn, hedges, paths); only
+        // commercial, mixed and civic plots are hard-paved forecourts.
+        let material = if matches!(parcel.use_type, ParcelUse::Park | ParcelUse::Residential) {
             "parcel.green"
         } else {
             "parcel.paving"

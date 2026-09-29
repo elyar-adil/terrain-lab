@@ -402,7 +402,7 @@ pub(super) fn build_parcels(
                     }
                     ParcelUse::Residential => {
                         let far = 2.4 + 1.0 * centrality * density;
-                        let slab = noise(753) < 0.42 && depth >= 46.0;
+                        let slab = noise(753) < 0.55 && depth >= 46.0;
                         if slab {
                             let slab_w = (width * 0.72).clamp(46.0, 78.0).min(width);
                             let slab_d = 12.5 + noise(757) * 2.5;
