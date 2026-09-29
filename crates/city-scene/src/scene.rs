@@ -415,7 +415,7 @@ mod tests {
     fn city() -> urban::ModernCity {
         generate_modern_chinese_city(ModernChinaSpec {
             seed: 42,
-            radius_km: 0.4,
+            radius_km: 0.5,
             block_size_metres: 110.0,
             ..ModernChinaSpec::default()
         })
