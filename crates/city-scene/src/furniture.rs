@@ -1123,8 +1123,7 @@ pub fn park_cars(network: &Network, builder: &mut MeshBuilder, seed: u32) -> usi
                     // `side > 0` is the `+1` direction, which runs forward.
                     let heading = path.tangent_at(station) * if side > 0.0 { 1.0 } else { -1.0 };
                     let yaw = yaw_along_x(heading);
-                    let tint = 0.72 + rng.unit() * 0.5;
-                    let colour = [tint, tint * (0.92 + rng.unit() * 0.12), tint * 0.94];
+                    let colour = car_paint(&mut rng);
                     builder.add_instance(
                         "car/body",
                         Instance::new(point.x, level::ROAD, point.z, yaw, 1.0, colour),
@@ -1147,8 +1146,7 @@ pub fn park_cars(network: &Network, builder: &mut MeshBuilder, seed: u32) -> usi
                     let heading = path.tangent_at(station) * if side > 0.0 { 1.0 } else { -1.0 };
                     let yaw = yaw_along_x(heading)
                         + if rng.chance(0.5) { 0.0 } else { std::f32::consts::FRAC_PI_2 };
-                    let tint = 0.66 + rng.unit() * 0.46;
-                    let colour = [tint, tint * (0.90 + rng.unit() * 0.14), tint * 0.95];
+                    let colour = car_paint(&mut rng);
                     builder.add_instance(
                         "car/body",
                         Instance::new(point.x, level::KERB - 0.03, point.z, yaw, 1.0, colour),
@@ -1668,4 +1666,29 @@ mod tests {
             }
         }
     }
+}
+
+
+/// Car body colour as an instance tint.  Chinese roads are mostly white, black,
+/// silver and grey, with a minority of red, blue and dark green — never a
+/// uniform white fleet, which reads as a row of paper cut-outs.
+fn car_paint(rng: &mut Rng) -> [f32; 3] {
+    let pick = rng.unit();
+    let shade = 0.9 + rng.unit() * 0.2;
+    let base = if pick < 0.28 {
+        [0.95, 0.95, 0.94]
+    } else if pick < 0.52 {
+        [0.10, 0.10, 0.11]
+    } else if pick < 0.72 {
+        [0.55, 0.57, 0.60]
+    } else if pick < 0.84 {
+        [0.28, 0.29, 0.31]
+    } else if pick < 0.90 {
+        [0.62, 0.10, 0.10]
+    } else if pick < 0.96 {
+        [0.14, 0.24, 0.48]
+    } else {
+        [0.42, 0.34, 0.24]
+    };
+    [base[0] * shade, base[1] * shade, base[2] * shade]
 }

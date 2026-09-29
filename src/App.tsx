@@ -59,6 +59,7 @@ const CITY_VIEW_PRESETS: Array<{ id: string; label: string }> = [
   { id: "street", label: "街道" },
   { id: "junction", label: "路口" },
   { id: "tower", label: "塔仰视" },
+  { id: "district", label: "街区" },
   { id: "aerial", label: "鸟瞰" },
   { id: "skyline", label: "天际线" },
 ];

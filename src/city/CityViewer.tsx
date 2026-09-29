@@ -70,6 +70,8 @@ export const PRESETS: Record<string, CameraPreset> = {
   /** A raised three-quarter view: the test for massing, roof forms, block
    *  structure and whether the skyline has any shape at all. */
   aerial: { name: "aerial", position: [430, 300, 430], target: [0, 12, 0], fov: 40, radius: 620 },
+  /** A low oblique view across a district: street walls, roofs and lawns together. */
+  district: { name: "district", position: [-150, 38, 210], target: [20, 14, -20], fov: 52, radius: 380 },
   /** The whole city from outside: the test for the extent, the silhouette
    *  against the sky, and the fog reading as air rather than as paper. */
   skyline: {
