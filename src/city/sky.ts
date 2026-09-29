@@ -266,5 +266,5 @@ export function createLighting(): Lighting {
  */
 export function createFog(extentMetres: number): THREE.Fog {
   const reach = Math.max(200, extentMetres);
-  return new THREE.Fog(SKY_FOG, reach * 1.6, reach * 7.0);
+  return new THREE.Fog(SKY_FOG, reach * 0.9, reach * 3.6);
 }

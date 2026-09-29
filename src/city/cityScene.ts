@@ -388,6 +388,7 @@ export function createMaterials(
       grassMap ? 0xffffff : 0x2e3a22,
     );
   }
+  standard("water", { roughness: 0.06, metalness: 0.15, envMapIntensity: 1.4 }, 0x35586b);
   standard("hedge", { roughness: 0.9, flatShading: true }, 0x22381a);
   standard("barrier.concrete", { roughness: 0.9 }, 0x9a988e);
   // Hot-dip galvanised steel: bright, but metallic, so it takes its colour from

@@ -324,6 +324,10 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
         &mut builder,
     );
 
+    if let Some(river) = city.river.as_deref() {
+        buildings::build_water(river, city.river_width_metres, city.frame, &mut builder);
+    }
+
     let geometry = builder.build();
     let vertices = geometry
         .meshes

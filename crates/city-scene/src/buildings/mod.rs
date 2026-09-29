@@ -891,3 +891,38 @@ mod tests {
         assert!(tall + slabs + low == city.buildings.len());
     }
 }
+
+
+/// The river as a water surface: a strip along the centreline, `width` metres
+/// across, lying just above the bare ground so the channel reads as water
+/// rather than as a gap in the city.
+pub fn build_water(river: &[Point], width: f32, frame: CityFrameInfo, builder: &mut MeshBuilder) {
+    builder.style(
+        "water",
+        GroupStyle { cast_shadow: false, receive_shadow: true, alpha_cutout: false, dynamic: false },
+    );
+    let line = ring_of(river, frame);
+    if line.len() < 2 {
+        return;
+    }
+    let half = width * 0.5;
+    let mut left = Vec::with_capacity(line.len());
+    let mut right = Vec::with_capacity(line.len());
+    for i in 0..line.len() {
+        let a = line[i.saturating_sub(1)];
+        let b = line[(i + 1).min(line.len() - 1)];
+        let (dx, dz) = (b.x - a.x, b.y - a.y);
+        let len = dx.hypot(dz).max(1.0e-4);
+        let (nx, nz) = (-dz / len, dx / len);
+        left.push(Vec2::new(line[i].x + nx * half, line[i].y + nz * half));
+        right.push(Vec2::new(line[i].x - nx * half, line[i].y - nz * half));
+    }
+    // Quad per segment: robust on bends where one big polygon would self-touch.
+    for i in 0..line.len() - 1 {
+        let mut quad = vec![left[i], left[i + 1], right[i + 1], right[i]];
+        if signed_area(&quad) < 0.0 {
+            quad.reverse();
+        }
+        builder.ground_uv("water", &quad, 0.03, None);
+    }
+}
