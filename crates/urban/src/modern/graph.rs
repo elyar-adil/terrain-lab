@@ -252,7 +252,7 @@ fn merge_close(pts: &mut Vec<V>, segs: &mut Vec<Seg>) -> bool {
 
 /// Split edges at T-junctions (a node within `SNAP_M` of another edge's side)
 /// and at genuine interior crossings.  True if anything was split.
-fn split_edges(pts: &mut Vec<V>, segs: &mut Vec<Seg>) -> bool {
+fn split_edges(pts: &mut Vec<V>, segs: &mut Vec<Seg>, forbid: &dyn Fn(V) -> bool) -> bool {
     let m = segs.len();
     let mut cuts: Vec<Vec<(f32, usize)>> = vec![Vec::new(); m];
     let np = pts.len();
@@ -279,7 +279,7 @@ fn split_edges(pts: &mut Vec<V>, segs: &mut Vec<Seg>) -> bool {
                 continue;
             }
             let d = (p.0 - a.0 - dx * t).hypot(p.1 - a.1 - dz * t);
-            if d < SNAP_M {
+            if d < SNAP_M && !forbid(p) {
                 cuts[ei].push((t, n));
             }
         }
@@ -309,6 +309,9 @@ fn split_edges(pts: &mut Vec<V>, segs: &mut Vec<Seg>) -> bool {
             if t * li <= guard || (1.0 - t) * li <= guard || u * lj <= guard || (1.0 - u) * lj <= guard
             {
                 continue;
+            }
+            if forbid(p) {
+                continue; // never put a junction in the river
             }
             let id = np + fresh.len();
             fresh.push(p);
@@ -343,10 +346,10 @@ fn split_edges(pts: &mut Vec<V>, segs: &mut Vec<Seg>) -> bool {
     changed
 }
 
-fn planarize(pts: &mut Vec<V>, segs: &mut Vec<Seg>) {
+fn planarize(pts: &mut Vec<V>, segs: &mut Vec<Seg>, forbid: &dyn Fn(V) -> bool) {
     for _ in 0..8 {
         let merged = merge_close(pts, segs);
-        let split = split_edges(pts, segs);
+        let split = split_edges(pts, segs, forbid);
         if !merged && !split {
             break;
         }
@@ -376,6 +379,18 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
     let mut pts: Vec<V> = Vec::new();
     let mut segs: Vec<Seg> = Vec::new();
     for (x, class) in grid_offsets(radius_m, block_m, organic, seed, 11, &skip) {
+        // A north–south street that would lie in the river channel for much of
+        // its length is not a street, it is a river; drop it in the plan so
+        // the cross streets span the water in one piece instead of ending in it.
+        let in_channel = (0..=32)
+            .filter(|i| {
+                let z = -radius_m + 2.0 * radius_m * *i as f32 / 32.0;
+                (x - frame.river_x(z)).abs() < river_half + SNAP_M
+            })
+            .count();
+        if in_channel > 10 {
+            continue;
+        }
         if let Some((a, b)) = clip_line(&outer, (x, 0.0), (0.0, 1.0)) {
             add_edge(&mut pts, &mut segs, a, b, class, ORIGIN_GRID);
         }
@@ -387,6 +402,24 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
     }
     add_ring(&mut pts, &mut segs, &outer, ModernRoadClass::Expressway, ORIGIN_OUTER);
     add_ring(&mut pts, &mut segs, &inner, ModernRoadClass::Arterial, ORIGIN_INNER);
+
+    // A riverside road (滨河路) on each bank, so the land between the river and
+    // the first cross street is a closed block that can be built on rather
+    // than an unbounded strip.
+    let bank_off = river_half + 22.0;
+    let bank_steps = ((2.0 * radius_m / 40.0) as usize).max(8);
+    for side in [-1.0_f32, 1.0] {
+        let mut prev: Option<V> = None;
+        for i in 0..=bank_steps {
+            let z = -radius_m + 2.0 * radius_m * i as f32 / bank_steps as f32;
+            let v = (frame.river_x(z) + side * bank_off, z);
+            let inside = v.0.hypot(v.1) < radius_m * cos_half * 0.985;
+            if let (Some(p), true) = (prev, inside) {
+                add_edge(&mut pts, &mut segs, p, v, ModernRoadClass::Collector, ORIGIN_GRID);
+            }
+            prev = inside.then_some(v);
+        }
+    }
 
     // Which diagonal avenues through the historic core are realised is chosen by
     // the ported stochastic model over candidate corridors, like the source
@@ -420,7 +453,8 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
     }
 
     // ---- 2. planarise: every crossing and T-junction becomes a node ----
-    planarize(&mut pts, &mut segs);
+    let in_river = |v: V| (v.0 - frame.river_x(v.1)).abs() < river_half + SNAP_M;
+    planarize(&mut pts, &mut segs, &in_river);
 
     // ---- 3. river, local-street growth model ----
     // Local streets are the discretionary layer of a Chinese plan: outer
@@ -454,8 +488,15 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
             (x - frame.river_x(z)).abs() < river_half
         });
         let major = matches!(s.class, ModernRoadClass::Expressway | ModernRoadClass::Arterial);
-        if river_hit && !major {
-            continue;
+        if river_hit {
+            // Only a street that actually crosses the channel becomes a bridge;
+            // one that runs along or inside it has no business existing.
+            let bank = |v: V| v.0 - frame.river_x(v.1);
+            let crosses = (bank(p) < -river_half && bank(q) > river_half)
+                || (bank(p) > river_half && bank(q) < -river_half);
+            if !major || !crosses {
+                continue;
+            }
         }
         if s.class == ModernRoadClass::Local && !river_hit {
             let mid = ((p.0 + q.0) * 0.5, (p.1 + q.1) * 0.5);
@@ -466,6 +507,33 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
         }
         kept.push((*s, river_hit));
     }
+
+    // Two bridges that cross over the water without a junction: keep the
+    // higher class (a diagonal yields to the street it would cut).
+    let mut drop = vec![false; kept.len()];
+    for i in 0..kept.len() {
+        if !kept[i].1 {
+            continue;
+        }
+        for j in (i + 1)..kept.len() {
+            if !kept[j].1 || drop[i] || drop[j] {
+                continue;
+            }
+            let (si, sj) = (kept[i].0, kept[j].0);
+            if si.a == sj.a || si.a == sj.b || si.b == sj.a || si.b == sj.b {
+                continue;
+            }
+            if seg_intersect(pts[si.a], pts[si.b], pts[sj.a], pts[sj.b]).is_some() {
+                let loser = if (si.class as i32) < (sj.class as i32) { j } else if (sj.class as i32) < (si.class as i32) { i } else if si.origin == ORIGIN_INNER { i } else { j };
+                drop[loser] = true;
+            }
+        }
+    }
+    let mut idx = 0;
+    kept.retain(|_| {
+        idx += 1;
+        !drop[idx - 1]
+    });
 
     // ---- 4. no cul-de-sacs, one connected network ----
     loop {
