@@ -3044,7 +3044,10 @@ export function Terrain3D({ result, config, cameraMode, cityFocus }: { result: G
       roadMarkingGroup.visible = roadMarkingFade > 0.001;
       cityStreetGroup.visible = cityStreetFade > 0.001;
       cityDetailGroup.visible = cityStreetFade > 0.001;
-      cityGroup.visible = cityFade > 0.001;
+      // The legacy metre-scale city (striped boxes, lane lattice) is retired: cities
+      // are drawn by CityViewer from the Rust city-scene. Kept hidden, not deleted, so
+      // the terrain view stays untouched.
+      cityGroup.visible = false;
       cityArchitectureGroup.visible = cityFade > 0.001;
       facadeWindows.visible = cityFade > 0.001;
       cityParcelGroup.visible = cityFade > 0.001;

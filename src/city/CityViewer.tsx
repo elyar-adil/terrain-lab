@@ -83,11 +83,12 @@ export const PRESETS: Record<string, CameraPreset> = {
 
 /** A plain ground plane, so the city is not floating in a void. */
 function createGround(extent: number): THREE.Mesh {
-  const size = Math.max(600, extent * 1.6);
+  // Far larger than the fog reach: the edge must dissolve into haze, never show as a square.
+  const size = Math.max(24000, extent * 24);
   const geometry = new THREE.PlaneGeometry(size, size, 1, 1);
   geometry.rotateX(-Math.PI / 2);
   const material = new THREE.MeshStandardMaterial({
-    color: 0x39412e,
+    color: 0x7a8562,
     roughness: 0.96,
     metalness: 0,
   });
