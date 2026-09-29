@@ -1,3 +1,5 @@
+mod blocks;
+mod geom;
 mod graph;
 mod landscape;
 mod parcels;
@@ -50,6 +52,15 @@ impl CityFrame {
         }
     }
 
+    /// Inverse of `to_world`: world km back to local city metres.
+    fn to_local(&self, p: Point) -> (f32, f32) {
+        let dx = (p.x_km - self.spec.centre.x_km) * 1_000.0;
+        let dy = (p.y_km - self.spec.centre.y_km) * 1_000.0;
+        let c = self.spec.rotation_radians.cos();
+        let s = self.spec.rotation_radians.sin();
+        (dx * c + dy * s, -dx * s + dy * c)
+    }
+
     fn river_x(&self, z_m: f32) -> f32 {
         let radius_m = self.radius_m;
         let phase = modern_phase(self.spec.seed);
@@ -64,9 +75,7 @@ pub fn generate_modern_chinese_city(spec: ModernChinaSpec) -> ModernCity {
     let GraphOutput {
         nodes,
         sd_roads,
-        mut hd_roads,
-        x_lines,
-        z_lines,
+        hd_roads,
         river,
         morphology_score,
     } = build_graph(&frame);
@@ -74,7 +83,7 @@ pub fn generate_modern_chinese_city(spec: ModernChinaSpec) -> ModernCity {
         blocks,
         parcels,
         buildings,
-    } = build_parcels(&frame, &x_lines, &z_lines);
+    } = build_parcels(&frame, &nodes, &sd_roads);
     let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
     ModernCity {
         version: 3,
