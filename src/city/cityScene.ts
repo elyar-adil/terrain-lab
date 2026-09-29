@@ -384,7 +384,14 @@ export function createMaterials(
   for (const key of ["block.ground", "parcel.green", "median.plant"]) {
     standard(
       key,
-      { map: grassMap ?? undefined, normalMap: normalFor("ground/grass", 1.2) ?? undefined, roughness: 0.95 },
+      {
+        map: grassMap ?? undefined,
+        normalMap: normalFor("ground/grass", 1.2) ?? undefined,
+        roughness: 0.95,
+        // The block plate lies under the lots by millimetres; push it away in
+        // depth so the lot always wins and the two never shimmer against each other.
+        ...(key === "block.ground" ? { polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 } : {}),
+      },
       grassMap ? 0xffffff : 0x2e3a22,
     );
   }
@@ -430,7 +437,7 @@ export function createMaterials(
   // Chinese centre lines are a deep chrome yellow, not a pastel one.
   paint("marking.yellow", 0xd8a41c, null);
   for (const key of ["marking.crosswalk", "marking.dashed-3-5", "marking.dashed-6-9"]) {
-    paint(key, 0xe8e6dc, textureFor(key), true);
+    paint(key, 0xe8e6dc, textureFor(key.replace(".", "/")), true);
   }
 
   // --- buildings ------------------------------------------------------------
@@ -541,7 +548,7 @@ export function createMaterials(
         metalness: 0.0,
         // Leaves are thin and translucent: a little transmission is what
         // separates a lit canopy from a painted green sphere.
-        emissive: 0x000000,
+        emissive: 0x16240f, // sky-through-leaf lift so a canopy never renders black
       }),
     ) as THREE.MeshStandardMaterial;
   };

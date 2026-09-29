@@ -331,7 +331,9 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
       const camera = new THREE.PerspectiveCamera(
         chosen.fov,
         initial.width / initial.height,
-        0.5,
+        // A far view has nothing within tens of metres, and the depth buffer's
+        // resolution at 400 m is what makes coplanar ground plates flicker.
+        chosen.position[1] > 100 ? 6 : 0.5,
         12000,
       );
       camera.position.set(...chosen.position);
