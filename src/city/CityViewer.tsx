@@ -97,7 +97,7 @@ function createGround(extent: number): THREE.Mesh {
   const ground = new THREE.Mesh(geometry, material);
   ground.name = "ground";
   ground.receiveShadow = true;
-  ground.position.y = -0.05;
+  ground.position.y = -0.45; // well below the roadbed: at 100 m+ a 5 cm gap is lost in the depth buffer
   return ground;
 }
 
@@ -123,7 +123,14 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
     let teardown: (() => void) | null = null;
 
     try {
-      const chosen = PRESETS[preset] ?? PRESETS.street;
+      const base = PRESETS[preset] ?? PRESETS.street;
+      // `?cam=x,y,z,tx,ty,tz[,fov]` overrides the framing, for audits and bug reports.
+      const camParam = new URLSearchParams(window.location.search).get("cam");
+      const cv = camParam ? camParam.split(",").map(Number) : [];
+      const chosen: CameraPreset =
+        cv.length >= 6 && cv.every((n) => Number.isFinite(n))
+          ? { ...base, position: [cv[0], cv[1], cv[2]], target: [cv[3], cv[4], cv[5]], fov: cv[6] ?? base.fov }
+          : base;
       const extent = aspectOf(scene);
       // `?cheap=1` trades the environment bake and the shadow resolution for
       // speed. The headless audit runs on SwiftShader, where a PMREM bake and a
@@ -343,7 +350,7 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
         initial.width / initial.height,
         // A far view has nothing within tens of metres, and the depth buffer's
         // resolution at 400 m is what makes coplanar ground plates flicker.
-        chosen.position[1] > 100 ? 6 : 0.5,
+        chosen.position[1] > 100 ? 6 : 1.0,
         12000,
       );
       camera.position.set(...chosen.position);

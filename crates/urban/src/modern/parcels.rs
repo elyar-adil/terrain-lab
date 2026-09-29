@@ -111,6 +111,27 @@ pub(super) fn build_parcels(
         if envelope.len() < 3 {
             continue;
         }
+        // The block's ground plate stops under the kerb, not at the street
+        // centre line: the plate sits above the carriageway datum, so a plate
+        // that reached the centre line would paint grass over half of every road.
+        let mut plate = face.ring.clone();
+        for i in 0..face.ring.len() {
+            let a = face.ring[i];
+            let b = face.ring[(i + 1) % face.ring.len()];
+            let len = face.edge_len[i];
+            if len < 1.0e-3 {
+                continue;
+            }
+            let n = (-(b.1 - a.1) / len, (b.0 - a.0) / len);
+            let inset = (right_of_way(face.classes[i]) - BUILDING_LINE_M - 1.2).max(1.0);
+            plate = clip_half(&plate, n, n.0 * a.0 + n.1 * a.1 + inset);
+            if plate.len() < 3 {
+                break;
+            }
+        }
+        if plate.len() < 3 {
+            continue;
+        }
 
         // ---- split off the river: each bank is its own block ----
         let near_river =
@@ -129,12 +150,12 @@ pub(super) fn build_parcels(
                     .filter(|p| p.len() >= 3 && signed_area(p) > 300.0)
                     .collect()
             };
-            let banks = split(&face.ring);
+            let banks = split(&plate);
             let mut envs = split(&envelope);
             envs.retain(|e| signed_area(e) > 300.0);
             (banks, envs)
         } else {
-            (vec![face.ring.clone()], vec![envelope])
+            (vec![plate.clone()], vec![envelope])
         };
         for ring in &block_rings {
             blocks.push(UrbanBlock { boundary: to_world(ring), courtyard: None });
