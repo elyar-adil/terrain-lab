@@ -28,20 +28,45 @@ pub fn roofscape(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &
     let depth = extent[3] - extent[1];
     let mut rng = Rng::new(building.id ^ 0x9e37_79b9);
 
-    let place = |rng: &mut Rng, half_x: f32, half_z: f32| -> Option<Vec2> {
-        if width < half_x * 2.0 + 1.2 || depth < half_z * 2.0 + 1.2 {
+    // Sample a centre inside the roof's bounding box, then require the *whole
+    // footprint* of the prop — its four corners, rotated the way `box_at`
+    // rotates them — to lie inside the roof polygon.  Checking only the centre
+    // is enough on an axis-aligned rectangle and wrong on any other footprint:
+    // a plant room then overhangs the parapet.
+    let place_checked = |rng: &mut Rng,
+                         sample_x: f32,
+                         sample_z: f32,
+                         hw: f32,
+                         hd: f32,
+                         rotation: f32|
+     -> Option<Vec2> {
+        if width < sample_x * 2.0 + 1.2 || depth < sample_z * 2.0 + 1.2 {
             return None;
         }
-        for _ in 0..12 {
+        let (sin, cos) = rotation.sin_cos();
+        for _ in 0..24 {
             let candidate = Vec2::new(
-                rng.range(extent[0] + half_x, extent[2] - half_x),
-                rng.range(extent[1] + half_z, extent[3] - half_z),
+                rng.range(extent[0] + sample_x, extent[2] - sample_x),
+                rng.range(extent[1] + sample_z, extent[3] - sample_z),
             );
-            if point_in_ring(candidate, ring) {
+            let fits = point_in_ring(candidate, ring)
+                && [(-hw, -hd), (hw, -hd), (hw, hd), (-hw, hd)].iter().all(|(x, z)| {
+                    point_in_ring(
+                        Vec2::new(
+                            candidate.x + x * cos - z * sin,
+                            candidate.y + x * sin + z * cos,
+                        ),
+                        ring,
+                    )
+                });
+            if fits {
                 return Some(candidate);
             }
         }
         None
+    };
+    let place = |rng: &mut Rng, half_x: f32, half_z: f32| -> Option<Vec2> {
+        place_checked(rng, half_x, half_z, half_x, half_z, 0.0)
     };
     // The same, for a box that is about to be rotated.  A rotated rectangle's
     // axis-aligned half-extent is bigger than its own half-extent, and getting
@@ -49,10 +74,13 @@ pub fn roofscape(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &
     let place_box = |rng: &mut Rng, w: f32, d: f32, rotation: f32| -> Option<Vec2> {
         let (sin, cos) = rotation.sin_cos();
         let (sin, cos) = (sin.abs(), cos.abs());
-        place(
+        place_checked(
             rng,
             w * 0.5 * cos + d * 0.5 * sin,
             w * 0.5 * sin + d * 0.5 * cos,
+            w * 0.5,
+            d * 0.5,
+            rotation,
         )
     };
 
@@ -67,10 +95,15 @@ pub fn roofscape(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &
     let rotation = rng.range(-0.35, 0.35);
     let body_w = 3.2 + rng.unit() * 1.6;
     let body_d = 2.6 + rng.unit() * 0.8;
-    let cap_w = body_w + 0.40;
-    let cap_d = body_d + 0.40;
     let mut stair_house: Option<Vec2> = None;
-    if let Some(point) = place_box(&mut rng, cap_w, cap_d, rotation) {
+    // A tower crown is a small roof: if the full-size head house does not fit,
+    // a smaller one does — real crowns carry a smaller machine room, not none.
+    let fitted = [1.0_f32, 0.8, 0.65]
+        .into_iter()
+        .find_map(|k| place_box(&mut rng, body_w * k + 0.40, body_d * k + 0.40, rotation).map(|p| (p, k)));
+    if let Some((point, k)) = fitted {
+        let (body_w, body_d) = (body_w * k, body_d * k);
+        let (cap_w, cap_d) = (body_w + 0.40, body_d + 0.40);
         let height = 2.4 + rng.unit() * 1.5;
         crate::mesh::box_at(
             builder,
@@ -549,23 +582,44 @@ mod tests {
 
         // The stair head house and the lift overrun are pale masses above the
         // deck; the water tanks and the condensers are stainless; the masts are
-        // dark and thin.  Each is asserted above the roofline, because a prop
-        // *at* roof height is a prop that fell off.
-        for (material, label) in [
-            ("trim.light", "stair head house"),
-            ("metal.ac", "water tank / condenser"),
-            ("trim.dark", "antenna mast"),
-        ] {
-            let group = groups
-                .iter()
-                .find(|group| group.material == material)
-                .unwrap_or_else(|| panic!("no {label} geometry"));
-            let above = group
-                .positions
-                .chunks_exact(3)
-                .filter(|c| c[1] > highest_roof + 0.8)
-                .count();
-            assert!(above > 20, "only {above} vertices of {label} sit above a roof");
+        // dark and thin.  Each is asserted above *its own building's* roofline,
+        // because a prop at roof height is a prop that fell off.  (Measured per
+        // building, not against the tallest roof in the city: a stepped crown's
+        // top deck carries a mast by design, so the tallest roof need not carry
+        // a stair house.)
+        let mut above = [0_usize; 3];
+        let materials = ["trim.light", "metal.ac", "trim.dark"];
+        for building in &city.buildings {
+            let ring = ring_of(&building.footprint, city.frame);
+            if ring.len() < 3 || signed_area(&ring).abs() < 90.0 {
+                continue;
+            }
+            let mut outward = ring.clone();
+            if signed_area(&outward) < 0.0 {
+                outward.reverse();
+            }
+            let upper_storeys = (building.floors as f32 - 1.0).max(1.0);
+            let deck = level::GROUND + GROUND_STOREY_M + upper_storeys * STOREY_M;
+            let mut single = MeshBuilder::new();
+            roofscape(building, &outward, deck, &mut single);
+            for group in single.build().meshes {
+                if let Some(slot) = materials.iter().position(|m| *m == group.material) {
+                    above[slot] += group
+                        .positions
+                        .chunks_exact(3)
+                        .filter(|c| c[1] > deck + 0.8)
+                        .count();
+                }
+            }
+        }
+        for (slot, label) in
+            ["stair head house", "water tank / condenser", "antenna mast"].iter().enumerate()
+        {
+            assert!(
+                above[slot] > 20,
+                "only {} vertices of {label} sit above a roof",
+                above[slot]
+            );
         }
     }
 
