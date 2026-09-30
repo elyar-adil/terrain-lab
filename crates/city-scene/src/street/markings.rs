@@ -430,6 +430,22 @@ pub(super) fn road_markings(network: &Network, road: &Road, builder: &mut MeshBu
     }
 }
 
+/// Does any approach into `node` get a left-turn waiting box?  The box owns the
+/// ground it stands on, so a junction with one never also gets a hatched grid.
+pub(super) fn node_has_waiting_box(network: &Network, node: u32) -> bool {
+    network.lanes.iter().any(|lane| {
+        lane.to_node == node
+            && lane.index == 0
+            && lane.allowed.contains(&Movement::Left)
+            && network
+                .lanes
+                .iter()
+                .filter(|o| o.road == lane.road && o.to_node == node && o.direction == lane.direction)
+                .count()
+                >= 2
+    })
+}
+
 /// The left-turn waiting box (左转待转区).
 ///
 /// The source kernel's box runs from the stop line — `stopLineGap` = 5.2 m back

@@ -385,7 +385,12 @@ pub fn build(network: &Network, builder: &mut MeshBuilder, seed: u32) -> StreetO
     let mut output = StreetOutput::default();
     for junction in &network.junctions {
         surfaces::junction_geometry(junction, builder, &spec);
-        surfaces::junction_details(junction, builder, &spec);
+        surfaces::junction_details(
+            junction,
+            builder,
+            &spec,
+            !markings::node_has_waiting_box(network, junction.node),
+        );
         if junction.kind == urban::JunctionKind::Roundabout {
             surfaces::roundabout(junction, builder, &spec);
         }

@@ -531,8 +531,10 @@ pub(super) fn junction_geometry(junction: &Junction, builder: &mut MeshBuilder, 
 
 /// The junction's own markings: the yellow no-stopping box on a large signalised
 /// junction, and the give-way line of triangles on every unsignalised approach.
-pub(super) fn junction_details(junction: &Junction, builder: &mut MeshBuilder, spec: &JunctionSpec) {
-    yellow_grid_box(junction, builder, spec);
+pub(super) fn junction_details(junction: &Junction, builder: &mut MeshBuilder, spec: &JunctionSpec, grid: bool) {
+    if grid {
+        yellow_grid_box(junction, builder, spec);
+    }
     give_way_across_approach(junction, builder, spec);
 }
 
