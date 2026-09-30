@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { createCityLayer, type CityLayer } from "../city/cityLayer";
+import { beginCityLayer, type CityLayer, type CityLayerBuild } from "../city/cityLayer";
+import { createFramePerf, perfEnabled, perfTiming } from "../city/perf";
+import { Roam } from "../city/roam";
 import type { CityScene } from "../city/cityScene";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
@@ -335,6 +337,7 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     renderer.shadowMap.autoUpdate = false;
     renderer.toneMappingExposure = 1.08;
     host.appendChild(renderer.domElement);
+    const framePerf = createFramePerf(renderer);
 
     // 路口工坊移植:写实天空穹顶(同一份材质烘成 PMREM 环境贴图,玻璃与
     // 水面反射真实天色),跟随相机的巨大球壳,renderOrder 最先绘制。
@@ -856,6 +859,63 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       Math.max(0, sampleGrid(heights, worldX, worldZ) - result.stats.minElevation) * metresToScene
     );
 
+    // --- free-roam camera (walk / fly), an alternative to the orbit controls ---
+    // R toggles it, G switches walk/fly while roaming; the buttons do the same.
+    const roam = camera instanceof THREE.PerspectiveCamera
+      ? new Roam({ camera, dom: renderer.domElement, groundHeight: terrainHeightAt, metresToScene, halfExtent: terrainHalfExtent })
+      : null;
+    const roamUi: { root: HTMLDivElement; roamButton: HTMLButtonElement; modeButton: HTMLButtonElement } | null = roam
+      ? (() => {
+          const root = document.createElement("div");
+          root.style.cssText = "position:absolute;z-index:4;top:14px;right:14px;display:flex;gap:1px;"
+            + "border:1px solid rgba(255,255,255,.16);background:rgba(9,13,11,.78);backdrop-filter:blur(14px)";
+          const style = "padding:7px 10px;border:0;background:transparent;color:#9da8a3;font-size:11px;cursor:pointer";
+          const roamButton = document.createElement("button");
+          roamButton.style.cssText = style;
+          const modeButton = document.createElement("button");
+          modeButton.style.cssText = style;
+          root.append(roamButton, modeButton);
+          host.appendChild(root);
+          return { root, roamButton, modeButton };
+        })()
+      : null;
+    const refreshRoamUi = () => {
+      if (!roam || !roamUi) return;
+      roamUi.roamButton.textContent = roam.active ? "轨道视角 (R)" : "自由漫游 (R)";
+      roamUi.roamButton.style.background = roam.active ? "var(--accent, #d7ff72)" : "transparent";
+      roamUi.roamButton.style.color = roam.active ? "#11160f" : "#9da8a3";
+      roamUi.modeButton.style.display = roam.active ? "" : "none";
+      roamUi.modeButton.textContent = roam.walking ? "步行 → 飞行 (G)" : "飞行 → 步行 (G)";
+    };
+    let controlsRef: OrbitControls | null = null;
+    const setRoam = (on: boolean) => {
+      if (!roam || !controlsRef) return;
+      if (on && !roam.active) {
+        roam.enter(false);
+        controlsRef.enabled = false;
+      } else if (!on && roam.active) {
+        roam.exit();
+        controlsRef.enabled = true;
+        controlsRef.target.copy(roam.groundTarget);
+        controlsRef.update();
+      }
+      refreshRoamUi();
+    };
+    const onRoamKey = (event: KeyboardEvent) => {
+      const element = event.target as HTMLElement | null;
+      if (element && /^(INPUT|SELECT|TEXTAREA)$/.test(element.tagName)) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.code === "KeyR") setRoam(!roam?.active);
+      else if (event.code === "KeyG" && roam?.active) { roam.setWalking(!roam.walking); refreshRoamUi(); }
+    };
+    if (roam && roamUi) {
+      controlsRef = controls;
+      roamUi.roamButton.onclick = () => setRoam(!roam.active);
+      roamUi.modeButton.onclick = () => { roam.setWalking(!roam.walking); refreshRoamUi(); };
+      window.addEventListener("keydown", onRoamKey);
+      refreshRoamUi();
+    }
+
     // City generators provide real kilometre footprints and metre heights.
     // Build those exact polygons rather than scattering illustrative boxes.
     // Each style is merged into one draw call; geometry remains 1:1 because
@@ -1328,31 +1388,158 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
     scene.add(cityGroup);
 
     // --- the metre-scale city, mounted in this scene ------------------------
+    // Mounting is incremental. `mountCity` only starts a resumable build; the
+    // frame loop feeds it a few milliseconds a frame (`stepCityMount`), then warms
+    // the GPU buffers a few megabytes a frame on a layer the main camera does not
+    // see, and only when both are finished does the city appear. So the approach
+    // to a city never shows a half-built one and never stalls on the build.
+    const CITY_SLICE_MS = 4;
+    // A frame already taking 60 ms+ is hitching regardless (software GL, a huge
+    // window), and 4 ms slices would take minutes: scale the slice with it.
+    const forcedSlice = Number(new URLSearchParams(window.location.search).get("cityslice"));
+    const citySliceFor = (frameSeconds: number) => Number.isFinite(forcedSlice) && forcedSlice > 0
+      ? forcedSlice
+      : frameSeconds > 0.06 ? Math.min(250, frameSeconds * 200) : CITY_SLICE_MS;
+    const CITY_WARM_LAYER = 7;
+    const CITY_WARM_BYTES_PER_FRAME = 4 * 1024 * 1024;
     let cityLayer: CityLayer | null = null;
     let cityAnchor: THREE.Vector3 | null = null;
+    let cityBuild: CityLayerBuild | null = null;
+    let cityBuildData: CityScene | null = null;
+    let cityWarm: { layer: CityLayer; pieces: THREE.Mesh[]; next: number; camera: THREE.PerspectiveCamera } | null = null;
+    let cityWarmTarget: THREE.WebGLRenderTarget | null = null;
+    const abandonCityMount = () => {
+      cityBuild?.cancel();
+      cityBuild = null;
+      cityBuildData = null;
+      if (cityWarm) {
+        cityWarm.layer.dispose();
+        cityWarm = null;
+      }
+    };
     const mountCity = (data: CityScene | null) => {
+      abandonCityMount();
       if (cityLayer) {
         cityLayer.dispose();
         cityLayer = null;
         cityAnchor = null;
       }
       if (!data) return;
-      const layer = createCityLayer(data);
+      cityBuild = beginCityLayer(data);
+      cityBuildData = data;
+      // Known up front so the unload test in `requestNearbyCity` works mid-build.
+      cityAnchor = new THREE.Vector3(
+        (data.origin[0] - cityHalfExtentKm) * kilometreToScene,
+        0,
+        (data.origin[1] - cityHalfExtentKm) * kilometreToScene,
+      );
+    };
+    // Position the finished layer and start warming it.
+    const beginCityWarm = (layer: CityLayer, data: CityScene) => {
       const worldX = (data.origin[0] - cityHalfExtentKm) * kilometreToScene;
       const worldZ = (data.origin[1] - cityHalfExtentKm) * kilometreToScene;
       layer.group.scale.setScalar(metresToScene);
       layer.group.rotation.y = -data.rotationRadians;
       // The terrain under the city was levelled 0.8 m below this, so the apron
       // and roadbed always sit on top of it.
-      layer.group.position.set(worldX, terrainHeightAt(worldX, worldZ) + 0.12 * metresToScene, worldZ);
+      const groundY = terrainHeightAt(worldX, worldZ);
+      layer.group.position.set(worldX, groundY + 0.12 * metresToScene, worldZ);
       // Static city: freeze every transform so three.js does not recompute them.
       layer.group.updateMatrixWorld(true);
+      const pieces: THREE.Mesh[] = [];
       layer.group.traverse((object) => {
         if (object !== layer.group) object.matrixAutoUpdate = false;
+        const piece = object as THREE.Mesh;
+        if (piece.geometry && (piece.isMesh || (piece as unknown as { isInstancedMesh?: boolean }).isInstancedMesh)) {
+          pieces.push(piece);
+          piece.userData.wasVisible = piece.visible;
+          piece.layers.set(CITY_WARM_LAYER);
+          piece.visible = false;
+        }
       });
+      // Group by material so a batch introduces few new shader programs: linking
+      // a program is the other big stall besides buffer upload.
+      const materialOrder = new Map<string, number>();
+      for (const piece of pieces) {
+        const id = (piece.material as THREE.Material).uuid;
+        if (!materialOrder.has(id)) materialOrder.set(id, materialOrder.size);
+      }
+      pieces.sort((a, b) => (materialOrder.get((a.material as THREE.Material).uuid) as number) - (materialOrder.get((b.material as THREE.Material).uuid) as number));
+      const [minX, minZ, maxX, maxZ] = data.extentM;
+      const radius = Math.max(maxX - minX, maxZ - minZ, 200) * 0.75 * metresToScene;
+      const warmCamera = new THREE.PerspectiveCamera(120, 1, radius * 0.05, radius * 12);
+      warmCamera.position.set(worldX, groundY + radius * 1.1, worldZ);
+      warmCamera.up.set(0, 0, -1);
+      warmCamera.lookAt(worldX, groundY, worldZ);
+      warmCamera.layers.set(CITY_WARM_LAYER);
+      warmCamera.updateMatrixWorld(true);
       scene.add(layer.group);
-      cityLayer = layer;
-      cityAnchor = new THREE.Vector3(worldX, 0, worldZ);
+      cityWarm = { layer, pieces, next: 0, camera: warmCamera };
+      cityWarmTarget ??= new THREE.WebGLRenderTarget(8, 8, { type: THREE.HalfFloatType });
+    };
+    const geometryBytes = (piece: THREE.Mesh) => {
+      let bytes = 0;
+      for (const name in piece.geometry.attributes) bytes += (piece.geometry.attributes[name] as THREE.BufferAttribute).array.byteLength;
+      if (piece.geometry.index) bytes += piece.geometry.index.array.byteLength;
+      return bytes;
+    };
+    // Called once per frame before rendering.
+    const stepCityMount = (frameSeconds: number) => {
+      const slowFrame = frameSeconds > 0.06 && !(forcedSlice > 0);
+      if (cityBuild && cityBuildData) {
+        if (cityBuild.step(citySliceFor(frameSeconds)) && cityBuild.layer) {
+          const layer = cityBuild.layer;
+          const data = cityBuildData;
+          cityBuild = null;
+          cityBuildData = null;
+          beginCityWarm(layer, data);
+        }
+        return;
+      }
+      if (!cityWarm) return;
+      const warm = cityWarm;
+      const started = performance.now();
+      const batch: THREE.Mesh[] = [];
+      const batchMaterials = new Set<string>();
+      let bytes = 0;
+      const maxMaterials = slowFrame ? 24 : 3;
+      while (warm.next < warm.pieces.length && bytes < CITY_WARM_BYTES_PER_FRAME * (slowFrame ? 8 : 1)) {
+        const piece = warm.pieces[warm.next];
+        const materialId = (piece.material as THREE.Material).uuid;
+        if (batchMaterials.size >= maxMaterials && !batchMaterials.has(materialId)) break;
+        batchMaterials.add(materialId);
+        warm.next += 1;
+        bytes += geometryBytes(piece);
+        piece.visible = Boolean(piece.userData.wasVisible);
+        batch.push(piece);
+      }
+      if (batch.length > 0) {
+        // Draw this batch into a tiny target from above the city: everything is
+        // in view, so buffers, textures and programs upload now, over several
+        // frames, instead of in the frame the city appears.
+        const target = cityWarmTarget as THREE.WebGLRenderTarget;
+        // Hold back a pending shadow refresh: this pass sees only the city layer,
+        // and must not consume (or draw) the shadow map meant for the real frame.
+        const shadowPending = renderer.shadowMap.needsUpdate;
+        renderer.shadowMap.needsUpdate = false;
+        renderer.setRenderTarget(target);
+        renderer.render(scene, warm.camera);
+        renderer.setRenderTarget(null);
+        renderer.shadowMap.needsUpdate = shadowPending;
+        for (const piece of batch) piece.visible = false;
+        perfTiming("cityWarmSliceMaxMs", performance.now() - started);
+        perfTiming(`cityWarm${warm.next}Ms`, performance.now() - started);
+      }
+      if (warm.next >= warm.pieces.length) {
+        for (const piece of warm.pieces) {
+          piece.visible = Boolean(piece.userData.wasVisible);
+          piece.layers.set(0);
+        }
+        cityLayer = warm.layer;
+        cityWarm = null;
+        perfTiming("cityMountedAtS", performance.now() / 1000);
+        renderer.shadowMap.needsUpdate = true;
+      }
     };
     cityMountRef.current = mountCity;
     mountCity(cityLoadedRef.current);
@@ -3128,6 +3315,7 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       const focusRequest = cityFocusRef.current;
       if (focusRequest && focusRequest.nonce !== handledFocusNonce) {
         handledFocusNonce = focusRequest.nonce;
+        if (roam?.active) setRoam(false);
         const fx = (focusRequest.xKm - cityHalfExtentKm) * kilometreToScene;
         const fz = (focusRequest.yKm - cityHalfExtentKm) * kilometreToScene;
         const fy = terrainHeightAt(fx, fz);
@@ -3145,7 +3333,14 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
           camera.position.set(fx, fy + 5.2, fz + 0.001);
         }
       }
-      controls.update();
+      if (roam?.active) {
+        // The roam camera moves the camera itself; the orbit-centred systems
+        // below (planes, detail streaming, shadows, LOD) follow its ground target.
+        roam.update(delta);
+        controls.target.copy(roam.groundTarget);
+      } else {
+        controls.update();
+      }
       if (camera instanceof THREE.PerspectiveCamera) {
         // Keep the orbit focus attached to the terrain while panning, and keep
         // the eye above the sampled surface. This is collision against the same
@@ -3295,7 +3490,31 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       // 路口工坊移植:天空穹顶跟随相机并推进云漂移;雾距随视野缩放,远景
       // 融进天穹地平线色;太阳阴影相机贴着轨道目标,低频刷新投影。
       skyUniforms.uTime.value = worldTime;
-      cityLayer?.update(worldTime, camera.position.distanceTo(controls.target) * sceneToMetres);
+      if (cityLayer?.update(worldTime, camera.position.distanceTo(controls.target) * sceneToMetres, camera)) {
+        // City shadow casters changed tier: redraw the shadow map now rather
+        // than waiting for the periodic refresh.
+        renderer.shadowMap.needsUpdate = true;
+      }
+      // Contact occlusion is a 0.8 m effect: beyond a kilometre of view it is
+      // invisible, and it costs a second scene render plus full-screen passes.
+      if (gtaoPassRef) {
+        const wantAo = viewSpanMetres < 1500;
+        if (gtaoPassRef.enabled !== wantAo) gtaoPassRef.enabled = wantAo;
+      }
+      stepCityMount(delta);
+      if (perfEnabled) {
+        if (cityLayer) {
+          const lod = cityLayer.lodStats();
+          perfTiming("lodInstances", lod.instances);
+          perfTiming("lodHiddenStatics", lod.hiddenStatics);
+        }
+        perfTiming("viewSpanM", viewSpanMetres);
+        perfTiming("roam", roam?.active ? (roam.walking ? 2 : 1) : 0);
+        perfTiming("camXm", camera.position.x * sceneToMetres);
+        perfTiming("camYm", camera.position.y * sceneToMetres);
+        perfTiming("camZm", camera.position.z * sceneToMetres);
+        perfTiming("groundYm", terrainHeightAt(camera.position.x, camera.position.z) * sceneToMetres);
+      }
       skyDome.position.copy(camera.position);
       // The dome must sit inside the far plane or the frustum clips it away and
       // the sky renders as black.
@@ -3315,10 +3534,21 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       requestNearbyCity();
       frameCounter += 1;
       if (frameCounter % 45 === 1) renderer.shadowMap.needsUpdate = true;
+      framePerf.begin();
       if (composer && cameraMode === "3d") {
         (composer as unknown as { render: () => void }).render();
       } else {
         renderer.render(scene, camera);
+      }
+      framePerf.end();
+      if (perfEnabled) {
+        // Headless captures: a compositor screenshot never lands while software GL
+        // saturates the main thread, so copy the canvas in the task that drew it.
+        const w = window as unknown as { __SNAP__?: boolean; __SNAPSHOT__?: string };
+        if (w.__SNAP__) {
+          w.__SNAPSHOT__ = renderer.domElement.toDataURL("image/png");
+          w.__SNAP__ = false;
+        }
       }
       frame = requestAnimationFrame(animate);
     };
@@ -3328,6 +3558,12 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       cancelAnimationFrame(frame);
       observer.disconnect();
       cityMountRef.current = null;
+      framePerf.dispose();
+      window.removeEventListener("keydown", onRoamKey);
+      roam?.dispose();
+      roamUi?.root.remove();
+      abandonCityMount();
+      cityWarmTarget?.dispose();
       cityLayer?.dispose();
       controls.dispose();
       texture.dispose();

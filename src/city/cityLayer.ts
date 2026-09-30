@@ -7,15 +7,21 @@
  * whole map down to a street is one continuous camera move. This module builds
  * everything that belongs to the city itself — geometry, instanced trees and
  * lamps, the traffic fleet — and leaves lights, sky, fog and post to the host.
+ *
+ * Building is resumable (`beginCityLayer`): the host calls `step` with a few
+ * milliseconds a frame and mounts the group only when it reports done.
  */
 
 import * as THREE from "three";
 
+import { CityLod } from "./cityLod";
+import { perfTiming } from "./perf";
 import {
+  type CityBuild,
   type CityHandles,
   type CityScene,
   type MaterialCatalogue,
-  buildCityScene,
+  beginCityBuild,
   createMaterials,
 } from "./cityScene";
 
@@ -24,9 +30,26 @@ export interface CityLayer {
   group: THREE.Group;
   scene: CityScene;
   problems: string[];
-  /** Advance animated surfaces (water) to the host's clock, in seconds. */
-  update(seconds: number, cameraDistanceM?: number): void;
+  /**
+   * Advance animated surfaces (water) to the host's clock, in seconds, and
+   * distance- and view-cull. `camera` is the host's camera (the group's
+   * transform must be current); without it, LOD is skipped. Returns true when
+   * shadow casters changed and the host should refresh its shadow map.
+   */
+  update(seconds: number, cameraDistanceM?: number, camera?: THREE.Camera): boolean;
+  /** What the LOD currently keeps, for the perf overlay. */
+  lodStats(): { hiddenStatics: number; instances: number };
   dispose(): void;
+}
+
+/** A city layer under construction; see `beginCityLayer`. */
+export interface CityLayerBuild {
+  /** Null until `done`. */
+  readonly layer: CityLayer | null;
+  readonly done: boolean;
+  readonly progress: number;
+  step(budgetMs: number): boolean;
+  cancel(): void;
 }
 
 const PAINTS = [
@@ -34,12 +57,77 @@ const PAINTS = [
   0x9ea3a8, 0x9ea3a8, 0x5b5e63, 0x8c1c1c, 0x24406f, 0x6b5a44,
 ];
 
+/** Build a whole layer at once (blocks). Hosts with a frame loop use `beginCityLayer`. */
 export function createCityLayer(scene: CityScene): CityLayer {
+  const build = beginCityLayer(scene);
+  build.step(Number.POSITIVE_INFINITY);
+  return build.layer as CityLayer;
+}
+
+/**
+ * Build a layer a few milliseconds per call: materials, then geometry, then the
+ * layer itself. Nothing in here mounts the group, so a host that waits for
+ * `done` never draws a half-built city.
+ */
+export function beginCityLayer(scene: CityScene): CityLayerBuild {
+  let stage: 0 | 1 | 2 = 0;
+  let materials: MaterialCatalogue | null = null;
+  let build: CityBuild | null = null;
+  let layer: CityLayer | null = null;
+  let cancelled = false;
+  let cpu = 0;
+
+  return {
+    get layer() {
+      return layer;
+    },
+    get done() {
+      return layer !== null;
+    },
+    get progress() {
+      if (layer) return 1;
+      if (stage === 0) return 0;
+      return 0.05 + 0.9 * (build?.progress ?? 0);
+    },
+    step(budgetMs: number): boolean {
+      if (layer || cancelled) return layer !== null;
+      const sliceStart = performance.now();
+      const deadline = sliceStart + budgetMs;
+      if (stage === 0) {
+        let lampTotal = 0;
+        for (const rig of scene.signals) lampTotal += rig.lamps.length;
+        materials = createMaterials(scene.textures, lampTotal);
+        perfTiming("cityMaterialsMs", performance.now() - sliceStart);
+        stage = 1;
+        build = beginCityBuild(scene, materials, { chunkCellM: 320, chunkMinTriangles: 8000, lod: true });
+      }
+      if (stage === 1 && build) {
+        if (build.step(Math.max(0, deadline - performance.now()))) stage = 2;
+      }
+      if (stage === 2 && build && materials) {
+        layer = finishLayer(scene, materials, build.handles);
+      }
+      const slice = performance.now() - sliceStart;
+      cpu += slice;
+      perfTiming("cityBuildSliceMaxMs", slice);
+      perfTiming("cityBuildCpuMs", cpu);
+      return layer !== null;
+    },
+    cancel() {
+      if (cancelled || layer) return;
+      cancelled = true;
+      build?.cancel();
+      materials?.dispose();
+    },
+  };
+}
+
+function finishLayer(
+  scene: CityScene,
+  materials: MaterialCatalogue,
+  handles: CityHandles,
+): CityLayer {
   const problems: string[] = [];
-  let lampTotal = 0;
-  for (const rig of scene.signals) lampTotal += rig.lamps.length;
-  const materials: MaterialCatalogue = createMaterials(scene.textures, lampTotal);
-  const handles: CityHandles = buildCityScene(scene, materials);
   const group = new THREE.Group();
   group.name = "city-layer";
   group.add(handles.group);
@@ -99,30 +187,35 @@ export function createCityLayer(scene: CityScene): CityLayer {
     group.add(mesh);
   });
 
-  const cores: THREE.Object3D[] = [];
-  group.traverse((object) => {
-    if (object.userData.part === "mass") cores.push(object);
-  });
+  const lod = new CityLod(handles);
+  const inverse = new THREE.Matrix4();
+  const viewProjection = new THREE.Matrix4();
+  const frustum = new THREE.Frustum();
+  const local = new THREE.Vector3();
+  const forward = new THREE.Vector3();
 
   return {
     group,
     scene,
     problems,
-    update(seconds: number, cameraDistanceM = 0) {
-      // The solid core inside each crown exists only so that, from far above, a
-      // forest reads as a dense canopy instead of scattered cards. Up close the
-      // real branches and leaf clumps carry the crown, so the core is dithered
-      // out (alphaHash cross-fade) between 200 m and 300 m and hidden inside.
-      const fade = Math.min(1, Math.max(0, (cameraDistanceM - 200) / 100));
-      const coreOpacity = fade * fade * (3 - 2 * fade);
-      for (const mesh of cores) {
-        const visible = coreOpacity > 0.01;
-        if (mesh.visible !== visible) mesh.visible = visible;
-        const material = (mesh as THREE.Mesh).material as THREE.Material | undefined;
-        if (material && material.opacity !== coreOpacity) material.opacity = coreOpacity;
-      }
+    update(seconds: number, cameraDistanceM = 0, camera?: THREE.Camera): boolean {
       const clock = materials.get("water").userData.uTime as { value: number } | undefined;
       if (clock) clock.value = seconds;
+      if (!camera) return false;
+      camera.updateMatrixWorld();
+      // The group's scale is metres-to-scene, so its local frame is metres and
+      // every LOD distance is a real distance.
+      inverse.copy(group.matrixWorld).invert();
+      local.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(inverse);
+      camera.getWorldDirection(forward).transformDirection(inverse);
+      // view-projection of the camera, applied to city-local points
+      viewProjection.copy(camera.matrixWorld).invert();
+      viewProjection.premultiply(camera.projectionMatrix).multiply(group.matrixWorld);
+      frustum.setFromProjectionMatrix(viewProjection);
+      return lod.update(local, forward, frustum, cameraDistanceM);
+    },
+    lodStats() {
+      return { hiddenStatics: lod.hiddenStatics, instances: lod.keptInstances };
     },
     dispose() {
       group.removeFromParent();

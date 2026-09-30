@@ -21,15 +21,15 @@ import * as THREE from "three";
 export interface SceneMesh {
   material: string;
   /** base64 little-endian `f32`, three per vertex. */
-  positions: string;
+  positions: PayloadBuffer;
   /** base64 little-endian `f32`, three per vertex. */
-  normals: string;
+  normals: PayloadBuffer;
   /** base64 `u8` RGBA, four per vertex. Present only where the material is tinted. */
-  colors?: string;
+  colors?: PayloadBuffer;
   /** base64 little-endian `f32`, two per vertex, **in metres**. */
-  uvs?: string;
+  uvs?: PayloadBuffer;
   /** base64 little-endian `u32`. */
-  indices: string;
+  indices: PayloadBuffer;
   /** The instance list this geometry is drawn with, if it is a prototype. */
   instanceOf?: string;
   vertexCount: number;
@@ -38,13 +38,15 @@ export interface SceneMesh {
   receiveShadow: boolean;
   alphaCutout: boolean;
   dynamic: boolean;
+  /** `normals` is one signed byte per component (snorm8) instead of `f32`. */
+  normalsSnorm?: boolean;
 }
 
 /** A shared instance list: ten floats per instance. */
 export interface SceneInstances {
   key: string;
   count: number;
-  data: string;
+  data: PayloadBuffer;
 }
 
 export interface SceneTexture {
@@ -54,7 +56,7 @@ export interface SceneTexture {
   tileWidthM: number;
   tileHeightM: number;
   hasNormalSource: boolean;
-  data: string;
+  data: PayloadBuffer;
 }
 
 export interface SignalLamp {
@@ -106,7 +108,18 @@ export interface CityScene {
 
 // --- buffer decoding --------------------------------------------------------
 
-function base64ToBytes(base64: string): Uint8Array {
+/**
+ * A payload buffer: base64 text straight off the wire, or bytes/typed array that
+ * `cityLoader` already decoded in a worker (which is what keeps a 160 MB scene
+ * off the main thread). Every decoder below accepts either.
+ */
+export type PayloadBuffer = string | ArrayBufferView;
+
+export function base64ToBytes(input: PayloadBuffer): Uint8Array {
+  if (typeof input !== "string") {
+    return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+  }
+  const base64 = input;
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {
@@ -122,7 +135,11 @@ function base64ToBytes(base64: string): Uint8Array {
  * and a city scene is tens of megabytes of vertex data, so the payload is base64
  * rather than a JSON array of numbers.
  */
-export function decodeFloats(base64: string, expected: number): Float32Array {
+export function decodeFloats(base64: PayloadBuffer, expected: number): Float32Array {
+  if (base64 instanceof Float32Array) {
+    if (base64.length !== expected) throw new Error(`buffer is ${base64.length} floats, expected ${expected}`);
+    return base64;
+  }
   const bytes = base64ToBytes(base64);
   // Every buffer is a whole number of 4-byte elements; a mismatch means the
   // payload and the renderer disagree about the schema, and silently
@@ -136,7 +153,11 @@ export function decodeFloats(base64: string, expected: number): Float32Array {
   return new Float32Array(copy.buffer, 0, expected);
 }
 
-export function decodeIndices(base64: string, expected: number): Uint32Array {
+export function decodeIndices(base64: PayloadBuffer, expected: number): Uint32Array {
+  if (base64 instanceof Uint32Array) {
+    if (base64.length !== expected) throw new Error(`index buffer is ${base64.length} entries, expected ${expected}`);
+    return base64;
+  }
   const bytes = base64ToBytes(base64);
   if (bytes.length !== expected * 4) {
     throw new Error(`index buffer is ${bytes.length} bytes, expected ${expected * 4}`);
@@ -175,6 +196,11 @@ export interface MaterialCatalogue {
    * facades this renderer was written to eliminate.
    */
   readonly uvMismatch: Set<string>;
+  /**
+   * Deferred work (normal-map relief) that must run before the materials are
+   * drawn. `beginCityBuild` drains it; run each entry once, in order.
+   */
+  readonly pending: Array<() => void>;
   dispose(): void;
 }
 
@@ -278,6 +304,13 @@ export function createMaterials(
    * at bake resolution, and a wide kernel over a low-resolution field flattens
    * real relief into noise that shimmers under a moving sun.
    */
+  /**
+   * The map itself is created at once (materials need the object) as a flat
+   * normal, and the relief is computed later by a job on `pending`. A caller
+   * that draws before running the jobs gets flat surfaces, not a wrong image;
+   * `beginCityBuild` runs them, a few per slice, before it uploads geometry.
+   */
+  const pending: Array<() => void> = [];
   const normalFor = (name: string, strength: number): THREE.DataTexture | null => {
     const source = sources.get(name);
     if (!source?.hasNormalSource) return null;
@@ -287,38 +320,12 @@ export function createMaterials(
     const albedo = textureFor(name);
     if (!albedo) return null;
     const { width, height } = source;
-    const pixels = albedo.image.data as Uint8Array;
-    // Decide once which channel carries the field, rather than per texel: mixing
-    // the two inside a single normal map produces a seam down the middle of it.
-    let lowest = 255;
-    let highest = 0;
-    for (let index = 3; index < pixels.length; index += 4) {
-      lowest = Math.min(lowest, pixels[index]);
-      highest = Math.max(highest, pixels[index]);
-    }
-    const alphaCarries = highest - lowest > 8;
-    const sample = (x: number, y: number) => {
-      const xx = (x + width) % width;
-      const yy = (y + height) % height;
-      const index = (yy * width + xx) * 4;
-      if (alphaCarries) return pixels[index + 3] / 255;
-      return (pixels[index] * 0.2126
-        + pixels[index + 1] * 0.7152
-        + pixels[index + 2] * 0.0722) / 255;
-    };
     const normal = new Uint8Array(width * height * 4);
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        const nx = (sample(x - 1, y) - sample(x + 1, y)) * strength;
-        const ny = (sample(x, y - 1) - sample(x, y + 1)) * strength;
-        const nz = 1.0;
-        const length = Math.hypot(nx, ny, nz);
-        const index = (y * width + x) * 4;
-        normal[index] = ((nx / length) * 0.5 + 0.5) * 255;
-        normal[index + 1] = ((ny / length) * 0.5 + 0.5) * 255;
-        normal[index + 2] = ((nz / length) * 0.5 + 0.5) * 255;
-        normal[index + 3] = 255;
-      }
+    for (let index = 0; index < normal.length; index += 4) {
+      normal[index] = 128;
+      normal[index + 1] = 128;
+      normal[index + 2] = 255;
+      normal[index + 3] = 255;
     }
     const map = new THREE.DataTexture(normal, width, height, THREE.RGBAFormat);
     map.wrapS = THREE.RepeatWrapping;
@@ -331,6 +338,58 @@ export function createMaterials(
     map.needsUpdate = true;
     cache.set(key, map);
     builtTextures.push(map);
+    // Three small jobs' worth per texture: the height field, then row bands.
+    let field: Float32Array | null = null;
+    pending.push(() => {
+      const pixels = albedo.image.data as Uint8Array;
+      // Decide once which channel carries the field, rather than per texel:
+      // mixing the two inside a single normal map produces a seam down the
+      // middle of it.
+      let lowest = 255;
+      let highest = 0;
+      for (let index = 3; index < pixels.length; index += 4) {
+        lowest = Math.min(lowest, pixels[index]);
+        highest = Math.max(highest, pixels[index]);
+      }
+      const alphaCarries = highest - lowest > 8;
+      // Sampled into a plain height array first: the derivative loop then reads
+      // neighbours by index (wrapping), instead of calling a closure four times
+      // a texel, and `Math.sqrt` replaces `Math.hypot`, which is far slower.
+      field = new Float32Array(width * height);
+      for (let index = 0; index < field.length; index += 1) {
+        const p = index * 4;
+        field[index] = alphaCarries
+          ? pixels[p + 3] / 255
+          : (pixels[p] * 0.2126 + pixels[p + 1] * 0.7152 + pixels[p + 2] * 0.0722) / 255;
+      }
+    });
+    const bands = 4;
+    for (let band = 0; band < bands; band += 1) {
+      pending.push(() => {
+        const heightField = field as Float32Array;
+        for (let y = Math.floor((height * band) / bands); y < Math.floor((height * (band + 1)) / bands); y += 1) {
+          const up = ((y + height - 1) % height) * width;
+          const row = y * width;
+          const down = ((y + 1) % height) * width;
+          for (let x = 0; x < width; x += 1) {
+            const left = (x + width - 1) % width;
+            const right = (x + 1) % width;
+            const nx = (heightField[row + left] - heightField[row + right]) * strength;
+            const ny = (heightField[up + x] - heightField[down + x]) * strength;
+            const inverse = 1 / Math.sqrt(nx * nx + ny * ny + 1);
+            const index = (row + x) * 4;
+            normal[index] = (nx * inverse * 0.5 + 0.5) * 255;
+            normal[index + 1] = (ny * inverse * 0.5 + 0.5) * 255;
+            normal[index + 2] = (inverse * 0.5 + 0.5) * 255;
+            normal[index + 3] = 255;
+          }
+        }
+        if (band === bands - 1) {
+          map.needsUpdate = true;
+          field = null;
+        }
+      });
+    }
     return map;
   };
 
@@ -770,6 +829,7 @@ export function createMaterials(
     lamps,
     missing,
     uvMismatch,
+    pending,
     dispose() {
       for (const material of built) material.dispose();
       for (const texture of builtTextures) texture.dispose();
@@ -805,6 +865,32 @@ export function foliageMaskTexture(textures: SceneTexture[]): THREE.DataTexture 
 
 // --- scene assembly ---------------------------------------------------------
 
+/**
+ * One instance list, kept in a form the per-frame LOD can compact from: the
+ * authoritative matrices (and tints) plus a bounding sphere per instance. The
+ * mesh's own `instanceMatrix` holds only the *visible* subset, front-packed.
+ */
+export interface LodInstanceSet {
+  mesh: THREE.InstancedMesh;
+  /** Instance-list key, e.g. `tree/yang-shu/0` or `furniture/bin`. */
+  key: string;
+  /** Text after `#` in the material key: `mass`, `leaf`, `bark`, or empty. */
+  part: string;
+  count: number;
+  /** `count * 16` column-major matrices. */
+  matrices: Float32Array;
+  /** `count * 3` tint, or null when the material ignores instance colour. */
+  colors: Float32Array | null;
+  /** `count * 4`: centre x, y, z (city-local metres) and radius. */
+  bounds: Float32Array;
+  /**
+   * A very coarse stand-in used beyond the proxy distance. Present for tree
+   * crowns, whose 1 280-triangle core costs far more than it can show from a
+   * kilometre away.
+   */
+  far: THREE.InstancedMesh | null;
+}
+
 /** Everything the animation loop needs to touch after the first upload. */
 export interface CityHandles {
   group: THREE.Group;
@@ -824,15 +910,100 @@ export interface CityHandles {
   carBody?: THREE.BufferGeometry;
   carGlass?: THREE.BufferGeometry;
   vehicleCount: number;
+  /** Static (non-instanced) draw pieces; large groups are split into grid cells. */
+  statics: THREE.Mesh[];
+  /** Instance lists a host can distance-cull; empty unless `BuildOptions.lod`. */
+  lodSets: LodInstanceSet[];
   dispose(): void;
 }
 
-function geometryFor(mesh: SceneMesh, uvMismatch: Set<string>): THREE.BufferGeometry {
+export interface BuildOptions {
+  /**
+   * Split every static group of at least `chunkMinTriangles` into square cells
+   * of this many metres, so each cell has real bounds and the renderer can cull
+   * (and skip in the shadow and occlusion passes) what is off screen. Zero keeps
+   * groups whole.
+   */
+  chunkCellM?: number;
+  chunkMinTriangles?: number;
+  /** Keep per-instance source data and build far proxies for a host LOD. */
+  lod?: boolean;
+}
+
+/** Raw typed arrays of one mesh, before they become a `BufferGeometry`. */
+interface MeshArrays {
+  positions: Float32Array;
+  normals: Float32Array;
+  uvs: Float32Array | null;
+  colors: Uint8Array | null;
+  indices: Uint32Array;
+}
+
+function payloadBytes(buffer: PayloadBuffer): number {
+  if (typeof buffer !== "string") return buffer.byteLength;
+  const padding = buffer.endsWith("==") ? 2 : buffer.endsWith("=") ? 1 : 0;
+  return Math.floor((buffer.length * 3) / 4) - padding;
+}
+
+/**
+ * Decode one mesh's buffers. A generator so the caller can spend a few
+ * milliseconds per frame: each `atob` of a multi-megabyte attribute is its own
+ * step.
+ */
+function* decodeMesh(mesh: SceneMesh, uvMismatch: Set<string>): Generator<void, MeshArrays> {
+  const positions = decodeFloats(mesh.positions, mesh.vertexCount * 3);
+  yield;
+  let normals: Float32Array;
+  if (mesh.normalsSnorm) {
+    // Quantised on the wire: one signed byte per component.
+    const raw = base64ToBytes(mesh.normals);
+    const bytes = new Int8Array(raw.buffer, raw.byteOffset, mesh.vertexCount * 3);
+    normals = new Float32Array(mesh.vertexCount * 3);
+    for (let index = 0; index < normals.length; index += 1) {
+      normals[index] = Math.max(-1, bytes[index] / 127);
+    }
+  } else {
+    normals = decodeFloats(mesh.normals, mesh.vertexCount * 3);
+  }
+  yield;
+  const colors = mesh.colors ? base64ToBytes(mesh.colors) : null;
+  let uvs: Float32Array | null = null;
+  if (mesh.uvs) {
+    // In metres. The texture's `repeat` does the conversion.
+    const expected = mesh.vertexCount * 2;
+    /**
+     * A short UV buffer is a scene-layer defect, not a rendering one.
+     *
+     * `MeshBuilder::quad_uv` pushes UVs unconditionally while `MeshBuilder::quad`
+     * pushes them only when asked, so a material group that received both ends
+     * up with fewer UVs than vertices — and the UVs that *are* present belong to
+     * whichever quads happened to be emitted first. Reinterpreting the array
+     * would smear one wall's texture across another.
+     *
+     * There is no way to recover which vertices are missing, so the honest
+     * recovery is to drop UVs for the whole group: the surface renders
+     * untextured, which is plainly wrong and therefore plainly visible, rather
+     * than subtly wrong. And it is reported, so the caller finds out which
+     * material is at fault instead of hunting a wall that looks striped.
+     */
+    const bytes = payloadBytes(mesh.uvs);
+    if (Math.abs(bytes - expected * 4) > 2) {
+      uvMismatch.add(
+        `${mesh.material}: ${mesh.vertexCount} verts need ${expected * 4} B of UV, got ${bytes} B`,
+      );
+    } else {
+      uvs = decodeFloats(mesh.uvs, expected);
+    }
+    yield;
+  }
+  const indices = decodeIndices(mesh.indices, mesh.triangleCount * 3);
+  yield;
+  return { positions, normals, uvs, colors, indices };
+}
+
+function geometryFromArrays(arrays: MeshArrays, mesh: SceneMesh): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.BufferAttribute(decodeFloats(mesh.positions, mesh.vertexCount * 3), 3),
-  );
+  geometry.setAttribute("position", new THREE.BufferAttribute(arrays.positions, 3));
   // Foliage is drawn from alpha-cut cards, and the occlusion pass needs to
   // know that per vertex: its G-buffer sees every quad as solid otherwise,
   // which turns each canopy into a self-occluding blob. `post.ts` patches its
@@ -841,193 +1012,399 @@ function geometryFor(mesh: SceneMesh, uvMismatch: Set<string>): THREE.BufferGeom
   if (mesh.alphaCutout && (mesh.material === "tuft" || mesh.material.startsWith("leaf"))) {
     geometry.setAttribute(
       "aLeafCard",
-      new THREE.BufferAttribute(new Float32Array(mesh.vertexCount).fill(1), 1),
+      new THREE.BufferAttribute(new Float32Array(arrays.positions.length / 3).fill(1), 1),
     );
   }
-  geometry.setAttribute(
-    "normal",
-    new THREE.BufferAttribute(decodeFloats(mesh.normals, mesh.vertexCount * 3), 3),
-  );
-  if (mesh.colors) {
+  geometry.setAttribute("normal", new THREE.BufferAttribute(arrays.normals, 3));
+  if (arrays.colors) {
     // `u8` normalised: four bytes per vertex instead of twelve, and a facade
     // tint needs nowhere near eight bits of headroom to look right.
-    geometry.setAttribute(
-      "color",
-      new THREE.BufferAttribute(base64ToBytes(mesh.colors), 4, true),
-    );
+    geometry.setAttribute("color", new THREE.BufferAttribute(arrays.colors, 4, true));
   }
-  if (mesh.uvs) {
-    // In metres. The texture's `repeat` does the conversion.
-    const expected = mesh.vertexCount * 2;
-    /**
-     * `atob` returns a *binary string*: one character per decoded **byte**, not
-     * one per input character. Scaling its length by 3/4 to "recover" a byte
-     * count applies the base64 expansion factor twice, which reports every
-     * buffer in the payload as two-thirds of its real size — and then reports a
-     * healthy city as broken in its entirety.
-     */
-    const bytes = atob(mesh.uvs).length;
-    if (Math.abs(bytes - expected * 4) > 2) {
-      /**
-       * A short UV buffer is a scene-layer defect, not a rendering one.
-       *
-       * `MeshBuilder::quad_uv` pushes UVs unconditionally while `MeshBuilder::quad`
-       * pushes them only when asked, so a material group that received both ends
-       * up with fewer UVs than vertices — and the UVs that *are* present belong to
-       * whichever quads happened to be emitted first. Reinterpreting the array
-       * would smear one wall's texture across another.
-       *
-       * There is no way to recover which vertices are missing, so the honest
-       * recovery is to drop UVs for the whole group: the surface renders
-       * untextured, which is plainly wrong and therefore plainly visible, rather
-       * than subtly wrong. And it is reported, so the caller finds out which
-       * material is at fault instead of hunting a wall that looks striped.
-       */
-      uvMismatch.add(
-        `${mesh.material}: ${mesh.vertexCount} verts need ${expected * 4} B of UV, got ${bytes} B`,
-      );
-    } else {
-      geometry.setAttribute(
-        "uv",
-        new THREE.BufferAttribute(decodeFloats(mesh.uvs, expected), 2),
-      );
-    }
-  }
-  geometry.setIndex(new THREE.BufferAttribute(decodeIndices(mesh.indices, mesh.triangleCount * 3), 1));
-  // The payload states the real extent, so the renderer does not have to walk
-  // every vertex to work out a bounding sphere. Doing it correctly matters
-  // because an instanced mesh is bounded by its geometry, not by its instances.
+  if (arrays.uvs) geometry.setAttribute("uv", new THREE.BufferAttribute(arrays.uvs, 2));
+  geometry.setIndex(new THREE.BufferAttribute(arrays.indices, 1));
+  // The bounds matter: an instanced mesh is bounded by its geometry, and a
+  // chunk is only cullable if its own box is tight.
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   return geometry;
 }
 
 /**
- * Upload one city scene.
+ * Split one mesh into square cells by triangle centroid. Yields once per cell so
+ * a 400 000-vertex group never becomes one long task. Returns the original
+ * arrays untouched when everything falls in a single cell.
+ */
+function* splitIntoCells(arrays: MeshArrays, cellM: number): Generator<void, MeshArrays[]> {
+  const { positions, indices } = arrays;
+  const triangles = indices.length / 3;
+  const bins = new Map<number, number[]>();
+  for (let t = 0; t < triangles; t += 1) {
+    const a = indices[t * 3] * 3;
+    const b = indices[t * 3 + 1] * 3;
+    const c = indices[t * 3 + 2] * 3;
+    const cx = Math.floor((positions[a] + positions[b] + positions[c]) / (3 * cellM));
+    const cz = Math.floor((positions[a + 2] + positions[b + 2] + positions[c + 2]) / (3 * cellM));
+    const key = (cx + 2048) * 4096 + (cz + 2048);
+    let list = bins.get(key);
+    if (!list) {
+      list = [];
+      bins.set(key, list);
+    }
+    list.push(t);
+    if ((t & 0xffff) === 0xffff) yield;
+  }
+  yield;
+  if (bins.size <= 1) return [arrays];
+  const vertexCount = positions.length / 3;
+  const remap = new Int32Array(vertexCount).fill(-1);
+  const out: MeshArrays[] = [];
+  for (const list of bins.values()) {
+    const touched: number[] = [];
+    const local = new Uint32Array(list.length * 3);
+    let cursor = 0;
+    for (const t of list) {
+      for (let corner = 0; corner < 3; corner += 1) {
+        const source = indices[t * 3 + corner];
+        let mapped = remap[source];
+        if (mapped < 0) {
+          mapped = touched.length;
+          remap[source] = mapped;
+          touched.push(source);
+        }
+        local[cursor] = mapped;
+        cursor += 1;
+      }
+    }
+    const n = touched.length;
+    const p = new Float32Array(n * 3);
+    const nr = new Float32Array(n * 3);
+    const uv = arrays.uvs ? new Float32Array(n * 2) : null;
+    const col = arrays.colors ? new Uint8Array(n * 4) : null;
+    for (let i = 0; i < n; i += 1) {
+      const s = touched[i];
+      p[i * 3] = positions[s * 3];
+      p[i * 3 + 1] = positions[s * 3 + 1];
+      p[i * 3 + 2] = positions[s * 3 + 2];
+      nr[i * 3] = arrays.normals[s * 3];
+      nr[i * 3 + 1] = arrays.normals[s * 3 + 1];
+      nr[i * 3 + 2] = arrays.normals[s * 3 + 2];
+      if (uv && arrays.uvs) {
+        uv[i * 2] = arrays.uvs[s * 2];
+        uv[i * 2 + 1] = arrays.uvs[s * 2 + 1];
+      }
+      if (col && arrays.colors) {
+        col[i * 4] = arrays.colors[s * 4];
+        col[i * 4 + 1] = arrays.colors[s * 4 + 1];
+        col[i * 4 + 2] = arrays.colors[s * 4 + 2];
+        col[i * 4 + 3] = arrays.colors[s * 4 + 3];
+      }
+    }
+    for (let i = 0; i < n; i += 1) remap[touched[i]] = -1;
+    out.push({ positions: p, normals: nr, uvs: uv, colors: col, indices: local });
+    yield;
+  }
+  return out;
+}
+
+/** A low-poly ellipsoid around a prototype's bounds, tinted like the prototype. */
+function farProxyGeometry(
+  source: THREE.BufferGeometry,
+  arrays: MeshArrays,
+): THREE.BufferGeometry {
+  const box = source.boundingBox ?? new THREE.Box3().setFromBufferAttribute(source.attributes.position as THREE.BufferAttribute);
+  const centre = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const proxy = new THREE.IcosahedronGeometry(0.5, 1);
+  proxy.scale(size.x, size.y, size.z);
+  proxy.translate(centre.x, centre.y, centre.z);
+  const vertices = proxy.attributes.position.count;
+  if (arrays.uvs) proxy.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(vertices * 2), 2));
+  if (arrays.colors) {
+    // Mean of the prototype's vertex colours, so the stand-in matches its crown.
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    const n = arrays.colors.length / 4;
+    const stride = Math.max(1, Math.floor(n / 512));
+    let taken = 0;
+    for (let i = 0; i < n; i += stride) {
+      r += arrays.colors[i * 4];
+      g += arrays.colors[i * 4 + 1];
+      b += arrays.colors[i * 4 + 2];
+      taken += 1;
+    }
+    const mean = [Math.round(r / taken), Math.round(g / taken), Math.round(b / taken)];
+    const colours = new Uint8Array(vertices * 4);
+    for (let i = 0; i < vertices; i += 1) {
+      colours[i * 4] = mean[0];
+      colours[i * 4 + 1] = mean[1];
+      colours[i * 4 + 2] = mean[2];
+      colours[i * 4 + 3] = 255;
+    }
+    proxy.setAttribute("color", new THREE.BufferAttribute(colours, 4, true));
+  }
+  proxy.computeBoundingSphere();
+  proxy.computeBoundingBox();
+  return proxy;
+}
+
+/** A resumable build. Call `step` from the frame loop with a small budget. */
+export interface CityBuild {
+  readonly handles: CityHandles;
+  readonly done: boolean;
+  /** 0..1, by mesh count. */
+  readonly progress: number;
+  /**
+   * Run for about `budgetMs`, then return. True once everything is built.
+   * A single step can overrun by the cost of one attribute decode.
+   */
+  step(budgetMs: number): boolean;
+  /** Abandon a half-built city and free whatever was allocated. */
+  cancel(): void;
+}
+
+/**
+ * Begin uploading one city scene, resumably.
  *
  * Static groups become plain meshes. Groups that name an instance list become
  * `InstancedMesh`, which is the whole reason a city can have thousands of
  * leaf-detailed trees in a few dozen draw calls: the tree geometry is uploaded
  * once and the instance buffer positions it.
+ *
+ * Nothing is added to `handles.group` in a visible state until the host chooses
+ * to mount the group; a host that mounts only after `done` never shows a
+ * half-built city.
  */
-export function buildCityScene(scene: CityScene, materials: MaterialCatalogue): CityHandles {
+export function beginCityBuild(
+  scene: CityScene,
+  materials: MaterialCatalogue,
+  options: BuildOptions = {},
+): CityBuild {
   const group = new THREE.Group();
   group.name = "city";
-  // Every GPU resource this call allocated. A `THREE.Mesh` does not implement
+  // Every GPU resource this build allocated. A `THREE.Mesh` does not implement
   // `dispose` — only its geometry does — so the list holds geometries and
   // instanced meshes explicitly rather than objects, which is what makes
   // teardown total.
   const ownedGeometries: THREE.BufferGeometry[] = [];
   const ownedInstanced: THREE.InstancedMesh[] = [];
   const instanced = new Map<string, THREE.InstancedMesh>();
-  const prototypes = new Map<string, {
-    geometry: THREE.BufferGeometry;
-    material: THREE.Material;
-  }>();
+  const prototypes = new Map<string, { geometry: THREE.BufferGeometry; material: THREE.Material }>();
+  const statics: THREE.Mesh[] = [];
+  const lodSets: LodInstanceSet[] = [];
+  const chunkCell = options.chunkCellM ?? 0;
+  const chunkMin = options.chunkMinTriangles ?? 6000;
+  let carBody: THREE.BufferGeometry | undefined;
+  let carGlass: THREE.BufferGeometry | undefined;
+  let finished = false;
+  let cancelled = false;
+  let meshesDone = 0;
 
-  // Decode every instance list first: a prototype's geometry may be declared
-  // before the list it draws, and the order in the payload is not a contract.
-  const lists = new Map<string, { count: number; floats: Float32Array }>();
-  for (const list of scene.instances) {
-    lists.set(list.key, {
-      count: list.count,
-      floats: decodeFloats(list.data, list.count * 10),
-    });
-  }
+  const dispose = () => {
+    for (const mesh of ownedInstanced) mesh.dispose();
+    for (const geometry of ownedGeometries) geometry.dispose();
+    group.clear();
+  };
 
-  const dummy = new THREE.Object3D();
-  const colour = new THREE.Color();
-
-  for (const mesh of scene.meshes) {
-    if (!mesh.vertexCount || !mesh.triangleCount) continue;
-    const geometry = geometryFor(mesh, materials.uvMismatch);
-    const material = materials.get(mesh.material);
-    const instanceKey = mesh.instanceOf;
-
-    if (instanceKey) {
-      const list = lists.get(instanceKey);
-      if (!list) {
-        // Reported, not silently skipped: an instance list with no geometry is
-        // a payload bug and the objects simply do not exist.
-        geometry.dispose();
-        materials.missing.add(`instance-list:${instanceKey}`);
-        continue;
-      }
-      const target = new THREE.InstancedMesh(geometry, material, Math.max(1, list.count));
-      target.name = `${instanceKey}`;
-      target.count = list.count;
-      target.castShadow = mesh.castShadow;
-      target.receiveShadow = mesh.receiveShadow;
-      // The geometry is the unit prototype and the instances scale it, so the
-      // bounding sphere has to be scaled out to the largest instance or the
-      // whole thing is frustum-culled the moment it leaves the origin.
-      target.userData.part = mesh.material.includes("#") ? mesh.material.split("#")[1] : "";
-      for (let index = 0; index < list.count; index += 1) {
-        const base = index * 10;
-        const floats = list.floats;
-        dummy.position.set(floats[base], floats[base + 1], floats[base + 2]);
-        dummy.rotation.set(0, floats[base + 3], 0);
-        dummy.scale.set(floats[base + 4], floats[base + 5], floats[base + 6]);
-        dummy.updateMatrix();
-        target.setMatrixAt(index, dummy.matrix);
-        // The tenth slot onwards is the instance tint. Only write it when the
-        // material actually reads vertex colours, or the attribute buffer is
-        // allocated for nothing.
-        if ((material as THREE.MeshStandardMaterial).vertexColors) {
-          colour.setRGB(floats[base + 7], floats[base + 8], floats[base + 9]);
-          target.setColorAt(index, colour);
-        }
-      }
-      target.instanceMatrix.needsUpdate = true;
-      if (target.instanceColor) target.instanceColor.needsUpdate = true;
-      // Bounds from the real instance transforms, so off-screen trees are culled
-      // (and skipped in the shadow pass) instead of drawn every frame.
-      target.computeBoundingSphere();
-      target.computeBoundingBox();
-      instanced.set(instanceKey, target);
-      prototypes.set(instanceKey, { geometry, material });
-      ownedInstanced.push(target);
-      group.add(target);
-      continue;
-    }
-
-    const object = new THREE.Mesh(geometry, material);
-    object.name = mesh.material;
-    object.castShadow = mesh.castShadow;
-    object.receiveShadow = mesh.receiveShadow;
-    // Static geometry is not instanced, so its own bounds are correct.
-    ownedGeometries.push(geometry);
-    group.add(object);
-  }
-
-  // The moving fleet draws from the same prototype as the parked cars, so a
-  // moving car and a parked car cannot be different vehicles.
-  // Parked cars are hidden until the vehicle model is worth looking at.
-  instanced.get("car/body")?.removeFromParent();
-  instanced.get("car/glass")?.removeFromParent();
-  const carPrototype = instanced.get("car/body");
-  const glassPrototype = instanced.get("car/glass");
-  // Cloned rather than shared: an `InstancedMesh` and a plain `Mesh` may legally
-  // point at one buffer, but then the disposal order decides whether the second
-  // user gets a dangling handle, and two cities in one page would share it.
-  const carBody = carPrototype ? carPrototype.geometry.clone() : undefined;
-  const carGlass = glassPrototype ? glassPrototype.geometry.clone() : undefined;
-  if (carBody) ownedGeometries.push(carBody);
-  if (carGlass) ownedGeometries.push(carGlass);
-
-  return {
+  const handles: CityHandles = {
     group,
     materials,
     instanced,
     prototypes,
     lamps: materials.lamps,
     vehicleCount: scene.traffic.agents.length,
-    carBody,
-    carGlass,
-    dispose() {
-      for (const mesh of ownedInstanced) mesh.dispose();
-      for (const geometry of ownedGeometries) geometry.dispose();
-      group.clear();
+    statics,
+    lodSets,
+    dispose,
+  };
+
+  function* run(): Generator<void> {
+    // Decode every instance list first: a prototype's geometry may be declared
+    // before the list it draws, and the order in the payload is not a contract.
+    const lists = new Map<string, { count: number; floats: Float32Array }>();
+    for (const list of scene.instances) {
+      lists.set(list.key, { count: list.count, floats: decodeFloats(list.data, list.count * 10) });
+      yield;
+    }
+
+    // Deferred normal-map relief, one texture per step.
+    while (materials.pending.length > 0) {
+      (materials.pending.shift() as () => void)();
+      yield;
+    }
+
+    const dummy = new THREE.Object3D();
+    const colour = new THREE.Color();
+
+    for (const mesh of scene.meshes) {
+      meshesDone += 1;
+      if (!mesh.vertexCount || !mesh.triangleCount) continue;
+      const arrays = yield* decodeMesh(mesh, materials.uvMismatch);
+      const material = materials.get(mesh.material);
+      const instanceKey = mesh.instanceOf;
+
+      if (instanceKey) {
+        const list = lists.get(instanceKey);
+        if (!list) {
+          // Reported, not silently skipped: an instance list with no geometry is
+          // a payload bug and the objects simply do not exist.
+          materials.missing.add(`instance-list:${instanceKey}`);
+          continue;
+        }
+        const geometry = geometryFromArrays(arrays, mesh);
+        const target = new THREE.InstancedMesh(geometry, material, Math.max(1, list.count));
+        target.name = `${instanceKey}`;
+        target.count = list.count;
+        target.castShadow = mesh.castShadow;
+        target.receiveShadow = mesh.receiveShadow;
+        const part = mesh.material.includes("#") ? mesh.material.split("#")[1] : "";
+        target.userData.part = part;
+        const tinted = Boolean((material as THREE.MeshStandardMaterial).vertexColors);
+        const floats = list.floats;
+        const wantBounds = options.lod === true;
+        const bounds = wantBounds ? new Float32Array(list.count * 4) : null;
+        const sphere = geometry.boundingSphere as THREE.Sphere;
+        const CHUNK = 4096;
+        for (let start = 0; start < list.count; start += CHUNK) {
+          const end = Math.min(list.count, start + CHUNK);
+          for (let index = start; index < end; index += 1) {
+            const base = index * 10;
+            dummy.position.set(floats[base], floats[base + 1], floats[base + 2]);
+            dummy.rotation.set(0, floats[base + 3], 0);
+            dummy.scale.set(floats[base + 4], floats[base + 5], floats[base + 6]);
+            dummy.updateMatrix();
+            target.setMatrixAt(index, dummy.matrix);
+            // The tenth slot onwards is the instance tint. Only write it when the
+            // material actually reads vertex colours, or the attribute buffer is
+            // allocated for nothing.
+            if (tinted) {
+              colour.setRGB(floats[base + 7], floats[base + 8], floats[base + 9]);
+              target.setColorAt(index, colour);
+            }
+            if (bounds) {
+              const maxScale = Math.max(floats[base + 4], floats[base + 5], floats[base + 6]);
+              bounds[index * 4] = floats[base] + sphere.center.x * floats[base + 4];
+              bounds[index * 4 + 1] = floats[base + 1] + sphere.center.y * floats[base + 5];
+              bounds[index * 4 + 2] = floats[base + 2] + sphere.center.z * floats[base + 6];
+              bounds[index * 4 + 3] = sphere.radius * maxScale;
+            }
+          }
+          if (end < list.count) yield;
+        }
+        target.instanceMatrix.needsUpdate = true;
+        if (target.instanceColor) target.instanceColor.needsUpdate = true;
+        // Bounds from the real instance transforms, so off-screen trees are culled
+        // (and skipped in the shadow pass) instead of drawn every frame.
+        target.computeBoundingSphere();
+        target.computeBoundingBox();
+        instanced.set(instanceKey, target);
+        prototypes.set(instanceKey, { geometry, material });
+        ownedInstanced.push(target);
+        group.add(target);
+        if (bounds) {
+          let far: THREE.InstancedMesh | null = null;
+          if (part === "mass") {
+            const proxy = farProxyGeometry(geometry, arrays);
+            ownedGeometries.push(proxy);
+            far = new THREE.InstancedMesh(proxy, material, Math.max(1, list.count));
+            far.name = `${instanceKey}#far`;
+            far.count = 0;
+            far.castShadow = false;
+            far.receiveShadow = mesh.receiveShadow;
+            far.visible = false;
+            ownedInstanced.push(far);
+            group.add(far);
+          }
+          lodSets.push({
+            mesh: target,
+            key: instanceKey,
+            part,
+            count: list.count,
+            matrices: (target.instanceMatrix.array as Float32Array).slice(0, list.count * 16),
+            colors: target.instanceColor
+              ? (target.instanceColor.array as Float32Array).slice(0, list.count * 3)
+              : null,
+            bounds,
+            far,
+          });
+        }
+        yield;
+        continue;
+      }
+
+      const pieces = chunkCell > 0 && mesh.triangleCount >= chunkMin
+        ? yield* splitIntoCells(arrays, chunkCell)
+        : [arrays];
+      for (const piece of pieces) {
+        const geometry = geometryFromArrays(piece, mesh);
+        const object = new THREE.Mesh(geometry, material);
+        object.name = mesh.material;
+        object.castShadow = mesh.castShadow;
+        object.receiveShadow = mesh.receiveShadow;
+        // Static geometry is not instanced, so its own bounds are correct.
+        ownedGeometries.push(geometry);
+        statics.push(object);
+        group.add(object);
+        yield;
+      }
+    }
+
+    // The moving fleet draws from the same prototype as the parked cars, so a
+    // moving car and a parked car cannot be different vehicles.
+    // Parked cars are hidden until the vehicle model is worth looking at.
+    instanced.get("car/body")?.removeFromParent();
+    instanced.get("car/glass")?.removeFromParent();
+    const carPrototype = instanced.get("car/body");
+    const glassPrototype = instanced.get("car/glass");
+    // Cloned rather than shared: an `InstancedMesh` and a plain `Mesh` may legally
+    // point at one buffer, but then the disposal order decides whether the second
+    // user gets a dangling handle, and two cities in one page would share it.
+    carBody = carPrototype ? carPrototype.geometry.clone() : undefined;
+    carGlass = glassPrototype ? glassPrototype.geometry.clone() : undefined;
+    if (carBody) ownedGeometries.push(carBody);
+    if (carGlass) ownedGeometries.push(carGlass);
+    handles.carBody = carBody;
+    handles.carGlass = carGlass;
+    // Parked cars never draw: keep them out of the LOD sets too.
+    for (let index = lodSets.length - 1; index >= 0; index -= 1) {
+      if (lodSets[index].key.startsWith("car/")) lodSets.splice(index, 1);
+    }
+  }
+
+  const generator = run();
+  return {
+    handles,
+    get done() {
+      return finished;
+    },
+    get progress() {
+      return finished ? 1 : Math.min(0.99, meshesDone / Math.max(1, scene.meshes.length));
+    },
+    step(budgetMs: number): boolean {
+      if (finished || cancelled) return finished;
+      const deadline = performance.now() + budgetMs;
+      for (;;) {
+        const result = generator.next();
+        if (result.done) {
+          finished = true;
+          return true;
+        }
+        if (performance.now() >= deadline) return false;
+      }
+    },
+    cancel() {
+      if (cancelled || finished) return;
+      cancelled = true;
+      generator.return(undefined);
+      dispose();
     },
   };
+}
+
+/** Build a whole scene at once. Prefer `beginCityBuild` from a frame loop. */
+export function buildCityScene(scene: CityScene, materials: MaterialCatalogue): CityHandles {
+  const build = beginCityBuild(scene, materials);
+  build.step(Number.POSITIVE_INFINITY);
+  return build.handles;
 }

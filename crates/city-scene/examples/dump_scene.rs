@@ -3,6 +3,7 @@
 //!
 //! cargo run --release -p city-scene --example dump_scene -- \
 //!     [--radius-km 0.5] [--block-m 110] [--seed 42] [--out public/city-scenes.json]
+//!     [--bin city.bin]   also write the binary container the desktop app streams
 
 use city_scene::{SceneBudget, build_city_scene};
 use urban::{ModernChinaSpec, generate_modern_chinese_city};
@@ -30,6 +31,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "{} buildings, {} tree instances, {} draws, {} tris",
         s.buildings, s.tree_instances, s.draw_calls, s.triangles
     );
+    if let Some(binary) = flag("--bin") {
+        std::fs::write(&binary, city_scene::scene::encode_binary(&scene)?)?;
+        println!("wrote {binary}");
+    }
     std::fs::write(&out, serde_json::to_vec(&vec![scene])?)?;
     println!("wrote {out}");
     Ok(())
