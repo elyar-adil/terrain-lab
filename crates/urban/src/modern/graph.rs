@@ -406,7 +406,10 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
     // A riverside road (滨河路) on each bank, so the land between the river and
     // the first cross street is a closed block that can be built on rather
     // than an unbounded strip.
-    let bank_off = river_half + 22.0;
+    // Far enough back that a junction box on the riverside road (twenty to
+    // thirty-five metres deep) stays on dry land instead of hanging over the
+    // water and leaving the bridge deck short of the far bank.
+    let bank_off = river_half + 38.0;
     let bank_steps = ((2.0 * radius_m / 40.0) as usize).max(8);
     for side in [-1.0_f32, 1.0] {
         let mut prev: Option<V> = None;
@@ -492,8 +495,13 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
             // Only a street that actually crosses the channel becomes a bridge;
             // one that runs along or inside it has no business existing.
             let bank = |v: V| v.0 - frame.river_x(v.1);
-            let crosses = (bank(p) < -river_half && bank(q) > river_half)
-                || (bank(p) > river_half && bank(q) < -river_half);
+            // Both ends must stand well clear of the channel: a junction box is
+            // twenty to thirty metres deep, and one whose node is closer than that
+            // to the bank hangs its asphalt over the water, leaving the bridge deck
+            // stopping short of the far side.
+            let clear = river_half;
+            let crosses = (bank(p) < -clear && bank(q) > clear)
+                || (bank(p) > clear && bank(q) < -clear);
             if !major || !crosses {
                 continue;
             }

@@ -204,7 +204,7 @@ fn facade_tile_for(building: &ModernBuilding, massing: Massing) -> usize {
         Massing::CurtainTower | Massing::Tower => {
             // 8..12 is the first half of the curtain-wall block; the second half
             // (12..16) is reserved for crowns and for large districts.
-            if id % 3 == 0 {
+            if id % 2 == 0 {
                 8 + (id * 5 + 2) % 4
             } else {
                 [6usize, 17, 20, 20][id % 4]
