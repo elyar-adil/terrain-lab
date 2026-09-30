@@ -326,7 +326,18 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
     );
 
     if let Some(river) = city.river.as_deref() {
-        buildings::build_water(river, city.river_width_metres, city.frame, &mut builder);
+        // Discs along every river bridge: the quay stops short of them.
+        let mut crossings: Vec<(crate::math::Vec2, f32)> = Vec::new();
+        for road in network.roads.iter().filter(|road| road.bridge) {
+            let length = road.carriageway.length();
+            let mut station = 0.0;
+            while station <= length {
+                let point = road.carriageway.sample(station).0;
+                crossings.push((crate::math::Vec2::new(point.x, point.z), road.half_width() + 9.0));
+                station += 6.0;
+            }
+        }
+        buildings::build_water(river, city.river_width_metres, city.frame, &crossings, &mut builder);
     }
 
     let geometry = builder.build();

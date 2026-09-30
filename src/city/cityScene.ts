@@ -409,7 +409,7 @@ export function createMaterials(
     // vertex colours (sandy shallows, deep centre), written by the Rust layer.
     const water = standard(
       "water",
-      { roughness: 0.08, metalness: 0.1, envMapIntensity: 1.5, vertexColors: true },
+      { roughness: 0.12, metalness: 0.05, envMapIntensity: 1.3, vertexColors: true },
       0xffffff,
     );
     const waterTime = { value: 0 };
@@ -430,11 +430,15 @@ export function createMaterials(
 {
   vec2 p = vWaterP;
   float t = uWaterTime;
+  // Warp the lookup so no wave front stays a straight, grid-aligned line.
+  p += 2.3 * vec2(sin(p.y * 0.071 + t * 0.21), cos(p.x * 0.063 - t * 0.17));
   vec2 g = vec2(0.0);
-  g += vec2(0.8, 0.6) * cos(dot(p, vec2(0.8, 0.6)) * 0.9 + t * 1.3) * 0.9;
-  g += vec2(-0.5, 0.86) * cos(dot(p, vec2(-0.5, 0.86)) * 1.7 - t * 1.9) * 0.7;
-  g += vec2(0.96, -0.28) * cos(dot(p, vec2(0.96, -0.28)) * 3.1 + t * 2.6) * 0.45;
-  g += vec2(0.2, 0.98) * cos(dot(p, vec2(0.2, 0.98)) * 5.3 - t * 3.4) * 0.3;
+  g += vec2(0.8, 0.6) * cos(dot(p, vec2(0.8, 0.6)) * 0.53 + t * 1.1) * 0.85;
+  g += vec2(-0.5, 0.86) * cos(dot(p, vec2(-0.5, 0.86)) * 0.97 - t * 1.5) * 0.7;
+  g += vec2(0.96, -0.28) * cos(dot(p, vec2(0.96, -0.28)) * 1.73 + t * 2.1) * 0.5;
+  g += vec2(-0.31, -0.95) * cos(dot(p, vec2(-0.31, -0.95)) * 2.9 - t * 2.7) * 0.32;
+  g += vec2(0.62, -0.78) * cos(dot(p, vec2(0.62, -0.78)) * 4.3 + t * 3.3) * 0.18;
+  g += vec2(-0.91, 0.41) * cos(dot(p, vec2(-0.91, 0.41)) * 6.1 - t * 4.1) * 0.1;
   vec3 gw = vec3(g.x, 0.0, g.y) * 0.05;
   normal = normalize(normal - normalize(mat3(viewMatrix) * gw) * length(gw));
 }`,
@@ -451,6 +455,24 @@ export function createMaterials(
   // the sky rather than from its own albedo.
   standard("rail.steel", { roughness: 0.42, metalness: 0.75, envMapIntensity: 0.9 }, 0x8f9498);
   standard("bridge.concrete", { roughness: 0.9 }, 0x7c7a72);
+  standard("bridge.stone", { roughness: 0.88, side: THREE.DoubleSide, vertexColors: true }, 0xb4aca0);
+  // Dressed river-wall stone and paving: vertex colours carry the wet base and coping.
+  standard("quay.stone", { roughness: 0.9, side: THREE.DoubleSide, vertexColors: true }, 0xc4bcb0);
+  {
+    // Foam: several stacked translucent white strips give a soft, fading edge.
+    const foam = new THREE.MeshStandardMaterial({
+      color: 0xeef4f2,
+      roughness: 1,
+      metalness: 0,
+      transparent: true,
+      opacity: 0.2,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    register("water.foam", foam);
+  }
   standard("bridge.steel", { roughness: 0.5, metalness: 0.6, side: THREE.DoubleSide, vertexColors: true }, 0x9aa0a6);
   standard("wire", { roughness: 0.55, metalness: 0.3, side: THREE.DoubleSide }, 0x14161a);
 
