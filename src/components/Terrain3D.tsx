@@ -3516,6 +3516,15 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
         renderer.render(scene, camera);
       }
       framePerf.end();
+      if (perfEnabled) {
+        // Headless captures: a compositor screenshot never lands while software GL
+        // saturates the main thread, so copy the canvas in the task that drew it.
+        const w = window as unknown as { __SNAP__?: boolean; __SNAPSHOT__?: string };
+        if (w.__SNAP__) {
+          w.__SNAPSHOT__ = renderer.domElement.toDataURL("image/png");
+          w.__SNAP__ = false;
+        }
+      }
       frame = requestAnimationFrame(animate);
     };
     animate();

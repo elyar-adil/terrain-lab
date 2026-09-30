@@ -29,11 +29,11 @@ import type { CityHandles, LodInstanceSet } from "./cityScene";
 /** Distances are city-local metres. */
 export const LOD = {
   /** Leaf cards and bark are drawn within this distance of a tree. */
-  treeDetail: 700,
+  treeDetail: 450,
   /** Trees nearer than this show only their leaves; the solid core is hidden. */
   treeCoreNear: 150,
   /** Past this a crown core is replaced by the coarse ellipsoid. */
-  treeCoreFar: 1100,
+  treeCoreFar: 500,
   hedge: 350,
   tuft: 180,
   /** Tall furniture: lamps, poles, gantries, guide signs. */
