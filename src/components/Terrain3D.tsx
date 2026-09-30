@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { createCityLayer, type CityLayer } from "../city/cityLayer";
+import type { CityScene } from "../city/cityScene";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
@@ -284,8 +286,18 @@ const waterFragmentShader = `
   }
 `;
 
-export function Terrain3D({ result, config, cameraMode, cityFocus }: { result: GenerationResult; config: SimulationConfig; cameraMode: "3d" | "satellite"; cityFocus?: { xKm: number; yKm: number; spanKm: number; nonce: number } | null }) {
+export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, onNeedCity }: { result: GenerationResult; config: SimulationConfig; cameraMode: "3d" | "satellite"; cityFocus?: { xKm: number; yKm: number; spanKm: number; nonce: number } | null; cityScene?: CityScene | null; onNeedCity?: (index: number | null) => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  // The metre-scale city lives inside this scene. The scene is built once per
+  // terrain, so the loaded city and the request callback travel by ref.
+  const cityMountRef = useRef<((scene: CityScene | null) => void) | null>(null);
+  const cityLoadedRef = useRef<CityScene | null>(cityScene ?? null);
+  cityLoadedRef.current = cityScene ?? null;
+  const onNeedCityRef = useRef(onNeedCity);
+  onNeedCityRef.current = onNeedCity;
+  useEffect(() => {
+    cityMountRef.current?.(cityScene ?? null);
+  }, [cityScene]);
   // Camera jumps arrive as props; the render loop polls the ref so the heavy
   // scene is never rebuilt for a change of viewpoint.
   const cityFocusRef = useRef(cityFocus);
@@ -428,6 +440,53 @@ export function Terrain3D({ result, config, cameraMode, cityFocus }: { result: G
       // navigation identical for a 20 km tile and a 160 km tile.
       controls.minDistance = 1.2 * metresToScene;
       controls.maxDistance = Math.max(7.5, result.worldSizeKm * 1000 * metresToScene * 2.4);
+    }
+    // Level the ground under every settlement. The city is built on a flat
+    // frame, so the terrain must agree with it or roads would float on slopes
+    // and hills would poke through blocks; beyond the city the land blends back
+    // to its natural relief so there is no visible plateau.
+    const citySites: { xKm: number; yKm: number; radiusM: number }[] = [];
+    {
+      const cellM = (result.worldSizeKm * 1000) / Math.max(1, result.meshSize - 1);
+      for (const city of result.modernCities ?? []) {
+        if (!city.nodes.length) continue;
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const node of city.nodes) {
+          minX = Math.min(minX, node.point.x_km); maxX = Math.max(maxX, node.point.x_km);
+          minY = Math.min(minY, node.point.y_km); maxY = Math.max(maxY, node.point.y_km);
+        }
+        const xKm = (minX + maxX) / 2;
+        const yKm = (minY + maxY) / 2;
+        const radiusM = Math.max(450, Math.hypot(maxX - minX, maxY - minY) * 500 + 220);
+        citySites.push({ xKm, yKm, radiusM });
+        const cx = (xKm / result.worldSizeKm) * (result.meshSize - 1);
+        const cy = (yKm / result.worldSizeKm) * (result.meshSize - 1);
+        const blendM = 420;
+        const reach = Math.ceil((radiusM + blendM) / cellM) + 1;
+        let sum = 0, count = 0;
+        const core = Math.max(1, Math.round((radiusM * 0.5) / cellM));
+        for (let dy = -core; dy <= core; dy += 1) {
+          for (let dx = -core; dx <= core; dx += 1) {
+            const ix = Math.round(cx) + dx, iy = Math.round(cy) + dy;
+            if (ix < 0 || iy < 0 || ix >= result.meshSize || iy >= result.meshSize) continue;
+            sum += heights[iy * result.meshSize + ix]; count += 1;
+          }
+        }
+        if (!count) continue;
+        const level = sum / count - 0.8;
+        for (let dy = -reach; dy <= reach; dy += 1) {
+          for (let dx = -reach; dx <= reach; dx += 1) {
+            const ix = Math.round(cx) + dx, iy = Math.round(cy) + dy;
+            if (ix < 0 || iy < 0 || ix >= result.meshSize || iy >= result.meshSize) continue;
+            const distance = Math.hypot(ix - cx, iy - cy) * cellM;
+            if (distance >= radiusM + blendM) continue;
+            const t = Math.min(1, Math.max(0, (distance - radiusM) / blendM));
+            const weight = 1 - t * t * (3 - 2 * t);
+            const at = iy * result.meshSize + ix;
+            heights[at] = heights[at] * (1 - weight) + level * weight;
+          }
+        }
+      }
     }
     for (let index = 0; index < heights.length; index += 1) {
       const relativeElevation = Math.max(0, heights[index] - result.stats.minElevation);
@@ -1198,6 +1257,60 @@ export function Terrain3D({ result, config, cameraMode, cityFocus }: { result: G
     }
     cityGroup.visible = false;
     scene.add(cityGroup);
+
+    // --- the metre-scale city, mounted in this scene ------------------------
+    let cityLayer: CityLayer | null = null;
+    let cityAnchor: THREE.Vector3 | null = null;
+    const mountCity = (data: CityScene | null) => {
+      if (cityLayer) {
+        cityLayer.dispose();
+        cityLayer = null;
+        cityAnchor = null;
+      }
+      if (!data) return;
+      const layer = createCityLayer(data);
+      const worldX = (data.origin[0] - cityHalfExtentKm) * kilometreToScene;
+      const worldZ = (data.origin[1] - cityHalfExtentKm) * kilometreToScene;
+      layer.group.scale.setScalar(metresToScene);
+      layer.group.rotation.y = -data.rotationRadians;
+      // The terrain under the city was levelled 0.8 m below this, so the apron
+      // and roadbed always sit on top of it.
+      layer.group.position.set(worldX, terrainHeightAt(worldX, worldZ) + 0.8 * metresToScene, worldZ);
+      layer.group.traverse((object) => {
+        object.frustumCulled = object.frustumCulled && !(object as THREE.InstancedMesh).isInstancedMesh;
+      });
+      scene.add(layer.group);
+      cityLayer = layer;
+      cityAnchor = new THREE.Vector3(worldX, 0, worldZ);
+    };
+    cityMountRef.current = mountCity;
+    mountCity(cityLoadedRef.current);
+    let cityCheckFrame = 0;
+    const requestNearbyCity = () => {
+      cityCheckFrame += 1;
+      if (cityCheckFrame % 20 !== 0) return;
+      let nearest = -1;
+      let nearestDistance = Infinity;
+      (result.modernCities ?? []).forEach((_city, index) => {
+        const site = citySites[index];
+        if (!site) return;
+        const dx = (site.xKm - cityHalfExtentKm) * kilometreToScene - camera.position.x;
+        const dz = (site.yKm - cityHalfExtentKm) * kilometreToScene - camera.position.z;
+        const distance = Math.hypot(dx, dz, camera.position.y - terrainHeightAt(camera.position.x, camera.position.z)) * sceneToMetres;
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearest = index;
+        }
+      });
+      const loaded = cityLoadedRef.current;
+      if (nearest >= 0 && nearestDistance < 3500) {
+        if (!loaded || Math.hypot(loaded.origin[0] - citySites[nearest].xKm, loaded.origin[1] - citySites[nearest].yKm) > 0.05) {
+          onNeedCityRef.current?.(nearest);
+        }
+      } else if (loaded && cityAnchor && nearestDistance > 9000) {
+        onNeedCityRef.current?.(null);
+      }
+    };
 
     const facadeWindowGeometry = new THREE.BufferGeometry();
     if (windowPositions.length > 0) {
@@ -3089,6 +3202,7 @@ export function Terrain3D({ result, config, cameraMode, cityFocus }: { result: G
       sun.shadow.camera.near = 0.0001;
       sun.shadow.camera.far = shadowSpan * 6 + 0.2;
       sun.shadow.camera.updateProjectionMatrix();
+      requestNearbyCity();
       frameCounter += 1;
       if (frameCounter % 45 === 1) renderer.shadowMap.needsUpdate = true;
       if (composer && cameraMode === "3d") {
@@ -3103,6 +3217,8 @@ export function Terrain3D({ result, config, cameraMode, cityFocus }: { result: G
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      cityMountRef.current = null;
+      cityLayer?.dispose();
       controls.dispose();
       texture.dispose();
       geometry.dispose();

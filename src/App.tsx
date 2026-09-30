@@ -17,7 +17,6 @@ import type {
 } from "./types";
 import type { CityScene } from "./city/cityScene";
 import { Terrain3D } from "./components/Terrain3D";
-import { CityViewer } from "./city/CityViewer";
 
 const PRESETS: Record<TerrainPreset, Pick<SimulationConfig, "rainfall" | "evaporation" | "windSpeed" | "windDirection"> & { name: string; description: string }> = {
   arid: { name: "干旱高山", description: "裸岩、冲积扇与干涸河谷", rainfall: 425, evaporation: 975, windSpeed: 11, windDirection: 35 },
@@ -52,17 +51,8 @@ const DEFAULT_CONFIG: SimulationConfig = {
 };
 
 type AnalysisLayer = keyof GenerationResult["analysisPreviews"];
-type ViewMode = "satellite" | "3d" | "analysis" | "city";
+type ViewMode = "satellite" | "3d" | "analysis";
 
-/** Camera framings for the dedicated metre-scale city view (CityViewer presets). */
-const CITY_VIEW_PRESETS: Array<{ id: string; label: string }> = [
-  { id: "street", label: "街道" },
-  { id: "junction", label: "路口" },
-  { id: "tower", label: "塔仰视" },
-  { id: "district", label: "街区" },
-  { id: "aerial", label: "鸟瞰" },
-  { id: "skyline", label: "天际线" },
-];
 
 const ANALYSIS_LAYERS: Record<AnalysisLayer, string> = {
   discharge: "汇流量",
@@ -112,7 +102,6 @@ function App() {
   const [analysisLayer, setAnalysisLayer] = useState<AnalysisLayer>("discharge");
   const [cityFocus, setCityFocus] = useState<{ xKm: number; yKm: number; spanKm: number; nonce: number } | null>(null);
   const [citySceneIndex, setCitySceneIndex] = useState<number | null>(null);
-  const [cityPreset, setCityPreset] = useState<string>("street");
   const viewportRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -181,7 +170,7 @@ function App() {
   const [citySceneLoading, setCitySceneLoading] = useState(false);
 
   useEffect(() => {
-    if (viewMode !== "city" || citySceneIndex === null) {
+    if (citySceneIndex === null) {
       setActiveCityScene(null);
       return;
     }
@@ -200,14 +189,14 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [viewMode, citySceneIndex]);
+  }, [citySceneIndex]);
 
   const jumpToCityOption = (option: (typeof cityOptions)[number], optionIndex: number) => {
     setCityFocus({ xKm: option.xKm, yKm: option.yKm, spanKm: option.spanKm, nonce: Date.now() });
     const sceneIndex = optionIndex - 1;
     if (sceneIndex >= 0) {
       setCitySceneIndex(sceneIndex);
-      setViewMode("city");
+      setViewMode("3d");
     }
   };
 
@@ -375,9 +364,9 @@ function App() {
         </aside>
 
         <section className="viewport" ref={viewportRef}>
-          {result ? (viewMode === "city" ? <div style={{ position: "absolute", inset: 0 }}>{activeCityScene ? <CityViewer scene={activeCityScene} preset={cityPreset} /> : <div className="empty-state"><span>CITY VIEW</span><h2>{citySceneLoading ? "正在生成城市…" : "请选择一座城市"}</h2></div>}</div> : viewMode === "analysis" ? <img className="terrain-preview" src={result.analysisPreviews[analysisLayer]} alt={`${ANALYSIS_LAYERS[analysisLayer]}分析图层`} /> : <Terrain3D result={result} config={config} cameraMode={viewMode} cityFocus={cityFocus} />) : <div className="empty-state"><div className="contour-art" /><span>80 × 80 KM SYNTHETIC EARTH</span><h2>创造一片不存在，却足够真实的土地</h2><p>原生 Rust 地貌演化 · 河网推演 · 多尺度卫星辐射合成</p><button className="primary large" onClick={runGeneration}>生成第一片地貌</button></div>}
-          {result && <div className="view-switcher">{viewMode === "city" ? (<><select value={cityPreset} onChange={(event) => setCityPreset(event.target.value)}>{CITY_VIEW_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select><button onClick={() => setViewMode("3d")}>返回地形</button></>) : (<><button className={viewMode === "3d" ? "active" : ""} onClick={() => setViewMode("3d")}>3D 地形</button><button className={viewMode === "satellite" ? "active" : ""} onClick={() => setViewMode("satellite")}>动态卫星</button><select className={viewMode === "analysis" ? "active" : ""} value={analysisLayer} onChange={(event) => { setAnalysisLayer(event.target.value as AnalysisLayer); setViewMode("analysis"); }}><option disabled>分析图层</option>{(Object.keys(ANALYSIS_LAYERS) as AnalysisLayer[]).map((layer) => <option key={layer} value={layer}>{ANALYSIS_LAYERS[layer]}</option>)}</select><select value="" className="city-jump" onChange={(event) => { const index = Number(event.target.value); const option = cityOptions[index]; if (option) jumpToCityOption(option, index); }}><option disabled value="">跳转城市</option>{cityOptions.map((option, index) => <option key={option.label} value={index}>{option.label}</option>)}</select></>)}<button onClick={toggleFullscreen}>全屏</button></div>}
-          <div className="viewport-meta"><span>{viewMode === "city" ? "CITY VIEW · 米制尺度" : viewMode === "3d" ? "3D TERRAIN · VERTICAL 1:1 · LIVE WEATHER" : viewMode === "analysis" ? `SEMANTIC LAYER · ${ANALYSIS_LAYERS[analysisLayer]}` : "LIVE ORTHOGRAPHIC · SAME WORLD · SAME TIME"}</span><span>{viewMode === "city" && activeCityScene ? `${citySceneIndex !== null ? cityOptions[citySceneIndex + 1]?.label ?? "城市" : "城市"} · ${Math.round(Math.max(activeCityScene.extentM[2] - activeCityScene.extentM[0], activeCityScene.extentM[3] - activeCityScene.extentM[1]))} M` : `${config.worldSizeKm} KM / ${config.gridSize} PX`}</span></div>
+          {result ? (viewMode === "analysis" ? <img className="terrain-preview" src={result.analysisPreviews[analysisLayer]} alt={`${ANALYSIS_LAYERS[analysisLayer]}分析图层`} /> : <Terrain3D result={result} config={config} cameraMode={viewMode} cityFocus={cityFocus} cityScene={activeCityScene} onNeedCity={(index) => { if (index === null) { setCitySceneIndex(null); } else { setCitySceneIndex((current) => (current === index ? current : index)); } }} />) : <div className="empty-state"><div className="contour-art" /><span>80 × 80 KM SYNTHETIC EARTH</span><h2>创造一片不存在，却足够真实的土地</h2><p>原生 Rust 地貌演化 · 河网推演 · 多尺度卫星辐射合成</p><button className="primary large" onClick={runGeneration}>生成第一片地貌</button></div>}
+          {result && <div className="view-switcher">{(<><button className={viewMode === "3d" ? "active" : ""} onClick={() => setViewMode("3d")}>3D 地形</button><button className={viewMode === "satellite" ? "active" : ""} onClick={() => setViewMode("satellite")}>动态卫星</button><select className={viewMode === "analysis" ? "active" : ""} value={analysisLayer} onChange={(event) => { setAnalysisLayer(event.target.value as AnalysisLayer); setViewMode("analysis"); }}><option disabled>分析图层</option>{(Object.keys(ANALYSIS_LAYERS) as AnalysisLayer[]).map((layer) => <option key={layer} value={layer}>{ANALYSIS_LAYERS[layer]}</option>)}</select><select value="" className="city-jump" onChange={(event) => { const index = Number(event.target.value); const option = cityOptions[index]; if (option) jumpToCityOption(option, index); }}><option disabled value="">跳转城市</option>{cityOptions.map((option, index) => <option key={option.label} value={index}>{option.label}</option>)}</select></>)}<button onClick={toggleFullscreen}>全屏</button></div>}
+          <div className="viewport-meta"><span>{viewMode === "3d" ? "3D TERRAIN · VERTICAL 1:1 · LIVE WEATHER" : viewMode === "analysis" ? `SEMANTIC LAYER · ${ANALYSIS_LAYERS[analysisLayer]}` : "LIVE ORTHOGRAPHIC · SAME WORLD · SAME TIME"}</span><span>{citySceneLoading ? "正在加载城市细节…" : activeCityScene && citySceneIndex !== null ? `${cityOptions[citySceneIndex + 1]?.label ?? "城市"} · 米制细节已载入` : `${config.worldSizeKm} KM / ${config.gridSize} PX`}</span></div>
           {busy && <div className="progress-overlay"><div><span>{status}</span><b>{Math.round(progress * 100)}%</b></div><progress value={progress} max={1} /></div>}
         </section>
 

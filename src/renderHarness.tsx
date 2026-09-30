@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import type { CityScene } from "./city/cityScene";
 import { Terrain3D } from "./components/Terrain3D";
 import type { GenerationResult, SimulationConfig } from "./types";
 import "./styles.css";
@@ -33,6 +34,7 @@ window.cancelAnimationFrame = (handle: number) => window.clearTimeout(handle);
 
 function Harness() {
   const [fixture, setFixture] = useState<Fixture | null>(null);
+  const [cityScene, setCityScene] = useState<CityScene | null>(null);
   const mode = new URLSearchParams(window.location.search).get("mode") === "satellite"
     ? "satellite"
     : "3d";
@@ -78,7 +80,22 @@ function Harness() {
   useEffect(() => {
     fetch("/render-fixture.json")
       .then((response) => response.json())
-      .then((data: Fixture) => setFixture(data));
+      .then(async (data: Fixture) => {
+        // `?city=1` stands in for the desktop shell: it places the first scene of
+        // public/city-scenes.json at the world centre, declares a matching
+        // settlement so the terrain is levelled under it, and mounts it.
+        if (new URLSearchParams(window.location.search).get("city")) {
+          const scenes: CityScene[] = await (await fetch("/city-scenes.json")).json();
+          const scene = scenes[0];
+          const half = data.config.worldSizeKm / 2;
+          scene.origin = [half, half];
+          const [minX, minZ, maxX, maxZ] = scene.extentM;
+          const points = [[minX, minZ], [maxX, maxZ]].map(([x, z]) => ({ point: { x_km: half + x / 1000, y_km: half + z / 1000 } }));
+          (data.result as unknown as { modernCities: unknown[] }).modernCities = [{ nodes: points, edges: [], blocks: [], buildings: [], parcels: [], hdRoads: [], sdRoads: [], streets: [], lanes: [], connectors: [], junctions: [], compounds: [], trees: [] }];
+          setCityScene(scene);
+        }
+        setFixture(data);
+      });
   }, []);
 
   useEffect(() => {
@@ -91,7 +108,7 @@ function Harness() {
   }, [fixture]);
 
   return fixture
-    ? <Terrain3D result={fixture.result} config={fixture.config} cameraMode={mode} cityFocus={focus} />
+    ? <Terrain3D result={fixture.result} config={fixture.config} cameraMode={mode} cityFocus={focus} cityScene={cityScene} />
     : null;
 }
 
