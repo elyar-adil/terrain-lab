@@ -95,6 +95,21 @@ pub mod rule {
     }
 }
 
+/// A well-mixed per-building hash in `[0, 1)`.  (The `urban` hash only mixes the
+/// parity of a small id into its top bits, so every building of one parity got
+/// the same "random" draw — the reason a district read as copies.)
+pub(crate) fn hash_u32(seed: u32, a: i32, b: i32) -> f32 {
+    let mut v = seed.wrapping_mul(0x9e37_79b1)
+        ^ (a as u32).wrapping_mul(0x85eb_ca6b)
+        ^ (b as u32).wrapping_mul(0xc2b2_ae35).rotate_left(11);
+    v ^= v >> 16;
+    v = v.wrapping_mul(0x7feb_352d);
+    v ^= v >> 15;
+    v = v.wrapping_mul(0x846c_a68b);
+    v ^= v >> 16;
+    (v >> 8) as f32 / (1u32 << 24) as f32
+}
+
 /// Per-building jitter, derived from the building id so a city is identical for
 /// a seed and a single building can be re-derived without the others.
 pub(crate) struct Jitter {
@@ -107,8 +122,8 @@ pub(crate) struct Jitter {
 /// two different buildings, which is most of what stops a district reading as one
 /// copied block.
 pub(crate) fn building_tint(id: u32) -> [f32; 3] {
-    let lightness = 0.74 + modern::hash_u32(id, 11, 41) * 0.26;
-    let cast = modern::hash_u32(id, 13, 43);
+    let lightness = 0.74 + hash_u32(id, 11, 41) * 0.26;
+    let cast = hash_u32(id, 13, 43);
     let (r, g, b) = if cast < 0.34 {
         (1.0, 0.93, 0.83) // warm
     } else if cast < 0.67 {
@@ -119,11 +134,29 @@ pub(crate) fn building_tint(id: u32) -> [f32; 3] {
     [r * lightness, g * lightness, b * lightness]
 }
 
+/// Curtain-wall glass tint per building: blue, green, bronze or grey.  The
+/// renderer multiplies the glass' sky-tone emission by this colour, so the hue
+/// carries even though the tile albedo of glass is (correctly) dark.
+pub(crate) fn glass_tint(id: u32) -> [f32; 3] {
+    let family = hash_u32(id, 107, 43);
+    let l = 0.82 + hash_u32(id, 109, 43) * 0.18;
+    let (r, g, b) = if family < 0.36 {
+        (0.55, 0.80, 1.0) // blue
+    } else if family < 0.56 {
+        (0.55, 1.0, 0.80) // green
+    } else if family < 0.78 {
+        (1.0, 0.72, 0.42) // bronze
+    } else {
+        (0.80, 0.84, 0.90) // grey
+    };
+    [r * l, g * l, b * l]
+}
+
 pub(crate) fn jitter_for(id: u32) -> Jitter {
-    let value = 0.82 + modern::hash_u32(id, 3, 17) * 0.36;
+    let value = 0.82 + hash_u32(id, 3, 17) * 0.36;
     Jitter {
         value,
-        mirror: modern::hash_u32(id, 5, 23) < 0.15,
+        mirror: hash_u32(id, 5, 23) < 0.15,
     }
 }
 
