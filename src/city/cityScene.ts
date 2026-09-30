@@ -734,6 +734,10 @@ export function createMaterials(
               vertexColors: true,
               emissive: 0x16240f,
               emissiveIntensity: 0.5,
+              // Far-LOD shell only: dithered cross-fade driven by
+              // cityLayer.update (opacity 0 close up, 1 beyond ~300 m).
+              alphaHash: true,
+              opacity: 1,
             }),
           );
         }

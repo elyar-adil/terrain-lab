@@ -42,6 +42,10 @@ export interface GenerationResult {
   heightDataBase64: string;
   forestDataBase64: string;
   vegetationExclusionDataBase64: string;
+  /** Settlement footprints; heights and the exclusion mask are already levelled/cleared under them (Rust). */
+  /** Far-LOD tree prototypes from Rust (species x lod), typed arrays as base64. */
+  farTrees?: FarTreePayload[];
+  citySites?: { xKm: number; yKm: number; radiusM: number }[];
   urbanDataBase64: string;
   cultivatedDataBase64: string;
   /** 0 = uncultivated, 1 = wheat, 2 = maize, 3 = other rotation crop. */
@@ -237,6 +241,22 @@ export interface UrbanRiver {
 }
 
 /** One L-System tree prototype: flattened segments and foliage blobs. */
+export interface FarTreePayload {
+  species: string;
+  /** 0 = near (~600 tris), 1 = mid (~110), 2 = far (~30). */
+  lod: number;
+  heightMetres: number;
+  crownRadiusMetres: number;
+  trunkRadiusMetres: number;
+  /** base64 f32 LE xyz per vertex, unit height. */
+  positions: string;
+  normals: string;
+  /** base64 f32 LE linear rgb per vertex. */
+  colors: string;
+  /** base64 u16 LE triangle indices. */
+  indices: string;
+}
+
 export interface VegetationPrototypePayload {
   species: string;
   lod: "near" | "far" | string;

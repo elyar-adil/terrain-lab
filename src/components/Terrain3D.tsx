@@ -9,6 +9,8 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { buildFarTreeSet } from "./farTrees";
+import { createGroundCover } from "./groundCover";
 import type { GenerationResult, SimulationConfig, UrbanBuilding, UrbanLane, UrbanPoint, UrbanRoad, VegetationPrototypePayload } from "../types";
 
 function decodeHeights(base64: string): Float32Array {
@@ -442,53 +444,11 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
       controls.minDistance = 1.2 * metresToScene;
       controls.maxDistance = Math.max(7.5, result.worldSizeKm * 1000 * metresToScene * 2.4);
     }
-    // Level the ground under every settlement. The city is built on a flat
-    // frame, so the terrain must agree with it or roads would float on slopes
-    // and hills would poke through blocks; beyond the city the land blends back
-    // to its natural relief so there is no visible plateau.
-    const citySites: { xKm: number; yKm: number; radiusM: number }[] = [];
-    {
-      const cellM = (result.worldSizeKm * 1000) / Math.max(1, result.meshSize - 1);
-      for (const city of result.modernCities ?? []) {
-        if (!city.nodes.length) continue;
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (const node of city.nodes) {
-          minX = Math.min(minX, node.point.x_km); maxX = Math.max(maxX, node.point.x_km);
-          minY = Math.min(minY, node.point.y_km); maxY = Math.max(maxY, node.point.y_km);
-        }
-        const xKm = (minX + maxX) / 2;
-        const yKm = (minY + maxY) / 2;
-        const radiusM = Math.max(450, Math.hypot(maxX - minX, maxY - minY) * 500 + 220);
-        citySites.push({ xKm, yKm, radiusM });
-        const cx = (xKm / result.worldSizeKm) * (result.meshSize - 1);
-        const cy = (yKm / result.worldSizeKm) * (result.meshSize - 1);
-        const blendM = 420;
-        const reach = Math.ceil((radiusM + blendM) / cellM) + 1;
-        let sum = 0, count = 0;
-        const core = Math.max(1, Math.round((radiusM * 0.5) / cellM));
-        for (let dy = -core; dy <= core; dy += 1) {
-          for (let dx = -core; dx <= core; dx += 1) {
-            const ix = Math.round(cx) + dx, iy = Math.round(cy) + dy;
-            if (ix < 0 || iy < 0 || ix >= result.meshSize || iy >= result.meshSize) continue;
-            sum += heights[iy * result.meshSize + ix]; count += 1;
-          }
-        }
-        if (!count) continue;
-        const level = sum / count - 0.12;
-        for (let dy = -reach; dy <= reach; dy += 1) {
-          for (let dx = -reach; dx <= reach; dx += 1) {
-            const ix = Math.round(cx) + dx, iy = Math.round(cy) + dy;
-            if (ix < 0 || iy < 0 || ix >= result.meshSize || iy >= result.meshSize) continue;
-            const distance = Math.hypot(ix - cx, iy - cy) * cellM;
-            if (distance >= radiusM + blendM) continue;
-            const t = Math.min(1, Math.max(0, (distance - radiusM) / blendM));
-            const weight = 1 - t * t * (3 - 2 * t);
-            const at = iy * result.meshSize + ix;
-            heights[at] = heights[at] * (1 - weight) + level * weight;
-          }
-        }
-      }
-    }
+    // City sites come from terrain generation: the payload's heights are already
+    // levelled under every settlement (with the blend back to natural relief) and
+    // its vegetation-exclusion mask already cleared there, so the renderer only
+    // reads the footprints, to anchor the near-field city.
+    const citySites: { xKm: number; yKm: number; radiusM: number }[] = result.citySites ?? [];
     for (let index = 0; index < heights.length; index += 1) {
       const relativeElevation = Math.max(0, heights[index] - result.stats.minElevation);
       positions.setZ(index, relativeElevation * metresToScene);
@@ -539,6 +499,25 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
   diffuseColor.rgb += (w1 * tufts + w2 * blotch) * vec3(0.045, 0.03, -0.02);
   float blades = dNoise(vec2(pm.x * 38.0 + pm.y * 11.0, pm.y * 70.0)) * dNoise(pm * 23.0 + 9.0);
   diffuseColor.rgb *= 1.0 + w0 * (blades - 0.25) * 0.9;
+  // Vegetated ground only (roads, water and city surfaces are baked into the
+  // same texture and must not get grass grain or soil): greenness gate.
+  float veg = smoothstep(-0.01, 0.05, diffuseColor.g - max(diffuseColor.r, diffuseColor.b));
+  // Meadow clumps: dark hollows between tufts and pale dry stalks, at a scale that
+  // survives out to a few hundred metres (the blade streaks above do not).
+  float clump = dNoise(pm * 3.3) * 0.6 + dNoise(pm * 8.9 + 3.0) * 0.4;
+  diffuseColor.rgb *= 1.0 + veg * w1 * (clump - 0.5) * 0.55;
+  diffuseColor.rgb += veg * w1 * smoothstep(0.62, 0.86, clump) * vec3(0.06, 0.05, -0.01);
+  // Bare soil in scuffs and worn patches, dry straw in broad drifts: without
+  // them a field is one green from horizon to boots.
+  float soilShape = dFbm(pm * 0.17 + 13.0) + 0.25 * dNoise(pm * 1.3);
+  float soil = smoothstep(0.735, 0.80, soilShape) * veg * (1.0 - smoothstep(600.0, 3500.0, dm));
+  vec3 soilColour = vec3(0.27, 0.19, 0.12) * (0.75 + 0.5 * dNoise(pm * 7.0 + 2.0));
+  diffuseColor.rgb = mix(diffuseColor.rgb, soilColour, soil * 0.72);
+  float straw = smoothstep(0.52, 0.74, dFbm(pm * 0.0125 + 5.0)) * veg;
+  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.32, 1.14, 0.62) + vec3(0.03, 0.02, 0.0), straw * (1.0 - smoothstep(3000.0, 14000.0, dm)) * 0.55);
+  // Dark, wetter hollows where the ground gathers water.
+  float wet = smoothstep(0.62, 0.80, dFbm(pm * 0.045 + 31.0)) * veg;
+  diffuseColor.rgb *= 1.0 - wet * 0.22 * (1.0 - smoothstep(800.0, 6000.0, dm));
 }`)
         .replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>
 {
@@ -553,6 +532,24 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
     vec3 g = mat3(viewMatrix) * vec3(-(hx - h0) / e, 0.0, -(hz - h0) / e) * 0.035 * wb;
     normal = normalize(normal + g);
   }
+  // Mid- and macro-relief: hummocks a few metres across out to the middle
+  // distance, and long swells beyond, tilted in world space like the crumb
+  // relief above. Low sun on these is what stops distant ground from reading as
+  // a lit flat sheet; both fade out only where the mesh's own relief takes over.
+  float wmid = 1.0 - smoothstep(30.0, 1600.0, db);
+  float wmac = 1.0 - smoothstep(400.0, 9000.0, db);
+  if (wmid > 0.001 || wmac > 0.001) {
+    float em = 0.6;
+    float m0 = dFbm(pb * 0.31) + 0.5 * dNoise(pb * 0.9 + 4.0);
+    float mx = dFbm((pb + vec2(em, 0.0)) * 0.31) + 0.5 * dNoise((pb + vec2(em, 0.0)) * 0.9 + 4.0);
+    float mz = dFbm((pb + vec2(0.0, em)) * 0.31) + 0.5 * dNoise((pb + vec2(0.0, em)) * 0.9 + 4.0);
+    float eM = 12.0;
+    float b0 = dFbm(pb * 0.021 + 17.0);
+    float bx = dFbm((pb + vec2(eM, 0.0)) * 0.021 + 17.0);
+    float bz = dFbm((pb + vec2(0.0, eM)) * 0.021 + 17.0);
+    vec3 gm = mat3(viewMatrix) * vec3(-(mx - m0) / em * 0.20 * wmid - (bx - b0) / eM * 2.6 * wmac, 0.0, -(mz - m0) / em * 0.20 * wmid - (bz - b0) / eM * 2.6 * wmac);
+    normal = normalize(normal + gm);
+  }
 }`);
     };
     const terrain = new THREE.Mesh(geometry, terrainMaterial);
@@ -561,28 +558,13 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
 
     const forestValues = decodeBytes(result.forestDataBase64);
     const vegetationExclusion = decodeBytes(result.vegetationExclusionDataBase64);
-    // No fields, meadows or forest under a settlement: the metre-scale city owns
-    // that ground, and detail instances there would poke through its streets.
-    {
-      const cellM = (result.worldSizeKm * 1000) / Math.max(1, result.meshSize - 1);
-      for (const site of citySites) {
-        const cx = (site.xKm / result.worldSizeKm) * (result.meshSize - 1);
-        const cy = (site.yKm / result.worldSizeKm) * (result.meshSize - 1);
-        const clearM = site.radiusM + 60;
-        const reach = Math.ceil(clearM / cellM) + 1;
-        for (let dy = -reach; dy <= reach; dy += 1) {
-          for (let dx = -reach; dx <= reach; dx += 1) {
-            const ix = Math.round(cx) + dx, iy = Math.round(cy) + dy;
-            if (ix < 0 || iy < 0 || ix >= result.meshSize || iy >= result.meshSize) continue;
-            if (Math.hypot(ix - cx, iy - cy) * cellM <= clearM) vegetationExclusion[iy * result.meshSize + ix] = 255;
-          }
-        }
-      }
-    }
-    const treeGeometry = new THREE.ConeGeometry(3.8 * metresToScene, 18.0 * metresToScene, 5, 1);
-    const treeMaterial = new THREE.MeshStandardMaterial({ color: 0x1f4b2c, roughness: 0.94 });
+    // Forest prototypes come from Rust (`farTrees`, species records shared with
+    // the city's near trees); regional stands use the few-dozen-triangle LOD.
+    const regionalSet = buildFarTreeSet(result.farTrees, 2, metresToScene);
+    const treeMaterial = regionalSet.material;
     const treeMatrices: THREE.Matrix4[] = [];
     const treeColors: THREE.Color[] = [];
+    const treeSpecies: number[] = [];
     const hash01 = (x: number, y: number, salt: number) => {
       const value = Math.sin(x * 127.1 + y * 311.7 + salt * 74.7 + config.seed * 0.013) * 43758.5453;
       return value - Math.floor(value);
@@ -601,23 +583,34 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
         matrix.compose(
           new THREE.Vector3(
             worldX,
-            Math.max(0, heights[index] - result.stats.minElevation) * metresToScene + 9.0 * metresToScene * treeHeightScale,
+            Math.max(0, heights[index] - result.stats.minElevation) * metresToScene,
             worldZ,
           ),
           new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), hash01(x, y, 5) * Math.PI * 2),
           new THREE.Vector3(0.75 + hash01(x, y, 6) * 0.55, treeHeightScale, 0.75 + hash01(x, y, 7) * 0.55),
         );
         treeMatrices.push(matrix);
-        treeColors.push(new THREE.Color().setHSL(0.30 + hash01(x, y, 8) * 0.045, 0.36, 0.15 + hash01(x, y, 9) * 0.09));
+        // Vertex colours carry the species' own reflectance; the instance colour
+        // is only a per-tree value/hue tint around white.
+        const tint = 0.80 + hash01(x, y, 9) * 0.36;
+        treeColors.push(new THREE.Color(tint * (1 + (hash01(x, y, 8) - 0.5) * 0.10), tint, tint * (1 - (hash01(x, y, 8) - 0.5) * 0.10)));
+        treeSpecies.push(Math.floor(hash01(x, y, 10) * regionalSet.geometries.length) % regionalSet.geometries.length);
       }
     }
-    const trees = new THREE.InstancedMesh(treeGeometry, treeMaterial, treeMatrices.length);
-    for (let index = 0; index < treeMatrices.length; index += 1) {
-      trees.setMatrixAt(index, treeMatrices[index]);
-      trees.setColorAt(index, treeColors[index]);
-    }
-    trees.instanceMatrix.needsUpdate = true;
-    if (trees.instanceColor) trees.instanceColor.needsUpdate = true;
+    const trees = new THREE.Group();
+    regionalSet.geometries.forEach((geometry, species) => {
+      const members: number[] = [];
+      treeSpecies.forEach((value, index) => { if (value === species) members.push(index); });
+      if (!members.length) return;
+      const mesh = new THREE.InstancedMesh(geometry, treeMaterial, members.length);
+      members.forEach((source, slot) => {
+        mesh.setMatrixAt(slot, treeMatrices[source]);
+        mesh.setColorAt(slot, treeColors[source]);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      trees.add(mesh);
+    });
     scene.add(trees);
 
     // A whole-world tree mesh cannot retain real tree density over hundreds of
@@ -626,17 +619,19 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
     // regional stands, and this local layer streams individual trees around the
     // camera target. World-aligned cells keep trees stable while panning.
     const detailTreeCapacity = 32_000;
-    const detailCrownGeometry = new THREE.ConeGeometry(4.6 * metresToScene, 13.5 * metresToScene, 7, 2);
-    const detailTrunkGeometry = new THREE.CylinderGeometry(0.48 * metresToScene, 0.68 * metresToScene, 7.0 * metresToScene, 6);
-    const detailCrownMaterial = new THREE.MeshStandardMaterial({ color: 0x285c31, roughness: 0.95 });
-    const detailTrunkMaterial = new THREE.MeshStandardMaterial({ color: 0x59432d, roughness: 1.0 });
-    const detailCrowns = new THREE.InstancedMesh(detailCrownGeometry, detailCrownMaterial, detailTreeCapacity);
-    const detailTrunks = new THREE.InstancedMesh(detailTrunkGeometry, detailTrunkMaterial, detailTreeCapacity);
-    detailCrowns.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    detailTrunks.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    detailCrowns.count = 0;
-    detailTrunks.count = 0;
-    scene.add(detailTrunks, detailCrowns);
+    // Two streamed LODs: about 600 triangles per tree while the patch is a few
+    // hundred metres across, about 110 beyond that. Both share one material.
+    const detailSets = [buildFarTreeSet(result.farTrees, 0, metresToScene), buildFarTreeSet(result.farTrees, 1, metresToScene)];
+    const detailCrownMaterial = detailSets[1].material;
+    detailSets[0].material.dispose();
+    const detailMeshSets = detailSets.map((set) => set.geometries.map((geometry) => {
+      const mesh = new THREE.InstancedMesh(geometry, detailCrownMaterial, detailTreeCapacity);
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.count = 0;
+      scene.add(mesh);
+      return mesh;
+    }));
+    const detailMeshes = detailMeshSets.flat();
 
     const sampleGrid = (values: ArrayLike<number>, worldX: number, worldZ: number) => {
       const gridX = THREE.MathUtils.clamp((worldX + 1.6) / 3.2 * (result.meshSize - 1), 0, result.meshSize - 1);
@@ -2862,6 +2857,8 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       const minCellZ = Math.floor((centreMetresZ - wantedRadiusMetres) / spacingMetres);
       const maxCellZ = Math.ceil((centreMetresZ + wantedRadiusMetres) / spacingMetres);
       let count = 0;
+      const activeMeshes = detailMeshSets[wantedRadiusMetres <= 320 ? 0 : 1];
+      const perMesh = new Array<number>(activeMeshes.length).fill(0);
 
       for (let cellZ = minCellZ; cellZ <= maxCellZ && count < detailTreeCapacity; cellZ += 1) {
         for (let cellX = minCellX; cellX <= maxCellX && count < detailTreeCapacity; cellX += 1) {
@@ -2888,29 +2885,29 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
           const widthScale = 0.72 + hash01(cellX, cellZ, 35) * 0.58;
           localQuaternion.setFromAxisAngle(treeRotationAxis, hash01(cellX, cellZ, 36) * Math.PI * 2);
 
-          localPosition.set(worldX, terrainHeight + 3.5 * metresToScene * heightScale, worldZ);
-          localScale.set(0.78 + widthScale * 0.22, heightScale, 0.78 + widthScale * 0.22);
-          localMatrix.compose(localPosition, localQuaternion, localScale);
-          detailTrunks.setMatrixAt(count, localMatrix);
-
-          localPosition.y = terrainHeight + (7.0 + 6.75) * metresToScene * heightScale;
+          const species = Math.floor(hash01(cellX, cellZ, 39) * activeMeshes.length) % activeMeshes.length;
+          if (perMesh[species] >= detailTreeCapacity) continue;
+          localPosition.set(worldX, terrainHeight, worldZ);
           localScale.set(widthScale, heightScale, widthScale);
           localMatrix.compose(localPosition, localQuaternion, localScale);
-          detailCrowns.setMatrixAt(count, localMatrix);
-          localColour.setHSL(0.295 + hash01(cellX, cellZ, 37) * 0.055, 0.38, 0.17 + hash01(cellX, cellZ, 38) * 0.10);
-          detailCrowns.setColorAt(count, localColour);
+          activeMeshes[species].setMatrixAt(perMesh[species], localMatrix);
+          const tint = 0.80 + hash01(cellX, cellZ, 38) * 0.36;
+          const warm = (hash01(cellX, cellZ, 37) - 0.5) * 0.10;
+          localColour.setRGB(tint * (1 + warm), tint, tint * (1 - warm));
+          activeMeshes[species].setColorAt(perMesh[species], localColour);
+          perMesh[species] += 1;
           count += 1;
         }
       }
-      detailCrowns.count = count;
-      detailTrunks.count = count;
-      detailCrowns.instanceMatrix.needsUpdate = true;
-      detailTrunks.instanceMatrix.needsUpdate = true;
-      if (detailCrowns.instanceColor) detailCrowns.instanceColor.needsUpdate = true;
-      // Dynamic instance matrices need fresh bounds before Three.js can cull
-      // the streamed patch. Without this, all 32k slots are submitted forever.
-      detailCrowns.computeBoundingSphere();
-      detailTrunks.computeBoundingSphere();
+      for (const mesh of detailMeshes) mesh.count = 0;
+      activeMeshes.forEach((mesh, index) => {
+        mesh.count = perMesh[index];
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        // Dynamic instance matrices need fresh bounds before Three.js can cull
+        // the streamed patch. Without this, all 32k slots are submitted forever.
+        if (mesh.count > 0) mesh.computeBoundingSphere();
+      });
     };
 
     // 路口工坊移植:半球底光取冷天蓝/地面暖绿;太阳直射负责阴影,颜色与
@@ -2936,6 +2933,34 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
     const waterKind = decodeBytes(result.waterKindBase64);
     const flowDirection = new Int8Array(decodeBytes(result.flowDirectionBase64).buffer);
     const flowStrength = decodeBytes(result.flowStrengthBase64);
+
+    // Near-field ground cover (3D grass tufts, shrubs, wildflowers) on open land.
+    const groundCover = createGroundCover(metresToScene, {
+      hash01,
+      forest: (worldX, worldZ) => sampleGrid(forestValues, worldX, worldZ),
+      excluded: (worldX, worldZ) => sampleGrid(vegetationExclusion, worldX, worldZ),
+      water: (worldX, worldZ) => {
+        const size = result.waterDataSize;
+        const gx = THREE.MathUtils.clamp(Math.round((worldX + 1.6) / 3.2 * (size - 1)), 0, size - 1);
+        const gy = THREE.MathUtils.clamp(Math.round((worldZ + 1.6) / 3.2 * (size - 1)), 0, size - 1);
+        return waterMask[gy * size + gx];
+      },
+      // Height of the rendered triangle under this point (not the bilinear
+      // surface): the mesh is coarse, and plants must sit on the faces you see.
+      height: (worldX, worldZ) => {
+        const last = result.meshSize - 1;
+        const gx = THREE.MathUtils.clamp((worldX + 1.6) / 3.2 * last, 0, last - 1e-6);
+        const gz = THREE.MathUtils.clamp((worldZ + 1.6) / 3.2 * last, 0, last - 1e-6);
+        const ix = Math.floor(gx), iy = Math.floor(gz);
+        const u = gx - ix, v = gz - iy;
+        const at = (x: number, y: number) => Math.max(0, heights[y * result.meshSize + x] - result.stats.minElevation) * metresToScene;
+        const ha = at(ix, iy), hb = at(ix, iy + 1), hc = at(ix + 1, iy + 1), hd = at(ix + 1, iy);
+        return u + v <= 1 ? ha + u * (hd - ha) + v * (hb - ha) : hc + (1 - u) * (hb - hc) + (1 - v) * (hd - hc);
+      },
+      elevation01: (worldX, worldZ) => (sampleGrid(heights, worldX, worldZ) - result.stats.minElevation)
+        / Math.max(1, result.stats.maxElevation - result.stats.minElevation),
+    });
+    scene.add(groundCover.group);
     const waterGeometry = new THREE.PlaneGeometry(3.2, 3.2, result.meshSize - 1, result.meshSize - 1);
     const waterPositions = waterGeometry.attributes.position as THREE.BufferAttribute;
     for (let index = 0; index < waterHeights.length; index += 1) {
@@ -3201,10 +3226,8 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       const detailTreeFade = smoothFadeIn(viewSpanMetres, 3_200, 7_200);
       const regionalTreeFade = smoothFadeOut(viewSpanMetres, 3_800, 19_000);
       const showDetailTrees = detailTreeFade > 0.001;
-      detailCrowns.visible = showDetailTrees;
-      detailTrunks.visible = showDetailTrees;
+      for (const mesh of detailMeshes) mesh.visible = showDetailTrees;
       fadeMaterial(detailCrownMaterial, detailTreeFade);
-      fadeMaterial(detailTrunkMaterial, detailTreeFade);
       // Do not draw the sparse regional markers over the detailed trees at
       // full strength: they are deliberately blended in the overlap band.
       trees.visible = regionalTreeFade > 0.001;
@@ -3224,6 +3247,8 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
         fadeMaterial(material, cropPlantFade);
       }
       if (showCropRows || showCropPlants) updateCropDetail(viewSpanScene, groundFootprintScale);
+      groundCover.setFade(smoothFadeIn(cropSpanMetres, 320, 780));
+      groundCover.update(viewSpanScene, groundFootprintScale, controls.target.x, controls.target.z);
       // The baked satellite surface remains the far LOD. Vector ribbons only
       // take over when their real metre widths can occupy useful screen pixels.
       const roadSurfaceFade = smoothFadeIn(viewSpanMetres, 7_500, 18_000);
@@ -3308,12 +3333,9 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       texture.dispose();
       geometry.dispose();
       terrainMaterial.dispose();
-      treeGeometry.dispose();
-      treeMaterial.dispose();
-      detailCrownGeometry.dispose();
-      detailTrunkGeometry.dispose();
-      detailCrownMaterial.dispose();
-      detailTrunkMaterial.dispose();
+      groundCover.dispose();
+      regionalSet.dispose();
+      for (const set of detailSets) set.dispose();
       cropRowGeometry.dispose();
       cropRowMaterial.dispose();
       wheatStemGeometry.dispose();

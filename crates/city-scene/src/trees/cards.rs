@@ -149,11 +149,17 @@ pub fn target_coverage(species: &Species) -> f32 {
     }
 }
 
+const LEAF_FINENESS: f32 = 0.72;
+
 /// Leaf length as a fraction of the tile, and the fraction of its own bounding
 /// box that the leaf actually covers.  Together they give the scatter an area,
 /// which is what the coverage correction below needs to converge.
 fn form_metrics(form: LeafForm) -> (f32, f32) {
-    match form {
+    // Leaves are drawn at `LEAF_FINENESS` of their catalogue length: a card is a
+    // crop of a canopy, and at arm's length a canopy is many small leaves, not a
+    // few plate-sized ones.  The scatter solves its count from area, so coverage
+    // (and therefore canopy opacity) is unchanged.
+    let (unit, fill) = match form {
         LeafForm::Ovate => (0.155, 0.62),
         LeafForm::Elliptic => (0.145, 0.72),
         LeafForm::Palmate => (0.235, 0.30),
@@ -165,7 +171,8 @@ fn form_metrics(form: LeafForm) -> (f32, f32) {
         // A ginkgo fan is broad for its length but opens only in its outer
         // half, so the fill is a fan's, not a blade's.
         LeafForm::Fan => (0.190, 0.36),
-    }
+    };
+    (unit * LEAF_FINENESS, fill)
 }
 
 /// A petal flower's length as a fraction of the tile, and how much of that box

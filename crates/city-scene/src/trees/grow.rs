@@ -33,15 +33,30 @@ const CLIMB_FLOOR: f32 = 0.14;
 const TIP_FOLIAGE: f32 = 0.55;
 const MID_FOLIAGE: f32 = 0.34;
 const LOW_FOLIAGE: f32 = 0.30;
-const SECONDARY_TIP: f32 = 1.00;
-const SECONDARY_BACK: f32 = 0.45;
+const SECONDARY_TIP: f32 = 0.60;
+const SECONDARY_BACK: f32 = 0.30;
+/// Twigs: every secondary forks `TWIGS_PER_SECONDARY` fine shoots, each carrying
+/// a small clump at its tip and one partway back.  Foliage sits on twigs, the
+/// way leaves sit on twigs, so a close view sees wood running into every clump.
+const TWIGS_PER_SECONDARY: usize = 2;
+const TWIG_TIP: f32 = 0.50;
+const TWIG_BACK: f32 = 0.22;
+/// A leaf card is this fraction of the species' catalogue size.  Cards are the
+/// unit of foliage geometry, so a smaller card means smaller individual leaf
+/// sprays and a canopy of many more of them: at arm's length the crown is
+/// leaves on twigs and not a handful of polygons.  The card count follows
+/// (it is derived from card area), so the canopy's opacity is unchanged.
+const CARD_SHRINK: f32 = 0.66;
 
 /// Total foliage weight one primary limb spends, which is the divisor for the
 /// card budget.  Derived from the same constants the build uses, so it cannot
 /// disagree with them.
 fn limb_foliage_weight(fork: usize) -> f32 {
     TIP_FOLIAGE + MID_FOLIAGE + LOW_FOLIAGE
-        + fork as f32 * (SECONDARY_TIP + SECONDARY_BACK)
+        + fork as f32
+            * (SECONDARY_TIP
+                + SECONDARY_BACK
+                + TWIGS_PER_SECONDARY as f32 * (TWIG_TIP + TWIG_BACK))
 }
 
 /// Everything one prototype needs, derived from the species table alone.
@@ -82,7 +97,7 @@ impl Plan {
         // the crown touching the ground.
         let base = (species.clear_stem * 0.80).clamp(0.10, 0.86);
         let tile_m = card_tile_m(species);
-        let card = tile_m / height;
+        let card = tile_m / height * CARD_SHRINK;
         let arch = forms::architecture(species.canopy);
         // Card count from the crown's *silhouette*, because that is what a viewer
         // has to see through. A foliage card's normal is biased outward — the
@@ -370,8 +385,20 @@ impl<'a, 'b> Grower<'a, 'b> {
         // Four sides on a primary, three on a secondary. A primary limb is tens
         // of centimetres of real wood; a secondary is one, and three facets is
         // all a facet budget can spend on it honestly.
-        let sides: u8 = if level == 0 { 4 } else { 3 };
-        self.limb(from, to, radius, radius * 0.5, sides, 2, bow, 0.0);
+        let sides: u8 = match level {
+            0 => 5,
+            1 => 4,
+            _ => 3,
+        };
+        let rings: u8 = if level == 0 { 3 } else { 2 };
+        self.limb(from, to, radius, radius * 0.5, sides, rings, bow, 0.0);
+        if level >= 2 {
+            // A twig: a fine shoot with a clump at its tip and one behind it.
+            self.foliage(to, dir, TWIG_TIP, length);
+            let back = self.point_on(from, axis, bow, 0.50);
+            self.foliage(back, dir, TWIG_BACK, length);
+            return;
+        }
         if level == 0 {
             if self.arch.aerial > 0 {
                 // A point partway out along the major limb, for a banyan's
@@ -432,6 +459,22 @@ impl<'a, 'b> Grower<'a, 'b> {
             self.foliage(to, dir, SECONDARY_TIP, length);
             let origin = self.point_on(from, axis, bow, 0.42);
             self.foliage(origin, dir, SECONDARY_BACK, length);
+            for index in 0..TWIGS_PER_SECONDARY {
+                let t = 0.55 + 0.40 * (index as f32 + self.rng.range(0.0, 1.0))
+                    / TWIGS_PER_SECONDARY as f32;
+                let origin = self.point_on(from, axis, bow, t.min(0.97));
+                let side = self.rng.sphere();
+                let mut twig = (dir * 0.75 + side * 0.65).normalized_or_up();
+                if self.arch.hang > 0.0 {
+                    twig = (twig + Vec3::new(0.0, -0.9 * self.arch.hang, 0.0)).normalized_or_up();
+                }
+                let reach = length * self.rng.range(0.40, 0.70);
+                let mut end = origin + twig * reach;
+                // A hanging twig stops short of the ground: nothing below the
+                // planting line.
+                end.y = end.y.max(0.02);
+                self.branch(origin, end, radius * 0.5, 2);
+            }
         }
     }
 
@@ -640,7 +683,7 @@ impl<'a, 'b> Grower<'a, 'b> {
         // The cluster is a little over a card across, so consecutive clusters on
         // a branch merge into one mass of foliage instead of reading as beads —
         // but never wider than the shoot it grows on.
-        let spread = (self.plan.card * 1.35)
+        let spread = (self.plan.card * 2.0)
             .min(length * 0.60)
             .max(self.plan.card * 0.55);
         let shoot = shoot.normalized_or_up();
@@ -659,7 +702,7 @@ impl<'a, 'b> Grower<'a, 'b> {
                 + shoot * (along * spread)
                 + out * (spread * self.rng.range(0.10, 1.05));
             self.clamp_into_crown(&mut centre);
-            self.card(centre, shoot);
+            self.card(centre, shoot, tip, spread);
         }
     }
 
@@ -670,7 +713,7 @@ impl<'a, 'b> Grower<'a, 'b> {
     /// window of the texture; and its plane contains the shoot it is painted on,
     /// so the leaf spray stands up along the twig — or, on a hanging shoot,
     /// pours down it.
-    fn card(&mut self, centre: Vec3, shoot: Vec3) {
+    fn card(&mut self, centre: Vec3, shoot: Vec3, cluster: Vec3, spread: f32) {
         let size = self.plan.card * self.rng.range(0.70, 1.32);
         // A different crop of the tile every time. Foliage has no structure at
         // any scale, so any window of a leaf scatter is a valid leaf scatter, and
@@ -719,13 +762,32 @@ impl<'a, 'b> Grower<'a, 'b> {
         let tint = [value * (1.0 + warm), value, value * (1.0 - warm)];
         let half = size * 0.5;
         let uv = |a: f32, b: f32| (origin_u + a * window, origin_v + b * window);
+        // Clump-rounded normals: each corner leans away from the clump's centre,
+        // so a clump of flat cards shades as one soft, rounded bunch of leaves
+        // (light wraps round it) and not as a heap of individually lit
+        // rectangles.  The bend is a shading normal only: geometry is untouched.
+        let round = |corner: Vec3| {
+            let away = (corner - cluster) / spread.max(1.0e-4);
+            let away = if away.length() > 1.0e-4 {
+                away.normalized_or_up()
+            } else {
+                shading
+            };
+            (shading * 0.85 + away * 0.55).normalized_or_up()
+        };
+        let corners = [
+            centre - axis_u * half - axis_v * half,
+            centre + axis_u * half - axis_v * half,
+            centre + axis_u * half + axis_v * half,
+            centre - axis_u * half + axis_v * half,
+        ];
         self.builder.quad_uv_shaded(
             self.leaf,
             [
-                (centre - axis_u * half - axis_v * half, shading),
-                (centre + axis_u * half - axis_v * half, shading),
-                (centre + axis_u * half + axis_v * half, shading),
-                (centre - axis_u * half + axis_v * half, shading),
+                (corners[0], round(corners[0])),
+                (corners[1], round(corners[1])),
+                (corners[2], round(corners[2])),
+                (corners[3], round(corners[3])),
             ],
             [
                 uv(0.0, 0.0),

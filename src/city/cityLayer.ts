@@ -110,11 +110,16 @@ export function createCityLayer(scene: CityScene): CityLayer {
     problems,
     update(seconds: number, cameraDistanceM = 0) {
       // The solid core inside each crown exists only so that, from far above, a
-      // forest reads as a dense canopy instead of scattered cards. Up close it is
-      // a visible smooth blob, so it is hidden inside 260 m.
-      const showCores = cameraDistanceM > 260;
+      // forest reads as a dense canopy instead of scattered cards. Up close the
+      // real branches and leaf clumps carry the crown, so the core is dithered
+      // out (alphaHash cross-fade) between 200 m and 300 m and hidden inside.
+      const fade = Math.min(1, Math.max(0, (cameraDistanceM - 200) / 100));
+      const coreOpacity = fade * fade * (3 - 2 * fade);
       for (const mesh of cores) {
-        if (mesh.visible !== showCores) mesh.visible = showCores;
+        const visible = coreOpacity > 0.01;
+        if (mesh.visible !== visible) mesh.visible = visible;
+        const material = (mesh as THREE.Mesh).material as THREE.Material | undefined;
+        if (material && material.opacity !== coreOpacity) material.opacity = coreOpacity;
       }
       const clock = materials.get("water").userData.uTime as { value: number } | undefined;
       if (clock) clock.value = seconds;

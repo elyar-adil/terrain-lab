@@ -437,7 +437,12 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
         if (object.userData.part === "mass") cores.push(object);
       });
       const coreDistance = camera.position.distanceTo(lookAt);
-      for (const core of cores) core.visible = coreDistance > 260;
+      const coreFade = Math.min(1, Math.max(0, (coreDistance - 200) / 100));
+      for (const core of cores) {
+        core.visible = coreFade > 0.01;
+        const material = (core as THREE.Mesh).material as THREE.Material | undefined;
+        if (material) material.opacity = coreFade * coreFade * (3 - 2 * coreFade);
+      }
 
       const tick = () => {
         if (disposed) return;

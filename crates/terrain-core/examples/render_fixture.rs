@@ -5,6 +5,7 @@ use std::{env, fs, io::Cursor, path::PathBuf};
 use terrain_core::{
     Landform, SimulationConfig, TerrainPreset, TerrainStats, downsample_height, generate,
     render_satellite,
+    sites::{CitySite, exclude_vegetation, flatten_heights},
 };
 
 #[derive(Serialize)]
@@ -28,6 +29,8 @@ struct FixtureResult {
     height_data_base64: String,
     forest_data_base64: String,
     vegetation_exclusion_data_base64: String,
+    city_sites: Vec<CitySite>,
+    far_trees: Vec<city_scene::trees::FarTreePayload>,
     urban_data_base64: String,
     cultivated_data_base64: String,
     crop_data_base64: String,
@@ -99,7 +102,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let terrain = generate(&config, |_, _| {})?;
     let mesh_size = 128_usize.min(terrain.size);
-    let height_bytes: Vec<u8> = downsample_height(&terrain, mesh_size)
+    // `FIXTURE_CITY_RADIUS_M=900` declares one city site at the world centre (where
+    // the harness's `?city=1` mounts a scene) and levels/clears the ground under
+    // it exactly as the desktop payload does.
+    let city_sites: Vec<CitySite> = env::var("FIXTURE_CITY_RADIUS_M")
+        .ok()
+        .and_then(|value| value.parse::<f32>().ok())
+        .map(|radius_m| {
+            vec![CitySite {
+                x_km: config.world_size_km / 2.0,
+                y_km: config.world_size_km / 2.0,
+                radius_m,
+            }]
+        })
+        .unwrap_or_default();
+    let mut mesh_heights = downsample_height(&terrain, mesh_size);
+    flatten_heights(&mut mesh_heights, mesh_size, config.world_size_km, &city_sites);
+    let mut exclusion = vec![0_u8; mesh_size * mesh_size];
+    exclude_vegetation(&mut exclusion, mesh_size, config.world_size_km, &city_sites);
+    let height_bytes: Vec<u8> = mesh_heights
         .into_iter()
         .flat_map(f32::to_le_bytes)
         .collect();
@@ -178,7 +199,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             water_data_size,
             height_data_base64: STANDARD.encode(height_bytes),
             forest_data_base64: STANDARD.encode(forest_bytes),
-            vegetation_exclusion_data_base64: STANDARD.encode(vec![0_u8; mesh_size * mesh_size]),
+            vegetation_exclusion_data_base64: STANDARD.encode(exclusion),
+            city_sites,
+            far_trees: city_scene::trees::far_tree_payload(),
             urban_data_base64: STANDARD.encode(vec![0_u8; mesh_size * mesh_size]),
             cultivated_data_base64: STANDARD.encode(vec![0_u8; mesh_size * mesh_size]),
             crop_data_base64: STANDARD.encode(vec![0_u8; mesh_size * mesh_size]),
