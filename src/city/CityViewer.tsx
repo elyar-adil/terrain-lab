@@ -186,6 +186,11 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
 
       const world = new THREE.Scene();
       world.fog = createFog(extent);
+      const fogParam = new URLSearchParams(window.location.search).get("fog");
+      if (fogParam) {
+        const [n, f] = fogParam.split(",").map(Number);
+        if (Number.isFinite(n) && Number.isFinite(f)) (world.fog as THREE.Fog).near = n, (world.fog as THREE.Fog).far = f;
+      }
       /**
        * A background behind the sky dome, as insurance.
        *
