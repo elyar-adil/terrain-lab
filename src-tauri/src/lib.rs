@@ -869,6 +869,27 @@ async fn city_scene(index: usize) -> Result<city_scene::CityScene, String> {
         .ok_or_else(|| format!("city {index} does not exist ({} cities)", scenes.len()))
 }
 
+/// The same scene as `city_scene`, as the binary container
+/// (`city_scene::scene::encode_binary`) sent as a raw `ArrayBuffer`.
+///
+/// This is what the app uses: no base64, no JSON of a 100 MB string, and the
+/// webview can view the buffers in place. It also encodes under the lock instead
+/// of cloning the whole scene first.
+#[tauri::command]
+async fn city_scene_bin(index: usize) -> Result<tauri::ipc::Response, String> {
+    let guard = CITY_SCENES
+        .lock()
+        .map_err(|_| "the city scene cache is poisoned")?;
+    let scenes = guard
+        .as_ref()
+        .ok_or_else(|| "no city scenes: generate the world first".to_owned())?;
+    let scene = scenes
+        .get(index)
+        .ok_or_else(|| format!("city {index} does not exist ({} cities)", scenes.len()))?;
+    let bytes = city_scene::scene::encode_binary(scene)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Pure payload assembly shared by the desktop command and headless render
 /// fixtures: terrain → infrastructure → satellite composites → the JSON the
 /// renderer consumes.  `progress` receives (fraction, stage) updates.
@@ -1184,6 +1205,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             generate_terrain,
             city_scene,
+            city_scene_bin,
             export_terrain,
             save_project,
             load_project,

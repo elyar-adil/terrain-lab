@@ -16,6 +16,7 @@ import type {
   TerrainPreset,
 } from "./types";
 import type { CityScene } from "./city/cityScene";
+import { loadCityScene } from "./city/cityLoader";
 import { Terrain3D } from "./components/Terrain3D";
 
 const PRESETS: Record<TerrainPreset, Pick<SimulationConfig, "rainfall" | "evaporation" | "windSpeed" | "windDirection"> & { name: string; description: string }> = {
@@ -176,7 +177,10 @@ function App() {
     }
     let cancelled = false;
     setCitySceneLoading(true);
-    fetchCityScene(citySceneIndex)
+    // Binary container over raw IPC: no base64, no giant JSON parse on the main
+    // thread. Falls back to the JSON command if the container cannot be read.
+    loadCityScene(citySceneIndex)
+      .catch(() => fetchCityScene(citySceneIndex))
       .then((scene) => {
         if (!cancelled) setActiveCityScene(scene);
       })

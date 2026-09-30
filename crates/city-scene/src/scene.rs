@@ -412,6 +412,134 @@ pub fn scene_variant(seed: u32) -> u32 {
     rng.next_u32()
 }
 
+// --- binary container -------------------------------------------------------
+//
+// The JSON form above is what tests, `dump_scene` and the audit harnesses read.
+// The desktop app uses this one: a city is tens of megabytes of vertex data, and
+// as JSON it costs a base64 expansion (+33 %), a multi-second `JSON.parse` of a
+// string that big, and a base64 decode of every buffer — all on the webview's
+// main thread. As a binary container the webview receives one `ArrayBuffer`,
+// parses only a small header, and makes typed-array *views* into it: no copies.
+//
+// Layout (little-endian):
+//
+//     b"CSB1"            magic
+//     u32                header length in bytes (unpadded)
+//     header JSON        the scene with each buffer replaced by [offset, bytes]
+//     zero padding       to a multiple of 4
+//     blobs              each 4-byte aligned; offsets are from the first blob
+//
+// Normals are stored as signed-normalised bytes (`round(n * 127)`, three per
+// vertex) instead of `f32`, cutting the second-largest buffer to a quarter; the
+// mesh entry says so with `normalsSnorm: true`. Everything else is verbatim.
+// `network` (lane graph for tooling) is not sent: no renderer reads it.
+
+struct BlobWriter {
+    data: Vec<u8>,
+}
+
+impl BlobWriter {
+    fn push(&mut self, bytes: &[u8]) -> [usize; 2] {
+        while self.data.len() % 4 != 0 {
+            self.data.push(0);
+        }
+        let offset = self.data.len();
+        self.data.extend_from_slice(bytes);
+        [offset, bytes.len()]
+    }
+}
+
+fn decode_b64(text: &str) -> Result<Vec<u8>, String> {
+    STANDARD.decode(text).map_err(|error| format!("scene buffer is not base64: {error}"))
+}
+
+/// Serialise a scene into the binary container described above.
+pub fn encode_binary(scene: &CityScene) -> Result<Vec<u8>, String> {
+    use serde_json::{Value, json};
+
+    let mut blobs = BlobWriter { data: Vec::new() };
+    let mut meshes: Vec<Value> = Vec::with_capacity(scene.meshes.len());
+    for mesh in &scene.meshes {
+        let positions = blobs.push(&decode_b64(&mesh.positions)?);
+        let normal_bytes = decode_b64(&mesh.normals)?;
+        let snorm: Vec<u8> = normal_bytes
+            .chunks_exact(4)
+            .map(|chunk| {
+                let value = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                ((value.clamp(-1.0, 1.0) * 127.0).round() as i8) as u8
+            })
+            .collect();
+        let normals = blobs.push(&snorm);
+        let mut entry = json!({
+            "material": mesh.material,
+            "positions": positions,
+            "normals": normals,
+            "normalsSnorm": true,
+            "vertexCount": mesh.vertex_count,
+            "triangleCount": mesh.triangle_count,
+            "castShadow": mesh.cast_shadow,
+            "receiveShadow": mesh.receive_shadow,
+            "alphaCutout": mesh.alpha_cutout,
+            "dynamic": mesh.dynamic,
+        });
+        if let Some(colors) = &mesh.colors {
+            entry["colors"] = json!(blobs.push(&decode_b64(colors)?));
+        }
+        if let Some(uvs) = &mesh.uvs {
+            entry["uvs"] = json!(blobs.push(&decode_b64(uvs)?));
+        }
+        entry["indices"] = json!(blobs.push(&decode_b64(&mesh.indices)?));
+        if let Some(key) = &mesh.instance_of {
+            entry["instanceOf"] = json!(key);
+        }
+        meshes.push(entry);
+    }
+    let mut instances: Vec<Value> = Vec::with_capacity(scene.instances.len());
+    for list in &scene.instances {
+        instances.push(json!({
+            "key": list.key,
+            "count": list.count,
+            "data": blobs.push(&decode_b64(&list.data)?),
+        }));
+    }
+    let mut textures: Vec<Value> = Vec::with_capacity(scene.textures.len());
+    for texture in &scene.textures {
+        textures.push(json!({
+            "name": texture.name,
+            "width": texture.width,
+            "height": texture.height,
+            "tileWidthM": texture.tile_width_m,
+            "tileHeightM": texture.tile_height_m,
+            "hasNormalSource": texture.has_normal_source,
+            "data": blobs.push(&decode_b64(&texture.data)?),
+        }));
+    }
+    let to_value = |value: Result<Value, serde_json::Error>| value.map_err(|error| error.to_string());
+    let header = json!({
+        "version": scene.version,
+        "seed": scene.seed,
+        "origin": scene.origin,
+        "rotationRadians": scene.rotation_radians,
+        "extentM": scene.extent_m,
+        "meshes": meshes,
+        "instances": instances,
+        "textures": textures,
+        "signals": to_value(serde_json::to_value(&scene.signals))?,
+        "traffic": to_value(serde_json::to_value(&scene.traffic))?,
+        "stats": to_value(serde_json::to_value(&scene.stats))?,
+    });
+    let header_bytes = serde_json::to_vec(&header).map_err(|error| error.to_string())?;
+    let mut out = Vec::with_capacity(12 + header_bytes.len() + blobs.data.len());
+    out.extend_from_slice(b"CSB1");
+    out.extend_from_slice(&(header_bytes.len() as u32).to_le_bytes());
+    out.extend_from_slice(&header_bytes);
+    while out.len() % 4 != 0 {
+        out.push(0);
+    }
+    out.extend_from_slice(&blobs.data);
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,5 +731,53 @@ mod tests {
             assert_eq!(a.key, b.key);
             assert_eq!(a.data, b.data);
         }
+    }
+}
+
+#[cfg(test)]
+mod binary_tests {
+    use super::*;
+    use urban::{ModernChinaSpec, generate_modern_chinese_city};
+
+    /// The binary container must describe exactly the buffers the JSON form
+    /// does: every reference in bounds, aligned, and the right size for its
+    /// vertex and triangle counts.
+    #[test]
+    fn the_binary_container_matches_the_json_scene() {
+        let city = generate_modern_chinese_city(ModernChinaSpec {
+            seed: 7,
+            radius_km: 0.3,
+            block_size_metres: 110.0,
+            ..ModernChinaSpec::default()
+        });
+        let scene = build_city_scene(&city, SceneBudget::default());
+        let bytes = encode_binary(&scene).expect("encodes");
+        assert_eq!(&bytes[0..4], b"CSB1");
+        let header_len = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize;
+        let header: serde_json::Value = serde_json::from_slice(&bytes[8..8 + header_len]).unwrap();
+        let base = (8 + header_len).div_ceil(4) * 4;
+        let region = bytes.len() - base;
+        let check = |reference: &serde_json::Value, expected_bytes: usize| {
+            let offset = reference[0].as_u64().unwrap() as usize;
+            let length = reference[1].as_u64().unwrap() as usize;
+            assert_eq!(offset % 4, 0, "blob is 4-byte aligned");
+            assert!(offset + length <= region, "blob is inside the file");
+            assert_eq!(length, expected_bytes);
+        };
+        let meshes = header["meshes"].as_array().unwrap();
+        assert_eq!(meshes.len(), scene.meshes.len());
+        for (entry, mesh) in meshes.iter().zip(&scene.meshes) {
+            check(&entry["positions"], mesh.vertex_count * 12);
+            check(&entry["normals"], mesh.vertex_count * 3);
+            check(&entry["indices"], mesh.triangle_count * 12);
+            if mesh.colors.is_some() {
+                check(&entry["colors"], mesh.vertex_count * 4);
+            }
+        }
+        for (entry, texture) in header["textures"].as_array().unwrap().iter().zip(&scene.textures) {
+            // Sized by what the JSON form carries, not by width x height.
+            check(&entry["data"], STANDARD.decode(&texture.data).unwrap().len());
+        }
+        assert!(header.get("network").is_none());
     }
 }
