@@ -546,7 +546,7 @@ pub(super) fn junction_details(junction: &Junction, builder: &mut MeshBuilder, s
 /// quads a junction, and past a handful of junctions that is a triangle budget
 /// spent on paint nobody sees from a car.
 fn yellow_grid_box(junction: &Junction, builder: &mut MeshBuilder, spec: &JunctionSpec) {
-    if junction.roundabout || junction.ports.len() < 4 || junction.radius < 16.0 {
+    if junction.roundabout || junction.ports.len() < 4 || junction.radius < 22.0 {
         return;
     }
     let inset = crate::math::inset_ring(&junction.ring, 2.6);

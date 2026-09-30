@@ -942,6 +942,9 @@ export function buildCityScene(scene: CityScene, materials: MaterialCatalogue): 
 
   // The moving fleet draws from the same prototype as the parked cars, so a
   // moving car and a parked car cannot be different vehicles.
+  // Parked cars are hidden until the vehicle model is worth looking at.
+  instanced.get("car/body")?.removeFromParent();
+  instanced.get("car/glass")?.removeFromParent();
   const carPrototype = instanced.get("car/body");
   const glassPrototype = instanced.get("car/glass");
   // Cloned rather than shared: an `InstancedMesh` and a plain `Mesh` may legally

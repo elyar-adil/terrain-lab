@@ -44,7 +44,8 @@ export function createCityLayer(scene: CityScene): CityLayer {
   group.name = "city-layer";
   group.add(handles.group);
 
-  const agentCount = scene.traffic.agents.length;
+  // The vehicle models are not yet believable, so no cars are drawn at all.
+  const agentCount = 0;
   const dummy = new THREE.Object3D();
   const owned: THREE.InstancedMesh[] = [];
   if (handles.carBody && agentCount > 0) {
