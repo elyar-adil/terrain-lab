@@ -63,7 +63,7 @@ fn every_species_has_a_prototype_and_the_set_is_bounded() {
     }
     assert_eq!(prototypes.len(), SPECIES.len() + TWO_VARIANT.len());
     assert!(prototypes.len() <= 48, "{} prototypes", prototypes.len());
-    // Two mesh groups each, so the tree layer's draw-call cost is exactly
+    // Three mesh groups each (bark, leaf, canopy mass), so the tree layer's cost is exactly
     // twice the prototype count: bark and leaf are separate materials and the
     // renderer splits on `#`.
     let (_p, meshes) = built();
@@ -71,8 +71,8 @@ fn every_species_has_a_prototype_and_the_set_is_bounded() {
         .iter()
         .filter(|mesh| mesh.material.starts_with("tree/"))
         .count();
-    assert_eq!(tree_meshes, prototypes.len() * 2);
-    assert!(tree_meshes <= 96, "{tree_meshes} tree mesh groups");
+    assert_eq!(tree_meshes, prototypes.len() * 3);
+    assert!(tree_meshes <= 144, "{tree_meshes} tree mesh groups");
     // And every one of them is bound to a real instance list.
     for prototype in &prototypes {
         for part in ["bark", "leaf"] {
