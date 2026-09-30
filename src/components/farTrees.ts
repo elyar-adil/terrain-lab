@@ -26,8 +26,9 @@ export interface FarTreeSet {
  * from the city's species records); a payload without them (older fixtures)
  * falls back to one vertex-coloured cone so forests still draw.
  *
- * `lod` 0 is the mid-detail prototype used by the streamed near forest, 1 the
- * few-dozen-triangle one used for regional stands.
+ * `lod` 0 is the near prototype (about 600 triangles, for the streamed forest
+ * within a few hundred metres), 1 the mid one (about 110, the streamed forest
+ * beyond that) and 2 the few-dozen-triangle one used for regional stands.
  */
 export function buildFarTreeSet(
   payload: FarTreePayload[] | undefined,

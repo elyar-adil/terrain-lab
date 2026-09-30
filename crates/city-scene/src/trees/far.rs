@@ -12,7 +12,7 @@
 //! a `香樟` a wide round heap). Vertex colours carry the species' foliage and
 //! bark reflectance with per-lobe value variation; normals are the ellipsoids'
 //! so the lobes shade as rounded clumps. Prototypes are authored at unit height
-//! (the instance scale supplies the metres), and come in two detail levels.
+//! (the instance scale supplies the metres), and come in three detail levels.
 
 use super::forms;
 use super::TAU;
@@ -34,7 +34,7 @@ pub const FAR_SPECIES: [&str; 6] = [
 #[derive(Debug, Clone)]
 pub struct FarTree {
     pub species: &'static str,
-    /// 0 = mid (about a hundred triangles), 1 = far (about thirty).
+    /// 0 = near (about 600 triangles), 1 = mid (about 110), 2 = far (about 30).
     pub lod: u8,
     /// Real metres at the species' table mid-range; instance scale is relative.
     pub height_m: f32,
@@ -172,14 +172,18 @@ fn build(species: &'static Species, lod: u8) -> FarTree {
         base + (1.0 - base) * 0.55,
         trunk_r,
         trunk_r * 0.55,
-        if lod == 0 { 6 } else { 4 },
+        match lod {
+            0 => 8,
+            1 => 6,
+            _ => 4,
+        },
         bark,
     );
 
-    let (levels, ring, lat, lon) = if lod == 0 {
-        (2usize, 1usize, 3usize, 5usize)
-    } else {
-        (2, 0, 2, 6)
+    let (levels, ring, lat, lon) = match lod {
+        0 => (3usize, 2usize, 5usize, 8usize),
+        1 => (2, 1, 3, 5),
+        _ => (2, 0, 2, 6),
     };
     let span = 1.0 - base;
     let f = species.foliage;
@@ -218,7 +222,7 @@ fn build(species: &'static Species, lod: u8) -> FarTree {
     }
     // A top lobe so the tip is rounded off (or pointed, for a spire: its own
     // profile is near zero there and the lobe is narrow).
-    if lod == 0 {
+    if lod < 2 {
         let r_top = radius * (arch.profile)(0.92).clamp(0.05, 1.0);
         b.lobe(
             Vec3::new(0.0, 1.0 - level_h * 0.62, 0.0),
@@ -254,12 +258,12 @@ fn build(species: &'static Species, lod: u8) -> FarTree {
     }
 }
 
-/// Every far prototype: [`FAR_SPECIES`] at two levels of detail each.
+/// Every far prototype: [`FAR_SPECIES`] at three levels of detail each.
 pub fn far_tree_set() -> Vec<FarTree> {
     let mut set = Vec::new();
     for key in FAR_SPECIES {
         if let Some(species) = SPECIES.iter().find(|species| species.key == key) {
-            for lod in 0..2u8 {
+            for lod in 0..3u8 {
                 set.push(build(species, lod));
             }
         }
@@ -295,8 +299,8 @@ pub fn far_tree_payload() -> Vec<FarTreePayload> {
             species: tree.species.to_string(),
             lod: tree.lod,
             height_metres: tree.height_m,
-            crown_radius_metres: tree.crown_m * 0.5,
-            trunk_radius_metres: tree.trunk_m * 0.5,
+            crown_radius_metres: tree.crown_m,
+            trunk_radius_metres: tree.trunk_m,
             positions: floats(&tree.positions),
             normals: floats(&tree.normals),
             colors: floats(&tree.colors),
@@ -317,7 +321,7 @@ mod tests {
     #[test]
     fn far_trees_are_unit_height_cheap_and_species_shaped() {
         let set = far_tree_set();
-        assert_eq!(set.len(), FAR_SPECIES.len() * 2);
+        assert_eq!(set.len(), FAR_SPECIES.len() * 3);
         for tree in &set {
             let triangles = tree.indices.len() / 3;
             let top = tree.positions.chunks(3).map(|p| p[1]).fold(f32::MIN, f32::max);
@@ -330,7 +334,11 @@ mod tests {
                     .iter()
                     .all(|&i| (i as usize) < tree.positions.len() / 3)
             );
-            let limit = if tree.lod == 0 { 170 } else { 60 };
+            let limit = match tree.lod {
+                0 => 720,
+                1 => 170,
+                _ => 60,
+            };
             assert!(
                 triangles > 20 && triangles <= limit,
                 "{} lod {} has {triangles} triangles",

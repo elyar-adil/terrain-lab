@@ -243,7 +243,7 @@ export interface UrbanRiver {
 /** One L-System tree prototype: flattened segments and foliage blobs. */
 export interface FarTreePayload {
   species: string;
-  /** 0 = mid detail, 1 = far. */
+  /** 0 = near (~600 tris), 1 = mid (~110), 2 = far (~30). */
   lod: number;
   heightMetres: number;
   crownRadiusMetres: number;

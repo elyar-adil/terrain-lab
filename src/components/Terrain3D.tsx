@@ -510,9 +510,9 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
   // Bare soil in scuffs and worn patches, dry straw in broad drifts: without
   // them a field is one green from horizon to boots.
   float soilShape = dFbm(pm * 0.17 + 13.0) + 0.25 * dNoise(pm * 1.3);
-  float soil = smoothstep(0.66, 0.76, soilShape) * veg * (1.0 - smoothstep(600.0, 3500.0, dm));
-  vec3 soilColour = vec3(0.32, 0.23, 0.15) * (0.75 + 0.5 * dNoise(pm * 7.0 + 2.0));
-  diffuseColor.rgb = mix(diffuseColor.rgb, soilColour, soil * 0.82);
+  float soil = smoothstep(0.735, 0.80, soilShape) * veg * (1.0 - smoothstep(600.0, 3500.0, dm));
+  vec3 soilColour = vec3(0.27, 0.19, 0.12) * (0.75 + 0.5 * dNoise(pm * 7.0 + 2.0));
+  diffuseColor.rgb = mix(diffuseColor.rgb, soilColour, soil * 0.72);
   float straw = smoothstep(0.52, 0.74, dFbm(pm * 0.0125 + 5.0)) * veg;
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.32, 1.14, 0.62) + vec3(0.03, 0.02, 0.0), straw * (1.0 - smoothstep(3000.0, 14000.0, dm)) * 0.55);
   // Dark, wetter hollows where the ground gathers water.
@@ -560,7 +560,7 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
     const vegetationExclusion = decodeBytes(result.vegetationExclusionDataBase64);
     // Forest prototypes come from Rust (`farTrees`, species records shared with
     // the city's near trees); regional stands use the few-dozen-triangle LOD.
-    const regionalSet = buildFarTreeSet(result.farTrees, 1, metresToScene);
+    const regionalSet = buildFarTreeSet(result.farTrees, 2, metresToScene);
     const treeMaterial = regionalSet.material;
     const treeMatrices: THREE.Matrix4[] = [];
     const treeColors: THREE.Color[] = [];
@@ -619,15 +619,19 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
     // regional stands, and this local layer streams individual trees around the
     // camera target. World-aligned cells keep trees stable while panning.
     const detailTreeCapacity = 32_000;
-    const detailSet = buildFarTreeSet(result.farTrees, 0, metresToScene);
-    const detailCrownMaterial = detailSet.material;
-    const detailMeshes = detailSet.geometries.map((geometry) => {
+    // Two streamed LODs: about 600 triangles per tree while the patch is a few
+    // hundred metres across, about 110 beyond that. Both share one material.
+    const detailSets = [buildFarTreeSet(result.farTrees, 0, metresToScene), buildFarTreeSet(result.farTrees, 1, metresToScene)];
+    const detailCrownMaterial = detailSets[1].material;
+    detailSets[0].material.dispose();
+    const detailMeshSets = detailSets.map((set) => set.geometries.map((geometry) => {
       const mesh = new THREE.InstancedMesh(geometry, detailCrownMaterial, detailTreeCapacity);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.count = 0;
       scene.add(mesh);
       return mesh;
-    });
+    }));
+    const detailMeshes = detailMeshSets.flat();
 
     const sampleGrid = (values: ArrayLike<number>, worldX: number, worldZ: number) => {
       const gridX = THREE.MathUtils.clamp((worldX + 1.6) / 3.2 * (result.meshSize - 1), 0, result.meshSize - 1);
@@ -2853,7 +2857,8 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       const minCellZ = Math.floor((centreMetresZ - wantedRadiusMetres) / spacingMetres);
       const maxCellZ = Math.ceil((centreMetresZ + wantedRadiusMetres) / spacingMetres);
       let count = 0;
-      const perMesh = new Array<number>(detailMeshes.length).fill(0);
+      const activeMeshes = detailMeshSets[wantedRadiusMetres <= 320 ? 0 : 1];
+      const perMesh = new Array<number>(activeMeshes.length).fill(0);
 
       for (let cellZ = minCellZ; cellZ <= maxCellZ && count < detailTreeCapacity; cellZ += 1) {
         for (let cellX = minCellX; cellX <= maxCellX && count < detailTreeCapacity; cellX += 1) {
@@ -2880,21 +2885,22 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
           const widthScale = 0.72 + hash01(cellX, cellZ, 35) * 0.58;
           localQuaternion.setFromAxisAngle(treeRotationAxis, hash01(cellX, cellZ, 36) * Math.PI * 2);
 
-          const species = Math.floor(hash01(cellX, cellZ, 39) * detailMeshes.length) % detailMeshes.length;
+          const species = Math.floor(hash01(cellX, cellZ, 39) * activeMeshes.length) % activeMeshes.length;
           if (perMesh[species] >= detailTreeCapacity) continue;
           localPosition.set(worldX, terrainHeight, worldZ);
           localScale.set(widthScale, heightScale, widthScale);
           localMatrix.compose(localPosition, localQuaternion, localScale);
-          detailMeshes[species].setMatrixAt(perMesh[species], localMatrix);
+          activeMeshes[species].setMatrixAt(perMesh[species], localMatrix);
           const tint = 0.80 + hash01(cellX, cellZ, 38) * 0.36;
           const warm = (hash01(cellX, cellZ, 37) - 0.5) * 0.10;
           localColour.setRGB(tint * (1 + warm), tint, tint * (1 - warm));
-          detailMeshes[species].setColorAt(perMesh[species], localColour);
+          activeMeshes[species].setColorAt(perMesh[species], localColour);
           perMesh[species] += 1;
           count += 1;
         }
       }
-      detailMeshes.forEach((mesh, index) => {
+      for (const mesh of detailMeshes) mesh.count = 0;
+      activeMeshes.forEach((mesh, index) => {
         mesh.count = perMesh[index];
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
@@ -3318,7 +3324,7 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       terrainMaterial.dispose();
       groundCover.dispose();
       regionalSet.dispose();
-      detailSet.dispose();
+      for (const set of detailSets) set.dispose();
       cropRowGeometry.dispose();
       cropRowMaterial.dispose();
       wheatStemGeometry.dispose();
