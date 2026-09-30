@@ -514,11 +514,45 @@ export function createMaterials(
         roughness: glass ? 0.28 : 0.85,
         metalness: glass ? 0.1 : 0.0,
         envMapIntensity: glass ? 1.25 : 0.5,
-        ...(glass && map ? { emissiveMap: map, emissive: 0x6f8fb0, emissiveIntensity: 0.22 } : {}),
         vertexColors: true,
       },
       map ? 0xffffff : 0xa8a49c,
     );
+    if (glass) {
+      const material = table.get(key) as THREE.MeshStandardMaterial;
+      // No env map in the harness, so glass is lit by a synthetic sky term: an
+      // emission that follows the per-building tint (vertex colour), brightens
+      // with height, varies floor by floor and rises at grazing angles
+      // (Fresnel). It is masked to the glass pixels of the tile so mullions and
+      // spandrels stay dark and keep the grid readable.
+      material.onBeforeCompile = (shader) => {
+        shader.vertexShader = shader.vertexShader
+          .replace("#include <common>", "#include <common>\nvarying vec3 vGlassW;")
+          .replace(
+            "#include <begin_vertex>",
+            "#include <begin_vertex>\nvGlassW = (modelMatrix * vec4(transformed, 1.0)).xyz;",
+          );
+        shader.fragmentShader = shader.fragmentShader
+          .replace("#include <common>", "#include <common>\nvarying vec3 vGlassW;")
+          .replace(
+            "#include <emissivemap_fragment>",
+            `#include <emissivemap_fragment>
+{
+  float lum = dot(diffuseColor.rgb, vec3(0.3, 0.55, 0.15));
+  float glassMask = smoothstep(0.012, 0.03, lum) * (1.0 - smoothstep(0.12, 0.3, lum));
+  float floorId = floor(vGlassW.y / 3.6);
+  float h1 = fract(sin(floorId * 12.9898 + floor((vGlassW.x + vGlassW.z) / 27.0) * 78.233) * 43758.5453);
+  float h2 = fract(sin(dot(vec2(floorId, floor((vGlassW.x + vGlassW.z) / 3.9)), vec2(127.1, 311.7))) * 43758.5453);
+  float variation = 0.72 + 0.34 * h1 + 0.16 * h2;
+  float sky = 0.75 + 0.5 * smoothstep(0.0, 140.0, vGlassW.y);
+  vec3 tint = pow(vColor.rgb, vec3(1.6));
+  float fres = pow(1.0 - clamp(abs(dot(normalize(vViewPosition), normal)), 0.0, 1.0), 2.5);
+  totalEmissiveRadiance += vec3(0.78, 0.82, 0.86) * tint * glassMask * variation * sky * (0.13 + 0.30 * fres);
+}`,
+          );
+      };
+      material.needsUpdate = true;
+    }
   }
   for (const kind of ["shop", "lobby", "home"]) {
     standard(`ground/${kind}`, { map: textureFor(`ground/${kind}`) ?? undefined, roughness: 0.72 }, 0xffffff);

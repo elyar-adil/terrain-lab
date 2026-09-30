@@ -24,7 +24,7 @@ use super::{
     Jitter, Massing, crown_tile_for, facade_tile_for, ground_floor_material, jitter_for,
     massing_of, podium_storeys, podium_tile_for, rule,
 };
-use super::{facade_wall, level};
+use super::{facade_wall, hash_u32, level};
 use crate::facades::{GROUND_STOREY_M, design};
 use crate::math::{Vec2, Vec3, inset_ring, ring_centroid, signed_area};
 use crate::mesh::MeshBuilder;
@@ -50,7 +50,7 @@ pub(crate) enum SlabVariant {
 /// The slab variant for a building id.  Roughly 60% of slabs depart from the
 /// rectangle, in a fixed blend so any seed shows all of them.
 pub(crate) fn slab_variant(id: u32) -> SlabVariant {
-    let roll = modern::hash_u32(id, 19, 43);
+    let roll = hash_u32(id, 19, 43);
     if roll < 0.16 {
         SlabVariant::CarvedL
     } else if roll < 0.30 {
@@ -188,6 +188,10 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         let carved = carve_for(slab_variant(building.id), &outward);
         if carved.len() != outward.len() {
             outward = carved;
+            // The carve is emitted counter-clockwise; walls need clockwise.
+            if signed_area(&outward) > 0.0 {
+                outward.reverse();
+            }
         }
     }
 
@@ -239,19 +243,54 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
     let tower = matches!(massing, Massing::Tower | Massing::CurtainTower);
     // A tower's shaft steps back from its podium; a slab's does not, because a
     // 板楼 with a setback is a different building.
-    let shaft_ring = if tower {
+    let podium_ring = if tower {
         inset_ring(&outward, 2.2 + (building.floors as f32 * 0.08).min(3.0))
     } else {
         outward.clone()
     };
-    // Crowns: two setbacks for most towers, three for the tallest, each one
-    // storey of the *crown design's* own 层高.
-    let crown_stages = if tower && building.floors >= 30 {
-        3.0_f32
-    } else if tower {
-        2.0
-    } else {
-        0.0
+    let mut shaft_ring = podium_ring.clone();
+    // Chamfered plan: a glass tower with its corners cut is a different
+    // silhouette from a box and catches a second face of light.
+    if tower && glass && hash_u32(building.id, 71, 5) < 0.35 {
+        if let Some(cut) = chamfer_ring(&shaft_ring, 1.8 + hash_u32(building.id, 73, 5) * 1.6) {
+            shaft_ring = cut;
+        }
+    }
+    // Crown family, seeded per building: stepped ziggurat, tapered spire,
+    // wide mechanical penthouse, or a blunt flat top with a heavy parapet.
+    let crown_kind = {
+        let roll = hash_u32(building.id, 61, 7);
+        if !tower {
+            0
+        } else if roll < 0.32 {
+            0
+        } else if roll < 0.55 {
+            1
+        } else if roll < 0.80 {
+            2
+        } else {
+            3
+        }
+    };
+    let crown_stages = match crown_kind {
+        0 => {
+            if tower && building.floors >= 30 {
+                3.0_f32
+            } else if tower {
+                2.0
+            } else {
+                0.0
+            }
+        }
+        1 => 4.0,
+        2 => 2.0,
+        _ => 1.0,
+    };
+    let crown_insets: &[f32] = match crown_kind {
+        0 => &[1.1, 1.4, 1.1],
+        1 => &[0.8, 0.9, 0.9, 0.9],
+        2 => &[2.6, 2.4],
+        _ => &[0.5],
     };
     let crown_index = if tower { crown_tile_for(shaft_index, building.id) } else { shaft_index };
     let crown_storey = design(crown_index).storey_m;
@@ -265,9 +304,9 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         let podium_storey = design(podium_index).storey_m;
         let storeys = podium_storeys(building);
         let podium_top = shaft_base + storeys * podium_storey;
-        for index in 0..shaft_ring.len() {
-            let a = shaft_ring[index];
-            let b = shaft_ring[(index + 1) % shaft_ring.len()];
+        for index in 0..podium_ring.len() {
+            let a = podium_ring[index];
+            let b = podium_ring[(index + 1) % podium_ring.len()];
             facade_wall(
                 builder,
                 &format!("facade/{podium_index:02}"),
@@ -285,17 +324,18 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         details::wall_relief(
             builder,
             &format!("facade/{podium_index:02}"),
-            &shaft_ring,
+            &podium_ring,
             shaft_base,
             podium_top,
             storeys,
             mirror,
             design(podium_index),
         );
-        podium_deck(&outward, &shaft_ring, podium_top, builder);
-        parapet(&shaft_ring, podium_top, 0.55, builder);
+        podium_deck(&outward, &podium_ring, podium_top, builder);
+        builder.ground_uv("roof", &podium_ring, podium_top, None);
+        parapet(&podium_ring, podium_top, 0.55, builder);
         // Podium roofs are working roofs: plant and a greening patch, not a lid.
-        roofscape::podium_deck_props(building, &shaft_ring, podium_top, builder);
+        roofscape::podium_deck_props(building, &podium_ring, podium_top, builder);
 
         // The shaft starts on the deck and ends a whole number of storeys below
         // the plan top, leaving the crown stages out of the shaft's count.
@@ -306,65 +346,72 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
     }
 
     let shaft_storeys = (shaft_top - shaft_base_local) / storey;
-    for index in 0..shaft_ring.len() {
-        let a = shaft_ring[index];
-        let b = shaft_ring[(index + 1) % shaft_ring.len()];
-        facade_wall(
-            builder,
-            &shaft_material,
-            a,
-            b,
-            shaft_base_local,
-            shaft_top,
-            shaft_storeys,
-            mirror,
-            tint,
-        );
+    // Mid-shaft setback: the shaft steps in part-way up, leaving a terrace deck.
+    // Only where no balconies ride the shaft ring (glass and big masonry towers).
+    let mut sections: Vec<(Vec<Vec2>, f32, f32, f32)> = Vec::new();
+    let mut stepped_shaft = false;
+    if tower
+        && shaft_storeys >= 14.0
+        && (glass || perimeter >= 150.0)
+        && hash_u32(building.id, 79, 5) < 0.55
+    {
+        let k = (shaft_storeys * (0.5 + hash_u32(building.id, 83, 5) * 0.25)).round();
+        let upper = inset_ring(&shaft_ring, 2.0 + hash_u32(building.id, 89, 5) * 2.5);
+        if k >= 6.0 && shaft_storeys - k >= 5.0 && ring_shrinks_sanely(&shaft_ring, &upper) {
+            let y_mid = shaft_base_local + k * storey;
+            sections.push((shaft_ring.clone(), shaft_base_local, y_mid, k));
+            sections.push((upper.clone(), y_mid, shaft_top, shaft_storeys - k));
+            podium_deck(&shaft_ring, &upper, y_mid, builder);
+            parapet(&shaft_ring, y_mid, 1.0, builder);
+            stepped_shaft = true;
+        }
     }
-
-    // Real relief on the shaft walls: projecting pier strips on masonry, a
-    // cluster of full-height fins on curtain wall.  This is the geometry half
-    // of the vertical rhythm — the tile paints it, the wall now casts it.
+    if !stepped_shaft {
+        sections.push((shaft_ring.clone(), shaft_base_local, shaft_top, shaft_storeys));
+    }
+    let base_tint = builder.ambient_tint;
     if glass {
-        details::curtain_fins(
-            builder,
-            &shaft_material,
-            &shaft_ring,
-            shaft_base_local,
-            shaft_top,
-            shaft_storeys,
-            mirror,
-            shaft_design,
-        );
-    } else {
-        details::wall_relief(
-            builder,
-            &shaft_material,
-            &shaft_ring,
-            shaft_base_local,
-            shaft_top,
-            shaft_storeys,
-            mirror,
-            shaft_design,
-        );
+        builder.ambient_tint = Some(super::glass_tint(building.id));
     }
-
-    // Sill courses at every floor, and 飘窗 bay courses on the 2000s tile-clad
-    // stock: the horizontal relief a storey rhythm needs to survive raking
-    // light.  Masonry only — a curtain wall carries its painted coping.
-    if !glass {
-        details::sill_courses(builder, &shaft_ring, shaft_base_local, shaft_top, shaft_design);
+    for (ring_s, y0, y1, n) in &sections {
+        for index in 0..ring_s.len() {
+            let a = ring_s[index];
+            let b = ring_s[(index + 1) % ring_s.len()];
+            facade_wall(builder, &shaft_material, a, b, *y0, *y1, *n, mirror, tint);
+        }
+        // Real relief on the shaft walls: projecting pier strips on masonry, a
+        // cluster of full-height fins on curtain wall.
+        if glass {
+            details::curtain_fins(builder, &shaft_material, ring_s, *y0, *y1, *n, mirror, shaft_design);
+        } else {
+            details::wall_relief(builder, &shaft_material, ring_s, *y0, *y1, *n, mirror, shaft_design);
+            details::sill_courses(builder, ring_s, *y0, *y1, shaft_design);
+        }
+        if massing != Massing::LowRise && *n >= 8.0 {
+            string_courses(ring_s, *y0, *y1, 4.0, storey, builder);
+        }
     }
+    builder.ambient_tint = base_tint;
+    let top_ring: Vec<Vec2> = sections.last().map(|s| s.0.clone()).unwrap_or_else(|| shaft_ring.clone());
 
-    // String courses.  A projecting band every four storeys is the strongest
-    // horizontal the elevation has, and it is real geometry, so it throws a real
-    // shadow at every storey of the day instead of a painted one.
-    if massing != Massing::LowRise && shaft_storeys >= 8.0 {
-        string_courses(&shaft_ring, shaft_base_local, shaft_top, 4.0, storey, builder);
+    // Cornice and plinth course on masonry: the two horizontals that make a
+    // wall a composed elevation instead of an extrusion.
+    if !glass && !pitched {
+        cornice(&top_ring, shaft_top, builder);
+        if !tower {
+            plinth_course(&outward, shaft_base, builder);
+        }
+    }
+    // Stair/lift core bump on the back of a slab or walk-up.
+    if matches!(massing, Massing::Slab | Massing::LowRise)
+        && !pitched
+        && hash_u32(building.id, 97, 5) < 0.65
+    {
+        core_bump(building.id, &outward, shaft_base, shaft_top, shaft_storeys, &shaft_material, mirror, builder);
     }
 
     // --- the roof ----------------------------------------------------------
-    let cap_ring = shaft_ring.clone();
+    let cap_ring = top_ring.clone();
     builder.ground_uv("roof", &cap_ring, shaft_top, None);
     parapet(&cap_ring, shaft_top, 0.55 + jitter_value * 0.2, builder);
     if area > 90.0 {
@@ -376,38 +423,29 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         // Setbacks and a crown in its own material.  A tower with one flat
         // top is a box; a tower with a stepped top is a skyline.
         let crown_material = format!("facade/{crown_index:02}");
-        let mut stage = shaft_ring.clone();
+        let mut stage = top_ring.clone();
         let mut stage_deck = shaft_top;
-        let inset = [1.1_f32, 1.4, 1.1];
         for stage_number in 0..crown_stages as usize {
-            let next = inset_ring(&stage, inset[stage_number.min(2)]);
+            let next = inset_ring(&stage, crown_insets[stage_number.min(crown_insets.len() - 1)]);
+            if !ring_shrinks_sanely(&stage, &next) {
+                break;
+            }
             for index in 0..stage.len() {
                 let a = stage[index];
                 let b = stage[(index + 1) % stage.len()];
-                facade_wall(
-                    builder,
-                    &crown_material,
-                    a,
-                    b,
-                    stage_deck,
-                    stage_deck + crown_storey,
-                    1.0,
-                    mirror,
-                    tint,
-                );
+                facade_wall(builder, &crown_material, a, b, stage_deck, stage_deck + crown_storey, 1.0, mirror, tint);
             }
             stage_deck += crown_storey;
             // The step's own deck and its shadowed fascia, so the setback reads
             // as a step rather than as a hole.
             podium_deck(&stage, &next, stage_deck, builder);
             builder.ground_uv("roof", &next, stage_deck, None);
-            parapet(&next, stage_deck, 0.62, builder);
+            parapet(&next, stage_deck, if crown_kind == 3 { 1.1 } else { 0.62 }, builder);
             stage = next;
         }
-        if crown_stages >= 3.0 {
+        if crown_kind == 1 || (crown_kind == 0 && crown_stages >= 3.0) {
             // The topmost step is small, so it carries a mast and a condenser
-            // rather than a full roofscape: the silhouette detail that says
-            // "city" from a kilometre out.
+            // rather than a full roofscape.
             roofscape::crown_mast(building.id, &stage, stage_deck, builder);
         } else {
             roofscape::roofscape(building, &stage, stage_deck, builder);
@@ -748,4 +786,129 @@ fn entrance_portal(ring: &[Vec2], builder: &mut MeshBuilder) {
         Vec3::from_plan(so0, sign_y),
         None,
     );
+}
+
+/// Whether `inner` is a plausible inset of `outer`: same winding, still a
+/// polygon with real area, and not a runaway miter.
+fn ring_shrinks_sanely(outer: &[Vec2], inner: &[Vec2]) -> bool {
+    if inner.len() < 3 || inner.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
+        return false;
+    }
+    let a0 = signed_area(outer);
+    let a1 = signed_area(inner);
+    a0 * a1 > 0.0 && a1.abs() > 40.0 && a1.abs() < a0.abs() * 0.98 && a1.abs() > a0.abs() * 0.3
+}
+
+/// Cut every corner of a ring by `d`, or `None` if any edge is too short for it.
+fn chamfer_ring(ring: &[Vec2], d: f32) -> Option<Vec<Vec2>> {
+    let n = ring.len();
+    if n < 3 {
+        return None;
+    }
+    for i in 0..n {
+        if ring[i].distance(ring[(i + 1) % n]) < d * 2.0 + 4.0 {
+            return None;
+        }
+    }
+    let mut out = Vec::with_capacity(n * 2);
+    for i in 0..n {
+        let prev = ring[(i + n - 1) % n];
+        let next = ring[(i + 1) % n];
+        let v = ring[i];
+        out.push(v + (prev - v).normalize() * d);
+        out.push(v + (next - v).normalize() * d);
+    }
+    Some(out)
+}
+
+/// A projecting cornice under the parapet: fascia, soffit shadow and a top face.
+fn cornice(ring: &[Vec2], y: f32, builder: &mut MeshBuilder) {
+    let centre = ring_centroid(ring);
+    for index in 0..ring.len() {
+        let a = ring[index];
+        let b = ring[(index + 1) % ring.len()];
+        if a.distance(b) < 2.0 {
+            continue;
+        }
+        let outward = ((a + b) * 0.5 - centre).normalize();
+        let d = 0.38;
+        let (ao, bo) = (a + outward * d, b + outward * d);
+        builder.wall("trim.dark", a, b, y - 0.62, y - 0.50, None);
+        builder.wall("trim.light", bo, ao, y - 0.50, y, None);
+        builder.quad(
+            "trim.light",
+            Vec3::from_plan(a, y),
+            Vec3::from_plan(b, y),
+            Vec3::from_plan(bo, y),
+            Vec3::from_plan(ao, y),
+            None,
+        );
+    }
+}
+
+/// A shallow projecting course at the head of the ground storey.
+fn plinth_course(ring: &[Vec2], y: f32, builder: &mut MeshBuilder) {
+    let centre = ring_centroid(ring);
+    for index in 0..ring.len() {
+        let a = ring[index];
+        let b = ring[(index + 1) % ring.len()];
+        if a.distance(b) < 2.0 {
+            continue;
+        }
+        let outward = ((a + b) * 0.5 - centre).normalize();
+        let d = 0.16;
+        let (ao, bo) = (a + outward * d, b + outward * d);
+        builder.wall("trim.light", bo, ao, y - 0.05, y + 0.32, None);
+        builder.quad(
+            "trim.light",
+            Vec3::from_plan(a, y + 0.32),
+            Vec3::from_plan(b, y + 0.32),
+            Vec3::from_plan(bo, y + 0.32),
+            Vec3::from_plan(ao, y + 0.32),
+            None,
+        );
+    }
+}
+
+/// A stair/lift core: a full-height box projecting from a back wall and running
+/// on above the roof as a lift overrun.
+fn core_bump(
+    id: u32,
+    ring: &[Vec2],
+    base: f32,
+    top: f32,
+    storeys: f32,
+    material: &str,
+    mirror: bool,
+    builder: &mut MeshBuilder,
+) {
+    let n = ring.len();
+    let front = front_edges(ring, 1);
+    let mut best: Option<(usize, f32)> = None;
+    for i in 0..n {
+        if front.contains(&i) {
+            continue;
+        }
+        let len = ring[i].distance(ring[(i + 1) % n]);
+        if len > 12.0 && best.map_or(true, |(_, l)| len > l) {
+            best = Some((i, len));
+        }
+    }
+    let Some((i, len)) = best else { return };
+    let a = ring[i];
+    let b = ring[(i + 1) % n];
+    let dir = (b - a).normalize();
+    let out = dir.left_normal();
+    let w = 3.6 + hash_u32(id, 101, 5) * 1.8;
+    let t = 0.25 + hash_u32(id, 103, 5) * 0.5;
+    let e0 = a + dir * (len * t);
+    let e1 = e0 + dir * w;
+    let depth = 1.5;
+    let (p0, p1) = (e0 + out * depth, e1 + out * depth);
+    let head = top + 2.8;
+    for (u, v) in [(e0, p0), (p0, p1), (p1, e1)] {
+        facade_wall(builder, material, u, v, base, top, storeys, mirror, None);
+        builder.wall("wall.render", u, v, top, head, None);
+    }
+    builder.ground_uv("roof", &[e0, p0, p1, e1], head, None);
 }
