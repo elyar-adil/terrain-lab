@@ -39,6 +39,13 @@ pub struct GenerationResult {
     /// Rich Chinese-city graph and parcel metadata. `cities` remains the
     /// legacy UrbanModel projection for older renderers.
     pub modern_cities: serde_json::Value,
+    /// Where each city owns the ground. `height_data_base64` is already levelled
+    /// under these and `vegetation_exclusion_data_base64` already cleared, so
+    /// consumers only read them (e.g. to anchor the near-field city).
+    pub city_sites: Vec<terrain_core::sites::CitySite>,
+    /// Far-LOD tree prototypes (species x detail level) for the terrain's forests,
+    /// generated from the same species records as the city's near trees.
+    pub far_trees: Vec<city_scene::trees::FarTreePayload>,
     /// The render-ready city layer: finished vertex buffers, instanced
     /// prototype lists, baked textures, signal states and the initial traffic
     /// pose. Derived entirely in Rust so the renderer never re-derives
@@ -903,7 +910,26 @@ pub fn build_payload(
     };
     let analysis_previews = analysis_previews(&terrain, &infrastructure)?;
         let mesh_size = 512_usize.min(terrain.size);
-        let height_bytes: Vec<u8> = downsample_height(&terrain, mesh_size)
+        // Settlement footprints, then level the mesh under them and keep plants
+        // out of them: the city is built on a flat frame, so terrain generation
+        // (not the renderer) makes the ground agree with it.
+        let city_sites: Vec<terrain_core::sites::CitySite> = infrastructure
+            .modern_cities
+            .iter()
+            .filter_map(|city| {
+                terrain_core::sites::site_from_points(
+                    city.nodes.iter().map(|node| (node.point.x_km, node.point.y_km)),
+                )
+            })
+            .collect();
+        let mut mesh_heights = downsample_height(&terrain, mesh_size);
+        terrain_core::sites::flatten_heights(
+            &mut mesh_heights,
+            mesh_size,
+            config.world_size_km,
+            &city_sites,
+        );
+        let height_bytes: Vec<u8> = mesh_heights
             .into_iter()
             .flat_map(f32::to_le_bytes)
             .collect();
@@ -916,7 +942,13 @@ pub fn build_payload(
                     .push((terrain.forest[sy * terrain.size + sx].clamp(0.0, 1.0) * 255.0) as u8);
             }
         }
-        let vegetation_exclusion_bytes = vegetation_exclusion_mask(&infrastructure, mesh_size);
+        let mut vegetation_exclusion_bytes = vegetation_exclusion_mask(&infrastructure, mesh_size);
+        terrain_core::sites::exclude_vegetation(
+            &mut vegetation_exclusion_bytes,
+            mesh_size,
+            config.world_size_km,
+            &city_sites,
+        );
         let (urban_bytes, cultivated_bytes, crop_bytes, road_bytes) =
             infrastructure_surface_masks(&infrastructure, mesh_size);
         let max_flow = terrain.flow.iter().copied().fold(1.0_f32, f32::max);
@@ -1001,6 +1033,8 @@ pub fn build_payload(
             roads: render_roads(&infrastructure),
             cities: serde_json::to_value(&infrastructure.cities)
                 .map_err(|error| error.to_string())?,
+            city_sites,
+            far_trees: city_scene::trees::far_tree_payload(),
             modern_cities: serde_json::to_value(&infrastructure.modern_cities)
                 .map_err(|error| error.to_string())?,
             // The city scenes are **not** part of this payload. They are tens of

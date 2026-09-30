@@ -9,6 +9,7 @@ use thiserror::Error;
 
 pub mod evolution;
 pub mod geology;
+pub mod sites;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

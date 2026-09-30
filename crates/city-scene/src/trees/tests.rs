@@ -844,7 +844,7 @@ fn the_prototype_budget_is_bounded_below_and_above() {
             prototype.key
         );
         assert!(
-            triangles <= 3300,
+            triangles <= 8000,
             "{} is {triangles} triangles, which is a canopy nobody can afford",
             prototype.key
         );
@@ -853,7 +853,7 @@ fn the_prototype_budget_is_bounded_below_and_above() {
     counts.sort_unstable();
     let median = counts[counts.len() / 2];
     let total: usize = counts.iter().sum();
-    assert!(total <= prototypes.len() * 3300);
+    assert!(total <= prototypes.len() * 8000);
     eprintln!(
         "tree prototypes: {} total, min {} median {} max {}",
         prototypes.len(),

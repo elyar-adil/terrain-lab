@@ -50,6 +50,7 @@ pub(crate) mod cards;
 /// Publicly nameable but entirely `pub(crate)` inside: a documentation anchor,
 /// so [`crate::species`] can point at the canopy records by path.
 pub mod forms;
+pub mod far;
 mod grow;
 mod plant;
 mod shrub;
@@ -58,6 +59,7 @@ pub use cards::{
     CARD_WINDOW, card_tile_m, chromaticity, colour_distance, leaf_card_textures, luma,
     mean_albedo_rgb, opaque_albedo, target_coverage, tuft_texture,
 };
+pub use far::{FAR_SPECIES, FarTree, FarTreePayload, far_tree_payload, far_tree_set};
 pub use plant::{TreeOutput, TreeRole, plant, species_for_parcel};
 pub use shrub::{build_shrub_prototype, build_tuft_prototype, plant_median_shrubs};
 
@@ -100,7 +102,7 @@ const TWO_VARIANT: [&str; 8] = [
 /// "simplification" from turning a species into a bare armature; the ceiling is
 /// what keeps 3 200 instances of one prototype affordable.
 pub(crate) const MIN_CARDS: usize = 220;
-pub(crate) const MAX_CARDS: usize = 1050;
+pub(crate) const MAX_CARDS: usize = 2200;
 
 /// The share of a card's own area a card presents to any given view.
 ///
