@@ -102,6 +102,23 @@ pub(crate) struct Jitter {
     pub mirror: bool,
 }
 
+/// A per-building colour shift for the facade tile: lightness from weathered to
+/// clean, and a warm, neutral or cool cast. Two towers that share a tile are still
+/// two different buildings, which is most of what stops a district reading as one
+/// copied block.
+pub(crate) fn building_tint(id: u32) -> [f32; 3] {
+    let lightness = 0.74 + modern::hash_u32(id, 11, 41) * 0.26;
+    let cast = modern::hash_u32(id, 13, 43);
+    let (r, g, b) = if cast < 0.34 {
+        (1.0, 0.93, 0.83) // warm
+    } else if cast < 0.67 {
+        (0.97, 0.97, 0.96) // neutral
+    } else {
+        (0.88, 0.94, 1.0) // cool
+    };
+    [r * lightness, g * lightness, b * lightness]
+}
+
 pub(crate) fn jitter_for(id: u32) -> Jitter {
     let value = 0.82 + modern::hash_u32(id, 3, 17) * 0.36;
     Jitter {
@@ -356,7 +373,9 @@ pub fn build(
         if ring.len() < 3 {
             continue;
         }
+        builder.ambient_tint = Some(building_tint(building.id));
         building_shell(building, &ring, builder);
+        builder.ambient_tint = None;
     }
     for compound in compounds {
         let ring = ring_of(&compound.boundary, frame);

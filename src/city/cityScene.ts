@@ -510,6 +510,7 @@ export function createMaterials(
         roughness: glass ? 0.16 : 0.85,
         metalness: glass ? 0.55 : 0.0,
         envMapIntensity: glass ? 1.25 : 0.5,
+        vertexColors: true,
       },
       map ? 0xffffff : 0xa8a49c,
     );

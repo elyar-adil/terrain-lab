@@ -1334,8 +1334,10 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       // The terrain under the city was levelled 0.8 m below this, so the apron
       // and roadbed always sit on top of it.
       layer.group.position.set(worldX, terrainHeightAt(worldX, worldZ) + 0.8 * metresToScene, worldZ);
+      // Static city: freeze every transform so three.js does not recompute them.
+      layer.group.updateMatrixWorld(true);
       layer.group.traverse((object) => {
-        object.frustumCulled = object.frustumCulled && !(object as THREE.InstancedMesh).isInstancedMesh;
+        if (object !== layer.group) object.matrixAutoUpdate = false;
       });
       scene.add(layer.group);
       cityLayer = layer;

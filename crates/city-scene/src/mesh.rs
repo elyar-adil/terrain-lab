@@ -135,6 +135,9 @@ pub struct MeshBuilder {
     meta: BTreeMap<String, GroupMeta>,
     /// Group material → prototype key it is instanced by.
     bound: BTreeMap<String, String>,
+    /// A tint applied to every untinted write into a `facade/*` group, so a whole
+    /// building can be shifted in colour without every wall primitive knowing.
+    pub ambient_tint: Option<[f32; 3]>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -217,6 +220,7 @@ impl MeshBuilder {
         if !a.0.is_finite() || !b.0.is_finite() || !c.0.is_finite() {
             return;
         }
+        let ambient = if material.starts_with("facade/") { self.ambient_tint } else { None };
         let buffers = self.buffers(material);
         let base = (buffers.positions.len() / 3) as u32;
         for (position, normal) in [a, b, c] {
@@ -225,7 +229,7 @@ impl MeshBuilder {
                 .normals
                 .extend_from_slice(&[normal.x, normal.y, normal.z]);
         }
-        if let Some(tint) = color {
+        if let Some(tint) = color.or(ambient) {
             let colors = buffers.colors.get_or_insert_with(|| {
                 buffers.with_colors = true;
                 Vec::with_capacity(INITIAL_VERTS * 3)
@@ -374,6 +378,7 @@ impl MeshBuilder {
             return;
         }
         let normal = face_normal(a, b, c);
+        let ambient = if material.starts_with("facade/") { self.ambient_tint } else { None };
         let buffers = self.buffers(material);
         let base = (buffers.positions.len() / 3) as u32;
         for (position, normal) in [(a, normal), (b, normal), (c, normal)] {
@@ -391,7 +396,7 @@ impl MeshBuilder {
         for corner in uv {
             store.extend_from_slice(&[corner.0, corner.1]);
         }
-        if let Some(tint) = color {
+        if let Some(tint) = color.or(ambient) {
             let store = buffers.colors.get_or_insert_with(|| {
                 buffers.with_colors = true;
                 Vec::with_capacity(INITIAL_VERTS * 3)
@@ -452,6 +457,7 @@ impl MeshBuilder {
         uv: Option<[(f32, f32); 4]>,
         color: Option<[f32; 3]>,
     ) {
+        let ambient = if material.starts_with("facade/") { self.ambient_tint } else { None };
         let buffers = self.buffers(material);
         let base = (buffers.positions.len() / 3) as u32;
         for (position, normal) in corners {
@@ -505,7 +511,7 @@ impl MeshBuilder {
                 }
             }
         }
-        if let Some(tint) = color {
+        if let Some(tint) = color.or(ambient) {
             let store = buffers.colors.get_or_insert_with(|| {
                 buffers.with_colors = true;
                 Vec::with_capacity(INITIAL_VERTS * 3)
@@ -551,6 +557,7 @@ impl MeshBuilder {
         d: (Vec3, Vec3),
         color: Option<[f32; 3]>,
     ) {
+        let ambient = if material.starts_with("facade/") { self.ambient_tint } else { None };
         let buffers = self.buffers(material);
         let base = (buffers.positions.len() / 3) as u32;
         for (position, normal) in [a, b, c, d] {
@@ -562,7 +569,7 @@ impl MeshBuilder {
                 .normals
                 .extend_from_slice(&[normal.x, normal.y, normal.z]);
         }
-        if let Some(tint) = color {
+        if let Some(tint) = color.or(ambient) {
             let colors = buffers.colors.get_or_insert_with(|| {
                 buffers.with_colors = true;
                 Vec::with_capacity(INITIAL_VERTS * 3)
