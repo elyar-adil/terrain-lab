@@ -789,9 +789,10 @@ pub fn derive(
             if road.from_node != node && road.to_node != node {
                 continue;
             }
-            if road.layer != 0 {
-                // An elevated road passes over; it has no kerb face at this
-                // level and must not grow a second box.
+            // A river bridge *ends* at this node and lands in its box like any
+            // other arm, ramping down to road level; a flyover that merely passes
+            // over has no kerb face here and must not grow a second box.
+            if road.layer != 0 && !road.bridge {
                 continue;
             }
             let at_start = road.from_node == node;
