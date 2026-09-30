@@ -814,6 +814,10 @@ pub fn derive(
         }
         ports.sort_by(|a, b| a.angle.total_cmp(&b.angle));
 
+        let roundabout = ports.len() >= 4 && radius[node_index] > 14.0 && {
+            rng.fork(node);
+            rng.chance(0.20)
+        };
         let mut ring: Vec<Vec2> = Vec::with_capacity(ports.len() * 9);
         let mut walk_ring: Vec<Vec2> = Vec::with_capacity(ports.len() * 9);
         for index in 0..ports.len() {
@@ -825,7 +829,33 @@ pub fn derive(
             let next = ports[(index + 1) % ports.len()];
             let chord = port.right.distance(next.left);
             let handle = chord * 0.45;
-            let corner = cubic_points(
+            let corner = if roundabout {
+                // A roundabout's kerb is a circle: sweep between the two mouth
+                // corners on an arc about the centre, radius blended between them,
+                // so the carriageway is round instead of a square box.
+                let (d0, d1) = (port.right - centre, next.left - centre);
+                let (r0, r1) = (d0.length().max(0.5), d1.length().max(0.5));
+                let a0 = d0.y.atan2(d0.x);
+                let mut delta = d1.y.atan2(d1.x) - a0;
+                while delta > std::f32::consts::PI {
+                    delta -= std::f32::consts::TAU;
+                }
+                while delta < -std::f32::consts::PI {
+                    delta += std::f32::consts::TAU;
+                }
+                let r_mid = (r0 + r1) * 0.5;
+                (0..=7)
+                    .map(|i| {
+                        let t = i as f32 / 7.0;
+                        // Bulge to the mean radius in the middle of the arc.
+                        let bulge = (std::f32::consts::PI * t).sin();
+                        let r = r0 + (r1 - r0) * t + (r_mid.max(r0.max(r1)) - (r0 + (r1 - r0) * t)) * bulge * 0.5;
+                        let angle = a0 + delta * t;
+                        centre + Vec2::new(angle.cos(), angle.sin()) * r
+                    })
+                    .collect::<Vec<Vec2>>()
+            } else {
+            cubic_points(
                 port.right,
                 // `dir` points from the road *towards* the junction (it is the
                 // negated into-the-road tangent), so the handles run along each
@@ -836,7 +866,8 @@ pub fn derive(
                 next.left + next.dir * handle,
                 next.left,
                 8,
-            );
+            )
+            };
             // Drop the two endpoints; they are already the port corners.
             for point in corner.iter().skip(1).take(7) {
                 ring.push(*point);
@@ -858,10 +889,6 @@ pub fn derive(
                 walk_ring.push(centre + delta * scale);
             }
         }
-        let roundabout = ports.len() >= 4 && radius[node_index] > 14.0 && {
-            rng.fork(node);
-            rng.chance(0.20)
-        };
         let kind = if roundabout {
             JunctionKind::Roundabout
         } else if ports.len() >= 4

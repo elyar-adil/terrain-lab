@@ -3252,6 +3252,7 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       // 路口工坊移植:天空穹顶跟随相机并推进云漂移;雾距随视野缩放,远景
       // 融进天穹地平线色;太阳阴影相机贴着轨道目标,低频刷新投影。
       skyUniforms.uTime.value = worldTime;
+      cityLayer?.update(worldTime);
       skyDome.position.copy(camera.position);
       // The dome must sit inside the far plane or the frustum clips it away and
       // the sky renders as black.

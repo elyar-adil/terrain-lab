@@ -801,15 +801,12 @@ pub fn junction_lane_guides(network: &Network, builder: &mut MeshBuilder) {
         if connector.turn_degrees.abs() < 25.0 {
             continue;
         }
+        if connector.from_lane.ends_with("bike") || connector.to_lane.ends_with("bike") {
+            continue;
+        }
         {
-            let n = connector.path.length();
-            let a = connector.path.plan_at(0.0);
-            let b = connector.path.plan_at(n);
-            let key = (
-                connector.node,
-                (a.x / 6.0).round() as i32 * 1000 + (a.y / 6.0).round() as i32,
-                (b.x / 6.0).round() as i32 * 1000 + (b.y / 6.0).round() as i32,
-            );
+            let road_of = |lane: &str| lane.split('/').nth(1).and_then(|v| v.parse::<i32>().ok()).unwrap_or(-1);
+            let key = (connector.node, road_of(&connector.from_lane), road_of(&connector.to_lane));
             if !drawn.insert(key) {
                 continue;
             }
@@ -823,6 +820,10 @@ pub fn junction_lane_guides(network: &Network, builder: &mut MeshBuilder) {
         let Some(junction) = network.junction(connector.node) else {
             continue;
         };
+        // A hatched no-stopping box owns the middle of the junction.
+        if junction.ports.len() >= 4 && junction.radius >= 16.0 {
+            continue;
+        }
         let Some((from, to)) = inside_ring(&path, &junction.ring) else {
             continue;
         };
@@ -834,7 +835,7 @@ pub fn junction_lane_guides(network: &Network, builder: &mut MeshBuilder) {
             0.0,
             from,
             to,
-            spec.white_line_width,
+            spec.white_line_width * 1.5,
             0.0,
         );
     }

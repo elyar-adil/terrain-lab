@@ -24,6 +24,8 @@ export interface CityLayer {
   group: THREE.Group;
   scene: CityScene;
   problems: string[];
+  /** Advance animated surfaces (water) to the host's clock, in seconds. */
+  update(seconds: number): void;
   dispose(): void;
 }
 
@@ -115,6 +117,10 @@ export function createCityLayer(scene: CityScene): CityLayer {
     group,
     scene,
     problems,
+    update(seconds: number) {
+      const clock = materials.get("water").userData.uTime as { value: number } | undefined;
+      if (clock) clock.value = seconds;
+    },
     dispose() {
       group.removeFromParent();
       for (const mesh of owned) mesh.dispose();

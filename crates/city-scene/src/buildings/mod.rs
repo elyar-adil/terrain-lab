@@ -951,13 +951,29 @@ pub fn build_water(river: &[Point], width: f32, frame: CityFrameInfo, builder: &
         "water",
         GroupStyle { cast_shadow: false, receive_shadow: true, alpha_cutout: false, dynamic: false },
     );
-    let line = ring_of(river, frame);
+    let mut line = ring_of(river, frame);
     if line.len() < 2 {
         return;
     }
+    // Chaikin corner cutting: the plan gives a coarse polyline, and offsetting a
+    // coarse polyline makes angular banks. Three passes round every bend into a
+    // smooth curve while keeping both ends where they were.
+    for _ in 0..3 {
+        let mut next = Vec::with_capacity(line.len() * 2);
+        next.push(line[0]);
+        for pair in line.windows(2) {
+            next.push(pair[0] * 0.75 + pair[1] * 0.25);
+            next.push(pair[0] * 0.25 + pair[1] * 0.75);
+        }
+        next.push(line[line.len() - 1]);
+        line = next;
+    }
     let half = width * 0.5;
+    let shore = (width * 0.12).clamp(2.5, 6.0);
     let mut left = Vec::with_capacity(line.len());
     let mut right = Vec::with_capacity(line.len());
+    let mut left_in = Vec::with_capacity(line.len());
+    let mut right_in = Vec::with_capacity(line.len());
     for i in 0..line.len() {
         let a = line[i.saturating_sub(1)];
         let b = line[(i + 1).min(line.len() - 1)];
@@ -966,13 +982,23 @@ pub fn build_water(river: &[Point], width: f32, frame: CityFrameInfo, builder: &
         let (nx, nz) = (-dz / len, dx / len);
         left.push(Vec2::new(line[i].x + nx * half, line[i].y + nz * half));
         right.push(Vec2::new(line[i].x - nx * half, line[i].y - nz * half));
+        left_in.push(Vec2::new(line[i].x + nx * (half - shore), line[i].y + nz * (half - shore)));
+        right_in.push(Vec2::new(line[i].x - nx * (half - shore), line[i].y - nz * (half - shore)));
     }
-    // Quad per segment: robust on bends where one big polygon would self-touch.
-    for i in 0..line.len() - 1 {
-        let mut quad = vec![left[i], left[i + 1], right[i + 1], right[i]];
+    // Shallow, sandy-green water at the edges and deep blue-green in the middle,
+    // written as vertex colours so one material draws the whole river.
+    let shallow = Some([0.34, 0.50, 0.46]);
+    let deep = Some([0.14, 0.27, 0.34]);
+    // Quads per segment: robust on bends where one big polygon would self-touch.
+    let mut put = |builder: &mut MeshBuilder, mut quad: Vec<Vec2>, colour: Option<[f32; 3]>| {
         if signed_area(&quad) < 0.0 {
             quad.reverse();
         }
-        builder.ground_uv("water", &quad, 0.03, None);
+        builder.ground_uv("water", &quad, 0.03, colour);
+    };
+    for i in 0..line.len() - 1 {
+        put(builder, vec![left[i], left[i + 1], left_in[i + 1], left_in[i]], shallow);
+        put(builder, vec![left_in[i], left_in[i + 1], right_in[i + 1], right_in[i]], deep);
+        put(builder, vec![right_in[i], right_in[i + 1], right[i + 1], right[i]], shallow);
     }
 }

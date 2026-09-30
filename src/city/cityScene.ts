@@ -401,7 +401,46 @@ export function createMaterials(
       grassMap ? 0xffffff : 0x2e3a22,
     );
   }
-  standard("water", { roughness: 0.05, metalness: 0.2, envMapIntensity: 1.6 }, 0x4b7488);
+  {
+    // Water is lit like a smooth dielectric and shaped by moving ripples: a few
+    // travelling sine waves perturb the *normal* only, so the surface stays flat
+    // (it sits a few centimetres above the ground) but the sky reflection breaks
+    // up into the streaky glints a real river has. The bank colours come from
+    // vertex colours (sandy shallows, deep centre), written by the Rust layer.
+    const water = standard(
+      "water",
+      { roughness: 0.08, metalness: 0.1, envMapIntensity: 1.5, vertexColors: true },
+      0xffffff,
+    );
+    const waterTime = { value: 0 };
+    water.userData.uTime = waterTime;
+    water.onBeforeCompile = (shader) => {
+      shader.uniforms.uWaterTime = waterTime;
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", "#include <common>\nvarying vec2 vWaterP;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvWaterP = position.xz;");
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          "#include <common>",
+          "#include <common>\nvarying vec2 vWaterP;\nuniform float uWaterTime;",
+        )
+        .replace(
+          "#include <normal_fragment_maps>",
+          `#include <normal_fragment_maps>
+{
+  vec2 p = vWaterP;
+  float t = uWaterTime;
+  vec2 g = vec2(0.0);
+  g += vec2(0.8, 0.6) * cos(dot(p, vec2(0.8, 0.6)) * 0.9 + t * 1.3) * 0.9;
+  g += vec2(-0.5, 0.86) * cos(dot(p, vec2(-0.5, 0.86)) * 1.7 - t * 1.9) * 0.7;
+  g += vec2(0.96, -0.28) * cos(dot(p, vec2(0.96, -0.28)) * 3.1 + t * 2.6) * 0.45;
+  g += vec2(0.2, 0.98) * cos(dot(p, vec2(0.2, 0.98)) * 5.3 - t * 3.4) * 0.3;
+  vec3 gw = vec3(g.x, 0.0, g.y) * 0.05;
+  normal = normalize(normal - normalize(mat3(viewMatrix) * gw) * length(gw));
+}`,
+        );
+    };
+  }
   standard(
     "hedge",
     { map: grassMap ?? undefined, normalMap: normalFor("ground/grass", 2.2) ?? undefined, roughness: 0.92, flatShading: false },

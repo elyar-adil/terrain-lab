@@ -546,26 +546,88 @@ pub(super) fn junction_details(junction: &Junction, builder: &mut MeshBuilder, s
 /// quads a junction, and past a handful of junctions that is a triangle budget
 /// spent on paint nobody sees from a car.
 fn yellow_grid_box(junction: &Junction, builder: &mut MeshBuilder, spec: &JunctionSpec) {
-    if junction.ports.len() < 4 || junction.radius < 20.0 {
+    if junction.roundabout || junction.ports.len() < 4 || junction.radius < 16.0 {
         return;
     }
-    let inset = crate::math::inset_ring(&junction.ring, 2.2);
+    let inset = crate::math::inset_ring(&junction.ring, 2.6);
     if inset.len() < 3 {
         return;
     }
+    let width = 0.085_f32;
+    // The outline: a continuous yellow border around the no-stopping box.
+    for index in 0..inset.len() {
+        let a = inset[index];
+        let b = inset[(index + 1) % inset.len()];
+        yellow_bar(builder, a, b, width * 1.5);
+    }
+    // The hatching: diagonal lines at +-45 degrees, 4.4 m apart, clipped to the
+    // outline. Each line is sampled every 0.7 m and drawn as one quad per run
+    // that lies inside the box.
     let mut lo = Vec2::new(f32::MAX, f32::MAX);
     let mut hi = Vec2::new(f32::MIN, f32::MIN);
     for point in &inset {
         lo = Vec2::new(lo.x.min(point.x), lo.y.min(point.y));
         hi = Vec2::new(hi.x.max(point.x), hi.y.max(point.y));
     }
-    let width = spec.yellow_grid_width * 0.5;
-    let lines = 8;
-    for index in 0..lines {
-        let t = (index as f32 + 0.5) / lines as f32;
-        grid_line(builder, &inset, lerp(lo.x, hi.x, t), true, width);
-        grid_line(builder, &inset, lerp(lo.y, hi.y, t), false, width);
+    let spacing = 4.4_f32;
+    let reach = (hi.x - lo.x) + (hi.y - lo.y);
+    for sign in [1.0_f32, -1.0] {
+        // Lines x + sign*z = c.
+        let (c_lo, c_hi) = if sign > 0.0 {
+            (lo.x + lo.y, hi.x + hi.y)
+        } else {
+            (lo.x - hi.y, hi.x - lo.y)
+        };
+        let mut c = c_lo + spacing * 0.5;
+        while c < c_hi {
+            // The line is x = c - sign*z: start at the box's low edge and walk up z.
+            let dir = Vec2::new(-sign, 1.0) * std::f32::consts::FRAC_1_SQRT_2;
+            let origin = Vec2::new(c - sign * lo.y, lo.y);
+            let steps = (reach / 0.7) as usize + 1;
+            let mut run_start: Option<Vec2> = None;
+            let mut last = origin;
+            for step in 0..=steps {
+                let point = origin + dir * (step as f32 * 0.7);
+                let inside = crate::math::point_in_ring(point, &inset);
+                if inside && run_start.is_none() {
+                    run_start = Some(point);
+                }
+                if !inside {
+                    if let Some(start) = run_start.take() {
+                        if start.distance(last) > 1.5 {
+                            yellow_bar(builder, start, last, width);
+                        }
+                    }
+                }
+                last = point;
+            }
+            if let Some(start) = run_start {
+                if start.distance(last) > 1.5 {
+                    yellow_bar(builder, start, last, width);
+                }
+            }
+            c += spacing;
+        }
     }
+}
+
+/// A flat yellow bar of half-width `half` from `a` to `b`, painted on the road.
+fn yellow_bar(builder: &mut MeshBuilder, a: Vec2, b: Vec2, half: f32) {
+    let along = b - a;
+    let length = along.x.hypot(along.y);
+    if length < 0.05 {
+        return;
+    }
+    let (nx, nz) = (-along.y / length * half, along.x / length * half);
+    let y = super::level::PAINT;
+    builder.quad(
+        "marking.yellow",
+        Vec3::new(a.x + nx, y, a.y + nz),
+        Vec3::new(b.x + nx, y, b.y + nz),
+        Vec3::new(b.x - nx, y, b.y - nz),
+        Vec3::new(a.x - nx, y, a.y - nz),
+        None,
+    );
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
@@ -694,9 +756,21 @@ pub(super) fn roundabout(junction: &Junction, builder: &mut MeshBuilder, spec: &
             })
             .collect()
     };
-    builder.ground_uv("asphalt", &ring(radius * 0.96, 48), super::level::ROAD, None);
-    // The apron, in concrete, from the circulatory surface to the island kerb.
-    builder.ground_uv("kerb", &ring(island + 0.45, 48), super::level::ROAD + 0.012, None);
+    // The carriageway is the junction ring itself, which is a circle for a
+    // roundabout. The apron: a coloured, mountable ring around the island, so the
+    // circle reads at a glance the way it does on a real one.
+    let inner = ring(island + 0.45, 48);
+    let outer = ring(island + 3.4, 48);
+    for index in 0..inner.len() {
+        let next = (index + 1) % inner.len();
+        builder.ground_uv(
+            "asphalt.cycle",
+            &[inner[index], outer[index], outer[next], inner[next]],
+            super::level::ROAD + 0.012,
+            None,
+        );
+    }
+    builder.ground_uv("kerb", &inner, super::level::ROAD + 0.014, None);
     // The island kerb as a wall, so it has a face and catches the sun on top.
     let kerb_ring = ring(island + 0.45, 48);
     for index in 0..kerb_ring.len() {
@@ -721,7 +795,7 @@ pub(super) fn roundabout(junction: &Junction, builder: &mut MeshBuilder, spec: &
         }
         let outward = offset / distance;
         let width = port.left.distance(port.right).max(3.0);
-        let line = centre + outward * (island + 1.6);
+        let line = centre + outward * (distance - 2.2);
         let right = Vec2::new(-outward.y, outward.x);
         let count = (width / spec.give_way_pitch).floor().max(1.0) as usize;
         let pitch = width / count as f32;
@@ -742,7 +816,7 @@ pub(super) fn roundabout(junction: &Junction, builder: &mut MeshBuilder, spec: &
         }
         // The deflection arrow: a straight stencil turned to the circle's
         // tangent, so the driver is told to curve rather than to continue.
-        let entry = centre + outward * (island + 4.0);
+        let entry = centre + outward * (distance - 8.0);
         deflection_arrow(builder, entry, right, 0.0);
     }
     let _ = spec.roundabout_apron;
