@@ -193,9 +193,70 @@ impl<'a, 'b> Grower<'a, 'b> {
         if self.arch.aerial > 0 {
             self.aerial_roots();
         }
+        self.canopy_mass();
         // A tree is drawn to its canopy, so the top of the last card is the top
         // of the tree. The geometry is unit height and the instance scale is the
         // real metres; that invariant is what lets one mesh be any tree.
+    }
+
+    // -- the canopy mass ------------------------------------------------------
+
+    /// An opaque, lumpy shell inside the crown envelope.
+    ///
+    /// Alpha-cut cards alone leave a canopy see-through and dark when looked at
+    /// from above: the viewer sees the trunk shadow and the ground through the
+    /// gaps. Real crowns read as a dense, softly lit mass of clumps, so the cards
+    /// sit on a smooth, noise-displaced shell at about two thirds of the crown
+    /// radius and stick out of it as leaf texture.
+    fn canopy_mass(&mut self) {
+        let (rows, cols) = (14usize, 22usize);
+        let base = self.plan.base + (self.plan.top - self.plan.base) * 0.04;
+        let top = self.plan.top - 0.005;
+        let phase = self.plan.phase;
+        let f = self.species.foliage;
+        let noise = |a: f32, y: f32| -> f32 {
+            0.5 * (a * 3.0 + y * 9.0 + phase).sin()
+                + 0.3 * (a * 5.0 - y * 14.0 + phase * 1.7).sin()
+                + 0.2 * (a * 9.0 + y * 21.0 + phase * 2.3).sin()
+        };
+        let mut grid: Vec<Vec3> = Vec::with_capacity((rows + 1) * cols);
+        let mut shade: Vec<f32> = Vec::with_capacity((rows + 1) * cols);
+        for i in 0..=rows {
+            let t = i as f32 / rows as f32;
+            let y = base + (top - base) * t;
+            // Close the shell at both ends with a rounded cap.
+            let cap = (1.0 - (2.0 * t - 1.0).powi(8)).max(0.0).sqrt();
+            let r = self.plan.radius_at(&self.arch, y) * 0.68 * cap.max(0.02);
+            for j in 0..cols {
+                let a = j as f32 / cols as f32 * TAU;
+                let n = noise(a, y);
+                let rr = r * (1.0 + 0.16 * n);
+                grid.push(Vec3::new(rr * a.cos(), y + 0.01 * n, rr * a.sin()));
+                shade.push(n);
+            }
+        }
+        let at = |i: usize, j: usize| i * cols + (j % cols);
+        let mut normals = vec![Vec3::new(0.0, 1.0, 0.0); grid.len()];
+        for i in 0..=rows {
+            for j in 0..cols {
+                let up = grid[at((i + 1).min(rows), j)] - grid[at(i.saturating_sub(1), j)];
+                let around = grid[at(i, j + 1)] - grid[at(i, j + cols - 1)];
+                // up x around points outward (radius grows with angle CCW from above).
+                normals[at(i, j)] = up.cross(around).normalized_or_up();
+            }
+        }
+        let name = self.leaf.replace("#leaf", "#mass");
+        for i in 0..rows {
+            for j in 0..cols {
+                let ids = [at(i, j), at(i, j + 1), at(i + 1, j + 1), at(i + 1, j)];
+                let n = (shade[ids[0]] + shade[ids[2]]) * 0.5;
+                let lift = 0.78 + 0.22 * (i as f32 / rows as f32) + 0.14 * n;
+                let colour = Some([f[0] * lift, f[1] * lift, f[2] * lift]);
+                let v = |k: usize| (grid[ids[k]], normals[ids[k]]);
+                self.builder.triangle(&name, v(0), v(3), v(2), colour);
+                self.builder.triangle(&name, v(0), v(2), v(1), colour);
+            }
+        }
     }
 
     // -- the wood ----------------------------------------------------------

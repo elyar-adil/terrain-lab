@@ -790,19 +790,34 @@ pub(super) fn approach_taper(road: &Road, builder: &mut MeshBuilder, spec: &Junc
 /// phase is unaffected: `V` is still metres from the connector's own start.
 pub fn junction_lane_guides(network: &Network, builder: &mut MeshBuilder) {
     let spec = &network.spec;
+    // One guide per arm pair: several lanes feed the same turn, and drawing each
+    // one produced a fan of crossing ticks. Only left turns cross the box, so only
+    // they are guided.
+    let mut drawn: std::collections::HashSet<(u32, i32, i32)> = std::collections::HashSet::new();
     for connector in &network.connectors {
-        // Skip movements the box already reads from its own shape: a
-        // near-straight connector is implied by the kerb line.
-        if connector.movement != Movement::Left && connector.movement != Movement::Right {
+        if connector.movement != Movement::Left {
             continue;
         }
         if connector.turn_degrees.abs() < 25.0 {
             continue;
         }
+        {
+            let n = connector.path.length();
+            let a = connector.path.plan_at(0.0);
+            let b = connector.path.plan_at(n);
+            let key = (
+                connector.node,
+                (a.x / 6.0).round() as i32 * 1000 + (a.y / 6.0).round() as i32,
+                (b.x / 6.0).round() as i32 * 1000 + (b.y / 6.0).round() as i32,
+            );
+            if !drawn.insert(key) {
+                continue;
+            }
+        }
         // A connector's *shape* is the detail, so this is the one place the
         // fine subdivision step is right.
         let path = connector.path.densified(crate::math::FINE_RESAMPLE_METRES);
-        if path.length() < 0.8 {
+        if path.length() < 8.0 {
             continue;
         }
         let Some(junction) = network.junction(connector.node) else {

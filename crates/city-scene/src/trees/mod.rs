@@ -260,6 +260,16 @@ pub fn build_prototypes(prototypes: &[TreePrototype], builder: &mut MeshBuilder)
                 dynamic: false,
             },
         );
+        let mass = format!("{}#mass", prototype.key);
+        builder.style(
+            &mass,
+            crate::mesh::GroupStyle {
+                cast_shadow: true,
+                receive_shadow: true,
+                alpha_cutout: false,
+                dynamic: false,
+            },
+        );
         let seed = hash_seed(prototype.species.key, prototype.variant);
         let mut grower = grow::Grower::new(prototype, seed, &bark, &leaf, builder);
         grower.build();
@@ -267,6 +277,7 @@ pub fn build_prototypes(prototypes: &[TreePrototype], builder: &mut MeshBuilder)
         // groups, one instance buffer.
         builder.bind(&bark, &prototype.key);
         builder.bind(&leaf, &prototype.key);
+        builder.bind(&mass, &prototype.key);
     }
 }
 

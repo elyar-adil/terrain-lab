@@ -623,6 +623,19 @@ export function createMaterials(
           const card = textureFor(`vegetation/leaf/${species}`);
           if (card) return leafMaterial(key, `vegetation/leaf/${species}`);
         }
+        if (part === "mass") {
+          return register(
+            key,
+            new THREE.MeshStandardMaterial({
+              color: 0xffffff,
+              roughness: 1,
+              metalness: 0,
+              vertexColors: true,
+              emissive: 0x16240f,
+              emissiveIntensity: 0.5,
+            }),
+          );
+        }
         if (part === "bark") {
           // Bark is per species as well — a plum's near-black fissured bark and a
           // plane tree's pale mottled bark are not one material — and the tint
