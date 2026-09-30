@@ -348,6 +348,7 @@ fn declare(builder: &mut MeshBuilder) {
         "marking.dashed-3-5",
         "marking.dashed-6-9",
         "bridge.concrete",
+        "bridge.steel",
     ] {
         builder.style(material, style);
     }

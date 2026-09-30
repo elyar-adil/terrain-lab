@@ -306,7 +306,7 @@ pub fn derive(
             .map(|section| section.width_metres)
             .fold(0.0_f32, f32::max);
         let mut value = if list.len() > 2 {
-            widest * 0.8 + 4.0
+            widest * 0.55 + 3.0
         } else {
             (widest * 0.5 + 2.0).min(8.0)
         };

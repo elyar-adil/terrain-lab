@@ -33,11 +33,11 @@ const PODIUM_FLOOR_M: f32 = 4.5;
 /// Gap left between two lots that share a bisection line.
 const LOT_GAP_M: f32 = 1.5;
 /// Extra clearance between a footprint and its lot line.
-const LOT_MARGIN_M: f32 = 2.0;
+const LOT_MARGIN_M: f32 = 0.8;
 /// Building line: distance from the back of the sidewalk to the wall.
-const BUILDING_LINE_M: f32 = 3.0;
+const BUILDING_LINE_M: f32 = 1.5;
 /// Clearance kept between any building lot and the river bank.
-const RIVER_BANK_M: f32 = 12.0;
+const RIVER_BANK_M: f32 = 6.0;
 
 /// Distance from a street centreline to the nearest permitted wall.
 fn right_of_way(class: ModernRoadClass) -> f32 {
@@ -177,8 +177,8 @@ pub(super) fn build_parcels(
             .unwrap_or(0);
         let (wa, wb) = (face.ring[widest], face.ring[(widest + 1) % face.ring.len()]);
 
-        let target = 2600.0
-            + 2400.0 * (1.0 - centrality) * (0.6 + 0.8 * modern_hash(seed, fi, 3, 761));
+        let target = 1100.0
+            + 1300.0 * (1.0 - centrality) * (0.6 + 0.8 * modern_hash(seed, fi, 3, 761));
         for (env_index, env) in envelopes.iter().enumerate() {
             let mut lots: Vec<Vec<V>> = Vec::new();
             subdivide(env, target, seed, fi * 8 + env_index as i32, 0, &mut lots);
@@ -186,16 +186,16 @@ pub(super) fn build_parcels(
             for (lot_index, lot) in lots.iter().enumerate() {
                 let ob = obb(lot);
                 let lot_area = signed_area(lot);
-                if lot.len() < 4 || lot_area < 400.0 || ob.width().min(ob.depth()) < 12.0 {
+                if lot.len() < 4 || lot_area < 300.0 || ob.width().min(ob.depth()) < 10.0 {
                     continue;
                 }
                 let key = fi * 64 + (env_index as i32) * 16 + lot_index as i32;
                 let n = modern_hash(seed, key, 1, 719);
                 let noise = |salt: i32| modern_hash(seed, key, 2, salt);
                 let waterfront = ring_polyline_dist(lot, &river_local) < river_half + RIVER_BANK_M;
-                let use_type = if park_block || waterfront {
+                let use_type = if park_block || (waterfront && n > 0.45) {
                     ParcelUse::Park
-                } else if n < 0.26 + 0.20 * centrality {
+                } else if n < 0.32 + 0.24 * centrality {
                     ParcelUse::Commercial
                 } else if n < 0.55 {
                     ParcelUse::MixedUse
@@ -235,7 +235,7 @@ pub(super) fn build_parcels(
                 let (bz0, bz1) = (ob.min_v + LOT_MARGIN_M, ob.max_v - LOT_MARGIN_M);
                 let width = bx1 - bx0;
                 let depth = bz1 - bz0;
-                if width < 22.0 || depth < 22.0 {
+                if width < 14.0 || depth < 14.0 {
                     continue;
                 }
                 let parcel_area = lot_area.min(width * depth * 1.15);
@@ -328,12 +328,12 @@ pub(super) fn build_parcels(
                             false,
                         );
                         let tower_area = 24.0 * 20.0;
-                        let tower_far = 2.2 + 2.2 * centrality * density;
-                        let tower_floors = ((tower_far * parcel_area * 0.55 / tower_area).round()
+                        let tower_far = 3.6 + 3.6 * centrality * density;
+                        let tower_floors = ((tower_far * parcel_area.max(4200.0) * 0.55 / tower_area).round()
                             as u16)
-                            .clamp(10, 38);
-                        let tower_w = 24.0 * (0.85 + noise(737) * 0.3);
-                        let tower_d = 20.0 * (0.85 + noise(739) * 0.3);
+                            .clamp(12, 34);
+                        let tower_w = 30.0 * (0.85 + noise(737) * 0.3);
+                        let tower_d = 26.0 * (0.85 + noise(739) * 0.3);
                         let towers = if parcel_area > 6_800.0 && noise(741) < 0.45 { 2 } else { 1 };
                         for t in 0..towers {
                             let (tx, tz) = if towers == 2 {
@@ -378,7 +378,7 @@ pub(super) fn build_parcels(
                         );
                         let tower_area = 22.0 * 18.0;
                         let far = 2.2 + 1.4 * centrality * density;
-                        let tower_floors = ((far * parcel_area * 0.55 / tower_area).round() as u16)
+                        let tower_floors = ((far * parcel_area.max(3000.0) * 0.55 / tower_area).round() as u16)
                             .clamp(9, 33);
                         let tower_w = 22.0 * (0.9 + noise(747) * 0.2);
                         let tower_d = 18.0 * (0.9 + noise(749) * 0.2);
@@ -419,6 +419,20 @@ pub(super) fn build_parcels(
                             BuildingFacade::StoneCivic,
                             RoofStyle::Flat,
                             false,
+                        );
+                    }
+                    ParcelUse::Residential if !compound => {
+                        // A street-wall block: the building fills its lot and
+                        // meets the pavement, as in any dense city centre.
+                        let floors = (5.0 + noise(763) * 6.0 + 6.0 * centrality * density).round() as u16;
+                        emit(
+                            rect(bx0, bx1, bz0, bz1, 0.03),
+                            floors.clamp(5, 16),
+                            ParcelUse::Residential,
+                            0,
+                            BuildingFacade::BrickResidential,
+                            RoofStyle::Flat,
+                            true,
                         );
                     }
                     ParcelUse::Residential => {
@@ -527,7 +541,7 @@ fn subdivide(poly: &[V], target: f32, seed: u32, key: i32, depth: u32, out: &mut
     let area = signed_area(poly);
     let ob: Obb = obb(poly);
     let (w, d) = (ob.width(), ob.depth());
-    if area <= target || depth >= 6 || w.max(d) < 48.0 {
+    if area <= target || depth >= 6 || w.max(d) < 30.0 {
         out.push(poly.to_vec());
         return;
     }
@@ -538,7 +552,7 @@ fn subdivide(poly: &[V], target: f32, seed: u32, key: i32, depth: u32, out: &mut
     let s = lo + (hi - lo) * t;
     let a = clip_half(poly, (-axis.0, -axis.1), -(s - LOT_GAP_M));
     let b = clip_half(poly, axis, s + LOT_GAP_M);
-    if a.len() < 3 || b.len() < 3 || signed_area(&a) < 500.0 || signed_area(&b) < 500.0 {
+    if a.len() < 3 || b.len() < 3 || signed_area(&a) < 320.0 || signed_area(&b) < 320.0 {
         out.push(poly.to_vec());
         return;
     }

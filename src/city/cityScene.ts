@@ -451,6 +451,7 @@ export function createMaterials(
   // the sky rather than from its own albedo.
   standard("rail.steel", { roughness: 0.42, metalness: 0.75, envMapIntensity: 0.9 }, 0x8f9498);
   standard("bridge.concrete", { roughness: 0.9 }, 0x7c7a72);
+  standard("bridge.steel", { roughness: 0.5, metalness: 0.6, side: THREE.DoubleSide, vertexColors: true }, 0x9aa0a6);
   standard("wire", { roughness: 0.55, metalness: 0.3, side: THREE.DoubleSide }, 0x14161a);
 
   // --- road paint -----------------------------------------------------------
@@ -507,9 +508,13 @@ export function createMaterials(
       key,
       {
         map: map ?? undefined,
-        roughness: glass ? 0.16 : 0.85,
-        metalness: glass ? 0.55 : 0.0,
+        // Without an environment map a metallic surface has nothing to
+        // reflect and renders black, so glass stays mostly dielectric and
+        // carries a faint self-lit sky tone in place of a reflection.
+        roughness: glass ? 0.28 : 0.85,
+        metalness: glass ? 0.1 : 0.0,
         envMapIntensity: glass ? 1.25 : 0.5,
+        ...(glass && map ? { emissiveMap: map, emissive: 0x6f8fb0, emissiveIntensity: 0.22 } : {}),
         vertexColors: true,
       },
       map ? 0xffffff : 0xa8a49c,
