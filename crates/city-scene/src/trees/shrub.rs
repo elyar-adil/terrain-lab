@@ -28,30 +28,42 @@ pub fn build_shrub_prototype(builder: &mut MeshBuilder) {
     );
     // A dense clipped dome: a vertical profile that is widest just below the
     // middle and a flat top, which is exactly what a pruning shear leaves.
-    let (rings, sides) = (5_u32, 9_u32);
-    let mut points: Vec<Vec3> = Vec::new();
+    // Smooth-shaded and textured: sixteen sides and eight rings, with the normal
+    // taken radially so light rolls across the dome instead of stepping facet by
+    // facet, and UVs in metres so the foliage texture keeps a real leaf scale.
+    let (rings, sides) = (8_u32, 16_u32);
+    let mut points: Vec<(Vec3, Vec3, (f32, f32))> = Vec::new();
     for ring in 0..=rings {
-        let phi = ring as f32 / rings as f32 * std::f32::consts::PI;
-        let y = phi.cos().abs().powf(0.7);
-        let radius = phi.sin().powf(0.8) * (0.94 - 0.10 * ring as f32 / rings as f32);
-        for side in 0..sides {
+        let phi = ring as f32 / rings as f32 * std::f32::consts::FRAC_PI_2;
+        let y = phi.cos().powf(0.55);
+        let radius = phi.sin().powf(0.75) * (0.96 - 0.10 * ring as f32 / rings as f32);
+        for side in 0..=sides {
             let theta = side as f32 / sides as f32 * TAU;
             // Lobed rather than circular: a clipped hedge is never a lathe form.
             let lobe = 1.0 + 0.07 * (theta * 3.0).sin();
-            points.push(Vec3::new(
+            let position = Vec3::new(
                 radius * lobe * theta.cos() * 0.62,
                 y * 0.62 + 0.10,
                 radius * lobe * theta.sin() * 0.62,
-            ));
+            );
+            let normal = Vec3::new(position.x, (position.y - 0.10) * 0.8 + 0.15, position.z)
+                .normalized_or_up();
+            points.push((position, normal, (theta / TAU * 2.4, (1.0 - y) * 0.9)));
         }
     }
+    let stride = sides as usize + 1;
     for ring in 0..rings as usize {
         for side in 0..sides as usize {
-            let a = ring * sides as usize + side;
-            let b = ring * sides as usize + (side + 1) % sides as usize;
-            let c = (ring + 1) * sides as usize + (side + 1) % sides as usize;
-            let d = (ring + 1) * sides as usize + side;
-            builder.quad("hedge", points[a], points[b], points[c], points[d], None);
+            let a = ring * stride + side;
+            let b = ring * stride + side + 1;
+            let c = (ring + 1) * stride + side + 1;
+            let d = (ring + 1) * stride + side;
+            builder.quad_uv_shaded(
+                "hedge",
+                [(points[a].0, points[a].1), (points[b].0, points[b].1), (points[c].0, points[c].1), (points[d].0, points[d].1)],
+                [points[a].2, points[b].2, points[c].2, points[d].2],
+                None,
+            );
         }
     }
     // One transform list places every shrub in the city.

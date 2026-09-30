@@ -402,7 +402,11 @@ export function createMaterials(
     );
   }
   standard("water", { roughness: 0.05, metalness: 0.2, envMapIntensity: 1.6 }, 0x4b7488);
-  standard("hedge", { roughness: 0.9, flatShading: true }, 0x22381a);
+  standard(
+    "hedge",
+    { map: grassMap ?? undefined, normalMap: normalFor("ground/grass", 2.2) ?? undefined, roughness: 0.92, flatShading: false },
+    grassMap ? 0x6f9a52 : 0x2a4a1f,
+  );
   standard("barrier.concrete", { roughness: 0.9 }, 0x9a988e);
   // Hot-dip galvanised steel: bright, but metallic, so it takes its colour from
   // the sky rather than from its own albedo.
