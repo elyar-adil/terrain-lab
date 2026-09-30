@@ -499,6 +499,45 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
     const terrainMaterial = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.96, metalness: 0.0 });
+    // The satellite preview is one texel per ~40 m, so anything closer than a
+    // few hundred metres is a blur. Detail is synthesised in the shader at four
+    // scales in *world metres* and faded in by the camera's distance, so the
+    // ground keeps grain (soil crumbs, grass tufts, field tone, patches) from
+    // the whole-map view down to a footstep, with no extra texture memory.
+    terrainMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.uMetres = { value: sceneToMetres };
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", "#include <common>\nvarying vec3 vDetailP;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvDetailP = (modelMatrix * vec4(position, 1.0)).xyz;");
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `#include <common>
+varying vec3 vDetailP;
+uniform float uMetres;
+float dHash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float dNoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(dHash(i), dHash(i + vec2(1, 0)), f.x), mix(dHash(i + vec2(0, 1)), dHash(i + vec2(1, 1)), f.x), f.y);
+}
+float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2 * dNoise(p * 4.37 + 3.7); }`)
+        .replace("#include <map_fragment>", `#include <map_fragment>
+{
+  vec2 pm = vDetailP.xz * uMetres;
+  float dm = length(vDetailP - cameraPosition) * uMetres;
+  float w0 = 1.0 - smoothstep(6.0, 60.0, dm);
+  float w1 = 1.0 - smoothstep(40.0, 320.0, dm);
+  float w2 = 1.0 - smoothstep(250.0, 1800.0, dm);
+  float w3 = 1.0 - smoothstep(1500.0, 12000.0, dm);
+  float grain = dFbm(pm * 9.0) - 0.5;
+  float tufts = dFbm(pm * 1.9) - 0.5;
+  float patch = dFbm(pm * 0.21) - 0.5;
+  float region = dFbm(pm * 0.021) - 0.5;
+  float tone = 1.0 + w0 * grain * 0.7 + w1 * tufts * 0.55 + w2 * patch * 0.45 + w3 * region * 0.3;
+  diffuseColor.rgb *= tone;
+  // Warm the dry patches and cool the lush ones a little, as real fields do.
+  diffuseColor.rgb += (w1 * tufts + w2 * patch) * vec3(0.045, 0.03, -0.02);
+}`);
+    };
     const terrain = new THREE.Mesh(geometry, terrainMaterial);
     terrain.rotation.x = -Math.PI / 2;
     scene.add(terrain);
@@ -3190,8 +3229,8 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
       // 融进天穹地平线色;太阳阴影相机贴着轨道目标,低频刷新投影。
       skyUniforms.uTime.value = worldTime;
       skyDome.position.copy(camera.position);
-      (scene.fog as THREE.Fog).near = Math.max(120 * metresToScene, viewSpanScene * 0.30);
-      (scene.fog as THREE.Fog).far = Math.max(600 * metresToScene, viewSpanScene * 1.25);
+      (scene.fog as THREE.Fog).near = Math.max(350 * metresToScene, viewSpanScene * 0.45);
+      (scene.fog as THREE.Fog).far = Math.max(2600 * metresToScene, viewSpanScene * 2.6);
       const shadowSpan = THREE.MathUtils.clamp(viewSpanScene * 0.85, 40 * metresToScene, 1.5);
       sun.target.position.copy(controls.target);
       sun.position.copy(controls.target).addScaledVector(SUN_DIR, shadowSpan * 2.5 + 0.05);
