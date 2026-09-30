@@ -535,6 +535,60 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
         !drop[idx - 1]
     });
 
+    // ---- 3b. tidy junctions ----
+    // A diagonal that runs through (or near) a grid intersection leaves a node
+    // with six or eight arms and slivers of 22-45 degrees between them.  No
+    // junction box can be drawn cleanly from that: the crosswalks overlap and
+    // the corner paving degenerates into spikes.  Keep at most four arms and no
+    // two closer than 50 degrees, sacrificing the narrowest street each time.
+    loop {
+        let mut victim: Option<usize> = None;
+        'nodes: for n in 0..pts.len() {
+            let arms: Vec<(usize, f32)> = kept
+                .iter()
+                .enumerate()
+                .filter(|(_, (s, _))| s.a == n || s.b == n)
+                .map(|(i, (s, _))| {
+                    let o = if s.a == n { s.b } else { s.a };
+                    (i, (pts[o].1 - pts[n].1).atan2(pts[o].0 - pts[n].0))
+                })
+                .collect();
+            if arms.len() < 3 {
+                continue;
+            }
+            let rank = |i: usize| {
+                let (s, bridge) = &kept[i];
+                (s.class as i32, *bridge as i32, -((pts[s.a].0 - pts[s.b].0).hypot(pts[s.a].1 - pts[s.b].1) * 10.0) as i32)
+            };
+            let mut offenders: Vec<usize> = Vec::new();
+            for x in 0..arms.len() {
+                for y in (x + 1)..arms.len() {
+                    let mut d = (arms[x].1 - arms[y].1).abs() % std::f32::consts::TAU;
+                    if d > std::f32::consts::PI {
+                        d = std::f32::consts::TAU - d;
+                    }
+                    if d < 50.0_f32.to_radians() {
+                        offenders.push(arms[x].0);
+                        offenders.push(arms[y].0);
+                    }
+                }
+            }
+            if offenders.is_empty() && arms.len() > 4 {
+                offenders = arms.iter().map(|a| a.0).collect();
+            }
+            if let Some(&worst) = offenders.iter().min_by_key(|&&i| rank(i)) {
+                victim = Some(worst);
+                break 'nodes;
+            }
+        }
+        match victim {
+            Some(i) => {
+                kept.remove(i);
+            }
+            None => break,
+        }
+    }
+
     // ---- 4. no cul-de-sacs, one connected network ----
     loop {
         let mut degree = vec![0_u32; pts.len()];

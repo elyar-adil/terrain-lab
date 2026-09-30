@@ -308,6 +308,7 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
         &network,
         &city.parcels,
         city.river.as_deref(),
+        city.river_width_metres,
         city.frame,
         &prototypes,
         &mut builder,

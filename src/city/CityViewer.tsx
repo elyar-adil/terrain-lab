@@ -90,7 +90,7 @@ function createGround(extent: number): THREE.Mesh {
   const geometry = new THREE.PlaneGeometry(size, size, 1, 1);
   geometry.rotateX(-Math.PI / 2);
   const material = new THREE.MeshStandardMaterial({
-    color: 0x7a8562,
+    color: 0x5f6d47,
     roughness: 0.96,
     metalness: 0,
   });

@@ -114,6 +114,7 @@ pub fn plant(
     network: &Network,
     parcels: &[Parcel],
     river: Option<&[Point]>,
+    river_width: f32,
     frame: CityFrameInfo,
     prototypes: &[TreePrototype],
     builder: &mut MeshBuilder,
@@ -320,7 +321,8 @@ pub fn plant(
             for side in [-1.0_f32, 1.0] {
                 let point = path.offset_at(
                     station,
-                    side * (network.max_trim().max(18.0) * 0.5 + 9.0),
+                    // Clear of the water: half the channel plus the bank promenade.
+                    side * (river_width * 0.5 + 14.0),
                     0.0,
                 );
                 place(
