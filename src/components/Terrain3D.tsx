@@ -537,6 +537,22 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
   diffuseColor.rgb *= tone;
   // Warm the dry patches and cool the lush ones a little, as real fields do.
   diffuseColor.rgb += (w1 * tufts + w2 * blotch) * vec3(0.045, 0.03, -0.02);
+  float blades = dNoise(vec2(pm.x * 38.0 + pm.y * 11.0, pm.y * 70.0)) * dNoise(pm * 23.0 + 9.0);
+  diffuseColor.rgb *= 1.0 + w0 * (blades - 0.25) * 0.9;
+}`)
+        .replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>
+{
+  vec2 pb = vDetailP.xz * uMetres;
+  float db = length(vDetailP - cameraPosition) * uMetres;
+  float wb = 1.0 - smoothstep(4.0, 90.0, db);
+  if (wb > 0.001) {
+    float e = 0.02;
+    float h0 = dFbm(pb * 14.0) + 0.6 * dNoise(pb * 45.0);
+    float hx = dFbm((pb + vec2(e, 0.0)) * 14.0) + 0.6 * dNoise((pb + vec2(e, 0.0)) * 45.0);
+    float hz = dFbm((pb + vec2(0.0, e)) * 14.0) + 0.6 * dNoise((pb + vec2(0.0, e)) * 45.0);
+    vec3 g = mat3(viewMatrix) * vec3(-(hx - h0) / e, 0.0, -(hz - h0) / e) * 0.035 * wb;
+    normal = normalize(normal + g);
+  }
 }`);
     };
     const terrain = new THREE.Mesh(geometry, terrainMaterial);
