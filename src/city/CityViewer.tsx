@@ -432,6 +432,13 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
       };
       drawFleet(scene.traffic.agents);
 
+      const cores: THREE.Object3D[] = [];
+      handles.group.traverse((object) => {
+        if (object.userData.part === "mass") cores.push(object);
+      });
+      const coreDistance = camera.position.distanceTo(lookAt);
+      for (const core of cores) core.visible = coreDistance > 260;
+
       const tick = () => {
         if (disposed) return;
         const elapsed = (performance.now() - started) / 1000;

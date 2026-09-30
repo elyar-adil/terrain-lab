@@ -474,7 +474,7 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
           }
         }
         if (!count) continue;
-        const level = sum / count - 0.8;
+        const level = sum / count - 0.12;
         for (let dy = -reach; dy <= reach; dy += 1) {
           for (let dx = -reach; dx <= reach; dx += 1) {
             const ix = Math.round(cx) + dx, iy = Math.round(cy) + dy;
@@ -1333,7 +1333,7 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       layer.group.rotation.y = -data.rotationRadians;
       // The terrain under the city was levelled 0.8 m below this, so the apron
       // and roadbed always sit on top of it.
-      layer.group.position.set(worldX, terrainHeightAt(worldX, worldZ) + 0.8 * metresToScene, worldZ);
+      layer.group.position.set(worldX, terrainHeightAt(worldX, worldZ) + 0.12 * metresToScene, worldZ);
       // Static city: freeze every transform so three.js does not recompute them.
       layer.group.updateMatrixWorld(true);
       layer.group.traverse((object) => {
@@ -3254,7 +3254,7 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       // 路口工坊移植:天空穹顶跟随相机并推进云漂移;雾距随视野缩放,远景
       // 融进天穹地平线色;太阳阴影相机贴着轨道目标,低频刷新投影。
       skyUniforms.uTime.value = worldTime;
-      cityLayer?.update(worldTime);
+      cityLayer?.update(worldTime, camera.position.distanceTo(controls.target) * sceneToMetres);
       skyDome.position.copy(camera.position);
       // The dome must sit inside the far plane or the frustum clips it away and
       // the sky renders as black.

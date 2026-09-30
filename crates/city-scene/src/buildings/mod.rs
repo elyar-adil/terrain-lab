@@ -423,9 +423,19 @@ pub(crate) fn facade_wall(
     if length <= 1.0e-3 || top - base <= 1.0e-3 {
         return;
     }
-    // `V` counts down from the wall's head, in tile heights.
-    let v_base = storeys / 4.0;
-    let u1 = if mirror { -length } else { length };
+    // `V` counts down from the wall's head, in tile heights. Whole storeys and
+    // whole bays: a wall is stretched by a few percent so that it starts and ends
+    // on a bay boundary and carries an integer number of floors, otherwise the
+    // window grid is cut through at every corner and misaligns between walls.
+    let v_base = storeys.round().max(1.0) / 4.0;
+    let bay = material
+        .strip_prefix("facade/")
+        .and_then(|index| index.parse::<usize>().ok())
+        .map(|index| crate::facades::design(index).bay_m)
+        .filter(|bay| *bay > 0.5)
+        .unwrap_or(3.6);
+    let snapped = (length / bay).round().max(1.0) * bay;
+    let u1 = if mirror { -snapped } else { snapped };
     builder.quad_uv(
         material,
         Vec3::from_plan(a, base),

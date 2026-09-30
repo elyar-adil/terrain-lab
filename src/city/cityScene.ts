@@ -896,7 +896,7 @@ export function buildCityScene(scene: CityScene, materials: MaterialCatalogue): 
       // The geometry is the unit prototype and the instances scale it, so the
       // bounding sphere has to be scaled out to the largest instance or the
       // whole thing is frustum-culled the moment it leaves the origin.
-      target.frustumCulled = false;
+      target.userData.part = mesh.material.includes("#") ? mesh.material.split("#")[1] : "";
       for (let index = 0; index < list.count; index += 1) {
         const base = index * 10;
         const floats = list.floats;
@@ -915,6 +915,10 @@ export function buildCityScene(scene: CityScene, materials: MaterialCatalogue): 
       }
       target.instanceMatrix.needsUpdate = true;
       if (target.instanceColor) target.instanceColor.needsUpdate = true;
+      // Bounds from the real instance transforms, so off-screen trees are culled
+      // (and skipped in the shadow pass) instead of drawn every frame.
+      target.computeBoundingSphere();
+      target.computeBoundingBox();
       instanced.set(instanceKey, target);
       prototypes.set(instanceKey, { geometry, material });
       ownedInstanced.push(target);

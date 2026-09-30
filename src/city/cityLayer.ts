@@ -25,7 +25,7 @@ export interface CityLayer {
   scene: CityScene;
   problems: string[];
   /** Advance animated surfaces (water) to the host's clock, in seconds. */
-  update(seconds: number): void;
+  update(seconds: number, cameraDistanceM?: number): void;
   dispose(): void;
 }
 
@@ -43,21 +43,6 @@ export function createCityLayer(scene: CityScene): CityLayer {
   const group = new THREE.Group();
   group.name = "city-layer";
   group.add(handles.group);
-
-  // Ground apron under the city: the terrain is levelled beneath it, and this
-  // grass plate sits between the roadbed and that levelled ground so that the
-  // satellite texture never shows through between blocks.
-  const [minX, minZ, maxX, maxZ] = scene.extentM;
-  const pad = 60;
-  const apron = new THREE.Mesh(
-    new THREE.PlaneGeometry(maxX - minX + pad * 2, maxZ - minZ + pad * 2),
-    new THREE.MeshStandardMaterial({ color: 0x5f6d47, roughness: 1, metalness: 0 }),
-  );
-  apron.rotation.x = -Math.PI / 2;
-  apron.position.set((minX + maxX) / 2, -0.45, (minZ + maxZ) / 2);
-  apron.receiveShadow = true;
-  apron.name = "apron";
-  group.add(apron);
 
   const agentCount = scene.traffic.agents.length;
   const dummy = new THREE.Object3D();
@@ -113,19 +98,29 @@ export function createCityLayer(scene: CityScene): CityLayer {
     group.add(mesh);
   });
 
+  const cores: THREE.Object3D[] = [];
+  group.traverse((object) => {
+    if (object.userData.part === "mass") cores.push(object);
+  });
+
   return {
     group,
     scene,
     problems,
-    update(seconds: number) {
+    update(seconds: number, cameraDistanceM = 0) {
+      // The solid core inside each crown exists only so that, from far above, a
+      // forest reads as a dense canopy instead of scattered cards. Up close it is
+      // a visible smooth blob, so it is hidden inside 260 m.
+      const showCores = cameraDistanceM > 260;
+      for (const mesh of cores) {
+        if (mesh.visible !== showCores) mesh.visible = showCores;
+      }
       const clock = materials.get("water").userData.uTime as { value: number } | undefined;
       if (clock) clock.value = seconds;
     },
     dispose() {
       group.removeFromParent();
       for (const mesh of owned) mesh.dispose();
-      apron.geometry.dispose();
-      (apron.material as THREE.Material).dispose();
       handles.dispose();
       materials.dispose();
     },

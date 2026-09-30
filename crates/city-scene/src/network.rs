@@ -350,6 +350,25 @@ pub fn derive(
         if path_points.len() < 2 {
             continue;
         }
+        // An elevated road gets its height per vertex, and a plan centreline can
+        // be as sparse as its two ends and a midpoint. Interpolating a ramp
+        // between such vertices is a straight ramp from the junction to the crown,
+        // which leaves the carriageway hanging metres off the ground at the
+        // junction. A vertex every three metres lets the ramp ease in properly and
+        // meet the junction at road level.
+        let path_points: Vec<Vec2> = if hd.layer != 0 {
+            let mut dense = vec![path_points[0]];
+            for pair in path_points.windows(2) {
+                let steps = ((pair[0].distance(pair[1]) / 3.0).ceil() as usize).max(1);
+                for step in 1..=steps {
+                    let t = step as f32 / steps as f32;
+                    dense.push(pair[0] * (1.0 - t) + pair[1] * t);
+                }
+            }
+            dense
+        } else {
+            path_points
+        };
         let full_length = Path::flat(path_points.clone()).length();
         let trim_start = radius[from_index];
         let trim_end = radius[to_index];
