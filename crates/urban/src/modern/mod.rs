@@ -5,7 +5,7 @@ mod landscape;
 mod parcels;
 mod roads;
 
-use graph::{GraphOutput, build_graph, modern_hash, modern_phase};
+use graph::{GraphOutput, build_graph, legacy_hash, modern_hash, modern_phase};
 use landscape::derive_compounds_and_trees;
 use parcels::{ParcelOutput, build_parcels};
 
@@ -19,7 +19,7 @@ use crate::{CityStyle, ModernChinaSpec, ModernCity, Point};
 /// building's appearance depend on how many draws happened before it, which
 /// breaks incremental regeneration.
 pub fn hash_u32(seed: u32, a: i32, b: i32) -> f32 {
-    modern_hash(seed, a, b, 0x5f37_1d1b)
+    legacy_hash(seed, a, b, 0x5f37_1d1b)
 }
 
 struct CityFrame {
@@ -29,11 +29,25 @@ struct CityFrame {
     density: f32,
     organic: f32,
     river_half: f32,
+    /// Peak of the height/density field and a weaker secondary sub-centre, in
+    /// local metres.  Seeded, so the tallest district is not always dead centre.
+    core: geom::V,
+    sub_core: geom::V,
 }
 
 impl CityFrame {
     fn new(spec: ModernChinaSpec) -> Self {
+        let radius_m = spec.radius_km.max(0.2) * 1_000.0;
+        let place = |salt: i32, lo: f32, hi: f32| -> geom::V {
+            let a = modern_hash(spec.seed, salt, 1, 811) * std::f32::consts::TAU;
+            let r = radius_m * (lo + (hi - lo) * modern_hash(spec.seed, salt, 2, 813));
+            (r * a.cos(), r * a.sin())
+        };
+        let core = place(1, 0.04, 0.32);
+        let sub_core = place(2, 0.35, 0.65);
         Self {
+            core,
+            sub_core,
             radius_m: spec.radius_km.max(0.2) * 1_000.0,
             block_m: spec.block_size_metres.clamp(70.0, 180.0),
             density: spec.density.clamp(0.0, 1.0),
@@ -59,6 +73,21 @@ impl CityFrame {
         let c = self.spec.rotation_radians.cos();
         let s = self.spec.rotation_radians.sin();
         (dx * c + dy * s, -dx * s + dy * c)
+    }
+
+    /// Urban intensity 0..1 at a local point: a main peak, a weaker sub-centre
+    /// and low-frequency local variation.  Drives block size, height and density.
+    fn core_weight(&self, x: f32, z: f32) -> f32 {
+        let r = self.radius_m;
+        let g = |c: geom::V, s: f32| {
+            let d = ((x - c.0).powi(2) + (z - c.1).powi(2)).sqrt() / (r * s);
+            (-d * d).exp()
+        };
+        let base = g(self.core, 0.5).max(0.62 * g(self.sub_core, 0.28));
+        let ph = modern_phase(self.spec.seed);
+        let wob = 0.10 * ((x / 95.0 + ph).sin() * (z / 120.0 + ph * 1.7).cos())
+            + 0.06 * ((x + z) / 55.0 + ph * 0.6).sin();
+        (base + wob * (0.4 + base)).clamp(0.0, 1.0)
     }
 
     fn river_x(&self, z_m: f32) -> f32 {

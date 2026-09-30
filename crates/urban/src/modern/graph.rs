@@ -54,6 +54,7 @@ impl CityGraph for GraphProbe<'_> {
 /// Which family a segment came from, kept through planarisation so junction
 /// roles can still be assigned.
 const ORIGIN_GRID: u8 = 4;
+const ORIGIN_QUAY: u8 = 8;
 const ORIGIN_OUTER: u8 = 1;
 const ORIGIN_INNER: u8 = 2;
 
@@ -119,45 +120,146 @@ fn add_ring(pts: &mut Vec<V>, segs: &mut Vec<Seg>, poly: &[V], class: ModernRoad
     }
 }
 
-/// Offsets and classes of one family of parallel grid lines.  Lines that would
-/// run alongside a ring edge are dropped; the ring itself carries that traffic.
+/// Distance from the river centreline to a quay (riverside road) centreline,
+/// beyond the water's half width.  The quay's outer kerb then sits about a dozen
+/// metres from the water (a narrow promenade), while a junction box on it, up to
+/// twenty-odd metres deep, still lands on dry ground.
+pub(super) const QUAY_OFF_M: f32 = 28.0;
+
+/// Offsets and classes of one family of parallel grid lines.  Spacing is tight
+/// where the urban intensity is high and opens out towards the edge, every
+/// line is jittered, and the road class follows the distance since the last
+/// higher-class street rather than a fixed count.  Lines that would run
+/// alongside a ring edge are dropped; the ring itself carries that traffic.
 fn grid_offsets(
-    half: f32,
-    block: f32,
-    organic: f32,
-    seed: u32,
+    frame: &CityFrame,
+    x_family: bool,
     salt: i32,
     skip: &[f32],
 ) -> Vec<(f32, ModernRoadClass)> {
-    let count = (half / block).ceil() as i32;
-    let mut lines: Vec<(f32, ModernRoadClass)> = Vec::new();
-    for i in -count..=count {
-        let base = i as f32 * block;
-        if base.abs() >= half {
-            continue;
-        }
-        let jitter = if i.abs() <= 1 {
-            0.0
+    let half = frame.radius_m;
+    let block = frame.block_m;
+    let seed = frame.spec.seed;
+    let weight = |pos: f32| {
+        if x_family {
+            frame.core_weight(pos, frame.core.1)
         } else {
-            (modern_hash(seed, i, salt, 733) - 0.5) * block * 0.07 * organic
-        };
-        let value = base + jitter;
-        let class = if i.rem_euclid(5) == 0 {
-            ModernRoadClass::Arterial
-        } else if i.rem_euclid(2) == 0 {
-            ModernRoadClass::Collector
-        } else {
-            ModernRoadClass::Local
-        };
-        if skip.iter().any(|a| (value.abs() - a).abs() < block * 0.35) {
-            continue;
+            frame.core_weight(frame.core.0, pos)
         }
-        if lines.last().map(|(last, _)| (value - *last).abs() < block * 0.35).unwrap_or(false) {
-            continue;
+    };
+    let start = (modern_hash(seed, 0, salt, 733) - 0.5) * block * 0.5;
+    let mut lines: Vec<(f32, ModernRoadClass)> = vec![(start, ModernRoadClass::Arterial)];
+    for dir in [1.0_f32, -1.0] {
+        let mut pos = start;
+        let mut since_art = 0.0_f32;
+        let mut since_col = 0.0_f32;
+        for i in 1..80 {
+            let w = weight(pos);
+            let jit = 0.8 + 0.45 * modern_hash(seed, i * 2 + (dir > 0.0) as i32, salt, 739);
+            let step = (block * (0.58 + 0.82 * (1.0 - w)) * jit).max(52.0);
+            pos += dir * step;
+            since_art += step;
+            since_col += step;
+            if pos.abs() >= half {
+                break;
+            }
+            let class = if since_art >= 420.0 * (0.8 + 0.4 * modern_hash(seed, i, salt, 743)) {
+                since_art = 0.0;
+                since_col = 0.0;
+                ModernRoadClass::Arterial
+            } else if since_col >= 170.0 {
+                since_col = 0.0;
+                ModernRoadClass::Collector
+            } else {
+                ModernRoadClass::Local
+            };
+            if skip.iter().any(|a| (pos.abs() - a).abs() < step * 0.4) {
+                continue;
+            }
+            lines.push((pos, class));
         }
-        lines.push((value, class));
     }
+    lines.sort_by(|a, b| a.0.total_cmp(&b.0));
     lines
+}
+
+/// Smooth displacement that bends the ideal grid into a hand-drawn one.  It
+/// fades to nothing at the outer ring so lines still meet it exactly.
+fn warp(frame: &CityFrame, p: V) -> V {
+    let seed = frame.spec.seed;
+    let amp = frame.block_m * (0.08 + 0.2 * frame.organic);
+    let ph = |k: i32| modern_hash(seed, k, 7, 907) * std::f32::consts::TAU;
+    let r = frame.radius_m;
+    let (x, z) = p;
+    let dx = (z / (r * 1.1) + ph(1)).sin() * 0.7 + (x / (r * 0.8) + z / (r * 1.0) + ph(2)).sin() * 0.5;
+    let dz = (x / (r * 1.2) + ph(3)).sin() * 0.7 + (z / (r * 0.75) - x / (r * 0.9) + ph(4)).sin() * 0.5;
+    let edge = ((r * 0.975 - p.0.hypot(p.1)) / 70.0).clamp(0.0, 1.0);
+    (x + dx * amp * edge, z + dz * amp * edge)
+}
+
+/// Add a street as a chain of short segments through `samples`, dropping any
+/// sample that falls in the river/quay zone so that the street crosses the
+/// water in a single span (which becomes a bridge meeting the quay).
+fn add_polyline(
+    frame: &CityFrame,
+    pts: &mut Vec<V>,
+    segs: &mut Vec<Seg>,
+    samples: &[V],
+    class: ModernRoadClass,
+    origin: u8,
+) {
+    let zone = frame.river_half + QUAY_OFF_M + 12.0;
+    let last = samples.len() - 1;
+    let kept: Vec<V> = samples
+        .iter()
+        .enumerate()
+        .filter(|(i, p)| *i == 0 || *i == last || (p.0 - frame.river_x(p.1)).abs() > zone)
+        .map(|(_, p)| *p)
+        .collect();
+    for w in kept.windows(2) {
+        add_edge(pts, segs, w[0], w[1], class, origin);
+    }
+}
+
+/// A closed ring road, subdivided along its own edges (so its shape is
+/// unchanged) with every sample inside the river zone dropped: the ring then
+/// leaps the water in one span, which becomes a bridge, instead of ending at a
+/// vertex that happens to lie in the channel.
+fn add_ring_over_river(
+    frame: &CityFrame,
+    pts: &mut Vec<V>,
+    segs: &mut Vec<Seg>,
+    poly: &[V],
+    class: ModernRoadClass,
+    origin: u8,
+) {
+    let zone = frame.river_half + QUAY_OFF_M + 12.0;
+    let mut samples: Vec<V> = Vec::new();
+    for i in 0..poly.len() {
+        let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+        let n = (((b.0 - a.0).hypot(b.1 - a.1) / 40.0).ceil() as usize).max(1);
+        for k in 0..n {
+            let t = k as f32 / n as f32;
+            samples.push((a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t));
+        }
+    }
+    let kept: Vec<V> =
+        samples.into_iter().filter(|p| (p.0 - frame.river_x(p.1)).abs() > zone).collect();
+    for i in 0..kept.len() {
+        add_edge(pts, segs, kept[i], kept[(i + 1) % kept.len()], class, origin);
+    }
+}
+
+/// Sample a straight street at about `step` metres and bend it by `warp`.
+fn warped_line(frame: &CityFrame, a: V, b: V, step: f32) -> Vec<V> {
+    let len = (b.0 - a.0).hypot(b.1 - a.1);
+    let n = ((len / step).ceil() as usize).max(2);
+    (0..=n)
+        .map(|i| {
+            let t = i as f32 / n as f32;
+            warp(frame, (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t))
+        })
+        .collect()
 }
 
 fn seg_intersect(a: V, b: V, c: V, d: V) -> Option<(f32, f32, V)> {
@@ -360,7 +462,6 @@ fn planarize(pts: &mut Vec<V>, segs: &mut Vec<Seg>, forbid: &dyn Fn(V) -> bool) 
 pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
     let radius_m = frame.radius_m;
     let block_m = frame.block_m;
-    let organic = frame.organic;
     let river_half = frame.river_half;
     let seed = frame.spec.seed;
     let rules = china_rules();
@@ -373,35 +474,44 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
     // ---- 1. plan whole lines ----
     let outer = ring_polygon(radius_m);
     let inner_r = radius_m * 0.72;
-    let inner = ring_polygon(inner_r);
+    let inner: Vec<V> = ring_polygon(inner_r)
+        .into_iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let k = 1.0 + (modern_hash(seed, i as i32, 3, 919) - 0.5) * 0.14;
+            warp(frame, (v.0 * k, v.1 * k))
+        })
+        .collect();
     let cos_half = (std::f32::consts::PI / RING_SIDES as f32).cos();
     let skip = [radius_m * cos_half, inner_r * cos_half];
     let mut pts: Vec<V> = Vec::new();
     let mut segs: Vec<Seg> = Vec::new();
-    for (x, class) in grid_offsets(radius_m, block_m, organic, seed, 11, &skip) {
+    for (x, class) in grid_offsets(frame, true, 11, &skip) {
         // A north–south street that would lie in the river channel for much of
         // its length is not a street, it is a river; drop it in the plan so
         // the cross streets span the water in one piece instead of ending in it.
         let in_channel = (0..=32)
             .filter(|i| {
                 let z = -radius_m + 2.0 * radius_m * *i as f32 / 32.0;
-                (x - frame.river_x(z)).abs() < river_half + SNAP_M
+                (x - frame.river_x(z)).abs() < river_half + QUAY_OFF_M + 46.0
             })
             .count();
-        if in_channel > 10 {
+        if in_channel > 8 {
             continue;
         }
         if let Some((a, b)) = clip_line(&outer, (x, 0.0), (0.0, 1.0)) {
-            add_edge(&mut pts, &mut segs, a, b, class, ORIGIN_GRID);
+            let s = warped_line(frame, a, b, 38.0);
+            add_polyline(frame, &mut pts, &mut segs, &s, class, ORIGIN_GRID);
         }
     }
-    for (z, class) in grid_offsets(radius_m, block_m, organic, seed, 29, &skip) {
+    for (z, class) in grid_offsets(frame, false, 29, &skip) {
         if let Some((a, b)) = clip_line(&outer, (0.0, z), (1.0, 0.0)) {
-            add_edge(&mut pts, &mut segs, a, b, class, ORIGIN_GRID);
+            let s = warped_line(frame, a, b, 38.0);
+            add_polyline(frame, &mut pts, &mut segs, &s, class, ORIGIN_GRID);
         }
     }
-    add_ring(&mut pts, &mut segs, &outer, ModernRoadClass::Expressway, ORIGIN_OUTER);
-    add_ring(&mut pts, &mut segs, &inner, ModernRoadClass::Arterial, ORIGIN_INNER);
+    add_ring_over_river(frame, &mut pts, &mut segs, &outer, ModernRoadClass::Expressway, ORIGIN_OUTER);
+    add_ring_over_river(frame, &mut pts, &mut segs, &inner, ModernRoadClass::Collector, ORIGIN_INNER);
 
     // A riverside road (滨河路) on each bank, so the land between the river and
     // the first cross street is a closed block that can be built on rather
@@ -409,7 +519,7 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
     // Far enough back that a junction box on the riverside road (twenty to
     // thirty-five metres deep) stays on dry land instead of hanging over the
     // water and leaving the bridge deck short of the far bank.
-    let bank_off = river_half + 38.0;
+    let bank_off = river_half + QUAY_OFF_M;
     let bank_steps = ((2.0 * radius_m / 40.0) as usize).max(8);
     for side in [-1.0_f32, 1.0] {
         let mut prev: Option<V> = None;
@@ -418,41 +528,43 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
             let v = (frame.river_x(z) + side * bank_off, z);
             let inside = v.0.hypot(v.1) < radius_m * cos_half * 0.985;
             if let (Some(p), true) = (prev, inside) {
-                add_edge(&mut pts, &mut segs, p, v, ModernRoadClass::Collector, ORIGIN_GRID);
+                add_edge(&mut pts, &mut segs, p, v, ModernRoadClass::Collector, ORIGIN_QUAY);
             }
             prev = inside.then_some(v);
         }
     }
 
-    // Which diagonal avenues through the historic core are realised is chosen by
-    // the ported stochastic model over candidate corridors, like the source
-    // kernel's regional-mobility choice set.
-    let mut corridor_rng = SplitMix64::new(seed as u64 ^ 0x6469_6167);
-    let corridor_growth = GrowthState::new(0.78);
-    let candidate_specs: [Option<(bool, bool)>; 4] =
-        [Some((true, false)), Some((false, true)), Some((true, true)), None];
-    let candidates: Vec<crate::model::ActionCandidate> = candidate_specs
-        .iter()
-        .map(|spec| match spec {
-            Some((true, true)) => corridor_growth.candidate(ActionKind::Connect, 0.95, 0.95, 0.18),
-            Some(_) => corridor_growth.candidate(ActionKind::Connect, 0.95, 0.52, 0.18),
-            None => corridor_growth.candidate(ActionKind::Stop, 0.0, 0.0, 0.0),
-        })
-        .collect();
-    let chosen = sample_action(&candidates, ModelWeights::default(), &mut corridor_rng)
-        .unwrap_or(candidate_specs.len() - 1);
-    let root_half = std::f32::consts::FRAC_1_SQRT_2;
-    if let Some(Some((rising, falling))) = candidate_specs.get(chosen) {
-        for (enabled, dir) in
-            [(*rising, (root_half, root_half)), (*falling, (root_half, -root_half))]
-        {
-            if !enabled {
-                continue;
-            }
-            if let Some((a, b)) = clip_line(&inner, (0.0, 0.0), dir) {
-                add_edge(&mut pts, &mut segs, a, b, ModernRoadClass::Arterial, ORIGIN_INNER);
-            }
-        }
+    // One or two curved arterials cut across the grid at oblique angles, as
+    // old radial roads do.  Each is a quadratic Bezier between two points of
+    // the outer ring, bowed sideways by a seeded amount.
+    let arcs = 1 + (modern_hash(seed, 5, 5, 923) > 0.45) as usize;
+    for k in 0..arcs {
+        let kk = k as i32;
+        let a0 = modern_hash(seed, kk, 1, 929) * std::f32::consts::TAU;
+        let a1 = a0 + std::f32::consts::PI + (modern_hash(seed, kk, 2, 937) - 0.5) * 1.1;
+        let end = |ang: f32| clip_line(&outer, (0.0, 0.0), (ang.cos(), ang.sin())).map(|(_, e)| e);
+        let (Some(p0), Some(p2)) = (end(a0), end(a1)) else { continue };
+        // Pass beside the core rather than through the middle of the grid.
+        let mid = ((p0.0 + p2.0) * 0.5, (p0.1 + p2.1) * 0.5);
+        let chord = (p2.0 - p0.0, p2.1 - p0.1);
+        let cl = chord.0.hypot(chord.1).max(1.0);
+        let perp = (-chord.1 / cl, chord.0 / cl);
+        let bow = radius_m * (0.18 + 0.3 * modern_hash(seed, kk, 3, 941))
+            * if modern_hash(seed, kk, 4, 947) < 0.5 { -1.0 } else { 1.0 };
+        let ctrl = (mid.0 + perp.0 * bow, mid.1 + perp.1 * bow);
+        let n = ((cl * 1.2 / 34.0).ceil() as usize).max(8);
+        let samples: Vec<V> = (0..=n)
+            .map(|i| {
+                let t = i as f32 / n as f32;
+                let u = 1.0 - t;
+                (
+                    u * u * p0.0 + 2.0 * u * t * ctrl.0 + t * t * p2.0,
+                    u * u * p0.1 + 2.0 * u * t * ctrl.1 + t * t * p2.1,
+                )
+            })
+            .collect();
+        let class = if k == 0 { ModernRoadClass::Arterial } else { ModernRoadClass::Collector };
+        add_polyline(frame, &mut pts, &mut segs, &samples, class, ORIGIN_INNER);
     }
 
     // ---- 2. planarise: every crossing and T-junction becomes a node ----
@@ -508,7 +620,7 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
         }
         if s.class == ModernRoadClass::Local && !river_hit {
             let mid = ((p.0 + q.0) * 0.5, (p.1 + q.1) * 0.5);
-            let centrality = (1.0 - mid.0.hypot(mid.1) / radius_m).clamp(0.0, 1.0);
+            let centrality = frame.core_weight(mid.0, mid.1);
             if !local_segment_built(centrality) {
                 continue;
             }
@@ -558,14 +670,15 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
                 widest[n] = widest[n].max(s.class.width_metres());
             }
         }
-        let need = |n: usize| if degree[n] > 2 { widest[n] * 0.8 + 4.0 } else { (widest[n] * 0.5 + 2.0).min(8.0) };
+        // Mirrors the junction radius the scene builder uses.
+        let need = |n: usize| if degree[n] > 2 { widest[n] * 0.5 + 3.0 } else { (widest[n] * 0.5 + 2.0).min(8.0) };
         let victim = kept
             .iter()
             .enumerate()
-            .filter(|(_, (s, bridge))| !*bridge)
+            .filter(|(_, (_, bridge))| !*bridge)
             .map(|(i, (s, _))| {
                 let len = (pts[s.a].0 - pts[s.b].0).hypot(pts[s.a].1 - pts[s.b].1);
-                (i, len, ((need(s.a) + need(s.b)) / 0.8).max(30.0))
+                (i, len, ((need(s.a) + need(s.b)) * 1.1).max(28.0))
             })
             .filter(|(_, len, want)| len < want)
             .min_by(|a, b| (a.1 / a.2).total_cmp(&(b.1 / b.2)));
@@ -584,18 +697,33 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
         }
         // Drop loops and merge parallel duplicates, keeping the wider class.
         kept.retain(|(e, _)| e.a != e.b);
-        let mut j = 0;
-        while j < kept.len() {
-            let key = (kept[j].0.a.min(kept[j].0.b), kept[j].0.a.max(kept[j].0.b));
-            if let Some(k) = (0..j).find(|&k| (kept[k].0.a.min(kept[k].0.b), kept[k].0.a.max(kept[k].0.b)) == key) {
-                if (kept[j].0.class as i32) > (kept[k].0.class as i32) {
-                    kept[k] = kept[j];
+        // Only edges now touching `keep` can have become duplicates.
+        let mut first: std::collections::HashMap<(usize, usize), usize> =
+            std::collections::HashMap::new();
+        let mut dead = vec![false; kept.len()];
+        for i in 0..kept.len() {
+            let e = kept[i].0;
+            if e.a != keep && e.b != keep {
+                continue;
+            }
+            let key = (e.a.min(e.b), e.a.max(e.b));
+            match first.get(&key) {
+                Some(&k) => {
+                    if (e.class as i32) > (kept[k].0.class as i32) {
+                        kept[k] = kept[i];
+                    }
+                    dead[i] = true;
                 }
-                kept.remove(j);
-            } else {
-                j += 1;
+                None => {
+                    first.insert(key, i);
+                }
             }
         }
+        let mut idx = 0;
+        kept.retain(|_| {
+            idx += 1;
+            !dead[idx - 1]
+        });
     }
 
     // ---- 3b. tidy junctions ----
@@ -606,12 +734,19 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
     // two closer than 50 degrees, sacrificing the narrowest street each time.
     loop {
         let mut victim: Option<usize> = None;
+        let mut adj: Vec<Vec<usize>> = vec![Vec::new(); pts.len()];
+        for (i, (s, _)) in kept.iter().enumerate() {
+            adj[s.a].push(i);
+            adj[s.b].push(i);
+        }
         'nodes: for n in 0..pts.len() {
-            let arms: Vec<(usize, f32)> = kept
+            if adj[n].len() < 3 {
+                continue;
+            }
+            let arms: Vec<(usize, f32)> = adj[n]
                 .iter()
-                .enumerate()
-                .filter(|(_, (s, _))| s.a == n || s.b == n)
-                .map(|(i, (s, _))| {
+                .map(|&i| {
+                    let s = &kept[i].0;
                     let o = if s.a == n { s.b } else { s.a };
                     (i, (pts[o].1 - pts[n].1).atan2(pts[o].0 - pts[n].0))
                 })
@@ -630,7 +765,7 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
                     if d > std::f32::consts::PI {
                         d = std::f32::consts::TAU - d;
                     }
-                    if d < 50.0_f32.to_radians() {
+                    if d < 40.0_f32.to_radians() {
                         offenders.push(arms[x].0);
                         offenders.push(arms[y].0);
                     }
@@ -652,7 +787,75 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
         }
     }
 
-    // ---- 4. no cul-de-sacs, one connected network ----
+    // ---- 3c. straighten chains ----
+    // Curved and warped streets were planned as chains of short samples.  A
+    // bend node that barely bends carries no information but splits the street
+    // into stubs too short to furnish, so drop it while the chord stays within
+    // a few metres of the original line and the street stays short enough to
+    // read as one block face.
+    loop {
+        let mut adj: Vec<Vec<usize>> = vec![Vec::new(); pts.len()];
+        for (i, (e, _)) in kept.iter().enumerate() {
+            adj[e.a].push(i);
+            adj[e.b].push(i);
+        }
+        let mut joined = false;
+        for n in 0..pts.len() {
+            if adj[n].len() != 2 {
+                continue;
+            }
+            let (i, j) = (adj[n][0], adj[n][1]);
+            let ((e1, b1), (e2, b2)) = (kept[i], kept[j]);
+            if b1 || b2 || e1.class != e2.class {
+                continue;
+            }
+            let a = if e1.a == n { e1.b } else { e1.a };
+            let b = if e2.a == n { e2.b } else { e2.a };
+            if a == b {
+                continue;
+            }
+            let (pa, pb) = (pts[a], pts[b]);
+            let chord = (pb.0 - pa.0).hypot(pb.1 - pa.1);
+            if chord > 140.0 || super::geom::point_seg_dist(pts[n], pa, pb) > 2.5 {
+                continue;
+            }
+            if kept.iter().any(|(e, _)| (e.a == a && e.b == b) || (e.a == b && e.b == a)) {
+                continue;
+            }
+            kept[i].0 = Seg { a, b, ..e1 };
+            kept.remove(j);
+            joined = true;
+            break;
+        }
+        if !joined {
+            break;
+        }
+    }
+
+    // ---- 4. few cul-de-sacs, one connected network ----
+    // A short local stub that hangs off a proper junction may survive as a dead
+    // end (a seeded minority); every other dangling street is pruned.
+    let mut protected = vec![false; pts.len()];
+    {
+        let mut degree = vec![0_u32; pts.len()];
+        for (s, _) in &kept {
+            degree[s.a] += 1;
+            degree[s.b] += 1;
+        }
+        for (i, (s, bridge)) in kept.iter().enumerate() {
+            let (leaf, other) = if degree[s.a] == 1 { (s.a, s.b) } else { (s.b, s.a) };
+            let len = (pts[s.a].0 - pts[s.b].0).hypot(pts[s.a].1 - pts[s.b].1);
+            if !*bridge
+                && degree[leaf] == 1
+                && degree[other] >= 3
+                && s.class == ModernRoadClass::Local
+                && len < 110.0
+                && modern_hash(seed, i as i32, 9, 953) < 0.4
+            {
+                protected[leaf] = true;
+            }
+        }
+    }
     loop {
         let mut degree = vec![0_u32; pts.len()];
         for (s, _) in &kept {
@@ -660,7 +863,9 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
             degree[s.b] += 1;
         }
         let before = kept.len();
-        kept.retain(|(s, _)| degree[s.a] > 1 && degree[s.b] > 1);
+        kept.retain(|(s, _)| {
+            (degree[s.a] > 1 || protected[s.a]) && (degree[s.b] > 1 || protected[s.b])
+        });
         if kept.len() == before {
             break;
         }
@@ -750,7 +955,9 @@ pub(super) fn modern_phase(seed: u32) -> f32 {
     modern_hash(seed, 3, 5, 751) * std::f32::consts::TAU
 }
 
-pub(super) fn modern_hash(seed: u32, x: i32, y: i32, salt: i32) -> f32 {
+/// The original one-round mixer.  Kept verbatim for `hash_u32`, whose callers
+/// (facade variants, rooftop plant) were tuned against its exact values.
+pub(super) fn legacy_hash(seed: u32, x: i32, y: i32, salt: i32) -> f32 {
     let mut value = seed
         ^ (x as u32).wrapping_mul(0x9e37_79b9)
         ^ (y as u32).wrapping_mul(0x85eb_ca6b)
@@ -758,5 +965,20 @@ pub(super) fn modern_hash(seed: u32, x: i32, y: i32, salt: i32) -> f32 {
     value ^= value >> 16;
     value = value.wrapping_mul(0x7feb_352d);
     value ^= value >> 15;
+    value as f32 / u32::MAX as f32
+}
+
+pub(super) fn modern_hash(seed: u32, x: i32, y: i32, salt: i32) -> f32 {
+    let mut value = seed
+        ^ (x as u32).wrapping_mul(0x9e37_79b9)
+        ^ (y as u32).wrapping_mul(0x85eb_ca6b)
+        ^ (salt as u32).wrapping_mul(0xc2b2_ae35);
+    // Full murmur3 finaliser: a one-bit change in the seed must reach the top
+    // bits, or neighbouring seeds produce near-identical cities.
+    value ^= value >> 16;
+    value = value.wrapping_mul(0x85eb_ca6b);
+    value ^= value >> 13;
+    value = value.wrapping_mul(0xc2b2_ae35);
+    value ^= value >> 16;
     value as f32 / u32::MAX as f32
 }

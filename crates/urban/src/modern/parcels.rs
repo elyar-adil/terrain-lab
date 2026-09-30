@@ -8,12 +8,12 @@
 //! whatever shape the network has.
 
 use super::CityFrame;
-use super::blocks::{Extraction, extract_faces};
+use super::blocks::{Extraction, extract_faces, split_concave};
 use super::geom::{
     Obb, V, centroid, clip_half, obb, point_in, point_seg_dist, ring_polyline_dist, seg_seg_dist,
     signed_area,
 };
-use super::graph::modern_hash;
+use super::graph::{QUAY_OFF_M, modern_hash};
 use crate::model::cross_section;
 use crate::{
     BuildingFacade, ModernBuilding, ModernRoadClass, Parcel, ParcelUse, Point, RoofStyle, SdNode,
@@ -37,12 +37,18 @@ const LOT_MARGIN_M: f32 = 0.8;
 /// Building line: distance from the back of the sidewalk to the wall.
 const BUILDING_LINE_M: f32 = 1.5;
 /// Clearance kept between any building lot and the river bank.
-const RIVER_BANK_M: f32 = 6.0;
+const RIVER_BANK_M: f32 = 4.0;
 
 /// Distance from a street centreline to the nearest permitted wall.
 fn right_of_way(class: ModernRoadClass) -> f32 {
     let s = cross_section(class);
     s.width_metres * 0.5 + s.sidewalk_metres + BUILDING_LINE_M
+}
+
+/// Setback of face edge `i`: a street's right-of-way, or half the lot gap along
+/// a cut between two pieces of the same block.
+fn edge_row(face: &super::blocks::Face, i: usize) -> f32 {
+    if face.open[i] { LOT_GAP_M * 0.5 } else { right_of_way(face.classes[i]) }
 }
 
 pub(super) fn build_parcels(
@@ -62,6 +68,7 @@ pub(super) fn build_parcels(
         .map(|r| (r.from as usize, r.to as usize, r.class))
         .collect();
     let Extraction { faces, spurs } = extract_faces(&pts, &edges);
+    let faces: Vec<_> = faces.into_iter().flat_map(split_concave).collect();
 
     let river_local: Vec<V> = (0..=48)
         .map(|i| {
@@ -87,7 +94,7 @@ pub(super) fn build_parcels(
             continue;
         }
         let fi = face_index as i32;
-        let centrality = (1.0 - centre.0.hypot(centre.1) / radius_m).clamp(0.0, 1.0);
+        let centrality = frame.core_weight(centre.0, centre.1);
 
         // ---- street setbacks -> buildable envelope ----
         let mut envelope = face.ring.clone();
@@ -102,7 +109,7 @@ pub(super) fn build_parcels(
             envelope = clip_half(
                 &envelope,
                 n,
-                n.0 * a.0 + n.1 * a.1 + right_of_way(face.classes[i]),
+                n.0 * a.0 + n.1 * a.1 + edge_row(face, i),
             );
             if envelope.len() < 3 {
                 break;
@@ -123,7 +130,7 @@ pub(super) fn build_parcels(
                 continue;
             }
             let n = (-(b.1 - a.1) / len, (b.0 - a.0) / len);
-            let inset = (right_of_way(face.classes[i]) - BUILDING_LINE_M - 1.2).max(1.0);
+            let inset = if face.open[i] { 0.0 } else { (right_of_way(face.classes[i]) - BUILDING_LINE_M - 1.2).max(1.0) };
             plate = clip_half(&plate, n, n.0 * a.0 + n.1 * a.1 + inset);
             if plate.len() < 3 {
                 break;
@@ -168,17 +175,25 @@ pub(super) fn build_parcels(
 
         let block_noise = modern_hash(seed, fi, 0, 701);
         let face_area = signed_area(&face.ring);
-        let park_block = block_noise < 0.025 + 0.045 * (1.0 - density)
+        let park_block = block_noise < 0.05 + 0.06 * (1.0 - density)
             || (face_area > 14_000.0 && block_noise < 0.10);
 
         // Widest street around this block: where compound gates face.
         let widest = (0..face.ring.len())
+            .filter(|i| !face.open[*i])
             .max_by_key(|i| face.classes[*i] as i32)
             .unwrap_or(0);
         let (wa, wb) = (face.ring[widest], face.ring[(widest + 1) % face.ring.len()]);
 
-        let target = 1100.0
-            + 1300.0 * (1.0 - centrality) * (0.6 + 0.8 * modern_hash(seed, fi, 3, 761));
+        // A few very large faces stay one lot: a walled compound or campus.
+        let superblock = face_area > 13_000.0
+            && centrality < 0.55
+            && modern_hash(seed, fi, 4, 777) < 0.45;
+        let target = if superblock {
+            1.0e9
+        } else {
+            900.0 + 1500.0 * (1.0 - centrality) * (0.6 + 0.8 * modern_hash(seed, fi, 3, 761))
+        };
         for (env_index, env) in envelopes.iter().enumerate() {
             let mut lots: Vec<Vec<V>> = Vec::new();
             subdivide(env, target, seed, fi * 8 + env_index as i32, 0, &mut lots);
@@ -192,8 +207,10 @@ pub(super) fn build_parcels(
                 let key = fi * 64 + (env_index as i32) * 16 + lot_index as i32;
                 let n = modern_hash(seed, key, 1, 719);
                 let noise = |salt: i32| modern_hash(seed, key, 2, salt);
-                let waterfront = ring_polyline_dist(lot, &river_local) < river_half + RIVER_BANK_M;
-                let use_type = if park_block || (waterfront && n > 0.45) {
+                let waterfront = ring_polyline_dist(lot, &river_local)
+                    < river_half + QUAY_OFF_M + 45.0;
+                let plaza = centrality > 0.45 && lot_area < 3_400.0 && noise(777) < 0.09;
+                let use_type = if park_block || plaza || (waterfront && n > 0.82) {
                     ParcelUse::Park
                 } else if n < 0.32 + 0.24 * centrality {
                     ParcelUse::Commercial
@@ -204,9 +221,15 @@ pub(super) fn build_parcels(
                 } else {
                     ParcelUse::Residential
                 };
+                let use_type = if superblock && !matches!(use_type, ParcelUse::Park) {
+                    ParcelUse::Residential
+                } else {
+                    use_type
+                };
                 let compound = matches!(use_type, ParcelUse::Residential)
                     && ob.width() > 55.0
-                    && ob.depth() > 40.0;
+                    && ob.depth() > 40.0
+                    && (superblock || (centrality < 0.5 && noise(779) < 0.6));
                 let parcel_id = next_parcel;
                 next_parcel += 1;
                 let gate_edge = (0..lot.len())
@@ -251,22 +274,39 @@ pub(super) fn build_parcels(
                     // centre until every corner is inside and it clears any
                     // dead-end street, else drop it.
                     let fc = centroid(&footprint);
-                    let placed = [1.0_f32, 0.92, 0.84, 0.76, 0.68].iter().find_map(|s| {
-                        let ring: Vec<V> = footprint
-                            .iter()
-                            .map(|p| {
-                                ob.to_world(fc.0 + (p.0 - fc.0) * s, fc.1 + (p.1 - fc.1) * s)
-                            })
-                            .collect();
-                        let clear_of_spurs = spurs.iter().all(|(a, b, class)| {
-                            let row = right_of_way(*class);
-                            ring.iter().all(|p| point_seg_dist(*p, *a, *b) >= row)
-                                && ring
-                                    .iter()
-                                    .zip(ring.iter().cycle().skip(1))
-                                    .all(|(p, q)| seg_seg_dist(*p, *q, *a, *b) >= row)
-                        });
-                        (clear_of_spurs && ring.iter().all(|p| point_in(lot, *p))).then_some(ring)
+                    let (fw, fd) = (width, depth);
+                    let shifts = [
+                        (0.0_f32, 0.0_f32),
+                        (0.12, 0.0),
+                        (-0.12, 0.0),
+                        (0.0, 0.12),
+                        (0.0, -0.12),
+                        (0.25, 0.0),
+                        (-0.25, 0.0),
+                        (0.0, 0.25),
+                        (0.0, -0.25),
+                    ];
+                    let placed = [1.0_f32, 0.92, 0.84, 0.76, 0.68, 0.58, 0.5].iter().find_map(|s| {
+                        shifts.iter().find_map(|(sx, sz)| {
+                            let ring: Vec<V> = footprint
+                                .iter()
+                                .map(|p| {
+                                    ob.to_world(
+                                        fc.0 + (p.0 - fc.0) * s + sx * fw,
+                                        fc.1 + (p.1 - fc.1) * s + sz * fd,
+                                    )
+                                })
+                                .collect();
+                            let clear_of_spurs = spurs.iter().all(|(a, b, class)| {
+                                let row = right_of_way(*class);
+                                ring.iter().all(|p| point_seg_dist(*p, *a, *b) >= row)
+                                    && ring
+                                        .iter()
+                                        .zip(ring.iter().cycle().skip(1))
+                                        .all(|(p, q)| seg_seg_dist(*p, *q, *a, *b) >= row)
+                            });
+                            (clear_of_spurs && ring.iter().all(|p| point_in(lot, *p))).then_some(ring)
+                        })
                     });
                     let Some(ring) = placed else {
                         return;
@@ -284,9 +324,24 @@ pub(super) fn build_parcels(
                         ParcelUse::Residential => procedural::FacadeKind::Residential,
                         ParcelUse::Park => procedural::FacadeKind::Residential,
                     };
-                    let metrics =
+                    let mut floors = floors;
+                    let mut metrics =
                         procedural::facade_metrics(max_side, max_side * 0.8, floors, facade_kind);
                     let podium_height = podium_floors as f32 * PODIUM_FLOOR_M;
+                    // No needles: height stays proportionate to the footprint's
+                    // short side (about 4.4 : 1 at the very most).
+                    let short_side = signed_area(&ring) / max_side.max(1.0);
+                    let height_cap = 4.4 * short_side - podium_height - 1.2;
+                    let cap_floors = (height_cap / metrics.storey_height_m).floor().max(3.0) as u16;
+                    if floors > cap_floors {
+                        floors = cap_floors;
+                        metrics = procedural::facade_metrics(
+                            max_side,
+                            max_side * 0.8,
+                            floors,
+                            facade_kind,
+                        );
+                    }
                     let floor_height = metrics.storey_height_m;
                     buildings.push(ModernBuilding {
                         id: next_building,
@@ -317,7 +372,8 @@ pub(super) fn build_parcels(
                 };
                 match use_type {
                     ParcelUse::Commercial => {
-                        let podium_floors = if noise(731) < 0.5 { 3 } else { 4 };
+                        let podium_floors =
+                            if centrality < 0.3 || noise(731) < 0.5 { 3 } else { 4 };
                         emit(
                             rect(bx0, bx1, bz0, bz1, 0.06),
                             podium_floors,
@@ -328,12 +384,14 @@ pub(super) fn build_parcels(
                             false,
                         );
                         let tower_area = 24.0 * 20.0;
-                        let tower_far = 3.6 + 3.6 * centrality * density;
-                        let tower_floors = ((tower_far * parcel_area.max(4200.0) * 0.55 / tower_area).round()
-                            as u16)
-                            .clamp(12, 34);
-                        let tower_w = 30.0 * (0.85 + noise(737) * 0.3);
-                        let tower_d = 26.0 * (0.85 + noise(739) * 0.3);
+                        let _ = tower_area;
+                        let tower_floors = ((6.0 + 30.0 * centrality.powf(1.15) * (0.7 + 0.3 * density))
+                            * (0.72 + 0.56 * noise(745)))
+                        .round()
+                        .clamp(5.0, 38.0) as u16;
+                        let size = 0.85 + 0.3 * centrality;
+                        let tower_w = 30.0 * size * (0.85 + noise(737) * 0.3);
+                        let tower_d = 26.0 * size * (0.85 + noise(739) * 0.3);
                         let towers = if parcel_area > 6_800.0 && noise(741) < 0.45 { 2 } else { 1 };
                         for t in 0..towers {
                             let (tx, tz) = if towers == 2 {
@@ -377,9 +435,11 @@ pub(super) fn build_parcels(
                             false,
                         );
                         let tower_area = 22.0 * 18.0;
-                        let far = 2.2 + 1.4 * centrality * density;
-                        let tower_floors = ((far * parcel_area.max(3000.0) * 0.55 / tower_area).round() as u16)
-                            .clamp(9, 33);
+                        let _ = tower_area;
+                        let tower_floors = ((5.0 + 24.0 * centrality.powf(1.15) * (0.7 + 0.3 * density))
+                            * (0.72 + 0.56 * noise(755)))
+                        .round()
+                        .clamp(4.0, 32.0) as u16;
                         let tower_w = 22.0 * (0.9 + noise(747) * 0.2);
                         let tower_d = 18.0 * (0.9 + noise(749) * 0.2);
                         emit(
@@ -424,10 +484,10 @@ pub(super) fn build_parcels(
                     ParcelUse::Residential if !compound => {
                         // A street-wall block: the building fills its lot and
                         // meets the pavement, as in any dense city centre.
-                        let floors = (5.0 + noise(763) * 6.0 + 6.0 * centrality * density).round() as u16;
+                        let floors = (4.0 + noise(763) * 5.0 + 11.0 * centrality.powf(1.2) * density).round() as u16;
                         emit(
-                            rect(bx0, bx1, bz0, bz1, 0.03),
-                            floors.clamp(5, 16),
+                            rect(bx0, bx1, bz0, bz1, 0.03 + 0.2 * (1.0 - centrality)),
+                            floors.clamp(4, 18),
                             ParcelUse::Residential,
                             0,
                             BuildingFacade::BrickResidential,
@@ -436,95 +496,47 @@ pub(super) fn build_parcels(
                         );
                     }
                     ParcelUse::Residential => {
-                        let far = 2.4 + 1.0 * centrality * density;
-                        let slab = noise(753) < 0.55 && depth >= 46.0;
-                        if slab {
-                            let slab_w = (width * 0.72).clamp(46.0, 78.0).min(width);
-                            let slab_d = 12.5 + noise(757) * 2.5;
-                            let footprint_area = slab_w * slab_d;
-                            let far_floors = |rows: f32| {
-                                ((far * parcel_area / (footprint_area * rows)).round() as u16)
-                                    .clamp(6, 18)
-                            };
-                            let mut rows = 1_u16;
-                            let mut floors = far_floors(1.0);
-                            let pitch_needed =
-                                floors as f32 * RESIDENTIAL_FLOOR_M * 1.2 + slab_d + 6.0;
-                            if depth >= pitch_needed + slab_d {
-                                rows = 2;
-                                floors = far_floors(2.0);
-                            }
-                            for row in 0..rows {
-                                let row_z = if rows == 1 {
-                                    bz0 + depth * 0.5
+                        // A walled compound: the lot is tiled into cells, each
+                        // holding a slab or tower, a minority left as garden.
+                        let slab_style = noise(753) < 0.5;
+                        let (cw, cd) = if slab_style { (46.0, 28.0) } else { (34.0, 30.0) };
+                        let nx = ((width / cw).floor() as usize).max(1);
+                        let nz = ((depth / cd).floor() as usize).max(1);
+                        let (cell_w, cell_d) = (width / nx as f32, depth / nz as f32);
+                        for i in 0..nx {
+                            for j in 0..nz {
+                                let ck = key * 97 + (i * 7 + j) as i32;
+                                let cn = |salt: i32| modern_hash(seed, ck, 3, salt);
+                                if cn(781) < 0.05 + 0.12 * (1.0 - centrality) {
+                                    continue;
+                                }
+                                let cx = bx0 + cell_w * (i as f32 + 0.5);
+                                let cz = bz0 + cell_d * (j as f32 + 0.5);
+                                let floors = (6.0
+                                    + (4.0 + 22.0 * centrality) * (0.5 + 0.7 * cn(783)))
+                                .round()
+                                .clamp(6.0, 34.0) as u16;
+                                let (w, d) = if slab_style {
+                                    ((cell_w * 0.86).min(72.0), 12.5 + cn(785) * 2.5)
                                 } else {
-                                    bz0 + depth * (if row == 0 { 0.26 } else { 0.74 })
+                                    (
+                                        (23.0 * (0.88 + cn(787) * 0.24)).min(cell_w * 0.82),
+                                        (19.0 * (0.88 + cn(789) * 0.24)).min(cell_d * 0.82),
+                                    )
                                 };
                                 emit(
-                                    rect(
-                                        bx0 + width * 0.5 - slab_w * 0.5,
-                                        bx0 + width * 0.5 + slab_w * 0.5,
-                                        row_z - slab_d * 0.5,
-                                        row_z + slab_d * 0.5,
-                                        0.0,
-                                    ),
+                                    rect(cx - w * 0.5, cx + w * 0.5, cz - d * 0.5, cz + d * 0.5, 0.0),
                                     floors,
                                     ParcelUse::Residential,
                                     0,
                                     BuildingFacade::BrickResidential,
-                                    RoofStyle::Flat,
+                                    if floors >= 30 {
+                                        RoofStyle::SetbackTower
+                                    } else {
+                                        RoofStyle::Flat
+                                    },
                                     true,
                                 );
-                            }
-                        } else {
-                            let tower_w = 23.0 * (0.88 + noise(759) * 0.24);
-                            let tower_d = 19.0 * (0.88 + noise(761) * 0.24);
-                            let cols = if width >= 78.0 { 2 } else { 1 };
-                            let footprint_area = tower_w * tower_d;
-                            let far_floors = |masses: f32| {
-                                ((far * parcel_area / (footprint_area * masses)).round() as u16)
-                                    .clamp(8, 33)
-                            };
-                            let mut rows = 1_u16;
-                            let mut floors = far_floors(cols as f32);
-                            let pitch_needed =
-                                floors as f32 * RESIDENTIAL_FLOOR_M * 1.1 + tower_d + 6.0;
-                            if depth >= pitch_needed + tower_d {
-                                rows = 2;
-                                floors = far_floors(cols as f32 * 2.0);
-                            }
-                            for row in 0..rows {
-                                let row_z = if rows == 1 {
-                                    bz0 + depth * 0.5
-                                } else {
-                                    bz0 + depth * (if row == 0 { 0.24 } else { 0.76 })
-                                };
-                                for col in 0..cols {
-                                    let col_x = if cols == 1 {
-                                        bx0 + width * 0.5
-                                    } else {
-                                        bx0 + width * (if col == 0 { 0.27 } else { 0.73 })
-                                    };
-                                    emit(
-                                        rect(
-                                            col_x - tower_w * 0.5,
-                                            col_x + tower_w * 0.5,
-                                            row_z - tower_d * 0.5,
-                                            row_z + tower_d * 0.5,
-                                            0.0,
-                                        ),
-                                        floors,
-                                        ParcelUse::Residential,
-                                        0,
-                                        BuildingFacade::BrickResidential,
-                                        if floors >= 30 {
-                                            RoofStyle::SetbackTower
-                                        } else {
-                                            RoofStyle::Flat
-                                        },
-                                        true,
-                                    );
-                                }
                             }
                         }
                     }

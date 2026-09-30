@@ -300,13 +300,19 @@ pub fn derive(
         if list.len() < 2 {
             continue;
         }
-        let widest = list
+        let mut widths: Vec<f32> = list
             .iter()
             .filter_map(|id| sections.get(id))
             .map(|section| section.width_metres)
-            .fold(0.0_f32, f32::max);
+            .collect();
+        widths.sort_by(|a, b| b.total_cmp(a));
+        let widest = widths.first().copied().unwrap_or(0.0);
+        let second = widths.get(1).copied().unwrap_or(0.0);
         let mut value = if list.len() > 2 {
-            widest * 0.55 + 3.0
+            // A crossing is as deep as the street it crosses is wide: the box is
+            // driven by the two widest arms, not by the widest alone, so a lane
+            // joining an avenue no longer gets an avenue-sized apron.
+            widest * 0.42 + second * 0.2 + 2.5
         } else {
             (widest * 0.5 + 2.0).min(8.0)
         };

@@ -12,6 +12,9 @@ pub(super) struct Face {
     /// Class of the road along edge `i` (`ring[i] -> ring[i+1]`).
     pub classes: Vec<ModernRoadClass>,
     pub edge_len: Vec<f32>,
+    /// True where edge `i` is a cut made when a concave face was split into
+    /// convex pieces, not a street: it carries no right-of-way.
+    pub open: Vec<bool>,
 }
 
 /// Faces plus the dangling streets that bound no block.  A cul-de-sac still
@@ -114,7 +117,116 @@ pub(super) fn extract_faces(pts: &[V], edges: &[(usize, usize, ModernRoadClass)]
                 (b.0 - a.0).hypot(b.1 - a.1)
             })
             .collect();
-        faces.push(Face { ring, classes, edge_len });
+        let open = vec![false; ring.len()];
+        faces.push(Face { ring, classes, edge_len, open });
     }
     Extraction { faces, spurs }
+}
+
+/// Turn at vertex `b` of `a -> b -> c`, positive for a left (convex, for a
+/// counter-clockwise ring) turn, in radians.
+fn turn(a: V, b: V, c: V) -> f32 {
+    let (u, v) = ((b.0 - a.0, b.1 - a.1), (c.0 - b.0, c.1 - b.1));
+    (u.0 * v.1 - u.1 * v.0).atan2(u.0 * v.0 + u.1 * v.1)
+}
+
+/// A boundary bend sharper than this (radians, towards the inside of the face)
+/// makes the face concave enough that half-plane setbacks would eat the block.
+const REFLEX_TOL: f32 = 0.21;
+
+fn point_in_tri(p: V, a: V, b: V, c: V) -> bool {
+    let s = |p: V, q: V, r: V| (q.0 - p.0) * (r.1 - p.1) - (q.1 - p.1) * (r.0 - p.0);
+    let (d1, d2, d3) = (s(a, b, p), s(b, c, p), s(c, a, p));
+    d1 > 1.0e-4 && d2 > 1.0e-4 && d3 > 1.0e-4
+}
+
+/// Ear-clip a simple counter-clockwise ring into triangles of ring indices.
+fn triangulate(ring: &[V]) -> Vec<[usize; 3]> {
+    let mut idx: Vec<usize> = (0..ring.len()).collect();
+    let mut tris = Vec::new();
+    while idx.len() > 3 {
+        let m = idx.len();
+        let mut pick = None;
+        for k in 0..m {
+            let (ia, ib, ic) = (idx[(k + m - 1) % m], idx[k], idx[(k + 1) % m]);
+            let (a, b, c) = (ring[ia], ring[ib], ring[ic]);
+            if (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0) <= 1.0e-4 {
+                continue;
+            }
+            if idx.iter().any(|&o| o != ia && o != ib && o != ic && point_in_tri(ring[o], a, b, c)) {
+                continue;
+            }
+            pick = Some(k);
+            break;
+        }
+        let k = pick.unwrap_or(0);
+        let m = idx.len();
+        tris.push([idx[(k + m - 1) % m], idx[k], idx[(k + 1) % m]]);
+        idx.remove(k);
+    }
+    if idx.len() == 3 {
+        tris.push([idx[0], idx[1], idx[2]]);
+    }
+    tris
+}
+
+/// Split a concave face into near-convex pieces (Hertel-Mehlhorn merge of an
+/// ear-clipped triangulation).  Edges along the original boundary keep their
+/// street class; diagonals become `open`.
+pub(super) fn split_concave(face: Face) -> Vec<Face> {
+    let n = face.ring.len();
+    let ring = &face.ring;
+    let convexish = (0..n).all(|i| turn(ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n]) > -REFLEX_TOL);
+    if convexish || n < 4 {
+        return vec![face];
+    }
+    let mut polys: Vec<Vec<usize>> = triangulate(ring).into_iter().map(|t| t.to_vec()).collect();
+    'merge: loop {
+        for pi in 0..polys.len() {
+            for qi in (pi + 1)..polys.len() {
+                let (p, q) = (&polys[pi], &polys[qi]);
+                for x in 0..p.len() {
+                    let (u, v) = (p[x], p[(x + 1) % p.len()]);
+                    let Some(y) = (0..q.len()).find(|&y| q[y] == v && q[(y + 1) % q.len()] == u) else {
+                        continue;
+                    };
+                    // p rotated to start at v and end at u; q rotated to start at u and end at v.
+                    let mut merged: Vec<usize> =
+                        (0..p.len()).map(|k| p[(x + 1 + k) % p.len()]).collect();
+                    let qrot: Vec<usize> = (0..q.len()).map(|k| q[(y + 1 + k) % q.len()]).collect();
+                    merged.extend_from_slice(&qrot[1..qrot.len() - 1]);
+                    let m = merged.len();
+                    let ok = (0..m).all(|k| {
+                        turn(ring[merged[(k + m - 1) % m]], ring[merged[k]], ring[merged[(k + 1) % m]])
+                            > -REFLEX_TOL
+                    });
+                    if ok {
+                        polys[pi] = merged;
+                        polys.remove(qi);
+                        continue 'merge;
+                    }
+                }
+            }
+        }
+        break;
+    }
+    polys
+        .into_iter()
+        .map(|poly| {
+            let m = poly.len();
+            let pts: Vec<V> = poly.iter().map(|&i| ring[i]).collect();
+            let mut classes = Vec::with_capacity(m);
+            let mut open = Vec::with_capacity(m);
+            let mut edge_len = Vec::with_capacity(m);
+            for k in 0..m {
+                let (a, b) = (poly[k], poly[(k + 1) % m]);
+                let original = b == (a + 1) % n;
+                classes.push(face.classes[a]);
+                open.push(!original);
+                let (pa, pb) = (ring[a], ring[b]);
+                edge_len.push((pb.0 - pa.0).hypot(pb.1 - pa.1));
+            }
+            Face { ring: pts, classes, edge_len, open }
+        })
+        .collect()
 }
