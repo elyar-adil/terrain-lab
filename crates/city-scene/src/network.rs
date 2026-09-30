@@ -323,7 +323,7 @@ pub fn derive(
             })
             .fold(f32::MAX, f32::min);
         if shortest.is_finite() {
-            value = value.min(shortest * 0.3);
+            value = value.min(shortest * 0.4);
         }
         radius[index] = value;
     }
@@ -827,8 +827,13 @@ pub fn derive(
             let handle = chord * 0.45;
             let corner = cubic_points(
                 port.right,
-                port.right - port.dir * handle,
-                next.left - next.dir * handle,
+                // `dir` points from the road *towards* the junction (it is the
+                // negated into-the-road tangent), so the handles run along each
+                // kerb line into the box.  With the opposite sign the corner
+                // bows away from the junction and reads as a convex blob rather
+                // than a kerb return.
+                port.right + port.dir * handle,
+                next.left + next.dir * handle,
                 next.left,
                 8,
             );

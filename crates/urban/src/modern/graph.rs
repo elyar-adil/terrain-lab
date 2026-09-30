@@ -535,6 +535,61 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
         !drop[idx - 1]
     });
 
+    // ---- 3a. no link shorter than its own junction boxes ----
+    // The scene builder trims each end of a road by roughly 0.8 x the widest
+    // street at that node, capped at 40 % of the road's length.  A link shorter
+    // than the two boxes it joins leaves neither box its full size: the
+    // carriageways of adjacent roads then no longer meet in a common corner, and
+    // the kerbs cross instead of turning.  Contract such links into one node.
+    loop {
+        let mut degree = vec![0_u32; pts.len()];
+        let mut widest = vec![0.0_f32; pts.len()];
+        for (s, _) in &kept {
+            for n in [s.a, s.b] {
+                degree[n] += 1;
+                widest[n] = widest[n].max(s.class.width_metres());
+            }
+        }
+        let need = |n: usize| if degree[n] > 2 { widest[n] * 0.8 + 4.0 } else { (widest[n] * 0.5 + 2.0).min(8.0) };
+        let victim = kept
+            .iter()
+            .enumerate()
+            .filter(|(_, (s, bridge))| !*bridge)
+            .map(|(i, (s, _))| {
+                let len = (pts[s.a].0 - pts[s.b].0).hypot(pts[s.a].1 - pts[s.b].1);
+                (i, len, ((need(s.a) + need(s.b)) / 0.8).max(30.0))
+            })
+            .filter(|(_, len, want)| len < want)
+            .min_by(|a, b| (a.1 / a.2).total_cmp(&(b.1 / b.2)));
+        let Some((i, _, _)) = victim else { break };
+        let (s, _) = kept[i];
+        // Keep the busier node where it is, so grid lines stay straight.
+        let (keep, gone) = if degree[s.a] >= degree[s.b] { (s.a, s.b) } else { (s.b, s.a) };
+        kept.remove(i);
+        for (e, _) in kept.iter_mut() {
+            if e.a == gone {
+                e.a = keep;
+            }
+            if e.b == gone {
+                e.b = keep;
+            }
+        }
+        // Drop loops and merge parallel duplicates, keeping the wider class.
+        kept.retain(|(e, _)| e.a != e.b);
+        let mut j = 0;
+        while j < kept.len() {
+            let key = (kept[j].0.a.min(kept[j].0.b), kept[j].0.a.max(kept[j].0.b));
+            if let Some(k) = (0..j).find(|&k| (kept[k].0.a.min(kept[k].0.b), kept[k].0.a.max(kept[k].0.b)) == key) {
+                if (kept[j].0.class as i32) > (kept[k].0.class as i32) {
+                    kept[k] = kept[j];
+                }
+                kept.remove(j);
+            } else {
+                j += 1;
+            }
+        }
+    }
+
     // ---- 3b. tidy junctions ----
     // A diagonal that runs through (or near) a grid intersection leaves a node
     // with six or eight arms and slivers of 22-45 degrees between them.  No
