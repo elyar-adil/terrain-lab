@@ -452,8 +452,9 @@ pub(crate) fn band_uv(
 /// A walled residential compound: boundary wall, a gate portal on the street
 /// front, an internal fire lane and a lawn.
 fn compound_shell(compound: &Compound, ring: &[Vec2], frame: CityFrameInfo, builder: &mut MeshBuilder) {
+    // Clockwise in plan, so wall quads face outward (see `building_shell`).
     let mut outward = ring.to_vec();
-    if signed_area(&outward) < 0.0 {
+    if signed_area(&outward) > 0.0 {
         outward.reverse();
     }
     let height = compound.fence_height_metres;
@@ -547,6 +548,47 @@ mod tests {
             block_size_metres: 110.0,
             ..ModernChinaSpec::default()
         })
+    }
+
+    /// Facade triangles must be front-facing from *outside*.  The renderer culls
+    /// back faces, so a wall wound inward is invisible from the street and the
+    /// viewer sees the far walls' inner sides instead: a building that looks
+    /// hollow.  Asserted on the emitted index winding, not on the stored normals.
+    #[test]
+    fn facade_walls_face_away_from_the_building() {
+        let city = city();
+        let mut checked = 0;
+        for building in city.buildings.iter().take(12) {
+            let ring = ring_of(&building.footprint, city.frame);
+            if ring.len() < 3 {
+                continue;
+            }
+            let centre = ring_centroid(&ring);
+            let mut builder = MeshBuilder::new();
+            shell::building_shell(building, &ring, &mut builder);
+            for group in builder.build().meshes.iter().filter(|g| g.material.starts_with("facade/")) {
+                let p = |i: u32| {
+                    let i = i as usize * 3;
+                    Vec3::new(group.positions[i], group.positions[i + 1], group.positions[i + 2])
+                };
+                for tri in group.indices.chunks_exact(3) {
+                    let (a, b, c) = (p(tri[0]), p(tri[1]), p(tri[2]));
+                    let n = (b - a).cross(c - a);
+                    if n.y.abs() > 0.5 * n.length() || n.length() < 1.0e-6 {
+                        continue; // not a wall
+                    }
+                    let mid = Vec2::new((a.x + b.x + c.x) / 3.0, (a.z + b.z + c.z) / 3.0);
+                    let out = Vec2::new(mid.x - centre.x, mid.y - centre.y);
+                    assert!(
+                        n.x * out.x + n.z * out.y > 0.0,
+                        "building {} has a facade wall wound inward",
+                        building.id
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 50, "only {checked} wall triangles checked");
     }
 
     fn built() -> crate::mesh::SceneGeometry {

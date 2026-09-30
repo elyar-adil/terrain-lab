@@ -152,10 +152,14 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
     // the note on vertex tints in `super` for why this layer writes no colours.
     let tint: Option<[f32; 3]> = None;
 
-    // Outward-facing ring: `inset_ring` on a reversed ring flips the winding, so
-    // work from an explicitly outward ring rather than trusting the plan's.
+    // Outward-facing ring.  Every wall primitive emits `(a, b)` as a quad whose
+    // face normal is the *left* of travel, and in plan `(x, z)` the left of a
+    // counter-clockwise ring is its interior.  So the ring the shell builds walls
+    // from must be clockwise (negative area) for walls to face outward; a
+    // counter-clockwise ring renders as a hollow building whose near walls are
+    // culled.  `inset_ring` accepts either winding.
     let mut outward = ring.to_vec();
-    if signed_area(&outward) < 0.0 {
+    if signed_area(&outward) > 0.0 {
         outward.reverse();
     }
 
