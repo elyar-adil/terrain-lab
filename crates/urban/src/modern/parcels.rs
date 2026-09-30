@@ -195,11 +195,11 @@ pub(super) fn build_parcels(
                 let waterfront = ring_polyline_dist(lot, &river_local) < river_half + RIVER_BANK_M;
                 let use_type = if park_block || waterfront {
                     ParcelUse::Park
-                } else if n < 0.17 + 0.18 * centrality {
+                } else if n < 0.26 + 0.20 * centrality {
                     ParcelUse::Commercial
-                } else if n < 0.44 {
+                } else if n < 0.55 {
                     ParcelUse::MixedUse
-                } else if n < 0.52 {
+                } else if n < 0.60 {
                     ParcelUse::Civic
                 } else {
                     ParcelUse::Residential
