@@ -3210,18 +3210,18 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       // resolve to a handful of pixels.  Both thresholds are real metres.
       const cityFade = smoothFadeIn(viewSpanMetres, 9_000, 26_000);
       const cityStreetFade = smoothFadeIn(viewSpanMetres, 650, 7_500);
-      roadSurfaceGroup.visible = roadSurfaceFade > 0.001;
-      roadMarkingGroup.visible = roadMarkingFade > 0.001;
-      cityStreetGroup.visible = cityStreetFade > 0.001;
-      cityDetailGroup.visible = cityStreetFade > 0.001;
+      roadSurfaceGroup.visible = false; // legacy renderer, retired: the Rust city layer draws cities
+      roadMarkingGroup.visible = false; // legacy renderer, retired: the Rust city layer draws cities
+      cityStreetGroup.visible = false; // legacy renderer, retired: the Rust city layer draws cities
+      cityDetailGroup.visible = false; // legacy renderer, retired: the Rust city layer draws cities
       // The legacy metre-scale city (striped boxes, lane lattice) is retired: cities
       // are drawn by CityViewer from the Rust city-scene. Kept hidden, not deleted, so
       // the terrain view stays untouched.
       cityGroup.visible = false;
-      cityArchitectureGroup.visible = cityFade > 0.001;
-      facadeWindows.visible = cityFade > 0.001;
-      cityParcelGroup.visible = cityFade > 0.001;
-      cityRiverGroup.visible = cityFade > 0.001;
+      cityArchitectureGroup.visible = false; // legacy renderer, retired: the Rust city layer draws cities
+      facadeWindows.visible = false; // legacy renderer, retired: the Rust city layer draws cities
+      cityParcelGroup.visible = false; // legacy renderer, retired: the Rust city layer draws cities
+      cityRiverGroup.visible = false; // legacy renderer, retired: the Rust city layer draws cities
       fadeMaterial(asphaltMaterial, roadSurfaceFade);
       fadeMaterial(dirtRoadMaterial, roadSurfaceFade);
       fadeMaterial(whiteMarkingMaterial, roadMarkingFade);
