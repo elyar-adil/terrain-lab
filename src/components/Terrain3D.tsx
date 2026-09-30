@@ -544,6 +544,24 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
 
     const forestValues = decodeBytes(result.forestDataBase64);
     const vegetationExclusion = decodeBytes(result.vegetationExclusionDataBase64);
+    // No fields, meadows or forest under a settlement: the metre-scale city owns
+    // that ground, and detail instances there would poke through its streets.
+    {
+      const cellM = (result.worldSizeKm * 1000) / Math.max(1, result.meshSize - 1);
+      for (const site of citySites) {
+        const cx = (site.xKm / result.worldSizeKm) * (result.meshSize - 1);
+        const cy = (site.yKm / result.worldSizeKm) * (result.meshSize - 1);
+        const clearM = site.radiusM + 60;
+        const reach = Math.ceil(clearM / cellM) + 1;
+        for (let dy = -reach; dy <= reach; dy += 1) {
+          for (let dx = -reach; dx <= reach; dx += 1) {
+            const ix = Math.round(cx) + dx, iy = Math.round(cy) + dy;
+            if (ix < 0 || iy < 0 || ix >= result.meshSize || iy >= result.meshSize) continue;
+            if (Math.hypot(ix - cx, iy - cy) * cellM <= clearM) vegetationExclusion[iy * result.meshSize + ix] = 255;
+          }
+        }
+      }
+    }
     const treeGeometry = new THREE.ConeGeometry(3.8 * metresToScene, 18.0 * metresToScene, 5, 1);
     const treeMaterial = new THREE.MeshStandardMaterial({ color: 0x1f4b2c, roughness: 0.94 });
     const treeMatrices: THREE.Matrix4[] = [];
@@ -3229,6 +3247,9 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       // 融进天穹地平线色;太阳阴影相机贴着轨道目标,低频刷新投影。
       skyUniforms.uTime.value = worldTime;
       skyDome.position.copy(camera.position);
+      // The dome must sit inside the far plane or the frustum clips it away and
+      // the sky renders as black.
+      skyDome.scale.setScalar(Math.max(1e-6, camera.far * 0.9 / 9000));
       (scene.fog as THREE.Fog).near = Math.max(350 * metresToScene, viewSpanScene * 0.45);
       (scene.fog as THREE.Fog).far = Math.max(2600 * metresToScene, viewSpanScene * 2.6);
       const shadowSpan = THREE.MathUtils.clamp(viewSpanScene * 0.85, 40 * metresToScene, 1.5);

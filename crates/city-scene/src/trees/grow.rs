@@ -226,7 +226,7 @@ impl<'a, 'b> Grower<'a, 'b> {
             let y = base + (top - base) * t;
             // Close the shell at both ends with a rounded cap.
             let cap = (1.0 - (2.0 * t - 1.0).powi(8)).max(0.0).sqrt();
-            let r = self.plan.radius_at(&self.arch, y) * 0.68 * cap.max(0.02);
+            let r = self.plan.radius_at(&self.arch, y) * 0.50 * cap.max(0.02);
             for j in 0..cols {
                 let a = j as f32 / cols as f32 * TAU;
                 let n = noise(a, y);
