@@ -209,15 +209,15 @@ impl<'a, 'b> Grower<'a, 'b> {
     /// sit on a smooth, noise-displaced shell at about two thirds of the crown
     /// radius and stick out of it as leaf texture.
     fn canopy_mass(&mut self) {
-        let (rows, cols) = (14usize, 22usize);
+        let (rows, cols) = (20usize, 32usize);
         let base = self.plan.base + (self.plan.top - self.plan.base) * 0.04;
         let top = self.plan.top - 0.005;
         let phase = self.plan.phase;
         let f = self.species.foliage;
         let noise = |a: f32, y: f32| -> f32 {
-            0.5 * (a * 3.0 + y * 9.0 + phase).sin()
-                + 0.3 * (a * 5.0 - y * 14.0 + phase * 1.7).sin()
-                + 0.2 * (a * 9.0 + y * 21.0 + phase * 2.3).sin()
+            0.4 * (a * 4.0 + y * 11.0 + phase).sin()
+                + 0.3 * (a * 7.0 - y * 17.0 + phase * 1.7).sin()
+                + 0.3 * (a * 12.0 + y * 27.0 + phase * 2.3).sin()
         };
         let mut grid: Vec<Vec3> = Vec::with_capacity((rows + 1) * cols);
         let mut shade: Vec<f32> = Vec::with_capacity((rows + 1) * cols);
@@ -226,11 +226,11 @@ impl<'a, 'b> Grower<'a, 'b> {
             let y = base + (top - base) * t;
             // Close the shell at both ends with a rounded cap.
             let cap = (1.0 - (2.0 * t - 1.0).powi(8)).max(0.0).sqrt();
-            let r = self.plan.radius_at(&self.arch, y) * 0.50 * cap.max(0.02);
+            let r = self.plan.radius_at(&self.arch, y) * 0.80 * cap.max(0.02);
             for j in 0..cols {
                 let a = j as f32 / cols as f32 * TAU;
                 let n = noise(a, y);
-                let rr = r * (1.0 + 0.16 * n);
+                let rr = r * (1.0 + 0.11 * n);
                 grid.push(Vec3::new(rr * a.cos(), y + 0.01 * n, rr * a.sin()));
                 shade.push(n);
             }
@@ -250,7 +250,8 @@ impl<'a, 'b> Grower<'a, 'b> {
             for j in 0..cols {
                 let ids = [at(i, j), at(i, j + 1), at(i + 1, j + 1), at(i + 1, j)];
                 let n = (shade[ids[0]] + shade[ids[2]]) * 0.5;
-                let lift = 0.78 + 0.22 * (i as f32 / rows as f32) + 0.14 * n;
+                let speckle = (((i * 73 + j * 151 + (phase * 100.0) as usize) % 17) as f32 / 17.0 - 0.5) * 0.22;
+                let lift = 0.72 + 0.30 * (i as f32 / rows as f32) + 0.16 * n + speckle;
                 let colour = Some([f[0] * lift, f[1] * lift, f[2] * lift]);
                 let v = |k: usize| (grid[ids[k]], normals[ids[k]]);
                 self.builder.triangle(&name, v(0), v(3), v(2), colour);

@@ -374,6 +374,7 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     let composer: THREE.WebGLRenderer | { render: () => void } | null = null;
     let gtaoPassRef: { enabled: boolean } | null = null;
     try {
+      if (new URLSearchParams(window.location.search).get("post") === "0") throw new Error("post disabled for diagnosis");
       const composerTarget = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, samples: 4 });
       const post = new EffectComposer(renderer, composerTarget);
       post.setPixelRatio(renderer.getPixelRatio());
@@ -530,12 +531,12 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
   float w3 = 1.0 - smoothstep(1500.0, 12000.0, dm);
   float grain = dFbm(pm * 9.0) - 0.5;
   float tufts = dFbm(pm * 1.9) - 0.5;
-  float patch = dFbm(pm * 0.21) - 0.5;
+  float blotch = dFbm(pm * 0.21) - 0.5;
   float region = dFbm(pm * 0.021) - 0.5;
-  float tone = 1.0 + w0 * grain * 0.7 + w1 * tufts * 0.55 + w2 * patch * 0.45 + w3 * region * 0.3;
+  float tone = 1.0 + w0 * grain * 0.7 + w1 * tufts * 0.55 + w2 * blotch * 0.45 + w3 * region * 0.3;
   diffuseColor.rgb *= tone;
   // Warm the dry patches and cool the lush ones a little, as real fields do.
-  diffuseColor.rgb += (w1 * tufts + w2 * patch) * vec3(0.045, 0.03, -0.02);
+  diffuseColor.rgb += (w1 * tufts + w2 * blotch) * vec3(0.045, 0.03, -0.02);
 }`);
     };
     const terrain = new THREE.Mesh(geometry, terrainMaterial);
@@ -2996,6 +2997,11 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
     const reliefMetres = result.stats.maxElevation - result.stats.minElevation;
     clouds.position.y = (reliefMetres + 1800) * metresToScene;
     scene.add(clouds);
+    {
+      const hide = new Set((new URLSearchParams(window.location.search).get("hide") ?? "").split(","));
+      if (hide.has("clouds")) clouds.visible = false;
+      if (hide.has("water")) water.visible = false;
+    }
 
     const shadowUniforms = {
       uTime: { value: 0 },
@@ -3250,8 +3256,8 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       // The dome must sit inside the far plane or the frustum clips it away and
       // the sky renders as black.
       skyDome.scale.setScalar(Math.max(1e-6, camera.far * 0.9 / 9000));
-      (scene.fog as THREE.Fog).near = Math.max(350 * metresToScene, viewSpanScene * 0.45);
-      (scene.fog as THREE.Fog).far = Math.max(2600 * metresToScene, viewSpanScene * 2.6);
+      (scene.fog as THREE.Fog).near = Math.max(500 * metresToScene, viewSpanScene * 1.5);
+      (scene.fog as THREE.Fog).far = Math.max(4000 * metresToScene, viewSpanScene * 6.0);
       const shadowSpan = THREE.MathUtils.clamp(viewSpanScene * 0.85, 40 * metresToScene, 1.5);
       sun.target.position.copy(controls.target);
       sun.position.copy(controls.target).addScaledVector(SUN_DIR, shadowSpan * 2.5 + 0.05);
