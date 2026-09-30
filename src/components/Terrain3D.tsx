@@ -2945,7 +2945,18 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
         const gy = THREE.MathUtils.clamp(Math.round((worldZ + 1.6) / 3.2 * (size - 1)), 0, size - 1);
         return waterMask[gy * size + gx];
       },
-      height: terrainHeightAt,
+      // Height of the rendered triangle under this point (not the bilinear
+      // surface): the mesh is coarse, and plants must sit on the faces you see.
+      height: (worldX, worldZ) => {
+        const last = result.meshSize - 1;
+        const gx = THREE.MathUtils.clamp((worldX + 1.6) / 3.2 * last, 0, last - 1e-6);
+        const gz = THREE.MathUtils.clamp((worldZ + 1.6) / 3.2 * last, 0, last - 1e-6);
+        const ix = Math.floor(gx), iy = Math.floor(gz);
+        const u = gx - ix, v = gz - iy;
+        const at = (x: number, y: number) => Math.max(0, heights[y * result.meshSize + x] - result.stats.minElevation) * metresToScene;
+        const ha = at(ix, iy), hb = at(ix, iy + 1), hc = at(ix + 1, iy + 1), hd = at(ix + 1, iy);
+        return u + v <= 1 ? ha + u * (hd - ha) + v * (hb - ha) : hc + (1 - u) * (hb - hc) + (1 - v) * (hd - hc);
+      },
       elevation01: (worldX, worldZ) => (sampleGrid(heights, worldX, worldZ) - result.stats.minElevation)
         / Math.max(1, result.stats.maxElevation - result.stats.minElevation),
     });

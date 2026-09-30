@@ -104,21 +104,28 @@ export function tuftGeometry(metresToScene: number): THREE.BufferGeometry {
 
 /** A leafy shrub: a noisy, low-poly heap with a dark underside and lit top. */
 export function shrubGeometry(metresToScene: number): THREE.BufferGeometry {
-  const geometry = new THREE.IcosahedronGeometry(0.5 * metresToScene, 1);
+  const geometry = new THREE.SphereGeometry(0.5 * metresToScene, 11, 8);
   const position = geometry.attributes.position as THREE.BufferAttribute;
   const colours = new Float32Array(position.count * 3);
-  const random = seeded(0x2545f491);
   for (let index = 0; index < position.count; index += 1) {
-    const x = position.getX(index);
-    const y = position.getY(index);
-    const z = position.getZ(index);
-    const lump = 0.80 + 0.40 * (Math.sin(x * 46 / metresToScene) * Math.cos(z * 39 / metresToScene) * 0.5 + 0.5) + random() * 0.12;
-    position.setXYZ(index, x * lump * 1.15, Math.max(-0.05 * metresToScene, y * lump * 0.78 + 0.32 * metresToScene), z * lump * 1.15);
-    const up = THREE.MathUtils.clamp((y / metresToScene + 0.5), 0, 1);
-    const value = 0.50 + 0.55 * up + (random() - 0.5) * 0.18;
-    colours[index * 3] = value * 0.86;
+    const x = position.getX(index) / metresToScene;
+    const y = position.getY(index) / metresToScene;
+    const z = position.getZ(index) / metresToScene;
+    // Lumpy foliage: layered sines in the vertex's own direction, so the shrub
+    // is a heap of leafy bunches rather than a smooth ball.
+    const lump = 0.86 + 0.20 * Math.sin(x * 19 + z * 7) * Math.cos(z * 17 - y * 9) + 0.10 * Math.sin(y * 31 + x * 23);
+    position.setXYZ(
+      index,
+      x * lump * 1.15 * metresToScene,
+      Math.max(-0.05, y * lump * 0.78 + 0.30) * metresToScene,
+      z * lump * 1.15 * metresToScene,
+    );
+    const up = THREE.MathUtils.clamp(y + 0.5, 0, 1);
+    const speckle = 0.5 + 0.5 * Math.sin(x * 57 + y * 43) * Math.sin(z * 61 - y * 37);
+    const value = 0.42 + 0.50 * up + 0.30 * speckle;
+    colours[index * 3] = value * 0.82;
     colours[index * 3 + 1] = value;
-    colours[index * 3 + 2] = value * 0.6;
+    colours[index * 3 + 2] = value * 0.55;
   }
   geometry.setAttribute("color", new THREE.BufferAttribute(colours, 3));
   geometry.computeVertexNormals();
@@ -291,7 +298,7 @@ export function createGroundCover(metresToScene: number, sampler: GroundSampler)
         colour.setHSL(
           0.245 - dryness * 0.125 + (h(cellX, cellZ, 109) - 0.5) * 0.03,
           0.34 + (1 - dryness) * 0.18,
-          0.34 + h(cellX, cellZ, 110) * 0.16 + dryness * 0.06,
+          0.25 + h(cellX, cellZ, 110) * 0.14 + dryness * 0.05,
         );
         push(tufts, matrix, colour);
 
@@ -316,7 +323,7 @@ export function createGroundCover(metresToScene: number, sampler: GroundSampler)
           position.set(worldX, height - 0.04 * metresToScene, worldZ);
           scale.set(shrubSize * (0.9 + h(cellX, cellZ, 133) * 0.4), shrubSize * (0.75 + h(cellX, cellZ, 134) * 0.5), shrubSize * (0.9 + h(cellX, cellZ, 135) * 0.4));
           matrix.compose(position, quaternion, scale);
-          colour.setHSL(0.26 - dryness * 0.09 + (h(cellX, cellZ, 136) - 0.5) * 0.05, 0.36, 0.20 + h(cellX, cellZ, 137) * 0.12);
+          colour.setHSL(0.27 - dryness * 0.09 + (h(cellX, cellZ, 136) - 0.5) * 0.05, 0.40, 0.13 + h(cellX, cellZ, 137) * 0.09);
           push(shrubs, matrix, colour);
         }
       }
