@@ -220,8 +220,10 @@ fn river_bridge(road: &Road, surface: &Carriageway, length: f32, builder: &mut M
                 }
             } else {
                 for (a, b) in [(pl, l), (pr, r)] {
-                    builder.wall(STEEL_M, Vec2::new(a.x, a.z), Vec2::new(b.x, b.z), a.y - depth, a.y, Some(paint));
-                    builder.wall(STEEL_M, Vec2::new(b.x, b.z), Vec2::new(a.x, a.z), b.y - depth, b.y, Some(paint));
+                    // Sloped top and bottom: the fascia follows the ramp instead of stepping.
+                    let (a0, b0) = (Vec3::new(a.x, a.y - depth, a.z), Vec3::new(b.x, b.y - depth, b.z));
+                    builder.quad(STEEL_M, a0, b0, b, a, Some(paint));
+                    builder.quad(STEEL_M, b0, a0, a, b, Some(paint));
                 }
                 builder.quad(
                     STEEL_M,

@@ -87,11 +87,11 @@ pub fn build_water(
     // ---- water surface ------------------------------------------------------
     // Lateral bands, tight near the bank and wide in the middle, each with its
     // own colour so the shallows fade smoothly into the channel.
-    let shallow = [0.22, 0.33, 0.29];
-    let mid = [0.16, 0.29, 0.31];
+    let shallow = [0.20, 0.31, 0.29];
+    let mid = [0.13, 0.26, 0.30];
     let deep = [0.08, 0.19, 0.27];
     let murk = [0.24, 0.30, 0.22];
-    let dists = [0.0_f32, 0.35, 0.8, 1.4, 2.2, 3.3, 4.8, 6.8, 9.5, 13.0, 18.0];
+    let dists = [0.0_f32, 0.3, 0.6, 1.0, 1.5, 2.1, 2.8, 3.6, 4.6, 5.8, 7.2, 9.0, 11.0, 13.5, 16.0, 19.0, 23.0, 28.0];
     let mut offsets: Vec<f32> = Vec::new();
     for d in dists.iter().filter(|d| **d < half - 0.5) {
         offsets.push(half - d);
