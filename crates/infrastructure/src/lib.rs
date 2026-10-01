@@ -8,7 +8,8 @@ use urban::{
     CityOptions, ModernChinaSpec, ModernCity, ModernRoadClass, Point as UrbanPoint,
     RegionalApproach, UrbanModel, generate_modern_chinese_city_with_options,
 };
-use world_core::{GridPoint, ScalarLayer, WorldError, WorldGrid};
+use world_core::{GridPoint, ScalarLayer, WorldError};
+pub use world_core::WorldGrid;
 
 pub mod fabric;
 pub mod rivers;
@@ -399,10 +400,15 @@ fn settlement_centre_km(grid: WorldGrid, settlement: &SettlementSite) -> UrbanPo
 /// its corners rounded to the curvature the class is built to. The regional
 /// renderer and the town's street plan both draw this one line.
 fn road_path_km(road: &Road, grid: WorldGrid) -> Vec<UrbanPoint> {
+    road_centreline_km(road, grid).iter().map(|p| UrbanPoint { x_km: p[0], y_km: p[1] }).collect()
+}
+
+/// The same line as plain `[x, y]` kilometres, for renderers.
+pub fn road_centreline_km(road: &Road, grid: WorldGrid) -> Vec<[f32; 2]> {
     fabric::road_centreline_m(road, grid)
         .0
         .iter()
-        .map(|p| UrbanPoint { x_km: (p.x / 1000.0) as f32, y_km: (p.y / 1000.0) as f32 })
+        .map(|p| [(p.x / 1000.0) as f32, (p.y / 1000.0) as f32])
         .collect()
 }
 

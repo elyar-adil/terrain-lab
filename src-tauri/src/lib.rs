@@ -81,20 +81,11 @@ struct RenderRoad {
 /// polyline there as well put two disagreeing road networks on top of each other.
 fn regional_road_pieces(infrastructure: &InfrastructureData) -> Vec<(&infrastructure::Road, Vec<[f32; 2]>)> {
     let grid = infrastructure.urban_land.grid;
-    let denominator = (grid.size - 1) as f32;
     let footprints = infrastructure.footprints();
     let mut out = Vec::new();
     for road in &infrastructure.roads {
-        let path_km: Vec<[f32; 2]> = road
-            .path
-            .iter()
-            .map(|point| {
-                [
-                    point.x as f32 / denominator * grid.world_size_km,
-                    point.y as f32 / denominator * grid.world_size_km,
-                ]
-            })
-            .collect();
+        // The line the town's own street plan carries on, not the router's raw path.
+        let path_km: Vec<[f32; 2]> = infrastructure::road_centreline_km(road, grid);
         for piece in infrastructure::clip_outside_footprints(&path_km, &footprints) {
             out.push((road, piece));
         }
@@ -359,7 +350,7 @@ fn rasterize_road_coverage(
     roads: &[infrastructure::Road],
     right_of_way: bool,
 ) {
-    let scale = (target_size - 1) as f32 / (source_size - 1) as f32;
+    let grid = infrastructure::WorldGrid::new(source_size, world_size_km).expect("a valid world grid");
     let metres_per_pixel = world_size_km * 1000.0 / (target_size - 1) as f32;
     for road in roads {
         let profile = road.class.profile();
@@ -369,11 +360,14 @@ fn rasterize_road_coverage(
             profile.carriageway_width_metres
         };
         let width_pixels = width_metres / metres_per_pixel;
-        for segment in road.path.windows(2) {
-            let ax = segment[0].x as f32 * scale;
-            let ay = segment[0].y as f32 * scale;
-            let bx = segment[1].x as f32 * scale;
-            let by = segment[1].y as f32 * scale;
+        // The same smoothed line the town plans carry on, in target pixels.
+        let line = infrastructure::road_centreline_km(road, grid);
+        let pixels_per_km = (target_size - 1) as f32 / world_size_km;
+        for segment in line.windows(2) {
+            let ax = segment[0][0] * pixels_per_km;
+            let ay = segment[0][1] * pixels_per_km;
+            let bx = segment[1][0] * pixels_per_km;
+            let by = segment[1][1] * pixels_per_km;
             let reach = (width_pixels * 0.5 + 1.0).max(1.0);
             let min_x = (ax.min(bx) - reach).floor().max(0.0) as usize;
             let max_x = (ax.max(bx) + reach).ceil().min((target_size - 1) as f32) as usize;
