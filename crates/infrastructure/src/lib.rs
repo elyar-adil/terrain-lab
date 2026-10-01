@@ -296,7 +296,7 @@ pub fn generate_infrastructure_with(
                 .enumerate()
                 .map(|(index, settlement)| match fabric.town_streets(index) {
                     Ok(town) => {
-                        let radius_km = settlement_radius_km(settlement.class) * 1.35;
+                        let radius_km = settlement_radius_km(settlement.class) * 1.35 + WINDOW_TAIL_KM;
                         urban::generate_modern_chinese_city_from_streets(
                             ModernChinaSpec {
                                 centre: settlement_centre_km(grid, settlement),
@@ -372,7 +372,19 @@ impl InfrastructureData {
         let city = self.modern_cities.get(index)?;
         Some(build_city_scene(city, scene_budget(settlement.class)))
     }
+
+    /// Like [`Self::build_city_scene`], but only the part of the plan within `radius_m`
+    /// of a local point: a look at one neighbourhood of a big town.
+    pub fn build_city_scene_clipped(&self, index: usize, centre: [f32; 2], radius_m: f32) -> Option<CityScene> {
+        let settlement = self.settlements.get(index)?;
+        let city = self.modern_cities.get(index)?.clipped(centre, radius_m);
+        Some(build_city_scene(&city, scene_budget(settlement.class)))
+    }
 }
+
+/// How far past the planned area the town's plan reaches, so the suburb and the
+/// farms beyond it have ground to stand on.
+pub(crate) const WINDOW_TAIL_KM: f32 = 0.3;
 
 /// Chinese settlement hierarchy on an 80 km map: the regional centre is a
 /// county-level city (县城, ~10 km² built-up area), towns (镇区) span roughly

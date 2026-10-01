@@ -75,3 +75,38 @@ pub struct ModernCity {
     /// assert a generated plan actually reads like a Chinese street network.
     pub morphology_score: f64,
 }
+
+impl ModernCity {
+    /// The part of the city within `radius_m` of a local point `(x, z)`: for looking at
+    /// one neighbourhood of a large plan without building the whole of it. Roads are
+    /// kept if any of their centreline is in range (nodes are all kept; unused ones
+    /// are harmless); everything else is kept by where its centre lies.
+    pub fn clipped(&self, centre: [f32; 2], radius_m: f32) -> ModernCity {
+        let local = |p: &Point| self.frame.to_local(*p);
+        let near = |p: &Point, extra: f32| {
+            let [x, z] = local(p);
+            (x - centre[0]).hypot(z - centre[1]) <= radius_m + extra
+        };
+        let middle = |ring: &[Point]| -> Option<Point> {
+            if ring.is_empty() {
+                return None;
+            }
+            let n = ring.len() as f32;
+            Some(Point {
+                x_km: ring.iter().map(|p| p.x_km).sum::<f32>() / n,
+                y_km: ring.iter().map(|p| p.y_km).sum::<f32>() / n,
+            })
+        };
+        let mut out = self.clone();
+        out.hd_roads.retain(|road| road.centreline.iter().any(|p| near(p, 60.0)));
+        let kept: std::collections::HashSet<u32> = out.hd_roads.iter().map(|road| road.sd_road).collect();
+        out.sd_roads.retain(|road| kept.contains(&road.id));
+        out.blocks.retain(|b| middle(&b.boundary).is_some_and(|c| near(&c, 0.0)));
+        out.parcels.retain(|b| middle(&b.ring).is_some_and(|c| near(&c, 0.0)));
+        let parcels: std::collections::HashSet<u32> = out.parcels.iter().map(|p| p.id).collect();
+        out.buildings.retain(|b| parcels.contains(&b.parcel_id));
+        out.compounds.retain(|c| parcels.contains(&c.parcel_id));
+        out.trees.retain(|t| near(&t.point, 0.0));
+        out
+    }
+}

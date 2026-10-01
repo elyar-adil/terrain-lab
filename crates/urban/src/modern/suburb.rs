@@ -124,6 +124,8 @@ pub(super) struct Sink<'a> {
 
 /// Lay out the houses along the streets of one face.
 pub(super) fn place_frontage(f: &Frontage<'_>, sink: &mut Sink<'_>) {
+    let debug = std::env::var("SUBURB_DEBUG").is_ok();
+    let mut stats = [0_u32; 8];
     let ring = &f.face.ring;
     let mut placed: Vec<Vec<V>> = Vec::new();
     for i in 0..ring.len() {
@@ -133,6 +135,7 @@ pub(super) fn place_frontage(f: &Frontage<'_>, sink: &mut Sink<'_>) {
         let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
         let len = f.face.edge_len[i];
         if len < 70.0 {
+            stats[0] += 1;
             continue;
         }
         let t = ((b.0 - a.0) / len, (b.1 - a.1) / len);
@@ -151,6 +154,7 @@ pub(super) fn place_frontage(f: &Frontage<'_>, sink: &mut Sink<'_>) {
             let built = f.frame.urbanness(probe.0, probe.1);
             let z = zone(built);
             if z == Zone::Open {
+                stats[1] += 1;
                 s += 40.0;
                 continue;
             }
@@ -159,7 +163,9 @@ pub(super) fn place_frontage(f: &Frontage<'_>, sink: &mut Sink<'_>) {
             if s + w > len - end_clear {
                 break;
             }
-            let lot: Vec<V> = vec![at(s, row), at(s + w, row), at(s + w, row + depth), at(s, row + depth)];
+            // A little inside the buildable ground, so the lot is not on its very edge.
+            let front = row + 0.5;
+            let lot: Vec<V> = vec![at(s, front), at(s + w, front), at(s + w, front + depth), at(s, front + depth)];
             let advance = w + 1.5 + 3.0 * noise(1109);
             // Whether this lot has a house on it at all: certain beside the town,
             // rare in the country.
@@ -169,6 +175,7 @@ pub(super) fn place_frontage(f: &Frontage<'_>, sink: &mut Sink<'_>) {
                 _ => 0.10 + 0.55 * smooth(OPEN_BUILT, VILLA_BUILT, built),
             };
             if noise(1103) > keep {
+                stats[2] += 1;
                 s += advance;
                 continue;
             }
@@ -180,9 +187,14 @@ pub(super) fn place_frontage(f: &Frontage<'_>, sink: &mut Sink<'_>) {
                 lot.iter().all(|c| point_seg_dist(*c, *p, *q) >= clear)
             });
             if !inside || near_river || !clear_of_spurs || placed.iter().any(|o| overlap(&lot, o, 1.0)) {
+                stats[3] += (!inside) as u32;
+                stats[4] += near_river as u32;
+                stats[5] += (!clear_of_spurs) as u32;
                 s += advance * 0.5;
                 continue;
             }
+            stats[6] += 1;
+            stats[7] += (z == Zone::Villa) as u32;
             // Orient the ring counter-clockwise (the street side is edge 0).
             let mut ring_out = lot.clone();
             if signed_area(&ring_out) < 0.0 {
@@ -205,16 +217,22 @@ pub(super) fn place_frontage(f: &Frontage<'_>, sink: &mut Sink<'_>) {
             });
             for part in &plan.parts {
                 let rect = vec![
-                    at(s + part.s0, row + part.d0),
-                    at(s + part.s1, row + part.d0),
-                    at(s + part.s1, row + part.d1),
-                    at(s + part.s0, row + part.d1),
+                    at(s + part.s0, front + part.d0),
+                    at(s + part.s1, front + part.d0),
+                    at(s + part.s1, front + part.d1),
+                    at(s + part.s0, front + part.d1),
                 ];
                 push_building(f.frame, sink, parcel_id, use_type, &rect, part);
             }
             placed.push(lot);
             s += advance;
         }
+    }
+    if debug {
+        eprintln!(
+            "frontage face {}: edges {} short {}, open {}, thinned {}, outside {}, river {}, spur {}, placed {} (villa {})",
+            f.face_index, ring.len(), stats[0], stats[1], stats[2], stats[3], stats[4], stats[5], stats[6], stats[7]
+        );
     }
 }
 

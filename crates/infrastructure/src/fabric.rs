@@ -124,6 +124,17 @@ impl SettlementUrban {
         Self { sites }
     }
 
+    /// How built-up the ground is at distance `r` from the centre where the town's outline
+    /// reaches `reach`: solid inside the town, then a long tail of suburb and scattered
+    /// farms. The tail is what a real edge is made of; it ends at 1.4 reach plus a
+    /// quarter kilometre, so even a village has a few hundred metres of it.
+    fn profile(reach: f64, r: f64) -> f64 {
+        let plateau = 0.6 * reach;
+        let end = 1.4 * reach + 250.0;
+        let x = ((end - r) / (end - plateau)).clamp(0.0, 1.0);
+        x.powf(1.5)
+    }
+
     /// The town's outline: how far its built-up area reaches in the direction of `p`.
     fn reach(site: &Site, p: V2) -> f64 {
         use std::f64::consts::{PI, TAU};
@@ -154,8 +165,7 @@ impl UrbanField for SettlementUrban {
                 continue;
             }
             let reach = Self::reach(site, p);
-            let u = ((reach * 1.12 - r) / (reach * 0.42)).clamp(0.0, 1.0);
-            best = best.max(site.strength * u);
+            best = best.max(site.strength * Self::profile(reach, r));
         }
         best
     }
@@ -357,7 +367,8 @@ impl WorldFabric {
     /// The streets of a town: the network inside a circle around it, cut at the
     /// circle, without the country roads that have nothing to do with the town.
     pub fn town_streets(&self, settlement: usize) -> Result<TownStreets, String> {
-        let (centre, radius) = (self.centre_m(settlement), self.radius_m(settlement) * 1.35);
+        let (centre, radius) =
+            (self.centre_m(settlement), self.radius_m(settlement) * 1.35 + f64::from(crate::WINDOW_TAIL_KM) * 1000.0);
         let net = self.network(centre, radius + 600.0)?;
         let urban_field = self.urban.clone();
         // The waterways through the town: the longest is the river, the rest are
@@ -382,8 +393,8 @@ impl WorldFabric {
                     let u = urban_field.urbanness(mid);
                     let keep = match edge.source {
                         EdgeSource::Given => true,
-                        EdgeSource::Generated if edge.class >= RoadClass::Collector => u >= 0.10,
-                        EdgeSource::Generated => u >= 0.14,
+                        // Out in the farms only the lanes and tracks remain, but they do.
+                        EdgeSource::Generated => u >= 0.03,
                     };
                     if !keep {
                         continue;

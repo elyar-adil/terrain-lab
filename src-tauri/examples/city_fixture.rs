@@ -127,9 +127,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some(only) => vec![only],
             None => (0..keep.min(infrastructure.modern_cities.len())).collect(),
         };
+        // `--clip X,Z,R` keeps only the plan within R metres of local point (X, Z).
+        let clip: Option<[f32; 3]> = flag("--clip").and_then(|value| {
+            let parts: Vec<f32> = value.split(',').filter_map(|part| part.parse().ok()).collect();
+            (parts.len() == 3).then(|| [parts[0], parts[1], parts[2]])
+        });
         let scenes: Vec<_> = indices
             .into_iter()
-            .filter_map(|index| infrastructure.build_city_scene(index))
+            .filter_map(|index| match clip {
+                Some([x, z, r]) => infrastructure.build_city_scene_clipped(index, [x, z], r),
+                None => infrastructure.build_city_scene(index),
+            })
             .collect();
         for (index, scene) in scenes.iter().enumerate() {
             report_scene(index, scene);

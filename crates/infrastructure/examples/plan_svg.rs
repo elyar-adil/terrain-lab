@@ -41,8 +41,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     for (i, (s, c)) in infra.settlements.iter().zip(&infra.modern_cities).enumerate() {
         let at = s.location.y * terrain.size + s.location.x;
         eprintln!(
-            "  {i:2} {:?} @({:3},{:3}) h={:.0}m: {} roads, {} blocks, {} parcels, {} buildings",
-            s.class, s.location.x, s.location.y, terrain.height[at], c.sd_roads.len(), c.blocks.len(), c.parcels.len(), c.buildings.len()
+            "  {i:2} {:?} @({:3},{:3}) h={:.0}m: {} roads, {} blocks, {} parcels ({} villa, {} farm), {} buildings",
+            s.class, s.location.x, s.location.y, terrain.height[at], c.sd_roads.len(), c.blocks.len(), c.parcels.len(),
+            c.parcels.iter().filter(|p| p.use_type == urban::ParcelUse::Villa).count(),
+            c.parcels.iter().filter(|p| p.use_type == urban::ParcelUse::Farmstead).count(),
+            c.buildings.len()
         );
     }
     let city = &infra.modern_cities[index.min(infra.modern_cities.len() - 1)];
@@ -62,6 +65,27 @@ fn main() -> Result<(), Box<dyn Error>> {
         count(urban::ParcelUse::Civic),
         count(urban::ParcelUse::Park)
     );
+
+    // The densest knot of villas and of farmsteads, in local metres, for `--clip`.
+    for (name, kind) in [("villa", urban::ParcelUse::Villa), ("farmstead", urban::ParcelUse::Farmstead)] {
+        let at: Vec<[f32; 2]> = city
+            .parcels
+            .iter()
+            .filter(|p| p.use_type == kind)
+            .map(|p| {
+                let n = p.ring.len() as f32;
+                city.frame.to_local(urban::Point {
+                    x_km: p.ring.iter().map(|q| q.x_km).sum::<f32>() / n,
+                    y_km: p.ring.iter().map(|q| q.y_km).sum::<f32>() / n,
+                })
+            })
+            .collect();
+        let best = at.iter().max_by_key(|a| at.iter().filter(|b| (a[0] - b[0]).hypot(a[1] - b[1]) < 150.0).count());
+        if let Some(b) = best {
+            let n = at.iter().filter(|c| (b[0] - c[0]).hypot(b[1] - c[1]) < 150.0).count();
+            eprintln!("  densest {name} knot: {:.0},{:.0} ({n} within 150 m)", b[0], b[1]);
+        }
+    }
 
     // Bounds from the roads.
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
