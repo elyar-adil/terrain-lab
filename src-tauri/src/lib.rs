@@ -29,6 +29,7 @@ pub struct GenerationResult {
     pub water_data_size: usize,
     pub height_data_base64: String,
     pub forest_data_base64: String,
+    pub material_data_base64: String,
     pub vegetation_exclusion_data_base64: String,
     pub urban_data_base64: String,
     pub cultivated_data_base64: String,
@@ -980,6 +981,12 @@ pub fn build_payload(
         );
         let (urban_bytes, cultivated_bytes, crop_bytes, road_bytes) =
             infrastructure_surface_masks(&infrastructure, mesh_size);
+        // Ground the shader may paint procedurally: everything but built-up land,
+        // fields and roads (kept as baked) and water.
+        let built: Vec<u8> = (0..mesh_size * mesh_size)
+            .map(|i| urban_bytes[i].max(cultivated_bytes[i]).max(road_bytes[i]))
+            .collect();
+        let material_bytes = terrain_core::material_control_map(&terrain, mesh_size, Some(&built));
         let max_flow = terrain.flow.iter().copied().fold(1.0_f32, f32::max);
         let max_flow_log = max_flow.ln_1p();
         let mut water_height_bytes = Vec::with_capacity(mesh_size * mesh_size * 4);
@@ -1054,6 +1061,7 @@ pub fn build_payload(
             water_data_size,
             height_data_base64: STANDARD.encode(height_bytes),
             forest_data_base64: STANDARD.encode(forest_bytes),
+            material_data_base64: STANDARD.encode(material_bytes),
             vegetation_exclusion_data_base64: STANDARD.encode(vegetation_exclusion_bytes),
             urban_data_base64: STANDARD.encode(urban_bytes),
             cultivated_data_base64: STANDARD.encode(cultivated_bytes),

@@ -483,7 +483,17 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     heightTexture.wrapS = heightTexture.wrapT = THREE.ClampToEdgeWrapping;
     heightTexture.generateMipmaps = false;
     heightTexture.needsUpdate = true;
+    // Ground cover (forest, grass, snow, naturalness) the shader builds materials
+    // from. Without it (older payloads) nothing is natural and the baked image rules.
+    const materialBytes = result.materialDataBase64 ? decodeBytes(result.materialDataBase64) : new Uint8Array(result.meshSize * result.meshSize * 4);
+    const materialTexture = new THREE.DataTexture(materialBytes, result.meshSize, result.meshSize, THREE.RGBAFormat, THREE.UnsignedByteType);
+    materialTexture.minFilter = THREE.LinearFilter;
+    materialTexture.magFilter = THREE.LinearFilter;
+    materialTexture.wrapS = materialTexture.wrapT = THREE.ClampToEdgeWrapping;
+    materialTexture.generateMipmaps = false;
+    materialTexture.needsUpdate = true;
     const terrainShadowUniforms = {
+      uMaterialTex: { value: materialTexture },
       uHeightTex: { value: heightTexture },
       uHeightN: { value: result.meshSize },
       uM2S: { value: metresToScene },
@@ -550,6 +560,7 @@ vec3 eNoise(vec2 x) {
 float gErodeH;
 vec2 gErodeG;
 uniform sampler2D uHeightTex;
+uniform sampler2D uMaterialTex;
 uniform float uHeightN;
 uniform float uM2S;
 uniform float uMaxHeightScene;
@@ -654,13 +665,68 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     float steep = smoothstep(0.06, 0.42, slope);
     erodedRelief(pm, dm * 0.0016, 380.0 * (0.12 + 1.9 * steep));
     float hn = smoothstep(0.18, 0.82, gErodeH);
+    // ---- natural ground, built from cover and relief ----------------------
+    // Colour is decided per pixel by what the ground is doing, not read from a
+    // 78 m image: steep ground is bare rock banded by strata and cut by cracks,
+    // scree gathers below it, soil and grass sit on the gentle ground, forest
+    // follows the gully floors, and snow lies on benches and in gullies while
+    // wind scours the ridges. The baked image supplies only the rock tint (the
+    // lithology colour) and everything that is not natural: water, roads, fields.
+    vec2 muv = ((vDetailP.xz + 1.6) / 3.2 * (uHeightN - 1.0) + 0.5) / uHeightN;
+    vec4 ctrl = texture2D(uMaterialTex, muv);
+    if (ctrl.a > 0.004) {
+      vec3 nf = normalize(wn + vec3(-gErodeG.x, 0.0, -gErodeG.y));
+      float sf = 1.0 - clamp(nf.y, 0.0, 1.0);
+      float foot = dm * 0.0016;
+      float altM = vDetailP.y * uMetres;
+      float bl = max(dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)), 0.05);
+      vec3 tint = mix(vec3(1.0), diffuseColor.rgb / bl, 0.7);
+      // Detail fades with the pixel footprint so far ground averages, not shimmers.
+      float a1 = 1.0 - smoothstep(0.4, 1.6, foot);
+      float a2 = 1.0 - smoothstep(2.0, 9.0, foot);
+      float a3 = 1.0 - smoothstep(10.0, 45.0, foot);
+      float warpS = dFbm(pm / 180.0);
+      // A band is only drawn while a pixel spans well under its thickness; on a
+      // cliff altitude changes fast across a pixel, so judge it by that, not by
+      // distance, or the bands alias into stripes.
+      float altStep = fwidth(altM);
+      float bandA = 1.0 - smoothstep(38.0 * 0.06, 38.0 * 0.28, altStep);
+      float bandB = 1.0 - smoothstep(7.5 * 0.06, 7.5 * 0.28, altStep);
+      float strata = mix(0.5, 0.5 + 0.5 * sin(altM / 38.0 * 6.2832 + 4.0 * warpS), bandA);
+      float strataF = mix(0.5, 0.5 + 0.5 * sin(altM / 7.5 * 6.2832 + 6.0 * dFbm(pm / 40.0)), bandB);
+      float cr = abs(dNoise(pm / 7.0) - 0.5);
+      float cracks = (1.0 - smoothstep(0.0, 0.05, cr)) * a1;
+      float rockLum = 0.115 + 0.075 * strata * (0.4 + 0.6 * a3) + 0.040 * strataF * a2
+        + 0.05 * (dFbm(pm / 23.0) - 0.5) * a2 + 0.05 * (dFbm(pm / 310.0) - 0.5);
+      rockLum *= (1.0 - 0.45 * cracks) * (0.86 + 0.28 * hn);
+      vec3 rock = tint * rockLum;
+      vec3 soil = tint * 0.105 * (0.88 + 0.24 * dNoise(pm / 5.0) * a2 + 0.12 * (dFbm(pm / 90.0) - 0.5));
+      vec3 scree = mix(rock, soil, 0.45) * (0.92 + 0.22 * dNoise(pm / 1.7) * a1);
+      vec3 grass = vec3(0.075, 0.098, 0.034) * (0.72 + 0.55 * dFbm(pm / 36.0)) * (0.9 + 0.2 * dNoise(pm / 2.3) * a1);
+      vec3 forest = vec3(0.028, 0.052, 0.024) * (0.62 + 0.75 * dNoise(pm / 9.0) * a2 + 0.3 * dFbm(pm / 260.0));
+      vec3 snow = vec3(0.93, 0.95, 0.98) * (0.93 + 0.07 * dNoise(vec2(pm.x / 11.0, pm.y / 80.0)) * a2);
+
+      // The gully pattern only means anything where the ground is sloped; on a
+      // bench or a plateau it would imprint noise blotches on snow and grass.
+      float hnm = mix(0.5, hn, smoothstep(0.03, 0.20, sf));
+      float vegLimit = 1.0 - smoothstep(0.10, 0.24, sf);
+      float rockW = smoothstep(0.15, 0.40, sf);
+      float forestW = ctrl.r * vegLimit * mix(0.5, 1.0, 1.0 - hnm);
+      float grassW = ctrl.g * vegLimit * mix(0.7, 1.0, 1.0 - hnm);
+      float screeW = smoothstep(0.08, 0.15, sf) * (1.0 - smoothstep(0.24, 0.36, sf)) * (1.0 - 0.5 * hn) * (1.0 - ctrl.r);
+      float snowW = ctrl.b * (1.0 - smoothstep(0.20, 0.46, sf)) * mix(0.55, 1.0, 1.0 - hnm)
+        * (0.90 + 0.10 * smoothstep(0.30, 0.60, dFbm(pm / 300.0)));
+      snowW = smoothstep(0.15, 0.55, snowW);
+      vec3 c = soil;
+      c = mix(c, grass, grassW * (1.0 - rockW));
+      c = mix(c, forest, forestW * (1.0 - rockW));
+      c = mix(c, scree, screeW * 0.6);
+      c = mix(c, rock, rockW);
+      c = mix(c, snow, clamp(snowW, 0.0, 1.0));
+      diffuseColor.rgb = mix(diffuseColor.rgb, c, ctrl.a);
+    }
     // Contact shadow in gully floors and on the lee of spurs.
-    diffuseColor.rgb *= mix(1.0, 0.34 + 0.95 * hn, 0.35 + 0.60 * steep);
-    // Bare rock on ridges and steep ground; vegetation follows the gully floors.
-    float greenness = smoothstep(-0.02, 0.06, diffuseColor.g - max(diffuseColor.r, diffuseColor.b));
-    vec3 rock = vec3(0.52, 0.47, 0.41) * (0.70 + 0.55 * hn);
-    diffuseColor.rgb = mix(diffuseColor.rgb, rock, steep * smoothstep(0.30, 0.80, hn) * 0.55);
-    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.80, 1.14, 0.72), (1.0 - hn) * steep * greenness * 0.65);
+    diffuseColor.rgb *= mix(1.0, 0.55 + 0.65 * hn, 0.20 + 0.40 * steep);
     gSunLit = sunVisibility(vDetailP);
   }
 }`)

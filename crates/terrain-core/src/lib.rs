@@ -1036,6 +1036,33 @@ where
         .ok_or(TerrainError::InvalidTerrain)
 }
 
+/// The semantic ground cover the terrain shader builds its materials from, as
+/// RGBA8 at `mesh_size` squared: R forest, G grass and shrub, B snow, A how
+/// natural the ground is (255 = paint it procedurally, 0 = keep the baked image,
+/// which is where water, roads, fields and towns are painted). `keep` is an
+/// optional 0..255 mask of such built or open-water surfaces to preserve.
+pub fn material_control_map(terrain: &TerrainData, mesh_size: usize, keep: Option<&[u8]>) -> Vec<u8> {
+    let source = terrain.size;
+    let scale = (source - 1) as f32 / (mesh_size - 1) as f32;
+    let mut out = vec![0_u8; mesh_size * mesh_size * 4];
+    out.par_chunks_mut(4).enumerate().for_each(|(i, px)| {
+        let sx = (i % mesh_size) as f32 * scale;
+        let sy = (i / mesh_size) as f32 * scale;
+        let forest = bilinear(&terrain.forest, source, sx, sy);
+        let grass = bilinear(&terrain.grassland, source, sx, sy)
+            .max(bilinear(&terrain.shrubland, source, sx, sy) * 0.85);
+        let snow = bilinear(&terrain.snow, source, sx, sy);
+        let water = bilinear(&terrain.water, source, sx, sy);
+        let kept = keep.map_or(0.0, |k| k[i] as f32 / 255.0);
+        let natural = clamp01(1.0 - (water * 1.5).max(kept * 1.5));
+        px[0] = (clamp01(forest) * 255.0) as u8;
+        px[1] = (clamp01(grass) * 255.0) as u8;
+        px[2] = (clamp01(snow) * 255.0) as u8;
+        px[3] = (natural * 255.0) as u8;
+    });
+    out
+}
+
 pub fn save_png(image: &RgbaImage, path: impl AsRef<std::path::Path>) -> Result<(), TerrainError> {
     image.save_with_format(path, image::ImageFormat::Png)?;
     Ok(())
@@ -1993,5 +2020,40 @@ mod tests {
             });
             assert!(neighbours.count() > 0, "isolated incision at {x},{y}");
         }
+    }
+
+    #[test]
+    fn the_material_control_map_carries_cover_and_marks_built_and_wet_ground() {
+        let config = SimulationConfig {
+            seed: 11,
+            preset: TerrainPreset::Temperate,
+            landform: Landform::Hills,
+            grid_size: 128,
+            world_size_km: 40.0,
+            rainfall: 1200.0,
+            evaporation: 600.0,
+            wind_speed: 8.0,
+            wind_direction: 220.0,
+            sun_azimuth: 235.0,
+            sun_elevation: 42.0,
+            haze: 2.5,
+            cloud_coverage: 35.0,
+            cloud_speed: 24.0,
+        };
+        let terrain = generate(&config, |_, _| {}).unwrap();
+        let mesh = 64;
+        let free = material_control_map(&terrain, mesh, None);
+        assert_eq!(free.len(), mesh * mesh * 4);
+        // Cover follows the terrain: some forest and some natural ground exist.
+        assert!(free.chunks(4).any(|p| p[0] > 100), "no forest channel");
+        assert!(free.chunks(4).any(|p| p[3] == 255), "no fully natural ground");
+        // Open water is not painted procedurally.
+        let wet = free.chunks(4).zip(0..).filter(|(p, _)| p[3] < 128).count();
+        let any_water = terrain.water.iter().any(|w| *w > 0.7);
+        assert_eq!(wet > 0, any_water, "natural flag must mirror open water");
+        // A kept (built-up) region is excluded from procedural painting.
+        let keep = vec![255_u8; mesh * mesh];
+        let built = material_control_map(&terrain, mesh, Some(&keep));
+        assert!(built.chunks(4).all(|p| p[3] == 0));
     }
 }

@@ -28,6 +28,7 @@ struct FixtureResult {
     water_data_size: usize,
     height_data_base64: String,
     forest_data_base64: String,
+    material_data_base64: String,
     vegetation_exclusion_data_base64: String,
     city_sites: Vec<CitySite>,
     far_trees: Vec<city_scene::trees::FarTreePayload>,
@@ -209,6 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dimensions = image.dimensions();
     let mut png = Cursor::new(Vec::new());
     image.write_to(&mut png, ImageFormat::Png)?;
+    let material_bytes = terrain_core::material_control_map(&terrain, mesh_size, None);
     let empty = String::new();
     let fixture = Fixture {
         config: config.clone(),
@@ -226,6 +228,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             water_data_size,
             height_data_base64: STANDARD.encode(height_bytes),
             forest_data_base64: STANDARD.encode(forest_bytes),
+            material_data_base64: STANDARD.encode(material_bytes),
             vegetation_exclusion_data_base64: STANDARD.encode(exclusion),
             city_sites,
             far_trees: city_scene::trees::far_tree_payload(),
