@@ -137,11 +137,6 @@ pub struct InfrastructureData {
     /// compatibility projection for the existing renderer, while this field
     /// preserves SD/HD roads, parcels, stable building ids and river geometry.
     pub modern_cities: Vec<ModernCity>,
-    /// Everything a renderer needs, derived once in Rust: finished vertex
-    /// buffers, instanced prototype lists, baked textures, signal states and a
-    /// traffic fleet.  `modern_cities` is the *plan*; this is the scene.
-    #[serde(skip)]
-    pub city_scenes: Vec<CityScene>,
     pub cities: Vec<UrbanModel>,
 }
 
@@ -280,33 +275,6 @@ pub fn generate_infrastructure(
         })
         .collect();
     let cities = modern_cities.iter().map(ModernCity::urban_model).collect();
-    // The scene layer runs after the plan, per city, because a renderer must
-    // never re-derive geometry that the traffic model also needs.  Budgets
-    // scale with the settlement's class: a village does not need four thousand
-    // building shells.
-    let city_scenes: Vec<CityScene> = settlements
-        .iter()
-        .zip(modern_cities.iter())
-        .map(|(settlement, city)| {
-            let mut budget = SceneBudget::default();
-            match settlement.class {
-                SettlementClass::RegionalCentre => {}
-                SettlementClass::Town => {
-                    budget.max_buildings = 1600;
-                    budget.max_trees = 1400;
-                    budget.vehicles = 28;
-                }
-                SettlementClass::Village => {
-                    budget.max_buildings = 500;
-                    budget.max_trees = 500;
-                    budget.vehicles = 12;
-                    budget.facade_texture_size = 128;
-                    budget.ground_texture_size = 128;
-                }
-            }
-            build_city_scene(city, budget)
-        })
-        .collect();
     Ok(InfrastructureData {
         travel_cost: ScalarLayer::new("travelCost", grid, travel_cost)?,
         hazard: ScalarLayer::new("hazard", grid, hazard)?,
@@ -322,9 +290,45 @@ pub fn generate_infrastructure(
         roads,
         crossings,
         modern_cities,
-        city_scenes,
         cities,
     })
+}
+
+/// What a settlement's finished scene may cost. A village does not need four
+/// thousand building shells.
+pub fn scene_budget(class: SettlementClass) -> SceneBudget {
+    let mut budget = SceneBudget::default();
+    match class {
+        SettlementClass::RegionalCentre => {}
+        SettlementClass::Town => {
+            budget.max_buildings = 1600;
+            budget.max_trees = 1400;
+            budget.vehicles = 28;
+        }
+        SettlementClass::Village => {
+            budget.max_buildings = 500;
+            budget.max_trees = 500;
+            budget.vehicles = 12;
+            budget.facade_texture_size = 128;
+            budget.ground_texture_size = 128;
+        }
+    }
+    budget
+}
+
+impl InfrastructureData {
+    /// The finished scene of one city, built now from its plan.
+    ///
+    /// A city is *planned* when the world is generated (where it is, how big, which
+    /// roads reach it, its streets and buildings as data) but its scene (tens of
+    /// megabytes of vertex buffers, textures and a traffic fleet) is built only
+    /// when something asks to draw it. The scene is a pure function of the plan, so
+    /// building it later, or twice, gives the same city.
+    pub fn build_city_scene(&self, index: usize) -> Option<CityScene> {
+        let settlement = self.settlements.get(index)?;
+        let city = self.modern_cities.get(index)?;
+        Some(build_city_scene(city, scene_budget(settlement.class)))
+    }
 }
 
 /// Chinese settlement hierarchy on an 80 km map: the regional centre is a
@@ -1324,5 +1328,32 @@ mod tests {
         let far = clip_outside_footprints(&[[0.0, 0.0], [3.0, 0.0]], &[town]);
         assert_eq!(far.len(), 1);
         assert!((far[0].last().unwrap()[0] - 3.0).abs() < 1.0e-5);
+    }
+
+    /// The principle behind building scenes lazily: a city's scene is a pure
+    /// function of its plan, so drawing it later, or again, gives the same city,
+    /// down to the byte. And generating the world must not have built it.
+    #[test]
+    fn a_city_scene_is_built_on_demand_and_is_a_pure_function_of_its_plan() {
+        let config = config();
+        let terrain = generate(&config, |_, _| {}).unwrap();
+        let started = std::time::Instant::now();
+        let data = generate_infrastructure(&terrain, &config).unwrap();
+        let plan_time = started.elapsed();
+        assert!(!data.modern_cities.is_empty());
+        // Smallest city: keeps the test cheap.
+        let index = (0..data.settlements.len())
+            .min_by_key(|i| (data.modern_cities[*i].buildings.len(), *i))
+            .unwrap();
+        let started = std::time::Instant::now();
+        let first = data.build_city_scene(index).expect("the city has a plan");
+        let build_time = started.elapsed();
+        let second = data.build_city_scene(index).unwrap();
+        let a = city_scene::scene::encode_binary(&first).unwrap();
+        let b = city_scene::scene::encode_binary(&second).unwrap();
+        assert_eq!(a.len(), b.len());
+        assert!(a == b, "the same plan produced two different scenes");
+        assert!(data.build_city_scene(data.settlements.len()).is_none());
+        eprintln!("planning every city {plan_time:?}; building the smallest scene {build_time:?}");
     }
 }

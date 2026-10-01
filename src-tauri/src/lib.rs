@@ -835,74 +835,116 @@ async fn generate_terrain(
             emit_progress(&app, progress, stage)
         })?;
         install_traffic(&infrastructure);
-        // The city scenes are cached for `city_scene` to serve on demand, and
-        // deliberately **not** returned here.
-        //
-        // A scene is tens of megabytes of base64 vertex buffers per city. The
-        // renderer's current city view needs none of it — it reads the
-        // `modernCities` plan — so including it in the generate response handed
-        // the webview several hundred megabytes of JSON it never looked at, and
-        // the webview died on arrival. Serialising it across the IPC boundary is
-        // the expensive part, not building it, so a city is fetched when
-        // something asks to draw it.
-        install_city_scenes(&infrastructure);
+        // Only the city *plans* are kept. A scene is tens of megabytes of vertex
+        // buffers, textures and a traffic fleet, so it is built the first time
+        // `city_scene` is asked for that city, and not returned here: a generate
+        // response carrying every scene was hundreds of megabytes of JSON that
+        // killed the webview on arrival.
+        install_city_plans(&infrastructure);
         Ok(result)
     })
     .await
     .map_err(|error| format!("native generation task failed: {error}"))?
 }
 
-/// The scenes from the most recent generation, served one at a time.
+/// The cities of the most recent generation: their *plans* (all of them, cheap),
+/// and the scenes built so far (only the ones something has asked to draw).
 ///
-/// Held rather than returned from `generate_terrain` because the payload is far
-/// too large to ship unconditionally: a three-city world is over 400 MB of
-/// base64, and it crosses the IPC boundary as one JSON document.
-static CITY_SCENES: std::sync::Mutex<Option<Vec<city_scene::CityScene>>> =
-    std::sync::Mutex::new(None);
+/// A scene is tens of megabytes of vertex buffers, textures and a traffic fleet,
+/// so none is built when the world is generated. The first request for a city
+/// builds it from its plan, on a worker thread, and caches it. It is a pure
+/// function of the plan, so a city built later (or after the cache is dropped and
+/// rebuilt) is the same city.
+struct CityWorld {
+    plans: Vec<(infrastructure::SettlementClass, urban::ModernCity)>,
+    scenes: std::collections::HashMap<usize, std::sync::Arc<city_scene::CityScene>>,
+}
 
-fn install_city_scenes(infrastructure: &InfrastructureData) {
-    *CITY_SCENES.lock().unwrap_or_else(|error| error.into_inner()) =
-        Some(infrastructure.city_scenes.clone());
+static CITY_WORLD: std::sync::Mutex<Option<CityWorld>> = std::sync::Mutex::new(None);
+
+fn install_city_plans(infrastructure: &InfrastructureData) {
+    let plans = infrastructure
+        .settlements
+        .iter()
+        .zip(infrastructure.modern_cities.iter())
+        .map(|(settlement, city)| (settlement.class, city.clone()))
+        .collect();
+    *CITY_WORLD.lock().unwrap_or_else(|error| error.into_inner()) =
+        Some(CityWorld { plans, scenes: std::collections::HashMap::new() });
+}
+
+/// The finished scene of one city, building it on the first request.
+async fn ensure_city_scene(index: usize) -> Result<std::sync::Arc<city_scene::CityScene>, String> {
+    let (class, city) = {
+        let guard = CITY_WORLD.lock().map_err(|_| "the city cache is poisoned")?;
+        let world = guard
+            .as_ref()
+            .ok_or_else(|| "no cities: generate the world first".to_owned())?;
+        if let Some(scene) = world.scenes.get(&index) {
+            return Ok(scene.clone());
+        }
+        let (class, city) = world
+            .plans
+            .get(index)
+            .ok_or_else(|| format!("city {index} does not exist ({} cities)", world.plans.len()))?;
+        (*class, city.clone())
+    };
+    let (scene, sim) = tauri::async_runtime::spawn_blocking(move || {
+        let scene = city_scene::build_city_scene(&city, infrastructure::scene_budget(class));
+        // The traffic fleet runs on the same lane graph the road surface was drawn
+        // from, so it is built here, with the scene it belongs to.
+        let network = city_scene::network::derive(
+            &city.nodes,
+            &city.sd_roads,
+            &city.hd_roads,
+            city.frame,
+            city_scene::JunctionSpec::default(),
+            city.seed,
+        );
+        let sim = city_scene::traffic::simulate(&network, scene.signals.clone(), city.seed, 44);
+        (scene, sim)
+    })
+    .await
+    .map_err(|error| format!("building the city scene failed: {error}"))?;
+    let scene = std::sync::Arc::new(scene);
+    {
+        let mut guard = CITY_WORLD.lock().map_err(|_| "the city cache is poisoned")?;
+        if let Some(world) = guard.as_mut() {
+            // A concurrent request may have built it first; keep that one.
+            world.scenes.entry(index).or_insert_with(|| scene.clone());
+        }
+    }
+    if let Ok(mut slot) = TRAFFIC.lock() {
+        if let Some(world) = slot.as_mut() {
+            if let Some(entry) = world.get_mut(index) {
+                *entry = sim;
+            }
+        }
+    }
+    Ok(scene)
 }
 
 /// One city's finished scene: vertex buffers, prototypes, textures, signals and
-/// a traffic state.
+/// a traffic state, built on first request.
 ///
 /// Fails with a clear message rather than an empty scene when asked before a
 /// generation has run, so a caller cannot mistake "not generated yet" for "this
 /// city is empty".
 #[tauri::command]
 async fn city_scene(index: usize) -> Result<city_scene::CityScene, String> {
-    let guard = CITY_SCENES
-        .lock()
-        .map_err(|_| "the city scene cache is poisoned")?;
-    let scenes = guard
-        .as_ref()
-        .ok_or_else(|| "no city scenes: generate the world first".to_owned())?;
-    scenes
-        .get(index)
-        .cloned()
-        .ok_or_else(|| format!("city {index} does not exist ({} cities)", scenes.len()))
+    let scene = ensure_city_scene(index).await?;
+    Ok((*scene).clone())
 }
 
 /// The same scene as `city_scene`, as the binary container
 /// (`city_scene::scene::encode_binary`) sent as a raw `ArrayBuffer`.
 ///
 /// This is what the app uses: no base64, no JSON of a 100 MB string, and the
-/// webview can view the buffers in place. It also encodes under the lock instead
-/// of cloning the whole scene first.
+/// webview can view the buffers in place.
 #[tauri::command]
 async fn city_scene_bin(index: usize) -> Result<tauri::ipc::Response, String> {
-    let guard = CITY_SCENES
-        .lock()
-        .map_err(|_| "the city scene cache is poisoned")?;
-    let scenes = guard
-        .as_ref()
-        .ok_or_else(|| "no city scenes: generate the world first".to_owned())?;
-    let scene = scenes
-        .get(index)
-        .ok_or_else(|| format!("city {index} does not exist ({} cities)", scenes.len()))?;
-    let bytes = city_scene::scene::encode_binary(scene)?;
+    let scene = ensure_city_scene(index).await?;
+    let bytes = city_scene::scene::encode_binary(&scene)?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -1179,32 +1221,11 @@ async fn load_project(input_path: String) -> Result<ProjectDocument, String> {
 static TRAFFIC: std::sync::Mutex<Option<Vec<Option<city_scene::traffic::TrafficSim>>>> =
     std::sync::Mutex::new(None);
 
-/// Rebuild the traffic fleets for a set of cities.
-///
-/// Only the *network* is re-derived here — no geometry, no textures — so this is
-/// cheap enough to run once per generation.
+/// Reset the traffic fleets: one empty slot per city, filled when that city's
+/// scene is built (the fleet needs the scene's signal rigs).
 fn install_traffic(infrastructure: &InfrastructureData) {
-    let world: Vec<Option<city_scene::traffic::TrafficSim>> = infrastructure
-        .modern_cities
-        .iter()
-        .enumerate()
-        .map(|(index, city)| {
-            let network = city_scene::network::derive(
-                &city.nodes,
-                &city.sd_roads,
-                &city.hd_roads,
-                city.frame,
-                city_scene::JunctionSpec::default(),
-                city.seed,
-            );
-            let signals = infrastructure
-                .city_scenes
-                .get(index)
-                .map(|scene| scene.signals.clone())
-                .unwrap_or_default();
-            city_scene::traffic::simulate(&network, signals, city.seed, 44)
-        })
-        .collect();
+    let world: Vec<Option<city_scene::traffic::TrafficSim>> =
+        infrastructure.modern_cities.iter().map(|_| None).collect();
     if let Ok(mut slot) = TRAFFIC.lock() {
         *slot = Some(world);
     }

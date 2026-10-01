@@ -121,11 +121,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if scene_only {
         let (_result, infrastructure) =
             wind_water_terrain_lab_lib::build_payload(config.clone(), &|_, _| {})?;
-        let scenes: Vec<_> = infrastructure
-            .city_scenes
-            .iter()
-            .take(keep)
-            .cloned()
+        let scenes: Vec<_> = (0..keep.min(infrastructure.modern_cities.len()))
+            .filter_map(|index| infrastructure.build_city_scene(index))
             .collect();
         for (index, scene) in scenes.iter().enumerate() {
             report_scene(index, scene);
@@ -175,8 +172,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  {key:<32} {:>8.1} MB", *size as f32 / 1_048_576.0);
         }
     }
-    for (index, scene) in infrastructure.city_scenes.iter().take(keep).enumerate() {
-        report_scene(index, scene);
+    for index in 0..keep.min(infrastructure.modern_cities.len()) {
+        if let Some(scene) = infrastructure.build_city_scene(index) {
+            report_scene(index, &scene);
+        }
     }
     Ok(())
 }
