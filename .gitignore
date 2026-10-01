@@ -22,3 +22,6 @@ src-tauri/target/
 
 # scratch fixtures used by component agents / audits (regenerable, tens of MB)
 public/audit-*.json
+
+# The tree grower compiled to WebAssembly (npm run build:wasm).
+/public/worldgen_trees.wasm

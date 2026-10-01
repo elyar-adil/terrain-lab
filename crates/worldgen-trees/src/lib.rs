@@ -9,6 +9,7 @@
 //! that only wants trees takes this crate and nothing else (and `worldgen-core`, for
 //! its seeds).
 
+pub mod ffi;
 pub mod grow;
 pub mod math;
 pub mod params;
