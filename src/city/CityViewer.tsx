@@ -512,6 +512,10 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
           window.__CITY_READY__ = true;
           document.documentElement.dataset.cityReady = "true";
           onReady?.(window.__CITY_DIAGNOSTICS__);
+          // `?once=1`: stop drawing once a finished frame exists, for audits on a
+          // software rasteriser that would otherwise keep redrawing while the
+          // screenshot waits for its clock.
+          if (new URLSearchParams(window.location.search).get("once") === "1") return;
         }
         window.requestAnimationFrame(tick);
       };
