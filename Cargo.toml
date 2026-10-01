@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/terrain-core", "crates/world-core", "crates/procedural", "crates/infrastructure", "crates/urban", "crates/city-scene", "src-tauri"]
+members = ["crates/terrain-core", "crates/world-core", "crates/worldgen-core", "crates/procedural", "crates/infrastructure", "crates/urban", "crates/city-scene", "src-tauri"]
 
 [profile.release]
 lto = "thin"

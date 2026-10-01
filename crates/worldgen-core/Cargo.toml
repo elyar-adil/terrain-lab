@@ -1,0 +1,7 @@
+[package]
+name = "worldgen-core"
+version = "0.1.0"
+edition = "2024"
+description = "Address, deterministic seeds, edge labels and the layer engine of the procedural world system. Standard library only."
+
+[dependencies]
