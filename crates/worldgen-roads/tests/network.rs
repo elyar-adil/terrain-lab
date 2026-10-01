@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use worldgen_contracts::{
-    DryLand, NodeId, Polyline, PolylineRiver, RoadClass, RoadNetwork, RoadTile, UrbanField, V2, segment_intersection, v2,
+    DryLand, HeightField, NodeId, Polyline, PolylineRiver, RoadClass, RoadNetwork, RoadTile, UrbanField, V2, segment_intersection, v2,
 };
 use worldgen_core::{Cell, Engine, Frame, Seed};
 use worldgen_roads::quad::{QUADS, Quad};
@@ -276,4 +276,107 @@ fn water_is_crossed_by_bridges_on_big_roads_and_not_by_small_ones() {
     let dry_net = network(&tiles(&dry, 11, CITY, 2000.0));
     assert!(dry_net.edges.len() > net.edges.len(), "the river cost the small roads that could not cross it");
     let _ = DryLand;
+}
+
+/// Length of road that runs within `gap` metres of a *different* road without being
+/// at a junction with it: the two-roads-side-by-side defect.
+fn parallel_overlap(net: &RoadNetwork, gap: f64, junction_clearance: f64) -> (f64, Vec<(V2, V2)>) {
+    // Sample every road finely and index the samples.
+    let cell = gap.max(1.0);
+    let mut grid: BTreeMap<(i64, i64), Vec<(u64, V2)>> = BTreeMap::new();
+    let mut samples: Vec<(u64, V2, NodeId, NodeId)> = Vec::new();
+    for ed in net.edges.values() {
+        for piece in &ed.pieces {
+            for p in piece.resampled(6.0).0 {
+                samples.push((ed.id.0, p, ed.a, ed.b));
+                grid.entry(((p.x / cell).floor() as i64, (p.y / cell).floor() as i64)).or_default().push((ed.id.0, p));
+            }
+        }
+    }
+    let edge_nodes: BTreeMap<u64, (NodeId, NodeId)> = net.edges.values().map(|e| (e.id.0, (e.a, e.b))).collect();
+    let mut length = 0.0;
+    let mut examples = Vec::new();
+    for (id, p, a, b) in &samples {
+        let near_junction = |q: V2| {
+            [a, b].iter().any(|n| net.nodes[n].position.dist(q) < junction_clearance)
+        };
+        if near_junction(*p) {
+            continue;
+        }
+        let (cx, cy) = ((p.x / cell).floor() as i64, (p.y / cell).floor() as i64);
+        let mut hit = None;
+        'search: for dy in -1..=1 {
+            for dx in -1..=1 {
+                for (other, q) in grid.get(&(cx + dx, cy + dy)).into_iter().flatten() {
+                    if other == id || p.dist(*q) > gap {
+                        continue;
+                    }
+                    // A road that meets this one at a junction nearby is converging, not parallel.
+                    let (oa, ob) = edge_nodes[other];
+                    let shares_junction = [oa, ob].iter().any(|n| net.nodes[n].position.dist(*p) < junction_clearance)
+                        || [*a, *b].iter().any(|n| net.nodes[n].position.dist(*q) < junction_clearance);
+                    if !shares_junction {
+                        hit = Some(*q);
+                        break 'search;
+                    }
+                }
+            }
+        }
+        if let Some(q) = hit {
+            length += 6.0;
+            if examples.len() < 5 {
+                examples.push((*p, q));
+            }
+        }
+    }
+    (length, examples)
+}
+
+#[test]
+fn no_two_roads_run_side_by_side_for_no_reason() {
+    let e = world(7, RoadClass::Track);
+    let net = network(&tiles(&e, 11, CITY, 1500.0));
+    let total: f64 = net.edges.values().flat_map(|e| e.pieces.iter()).map(Polyline::length).sum();
+    let (overlap, examples) = parallel_overlap(&net, 14.0, 45.0);
+    let (wide, _) = parallel_overlap(&net, 28.0, 45.0);
+    eprintln!("parallel overlap: {overlap:.0} m within 14 m, {wide:.0} m within 28 m, of {total:.0} m of road");
+    assert!(overlap < 0.01 * total, "{overlap:.0} m of {total:.0} m of road runs within 14 m of another road: {examples:?}");
+}
+
+/// A round hill with steep flanks.
+struct Hill {
+    centre: V2,
+    radius_m: f64,
+    height_m: f64,
+}
+
+impl worldgen_contracts::HeightField for Hill {
+    fn height_m(&self, p: V2) -> f64 {
+        let d = (p.dist(self.centre) / self.radius_m).clamp(0.0, 1.0);
+        self.height_m * (1.0 - d * d * (3.0 - 2.0 * d))
+    }
+}
+
+#[test]
+fn roads_keep_off_ground_too_steep_for_their_class() {
+    let hill = Hill { centre: CITY + v2(900.0, 0.0), radius_m: 800.0, height_m: 420.0 };
+    let fields = Fields::new(HashedTowns::shared(Seed::new(7))).with_height(Arc::new(hill));
+    let steep = engine(Seed::new(7), FRAME, RoadsConfig::default(), fields).unwrap();
+    let flat = world(7, RoadClass::Track);
+    let (a, b) = (network(&tiles(&steep, 11, CITY, 2000.0)), network(&tiles(&flat, 11, CITY, 2000.0)));
+    let hill = Hill { centre: CITY + v2(900.0, 0.0), radius_m: 800.0, height_m: 420.0 };
+    // A road may run along a steep slope (across the contours) but never up it: no
+    // road climbs more than the steepest grade any class is built to.
+    let climb = |n: &RoadNetwork| {
+        n.edges
+            .values()
+            .map(|e| {
+                let pts = e.pieces[0].resampled(50.0).0;
+                pts.windows(2).map(|w| (hill.height_m(w[1]) - hill.height_m(w[0])).abs() / w[0].dist(w[1])).fold(0.0, f64::max)
+            })
+            .fold(0.0, f64::max)
+    };
+    assert!(climb(&b) > 0.4, "the fixture needs roads that climb: {}", climb(&b));
+    assert!(climb(&a) < 0.27, "a road climbs {:.0}%", 100.0 * climb(&a));
+    assert!(a.edges.len() > b.edges.len() / 2, "the hill took out too much of the town");
 }

@@ -8,7 +8,8 @@
 use std::collections::BTreeMap;
 
 use worldgen_contracts::{
-    EdgeId, NodeId, NodeKind, Polyline, RoadClass, RoadEdge, RoadNode, Setting, Span, SpanKind, V2, WaterField,
+    EdgeId, HeightField, NodeId, NodeKind, Polyline, RoadClass, RoadEdge, RoadNode, Setting, Span, SpanKind, V2,
+    WaterField,
 };
 use worldgen_core::{Cell, Context, Dependency, Error, Layer, LayerId, Seed};
 
@@ -85,6 +86,9 @@ impl Builder<'_> {
         };
         let id = EdgeId::between(a.id, b.id, slot);
         let line = bend(self.fabric, self.cfg, a.pos, b.pos, id.0, self.cfg.wiggle_amp_m * wiggle_factor(class));
+        if steepest_grade(&*self.fields.height, &line) > grade_limit(class) {
+            return;
+        }
         let Some(spans) = water_spans(&*self.fields.water, &line, class) else {
             return;
         };
@@ -101,6 +105,33 @@ impl Builder<'_> {
             }
         }
     }
+}
+
+/// The steepest grade (rise over run) a class of road is built to. Switchbacks
+/// are not modelled, so a road that would have to climb more than this is not built.
+fn grade_limit(class: RoadClass) -> f64 {
+    match class {
+        RoadClass::Motorway => 0.05,
+        RoadClass::Arterial => 0.07,
+        RoadClass::Collector => 0.09,
+        RoadClass::Local => 0.12,
+        RoadClass::Service => 0.16,
+        RoadClass::Track => 0.25,
+    }
+}
+
+/// The steepest grade along a road, over stretches about 50 m long: a short
+/// steep step does not stop a road, a long climb does.
+fn steepest_grade(height: &dyn HeightField, line: &Polyline) -> f64 {
+    const STRETCH_M: f64 = 50.0;
+    let total = line.length();
+    if total < 1.0 {
+        return 0.0;
+    }
+    let n = (total / STRETCH_M).ceil().max(1.0) as usize;
+    let heights: Vec<f64> = (0..=n).map(|k| line.at(total * k as f64 / n as f64).map_or(0.0, |(p, _)| height.height_m(p))).collect();
+    let run = total / n as f64;
+    heights.windows(2).map(|w| (w[1] - w[0]).abs() / run).fold(0.0, f64::max)
 }
 
 /// Where a road meets water. `None` means it must not exist (a small road with no
