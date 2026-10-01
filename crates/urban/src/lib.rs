@@ -16,7 +16,8 @@ pub use model::{
     sample_action, synthesize_junction,
 };
 pub use modern::{
-    CityOptions, REGIONAL_ROAD_HANDOVER, RegionalApproach, generate_modern_chinese_city,
+    CityOptions, ExternalFields, ExternalNode, ExternalRoad, ExternalStreets,
+    generate_modern_chinese_city_from_streets, REGIONAL_ROAD_HANDOVER, RegionalApproach, generate_modern_chinese_city,
     generate_modern_chinese_city_with_approaches, generate_modern_chinese_city_with_options,
     hash_u32, junction_trim_m,
 };
@@ -394,5 +395,150 @@ mod tests {
         // (curvature times chord), and that is what is measured here; an
         // unsmoothed bend turns 10 to 30 degrees at once.
         assert!(worst < 7.0, "a street kinks {worst:.1} degrees where it should run straight on");
+    }
+
+    /// A square street grid at `spacing_m`, `n` streets each way, centred on the
+    /// origin, as an external network would supply it.
+    fn grid_streets(n: i32, spacing_m: f32, river: Vec<Point>) -> (ExternalStreets, f32) {
+        grid_streets_at(n, spacing_m, river, Point { x_km: 0.0, y_km: 0.0 })
+    }
+
+    fn grid_streets_at(n: i32, spacing_m: f32, river: Vec<Point>, centre: Point) -> (ExternalStreets, f32) {
+        let half = (n - 1) as f32 * spacing_m * 0.5;
+        let p = |i: i32, j: i32| Point {
+            x_km: centre.x_km + (i as f32 * spacing_m - half) / 1_000.0,
+            y_km: centre.y_km + (j as f32 * spacing_m - half) / 1_000.0,
+        };
+        let id = |i: i32, j: i32| (j * n + i) as u64;
+        let mut nodes = Vec::new();
+        let mut roads = Vec::new();
+        for j in 0..n {
+            for i in 0..n {
+                nodes.push(ExternalNode { id: id(i, j), point: p(i, j) });
+                for (di, dj) in [(1, 0), (0, 1)] {
+                    let (i2, j2) = (i + di, j + dj);
+                    if i2 < n && j2 < n {
+                        let class = if (i + j) % 4 == 0 { ModernRoadClass::Arterial } else { ModernRoadClass::Collector };
+                        roads.push(ExternalRoad {
+                            from: id(i, j),
+                            to: id(i2, j2),
+                            class,
+                            bridge: false,
+                            centreline: vec![p(i, j), p(i2, j2)],
+                        });
+                    }
+                }
+            }
+        }
+        (ExternalStreets { nodes, roads, river }, half)
+    }
+
+    #[test]
+    fn a_street_network_from_outside_gets_blocks_lots_and_buildings() {
+        let centre = Point { x_km: 10.0, y_km: 20.0 };
+        let (streets, half) = grid_streets_at(9, 140.0, Vec::new(), centre);
+        let spec = ModernChinaSpec {
+            centre,
+            radius_km: half / 1_000.0 * 1.5,
+            rotation_radians: 0.0,
+            ..ModernChinaSpec::default()
+        };
+        let fields = ExternalFields { urbanness: Box::new(|_| 1.0), intensity: Box::new(|_| 0.7) };
+        let city = generate_modern_chinese_city_from_streets(spec, streets, fields);
+        assert_eq!(city.sd_roads.len(), 2 * 9 * 8);
+        assert_eq!(city.hd_roads.len(), city.sd_roads.len());
+        assert!(city.hd_roads.iter().all(|r| !r.lanes.is_empty()), "every road has lanes");
+        assert!(city.blocks.len() >= 40, "{} blocks", city.blocks.len());
+        assert!(city.parcels.len() >= 100, "{} parcels", city.parcels.len());
+        assert!(city.buildings.len() >= 80, "{} buildings", city.buildings.len());
+        // Buildings stay off the carriageway: each footprint corner is clear of every street centreline.
+        let lines: Vec<(Point, Point, f32)> = city
+            .hd_roads
+            .iter()
+            .flat_map(|r| r.centreline.windows(2).map(move |w| (w[0], w[1], r.width_metres)))
+            .collect();
+        for b in city.buildings.iter().take(200) {
+            for corner in &b.footprint {
+                for (a, c, width) in &lines {
+                    let (ax, ay, cx, cy) = (a.x_km * 1000.0, a.y_km * 1000.0, c.x_km * 1000.0, c.y_km * 1000.0);
+                    let (px, py) = (corner.x_km * 1000.0, corner.y_km * 1000.0);
+                    let (dx, dy) = (cx - ax, cy - ay);
+                    let t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy).max(1e-6)).clamp(0.0, 1.0);
+                    let d = (px - (ax + dx * t)).hypot(py - (ay + dy * t));
+                    assert!(d > width * 0.5, "a building corner is {d:.1} m from a street {width} m wide");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_town_the_fields_say_is_empty_gets_no_buildings() {
+        let (streets, half) = grid_streets(7, 140.0, Vec::new());
+        let spec = ModernChinaSpec {
+            centre: Point { x_km: 0.0, y_km: 0.0 },
+            radius_km: half / 1_000.0 * 1.5,
+            rotation_radians: 0.0,
+            ..ModernChinaSpec::default()
+        };
+        // Built up only on the east side: the west stays fields.
+        let fields = ExternalFields {
+            urbanness: Box::new(|p| if p.x_km > 0.0 { 1.0 } else { 0.0 }),
+            intensity: Box::new(|p| if p.x_km > 0.0 { 0.8 } else { 0.0 }),
+        };
+        let city = generate_modern_chinese_city_from_streets(spec, streets, fields);
+        assert!(!city.buildings.is_empty());
+        let west = city.buildings.iter().filter(|b| b.footprint.iter().all(|c| c.x_km < -0.02)).count();
+        let east = city.buildings.iter().filter(|b| b.footprint.iter().all(|c| c.x_km > 0.0)).count();
+        assert_eq!(west, 0, "{west} buildings stand in the fields");
+        assert!(east > 20, "{east} buildings in the town");
+    }
+
+    #[test]
+    fn the_river_a_network_is_given_splits_the_blocks_it_runs_through() {
+        // A river running north to south, bending, through the middle of the grid.
+        let river: Vec<Point> = (0..=20)
+            .map(|k| {
+                let y = -0.4 + 0.04 * k as f32;
+                Point { x_km: 0.02 + 0.03 * (y * 6.0).sin(), y_km: y }
+            })
+            .collect();
+        let (mut streets, half) = grid_streets(9, 140.0, river.clone());
+        // Streets that would run along the water are not built.
+        streets.roads.retain(|r| {
+            let a = streets.nodes.iter().find(|n| n.id == r.from).unwrap().point;
+            let b = streets.nodes.iter().find(|n| n.id == r.to).unwrap().point;
+            !(a.x_km == b.x_km && (a.x_km - 0.02).abs() < 0.05)
+        });
+        let spec = ModernChinaSpec {
+            centre: Point { x_km: 0.0, y_km: 0.0 },
+            radius_km: half / 1_000.0 * 1.5,
+            rotation_radians: 0.0,
+            river_width_metres: 50.0,
+            ..ModernChinaSpec::default()
+        };
+        let fields = ExternalFields { urbanness: Box::new(|_| 1.0), intensity: Box::new(|_| 0.6) };
+        let city = generate_modern_chinese_city_from_streets(spec, streets, fields);
+        assert_eq!(city.river.as_ref().map(Vec::len), Some(river.len()));
+        // No building stands in the water.
+        let in_river = city
+            .buildings
+            .iter()
+            .flat_map(|b| b.footprint.iter())
+            .filter(|c| {
+                river
+                    .windows(2)
+                    .map(|w| {
+                        let (ax, ay, bx, by) = (w[0].x_km * 1000.0, w[0].y_km * 1000.0, w[1].x_km * 1000.0, w[1].y_km * 1000.0);
+                        let (px, py) = (c.x_km * 1000.0, c.y_km * 1000.0);
+                        let (dx, dy) = (bx - ax, by - ay);
+                        let t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+                        (px - (ax + dx * t)).hypot(py - (ay + dy * t))
+                    })
+                    .fold(f32::MAX, f32::min)
+                    < 22.0
+            })
+            .count();
+        assert_eq!(in_river, 0, "{in_river} footprint corners are in the river");
+        assert!(city.buildings.len() > 30);
     }
 }

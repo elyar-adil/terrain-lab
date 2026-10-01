@@ -70,12 +70,7 @@ pub(super) fn build_parcels(
     let Extraction { faces, spurs } = extract_faces(&pts, &edges);
     let faces: Vec<_> = faces.into_iter().flat_map(split_concave).collect();
 
-    let river_local: Vec<V> = (0..=48)
-        .map(|i| {
-            let z = -radius_m * 1.2 + 2.4 * radius_m * i as f32 / 48.0;
-            (frame.river_x(z), z)
-        })
-        .collect();
+    let river_local: Vec<V> = frame.river_line();
 
     let mut blocks: Vec<UrbanBlock> = Vec::new();
     let mut parcels: Vec<Parcel> = Vec::new();
@@ -154,11 +149,7 @@ pub(super) fn build_parcels(
             let bank = river_half + RIVER_BANK_M;
             let split = |ring: &[V]| -> Vec<Vec<V>> {
                 let c = centroid(ring);
-                let rx = frame.river_x(c.1);
-                let slope = (frame.river_x(c.1 + 5.0) - frame.river_x(c.1 - 5.0)) / 10.0;
-                let norm = (1.0 + slope * slope).sqrt();
-                let n = (1.0 / norm, -slope / norm);
-                let d = n.0 * rx + n.1 * c.1;
+                let (n, d) = frame.river_split(c);
                 [clip_half(ring, n, d + bank), clip_half(ring, (-n.0, -n.1), -d + bank)]
                     .into_iter()
                     .filter(|p| p.len() >= 3 && signed_area(p) > 300.0)
