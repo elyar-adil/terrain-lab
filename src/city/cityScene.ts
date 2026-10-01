@@ -17,6 +17,8 @@
 
 import * as THREE from "three";
 
+import { applyAntiTiling } from "./antiTile";
+
 /** One vertex buffer group from the payload. */
 export interface SceneMesh {
   material: string;
@@ -415,7 +417,7 @@ export function createMaterials(
   // like poured concrete, which is why the number here is low and the normal map
   // carries the detail.
   const asphaltMap = textureFor("ground/asphalt");
-  standard(
+  applyAntiTiling(standard(
     "asphalt",
     {
       map: asphaltMap ?? undefined,
@@ -426,12 +428,12 @@ export function createMaterials(
       // colour; the bake has already darkened them.
     },
     asphaltMap ? 0xffffff : 0x2a2c30,
-  );
+  ), "asphalt");
   // The shoulder / carriageway sweep wall: weathered, dustier than the road.
   standard("asphalt.pavement", { roughness: 0.95 }, 0x4a4a46);
 
   const pavingMap = textureFor("ground/paving");
-  standard(
+  applyAntiTiling(standard(
     "sidewalk",
     {
       map: pavingMap ?? undefined,
@@ -439,15 +441,15 @@ export function createMaterials(
       roughness: 0.9,
     },
     pavingMap ? 0xffffff : 0x6e6e68,
-  );
-  standard("parcel.paving", { map: pavingMap ?? undefined, roughness: 0.92 }, 0xffffff);
+  ), "paving");
+  applyAntiTiling(standard("parcel.paving", { map: pavingMap ?? undefined, roughness: 0.92 }, 0xffffff), "paving");
   // Kerb concrete: 25-35% reflectance, and a shade warmer than the asphalt it
   // sits beside, which is what makes a kerb line read at distance.
   standard("kerb", { roughness: 0.86 }, 0x8e8b82);
 
   const grassMap = textureFor("ground/grass");
   for (const key of ["block.ground", "parcel.green", "median.plant"]) {
-    standard(
+    applyAntiTiling(standard(
       key,
       {
         map: grassMap ?? undefined,
@@ -458,7 +460,7 @@ export function createMaterials(
         ...(key === "block.ground" ? { polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 } : {}),
       },
       grassMap ? 0xffffff : 0x2e3a22,
-    );
+    ), "grass");
   }
   {
     // Water is lit like a smooth dielectric and shaped by moving ripples: a few
