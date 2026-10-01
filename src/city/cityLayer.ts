@@ -14,7 +14,9 @@
 
 import * as THREE from "three";
 
-import { CityLod } from "./cityLod";
+import { CityLod, LOD } from "./cityLod";
+import { UniqueForest, preloadTreeGrower, treeGrowerIfReady } from "../trees";
+import { plantFromInstances } from "../trees/plant";
 import { perfTiming } from "./perf";
 import {
   type CityBuild,
@@ -51,6 +53,10 @@ export interface CityLayerBuild {
   step(budgetMs: number): boolean;
   cancel(): void;
 }
+
+// Start fetching the tree grower as soon as a city could be wanted; by the time a
+// scene has downloaded it is ready. Without it the city keeps its prototype trees.
+void preloadTreeGrower();
 
 const PAINTS = [
   0xf1f1ee, 0xf1f1ee, 0xf1f1ee, 0x17181a, 0x17181a, 0x17181a,
@@ -187,6 +193,21 @@ function finishLayer(
     group.add(mesh);
   });
 
+  // Every tree grown for itself: replace the prototype trees by a forest that
+  // grows each one from its own seed, finer the nearer the camera is.
+  let forest: UniqueForest | null = null;
+  const grower = treeGrowerIfReady();
+  if (grower) {
+    const planting = plantFromInstances(handles.lodSets, grower, scene.seed);
+    if (planting.trees.length > 0) {
+      forest = new UniqueForest(grower, planting.trees);
+      group.add(forest.group);
+      for (const mesh of planting.replaced) mesh.removeFromParent();
+      const gone = new Set(planting.sets);
+      handles.lodSets = handles.lodSets.filter((set) => !gone.has(set));
+    }
+  }
+
   const lod = new CityLod(handles);
   const inverse = new THREE.Matrix4();
   const viewProjection = new THREE.Matrix4();
@@ -212,13 +233,19 @@ function finishLayer(
       viewProjection.copy(camera.matrixWorld).invert();
       viewProjection.premultiply(camera.projectionMatrix).multiply(group.matrixWorld);
       frustum.setFromProjectionMatrix(viewProjection);
-      return lod.update(local, forward, frustum, cameraDistanceM);
+      let changed = lod.update(local, forward, frustum, cameraDistanceM);
+      if (forest) {
+        forest.setCasting(cameraDistanceM < LOD.shadowTrees);
+        changed = forest.update(local, 6) || changed;
+      }
+      return changed;
     },
     lodStats() {
       return { hiddenStatics: lod.hiddenStatics, instances: lod.keptInstances };
     },
     dispose() {
       group.removeFromParent();
+      forest?.dispose();
       for (const mesh of owned) mesh.dispose();
       handles.dispose();
       materials.dispose();

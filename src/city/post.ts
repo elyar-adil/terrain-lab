@@ -22,6 +22,8 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 
+import { patchTreeMaterial } from "../trees/shaders";
+
 export interface Post {
   composer: EffectComposer;
   gtao: GTAOPass;
@@ -96,6 +98,11 @@ export function createPost(
         );
     };
   }
+
+  // The occlusion pass draws the whole scene with one override material, so the
+  // individually grown trees (which are raised in the vertex shader, not stored
+  // as meshes) have to be taught to that material as well.
+  patchTreeMaterial(gtao.normalMaterial, "normal");
 
   // Tuned on the reference project's street views: a radius under a metre so
   // occlusion is contact-scale rather than a global darkening, and a denoise
