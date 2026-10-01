@@ -340,4 +340,59 @@ mod tests {
             "an organic town has no outer ring to put gateways on"
         );
     }
+
+    /// Where only two streets of one class meet there is a bend, not a junction,
+    /// and the road must carry on through it without a kink: a kinked centreline
+    /// is a kinked kerb, which reads as a zigzag.
+    #[test]
+    fn streets_run_through_bends_without_a_kink() {
+        let city = generate_modern_chinese_city(ModernChinaSpec {
+            centre: Point { x_km: 5.0, y_km: 5.0 },
+            radius_km: 1.0,
+            seed: 12,
+            ..ModernChinaSpec::default()
+        });
+        let heading = |a: Point, b: Point| (b.y_km - a.y_km).atan2(b.x_km - a.x_km);
+        let mut checked = 0;
+        let mut worst = 0.0_f32;
+        for node in &city.nodes {
+            let at: Vec<&HdRoad> = city
+                .hd_roads
+                .iter()
+                .filter(|r| {
+                    let sd = &city.sd_roads[r.id as usize];
+                    sd.from == node.id || sd.to == node.id
+                })
+                .collect();
+            if at.len() != 2 || at[0].class != at[1].class || at[0].bridge || at[1].bridge {
+                continue;
+            }
+            // Direction of each road as it leaves this node.
+            let leaving = |road: &HdRoad| -> Option<f32> {
+                let sd = &city.sd_roads[road.id as usize];
+                let c = &road.centreline;
+                (c.len() >= 2).then(|| {
+                    if sd.from == node.id { heading(c[0], c[1]) } else { heading(c[c.len() - 1], c[c.len() - 2]) }
+                })
+            };
+            let (Some(h0), Some(h1)) = (leaving(at[0]), leaving(at[1])) else { continue };
+            // A straight-through road has the two leaving directions opposite.
+            let mut kink = (h0 - h1).abs() % std::f32::consts::TAU;
+            if kink > std::f32::consts::PI {
+                kink = std::f32::consts::TAU - kink;
+            }
+            let bend = (std::f32::consts::PI - kink).to_degrees();
+            // Only the gentle bends are smoothed; corners (35+ degrees) stay corners.
+            if bend > 30.0 {
+                continue;
+            }
+            checked += 1;
+            worst = worst.max(bend);
+        }
+        assert!(checked > 10, "the fixture has too few bends to test ({checked})");
+        // A smooth curve still turns a few degrees across one four-metre chord
+        // (curvature times chord), and that is what is measured here; an
+        // unsmoothed bend turns 10 to 30 degrees at once.
+        assert!(worst < 7.0, "a street kinks {worst:.1} degrees where it should run straight on");
+    }
 }

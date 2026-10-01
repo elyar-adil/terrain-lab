@@ -1196,6 +1196,11 @@ pub(super) fn build_graph(frame: &CityFrame, approaches: &[super::RegionalApproa
             SdNode { id: id as u32, point: frame.to_world(x, z), role: role.into() }
         })
         .collect();
+    let mut adjacency: Vec<Vec<(usize, usize)>> = vec![Vec::new(); pts.len()];
+    for (i, (s, _)) in kept.iter().enumerate() {
+        adjacency[s.a].push((s.b, i));
+        adjacency[s.b].push((s.a, i));
+    }
     let mut sd_roads = Vec::with_capacity(kept.len());
     let mut hd_roads = Vec::with_capacity(kept.len());
     for (id, (s, bridge)) in kept.iter().enumerate() {
@@ -1210,11 +1215,7 @@ pub(super) fn build_graph(frame: &CityFrame, approaches: &[super::RegionalApproa
             class: s.class,
             width_metres: s.class.width_metres(),
             median_metres: s.class.median_metres(),
-            centreline: vec![
-                p0,
-                Point { x_km: (p0.x_km + p1.x_km) * 0.5, y_km: (p0.y_km + p1.y_km) * 0.5 },
-                p1,
-            ],
+            centreline: smooth_centreline(frame, &pts, &kept, &adjacency, id as usize, p0, p1),
             bridge: *bridge,
             layer: if *bridge { 1 } else { 0 },
             lanes: lanes_for_modern_road(id, s.class, &rules),
@@ -1229,6 +1230,93 @@ pub(super) fn build_graph(frame: &CityFrame, approaches: &[super::RegionalApproa
     });
 
     GraphOutput { nodes, sd_roads, hd_roads, river, morphology_score }
+}
+
+/// The centreline of one street between two nodes. A node where only two streets
+/// of the same class meet is a bend, not a junction, and drawing each street as a
+/// straight chord puts a kink in the kerb at every bend: the road reads as a
+/// zigzag. So a street runs on a cubic through its two ends whose tangent at a
+/// bend is the direction through the bend, which makes the road continuous in
+/// direction across it. Sharp turns, true junctions and bridge decks stay as the
+/// straight chord.
+fn smooth_centreline(
+    frame: &CityFrame,
+    pts: &[V],
+    kept: &[(Seg, bool)],
+    adjacency: &[Vec<(usize, usize)>],
+    edge: usize,
+    p0_world: Point,
+    p1_world: Point,
+) -> Vec<Point> {
+    let (seg, bridge) = kept[edge];
+    let (a, b) = (pts[seg.a], pts[seg.b]);
+    let chord = (b.0 - a.0, b.1 - a.1);
+    let length = chord.0.hypot(chord.1);
+    let straight = || {
+        vec![
+            p0_world,
+            Point { x_km: (p0_world.x_km + p1_world.x_km) * 0.5, y_km: (p0_world.y_km + p1_world.y_km) * 0.5 },
+            p1_world,
+        ]
+    };
+    if bridge || length < 12.0 {
+        return straight();
+    }
+    // Unit direction through a bend node, in the sense of travel `from -> to` of
+    // the street being drawn, or None where the node is a junction or a sharp turn.
+    let through = |node: usize, toward: usize| -> Option<V> {
+        let list = &adjacency[node];
+        if list.len() != 2 {
+            return None;
+        }
+        let ((u, eu), (v, ev)) = (list[0], list[1]);
+        if kept[eu].1 || kept[ev].1 || kept[eu].0.class != kept[ev].0.class {
+            return None;
+        }
+        let into = (pts[node].0 - pts[u].0, pts[node].1 - pts[u].1);
+        let out = (pts[v].0 - pts[node].0, pts[v].1 - pts[node].1);
+        let (li, lo) = (into.0.hypot(into.1), out.0.hypot(out.1));
+        if li < 1.0e-3 || lo < 1.0e-3 {
+            return None;
+        }
+        // Turns sharper than 35 degrees are corners, not bends.
+        if (into.0 * out.0 + into.1 * out.1) / (li * lo) < 0.82 {
+            return None;
+        }
+        let d = (pts[v].0 - pts[u].0, pts[v].1 - pts[u].1);
+        let ld = d.0.hypot(d.1).max(1.0e-3);
+        let d = (d.0 / ld, d.1 / ld);
+        // `d` runs u -> v; flip it to point toward `toward`.
+        if toward == v { Some(d) } else { Some((-d.0, -d.1)) }
+    };
+    let dir = (chord.0 / length, chord.1 / length);
+    let t0 = through(seg.a, seg.b).unwrap_or(dir);
+    let t1 = through(seg.b, seg.a).map(|t| (-t.0, -t.1)).unwrap_or(dir);
+    if t0 == dir && t1 == dir {
+        return straight();
+    }
+    let k = length * 0.9;
+    let (m0, m1) = ((t0.0 * k, t0.1 * k), (t1.0 * k, t1.1 * k));
+    // Dense enough that the first and last chord run along the end tangent: with
+    // a point only every 20 m the polyline still kinks at the bend by half its turn.
+    let steps = ((length / 4.0).ceil() as usize).max(10);
+    (0..=steps)
+        .map(|i| {
+            let t = i as f32 / steps as f32;
+            let (t2, t3) = (t * t, t * t * t);
+            let (h00, h10, h01, h11) =
+                (2.0 * t3 - 3.0 * t2 + 1.0, t3 - 2.0 * t2 + t, -2.0 * t3 + 3.0 * t2, t3 - t2);
+            let x = h00 * a.0 + h10 * m0.0 + h01 * b.0 + h11 * m1.0;
+            let z = h00 * a.1 + h10 * m0.1 + h01 * b.1 + h11 * m1.1;
+            if i == 0 {
+                p0_world
+            } else if i == steps {
+                p1_world
+            } else {
+                frame.to_world(x, z)
+            }
+        })
+        .collect()
 }
 
 pub(super) fn modern_phase(seed: u32) -> f32 {
