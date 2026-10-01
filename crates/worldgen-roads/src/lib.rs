@@ -9,6 +9,7 @@
 pub mod config;
 pub mod lattice;
 pub mod network;
+pub mod overlay;
 pub mod quad;
 pub mod shape;
 pub mod tile;
@@ -25,7 +26,8 @@ pub fn engine(seed: Seed, frame: Frame, config: RoadsConfig, fields: Fields) -> 
     EngineBuilder::new(seed, frame)
         .with(lattice::ChordLayer { config: config.clone(), urban: fields.urban.clone() })
         .with(quad::QuadLayer { config: config.clone(), urban: fields.urban.clone() })
-        .with(network::CellLayer { config: config.clone(), fields })
+        .with(network::CellLayer { config: config.clone(), fields: fields.clone() })
+        .with(overlay::OverlayLayer { config: config.clone(), fields })
         .with(tile::RoadsLayer { config })
         .build()
 }

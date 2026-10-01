@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use worldgen_contracts::{DryLand, FlatGround, HeightField, UrbanField, WaterField};
+use worldgen_contracts::{DryLand, FlatGround, HeightField, NoPinnedRoads, PinnedRoads, UrbanField, WaterField};
 
 /// One rung of the street hierarchy. A rung exists where the place is built up
 /// at least `min_urban`, and its streets lie `base_spacing_m` apart in the dense
@@ -74,14 +74,20 @@ pub struct Fields {
     pub urban: Arc<dyn UrbanField>,
     pub water: Arc<dyn WaterField>,
     pub height: Arc<dyn HeightField>,
+    /// Roads laid down by a planner; the layer generates the rest around them.
+    pub pinned: Arc<dyn PinnedRoads>,
 }
 
 impl Fields {
     pub fn new(urban: Arc<dyn UrbanField>) -> Self {
-        Self { urban, water: Arc::new(DryLand), height: Arc::new(FlatGround(0.0)) }
+        Self { urban, water: Arc::new(DryLand), height: Arc::new(FlatGround(0.0)), pinned: Arc::new(NoPinnedRoads) }
     }
     pub fn with_water(mut self, water: Arc<dyn WaterField>) -> Self {
         self.water = water;
+        self
+    }
+    pub fn with_pinned(mut self, pinned: Arc<dyn PinnedRoads>) -> Self {
+        self.pinned = pinned;
         self
     }
     pub fn with_height(mut self, height: Arc<dyn HeightField>) -> Self {

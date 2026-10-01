@@ -5,7 +5,8 @@ use worldgen_core::{Cell, Context, Dependency, Error, Layer, LayerId};
 
 use crate::config::RoadsConfig;
 use crate::lattice::cell_size;
-use crate::network::{CELLS, CellNetwork};
+use crate::network::CellNetwork;
+use crate::overlay::OVERLAY;
 use crate::shape::clip;
 
 pub const ROADS: LayerId = LayerId("roads");
@@ -31,7 +32,7 @@ impl Layer for RoadsLayer {
     }
 
     fn inputs(&self) -> Vec<Dependency> {
-        vec![Dependency::required(CELLS)]
+        vec![Dependency::required(OVERLAY)]
     }
 
     fn collapse(&self, ctx: &Context<'_>, cell: Cell) -> Result<RoadTile, Error> {
@@ -49,7 +50,7 @@ impl Layer for RoadsLayer {
         let mut nodes: std::collections::BTreeMap<_, RoadNode> = std::collections::BTreeMap::new();
         for j in j0..=j1 {
             for i in i0..=i1 {
-                let net = ctx.input::<CellNetwork>(CELLS, Cell::new(self.config.lattice_level, i, j))?;
+                let net = ctx.input::<CellNetwork>(OVERLAY, Cell::new(self.config.lattice_level, i, j))?;
                 for e in &net.edges {
                     if e.class < self.config.min_class {
                         continue;

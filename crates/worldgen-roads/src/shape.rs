@@ -46,6 +46,52 @@ pub fn bend(fabric: Seed, cfg: &RoadsConfig, a: V2, b: V2, edge_key: u64, wiggle
     Polyline(points)
 }
 
+/// A route with its corners rounded: each bend is replaced by a circular arc of
+/// the given radius, or the largest that fits if the legs are short. A router that
+/// works on a grid produces a staircase of kinks; roads are built to a curvature.
+///
+/// The result is a function of three consecutive vertices at a time, so rounding a
+/// long route in pieces gives the same curve as rounding it whole.
+pub fn round_corners(line: &Polyline, radius_m: f64, step_m: f64) -> Polyline {
+    let p = &line.0;
+    if p.len() < 3 {
+        return line.clone();
+    }
+    let mut out = vec![p[0]];
+    for i in 1..p.len() - 1 {
+        let (a, b, c) = (p[i - 1], p[i], p[i + 1]);
+        let (d0, d1) = ((b - a).norm(), (c - b).norm());
+        let turn = d0.cross(d1).atan2(d0.dot(d1));
+        let (l0, l1) = (a.dist(b), b.dist(c));
+        if turn.abs() < 1e-3 || l0 < 1e-9 || l1 < 1e-9 {
+            out.push(b);
+            continue;
+        }
+        // The arc touches each leg `reach` before the corner. It may not use more
+        // than 45% of a leg, so neighbouring arcs never overlap.
+        let half = turn.abs() * 0.5;
+        let reach = (radius_m * half.tan()).min(0.45 * l0.min(l1));
+        let r = reach / half.tan();
+        let (entry, exit) = (b - d0 * reach, b + d1 * reach);
+        let centre = entry + d0.perp() * (r * turn.signum());
+        let (from, to) = ((entry - centre).angle(), (exit - centre).angle());
+        let mut sweep = to - from;
+        while sweep > std::f64::consts::PI {
+            sweep -= std::f64::consts::TAU;
+        }
+        while sweep < -std::f64::consts::PI {
+            sweep += std::f64::consts::TAU;
+        }
+        let n = ((r * sweep.abs() / step_m).ceil() as usize).max(2);
+        for k in 0..=n {
+            let angle = from + sweep * k as f64 / n as f64;
+            out.push(centre + V2::from_angle(angle) * r);
+        }
+    }
+    out.push(*p.last().unwrap());
+    Polyline(out)
+}
+
 /// The parts of a polyline inside a rectangle. A point on the rectangle's border
 /// is computed from the segment and the border coordinate alone, so two
 /// rectangles that share a border cut a segment at the same point.
@@ -79,24 +125,46 @@ pub fn clip(line: &Polyline, rect: Rect) -> Vec<Polyline> {
     pieces.into_iter().filter(|p| p.len() >= 2).map(Polyline).collect()
 }
 
+/// A side of a rectangle: the axis (0 for x, 1 for y) and whether it is the
+/// maximum side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Border {
+    pub axis: u8,
+    pub max: bool,
+}
+
 /// A segment cut to a rectangle that is closed on the minimum sides and open on
 /// the maximum sides, so two rectangles that share a border do not both own a
-/// point exactly on it.
-fn clip_segment(p: V2, q: V2, r: Rect) -> Option<(V2, V2)> {
+/// point exactly on it. Also says which side the cut ends lie on, if they were cut.
+pub(crate) fn clip_segment(p: V2, q: V2, r: Rect) -> Option<(V2, V2)> {
+    clip_segment_at(p, q, r).map(|(a, b, _, _)| (a, b))
+}
+
+pub(crate) fn clip_segment_at(p: V2, q: V2, r: Rect) -> Option<(V2, V2, Option<Border>, Option<Border>)> {
     let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+    let (mut entry, mut exit): (Option<Border>, Option<Border>) = (None, None);
     let d = q - p;
-    for (lo, hi, p0, dd) in [(r.min[0], r.max[0], p.x, d.x), (r.min[1], r.max[1], p.y, d.y)] {
+    for (axis, (lo, hi, p0, dd)) in [(r.min[0], r.max[0], p.x, d.x), (r.min[1], r.max[1], p.y, d.y)].into_iter().enumerate() {
         if dd == 0.0 {
             if p0 < lo || p0 >= hi {
                 return None;
             }
         } else {
             let (mut ta, mut tb) = ((lo - p0) / dd, (hi - p0) / dd);
+            // Walking in the positive direction, the minimum side is entered first.
+            let (mut enter_max, mut leave_max) = (false, true);
             if ta > tb {
                 std::mem::swap(&mut ta, &mut tb);
+                (enter_max, leave_max) = (true, false);
             }
-            t0 = t0.max(ta);
-            t1 = t1.min(tb);
+            if ta > t0 {
+                t0 = ta;
+                entry = Some(Border { axis: axis as u8, max: enter_max });
+            }
+            if tb < t1 {
+                t1 = tb;
+                exit = Some(Border { axis: axis as u8, max: leave_max });
+            }
             if t0 > t1 {
                 return None;
             }
@@ -133,7 +201,52 @@ fn clip_segment(p: V2, q: V2, r: Rect) -> Option<(V2, V2)> {
         v2(x, y)
     };
     let (a, b) = (at(t0), at(t1));
-    (a != b).then_some((a, b))
+    (a != b).then_some((a, b, entry.filter(|_| t0 > 0.0), exit.filter(|_| t1 < 1.0)))
+}
+
+/// A continuous run of a polyline inside a rectangle, with where it came in and went out.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Run {
+    pub points: Vec<V2>,
+    /// Index of the segment of the original polyline the run starts in.
+    pub first_segment: usize,
+    pub last_segment: usize,
+    /// The side it entered by, if it was cut there rather than starting inside.
+    pub entered: Option<Border>,
+    pub left: Option<Border>,
+}
+
+/// Like [`clip`], but remembers which segment and which border each cut was at.
+pub fn clip_runs(line: &Polyline, rect: Rect) -> Vec<Run> {
+    let mut runs: Vec<Run> = Vec::new();
+    let mut open: Option<Run> = None;
+    for (i, w) in line.0.windows(2).enumerate() {
+        match clip_segment_at(w[0], w[1], rect) {
+            Some((p, q, entry, exit)) => {
+                let continuing = open.as_ref().is_some_and(|r| r.points.last() == Some(&p));
+                if !continuing {
+                    if let Some(r) = open.take() {
+                        runs.push(r);
+                    }
+                    open = Some(Run { points: vec![p], first_segment: i, last_segment: i, entered: entry, left: None });
+                }
+                let run = open.as_mut().unwrap();
+                run.points.push(q);
+                run.last_segment = i;
+                if exit.is_some() {
+                    run.left = exit;
+                    runs.push(open.take().unwrap());
+                }
+            }
+            None => {
+                if let Some(r) = open.take() {
+                    runs.push(r);
+                }
+            }
+        }
+    }
+    runs.extend(open);
+    runs.into_iter().filter(|r| r.points.len() >= 2).collect()
 }
 
 #[cfg(test)]
@@ -163,6 +276,36 @@ mod tests {
         let near = warp(fabric, &cfg, a + v2(1.0, 0.0)) - (a + v2(1.0, 0.0));
         let here = warp(fabric, &cfg, a) - a;
         assert!((near - here).len() < 0.2);
+    }
+
+    #[test]
+    fn rounding_replaces_a_kink_with_an_arc_that_stays_close_to_the_route() {
+        let route = Polyline(vec![v2(0.0, 0.0), v2(500.0, 0.0), v2(500.0, 400.0), v2(1200.0, 450.0)]);
+        let round = round_corners(&route, 120.0, 15.0);
+        assert!(route.max_turn() > 1.4, "the route has a right angle");
+        assert!(round.max_turn() < 0.2, "no kink is left: {}", round.max_turn());
+        assert_eq!(round.first(), route.first());
+        assert_eq!(round.last(), route.last());
+        // It cuts the corner by about the fillet, not by hundreds of metres.
+        assert!(round.length() < route.length() && round.length() > route.length() - 150.0);
+        for p in &round.0 {
+            assert!(route.closest(*p).unwrap().0 < 60.0, "{p:?} is far from the route");
+        }
+        // Straight routes and short ones pass through.
+        let straight = Polyline(vec![v2(0.0, 0.0), v2(10.0, 0.0), v2(20.0, 0.0)]);
+        assert_eq!(round_corners(&straight, 100.0, 10.0).0.len(), 3);
+        assert_eq!(round_corners(&Polyline(vec![v2(0.0, 0.0), v2(1.0, 1.0)]), 100.0, 10.0).0.len(), 2);
+    }
+
+    #[test]
+    fn rounding_a_route_in_halves_matches_rounding_it_whole() {
+        let route = Polyline((0..9).map(|k| v2(k as f64 * 300.0, if k % 2 == 0 { 0.0 } else { 220.0 })).collect());
+        let whole = round_corners(&route, 90.0, 12.0);
+        // Rounding keeps every vertex of the interior corners' neighbourhoods local.
+        let left = round_corners(&Polyline(route.0[..6].to_vec()), 90.0, 12.0);
+        for p in left.0.iter().take(left.0.len() - 12) {
+            assert!(whole.0.contains(p), "{p:?} differs when the route is cut");
+        }
     }
 
     #[test]

@@ -380,3 +380,122 @@ fn roads_keep_off_ground_too_steep_for_their_class() {
     assert!(climb(&a) < 0.27, "a road climbs {:.0}%", 100.0 * climb(&a));
     assert!(a.edges.len() > b.edges.len() / 2, "the hill took out too much of the town");
 }
+
+// ---- Given roads -------------------------------------------------------------------
+
+use worldgen_contracts::{PinnedRoad, PinnedSet};
+
+/// A long arterial that bends across the fixture city, as a router would lay it.
+fn given_road() -> PinnedRoad {
+    PinnedRoad {
+        id: 0xA11,
+        class: RoadClass::Arterial,
+        path: Polyline(vec![
+            CITY + v2(-6000.0, -2600.0),
+            CITY + v2(-3100.0, -1500.0),
+            CITY + v2(-1000.0, -300.0),
+            CITY + v2(900.0, 500.0),
+            CITY + v2(2900.0, 1900.0),
+            CITY + v2(6000.0, 2300.0),
+        ]),
+    }
+}
+
+fn world_with_given_road() -> Engine {
+    let fields = Fields::new(HashedTowns::shared(Seed::new(7))).with_pinned(Arc::new(PinnedSet::new(vec![given_road()])));
+    engine(Seed::new(7), FRAME, RoadsConfig::default(), fields).unwrap()
+}
+
+#[test]
+fn a_given_road_is_kept_as_it_is_and_the_streets_of_the_town_meet_it() {
+    let e = world_with_given_road();
+    let net = network(&tiles(&e, 11, CITY, 2600.0));
+    let given: Vec<_> = net.edges.values().filter(|ed| ed.class == RoadClass::Arterial && ed.id == worldgen_contracts::EdgeId::between(ed.a, ed.b, 0xA11)).collect();
+    assert!(given.len() >= 5, "{} pieces of the given road", given.len());
+    // Every point of every piece lies on the road as given.
+    let road = given_road();
+    for ed in &given {
+        for piece in &ed.pieces {
+            for p in &piece.0 {
+                assert!(road.path.closest(*p).unwrap().0 < 1e-6, "{p:?} is off the given road");
+            }
+        }
+    }
+    // Streets of the town end on it, and it is joined to them: its junctions have degree 3 or more.
+    let junctions = given.iter().flat_map(|ed| [ed.a, ed.b]).filter(|n| net.degree(*n) >= 3).collect::<BTreeSet<_>>();
+    assert!(junctions.len() >= 8, "only {} junctions on the given road", junctions.len());
+    // And it is one road: its pieces chain end to end without a gap.
+    let mut ends: BTreeMap<NodeId, usize> = BTreeMap::new();
+    for ed in &given {
+        *ends.entry(ed.a).or_default() += 1;
+        *ends.entry(ed.b).or_default() += 1;
+    }
+    assert_eq!(ends.values().filter(|&&n| n == 1).count(), 2, "a chain has two ends");
+}
+
+#[test]
+fn the_network_with_a_given_road_is_still_planar_and_has_no_streets_beside_it() {
+    let e = world_with_given_road();
+    let net = network(&tiles(&e, 11, CITY, 2600.0));
+    let segs: Vec<(u64, V2, V2)> = net
+        .edges
+        .values()
+        .flat_map(|ed| ed.pieces.iter().flat_map(move |p| p.0.windows(2).map(move |w| (ed.id.0, w[0], w[1]))))
+        .collect();
+    let mut crossings = Vec::new();
+    for (i, a) in segs.iter().enumerate() {
+        for b in &segs[i + 1..] {
+            if a.0 == b.0 {
+                continue;
+            }
+            if let Some((p, t, u)) = segment_intersection(a.1, a.2, b.1, b.2) {
+                let interior = |t: f64| t > 1e-6 && t < 1.0 - 1e-6;
+                if interior(t) || interior(u) {
+                    crossings.push((a.0, b.0, p));
+                }
+            }
+        }
+    }
+    assert!(crossings.is_empty(), "{} unmarked crossings, first at {:?}", crossings.len(), crossings.first());
+    let road = given_road();
+    let (overlap, examples) = parallel_overlap(&net, 14.0, 45.0);
+    let total: f64 = net.edges.values().flat_map(|e| e.pieces.iter()).map(Polyline::length).sum();
+    assert!(overlap < 0.01 * total, "{overlap:.0} m of road runs within 14 m of another: {examples:?}");
+    // The generated streets that were running beside the road are gone: none lies within 10 m of it
+    // for long stretches except the given road itself.
+    let beside = net
+        .edges
+        .values()
+        .filter(|ed| ed.id != worldgen_contracts::EdgeId::between(ed.a, ed.b, 0xA11))
+        .map(|ed| ed.pieces.iter().flat_map(|p| p.resampled(10.0).0).filter(|p| road.path.closest(*p).unwrap().0 < 10.0).count())
+        .sum::<usize>();
+    // Each crossing contributes a couple of samples; a street running beside the road contributes dozens.
+    assert!(beside < 3 * net.edges.len() / 4 + 40, "{beside} samples of other roads lie right beside the given road");
+}
+
+#[test]
+fn a_big_tile_with_a_given_road_is_still_exactly_the_tiles_inside_it() {
+    let e = world_with_given_road();
+    let parent = Cell::containing(&FRAME, CITY.to_array(), 10);
+    let whole = network(&[e.get::<RoadTile>(ROADS, parent).unwrap()]);
+    let parts: Vec<_> = parent.children().iter().map(|c| e.get::<RoadTile>(ROADS, *c).unwrap()).collect();
+    let merged = network(&parts);
+    assert!(whole.edges.values().any(|ed| ed.id == worldgen_contracts::EdgeId::between(ed.a, ed.b, 0xA11)), "the given road is in the tile");
+    assert_eq!(whole.edges.keys().collect::<Vec<_>>(), merged.edges.keys().collect::<Vec<_>>());
+    for (id, edge) in &whole.edges {
+        let other = &merged.edges[id];
+        assert_eq!((edge.a, edge.b, edge.class), (other.a, other.b, other.class));
+        let (lw, lm): (f64, f64) = (edge.pieces.iter().map(Polyline::length).sum(), other.pieces.iter().map(Polyline::length).sum());
+        assert!((lw - lm).abs() < 1e-6, "edge {id:?}: {lw} vs {lm}");
+    }
+}
+
+#[test]
+fn given_roads_do_not_change_places_they_do_not_touch() {
+    let with = world_with_given_road();
+    let without = world(7, RoadClass::Track);
+    let far = v2(CITY.x + 12000.0, CITY.y + 9000.0);
+    let a = network(&tiles(&with, 11, far, 700.0));
+    let b = network(&tiles(&without, 11, far, 700.0));
+    assert_eq!(a.edges.keys().collect::<Vec<_>>(), b.edges.keys().collect::<Vec<_>>());
+}

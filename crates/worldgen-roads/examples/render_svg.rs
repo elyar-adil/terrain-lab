@@ -5,7 +5,7 @@
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use worldgen_contracts::{PolylineRiver, RoadClass, Setting, V2, v2};
+use worldgen_contracts::{PinnedRoad, PinnedSet, Polyline, PolylineRiver, RoadClass, Setting, V2, v2};
 use worldgen_core::{Cell, Frame, Seed};
 use worldgen_roads::{Fields, HashedTowns, RoadsConfig, engine, ROADS};
 
@@ -48,7 +48,26 @@ fn main() {
         line: (0..60).map(|k| v2(cx - size * 0.7 + k as f64 * size * 0.025, cy + (k as f64 * 0.35).sin() * size * 0.08 - size * 0.1)).collect(),
         width_m: 38.0,
     };
-    let fields = Fields::new(HashedTowns::shared(Seed::new(seed))).with_water(Arc::new(river.clone()));
+    // A long arterial a router might have laid, bending across the window.
+    let given = PinnedRoad {
+        id: 0xA11,
+        class: RoadClass::Arterial,
+        path: worldgen_roads::shape::round_corners(
+            &Polyline(vec![
+                v2(cx - size * 0.9, cy - size * 0.35),
+                v2(cx - size * 0.3, cy - size * 0.12),
+                v2(cx + size * 0.05, cy + size * 0.02),
+                v2(cx + size * 0.35, cy + size * 0.22),
+                v2(cx + size * 0.9, cy + size * 0.3),
+            ]),
+            450.0,
+            20.0,
+        ),
+    };
+    let mut fields = Fields::new(HashedTowns::shared(Seed::new(seed))).with_water(Arc::new(river.clone()));
+    if std::env::var("GIVEN").is_ok() {
+        fields = fields.with_pinned(Arc::new(PinnedSet::new(vec![given])));
+    }
     let e = engine(Seed::new(seed), frame, config, fields).unwrap();
 
     // The window, as tiles at a level that fits a few of them.
