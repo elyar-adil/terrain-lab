@@ -1533,6 +1533,7 @@ dependencies = [
  "thiserror 2.0.19",
  "urban",
  "world-core",
+ "worldgen-contracts",
 ]
 
 [[package]]
@@ -3774,6 +3775,7 @@ version = "0.1.0"
 dependencies = [
  "procedural",
  "serde",
+ "worldgen-contracts",
 ]
 
 [[package]]
@@ -4544,6 +4546,13 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 2.0.19",
+]
+
+[[package]]
+name = "worldgen-contracts"
+version = "0.1.0"
+dependencies = [
+ "worldgen-core",
 ]
 
 [[package]]

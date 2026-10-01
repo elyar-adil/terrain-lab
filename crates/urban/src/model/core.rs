@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use worldgen_contracts::{RoadClass, Setting, cross_section};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Point {
@@ -121,25 +122,27 @@ pub enum ModernRoadClass {
 }
 
 impl ModernRoadClass {
-    /// Ribbon width in metres, matching the CJJ 37 cross-sections encoded in
-    /// `modern::roads::cross_section`: 快速路 36 m, 主干路 32 m, 次干路 22 m,
-    /// 支路 12 m.
-    pub const fn width_metres(self) -> f32 {
+    /// This class in the shared road vocabulary. The widths, medians and lane
+    /// counts below come from `worldgen_contracts::cross_section`, the one table
+    /// every layer reads; this enum is the city planner's view of it.
+    pub const fn contract(self) -> RoadClass {
         match self {
-            Self::Expressway => 36.0,
-            Self::Arterial => 32.0,
-            Self::Collector => 22.0,
-            Self::Local => 12.0,
+            Self::Expressway => RoadClass::Motorway,
+            Self::Arterial => RoadClass::Arterial,
+            Self::Collector => RoadClass::Collector,
+            Self::Local => RoadClass::Local,
         }
+    }
+
+    /// Ribbon width in metres, kerb face to kerb face, including cycle lanes and
+    /// pavements (CJJ 37): 快速路 34 m, 主干路 37 m, 次干路 24.8 m, 支路 11.3 m.
+    pub fn width_metres(self) -> f32 {
+        cross_section(self.contract(), Setting::Urban).width() as f32
     }
 
     /// Physical central median; divided streets are the Chinese norm for
     /// expressways and arterials, never for collectors or locals.
-    pub const fn median_metres(self) -> f32 {
-        match self {
-            Self::Expressway => 2.5,
-            Self::Arterial => 2.0,
-            Self::Collector | Self::Local => 0.0,
-        }
+    pub fn median_metres(self) -> f32 {
+        cross_section(self.contract(), Setting::Urban).median as f32
     }
 }

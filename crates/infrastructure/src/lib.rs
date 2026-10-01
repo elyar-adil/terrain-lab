@@ -58,38 +58,27 @@ pub struct RoadProfile {
 }
 
 impl RoadClass {
-    pub const fn profile(self) -> RoadProfile {
+    /// This class in the shared road vocabulary. Regional roads run through open
+    /// country, so their cross-sections are the *rural* ones; the planner widens
+    /// them into the urban section where they enter a town.
+    pub const fn contract(self) -> worldgen_contracts::RoadClass {
+        use worldgen_contracts::RoadClass as C;
         match self {
-            Self::Motorway => RoadProfile {
-                carriageway_width_metres: 24.6,
-                right_of_way_width_metres: 38.0,
-                lanes: 4,
-                paved: true,
-            },
-            Self::Arterial => RoadProfile {
-                carriageway_width_metres: 13.2,
-                right_of_way_width_metres: 20.0,
-                lanes: 4,
-                paved: true,
-            },
-            Self::Collector => RoadProfile {
-                carriageway_width_metres: 7.2,
-                right_of_way_width_metres: 11.0,
-                lanes: 2,
-                paved: true,
-            },
-            Self::Local => RoadProfile {
-                carriageway_width_metres: 5.5,
-                right_of_way_width_metres: 8.0,
-                lanes: 2,
-                paved: true,
-            },
-            Self::Rural => RoadProfile {
-                carriageway_width_metres: 4.2,
-                right_of_way_width_metres: 6.5,
-                lanes: 1,
-                paved: false,
-            },
+            Self::Motorway => C::Motorway,
+            Self::Arterial => C::Arterial,
+            Self::Collector => C::Collector,
+            Self::Local => C::Local,
+            Self::Rural => C::Track,
+        }
+    }
+
+    pub fn profile(self) -> RoadProfile {
+        let section = worldgen_contracts::cross_section(self.contract(), worldgen_contracts::Setting::Rural);
+        RoadProfile {
+            carriageway_width_metres: section.width() as f32,
+            right_of_way_width_metres: section.right_of_way() as f32,
+            lanes: section.lanes(),
+            paved: section.paved,
         }
     }
 }

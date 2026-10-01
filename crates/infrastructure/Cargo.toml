@@ -15,6 +15,7 @@ terrain-core = { path = "../terrain-core" }
 thiserror = "2"
 world-core = { path = "../world-core" }
 urban = { path = "../urban" }
+worldgen-contracts = { path = "../worldgen-contracts" }
 city-scene = { path = "../city-scene" }
 
 [dev-dependencies]

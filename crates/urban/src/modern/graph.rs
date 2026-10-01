@@ -64,17 +64,7 @@ impl CityGraph for GraphProbe<'_> {
 /// an arterial, left a corner radius of three metres, which reads as a square
 /// corner. A node with two streets is a bend and gets a small trim.
 pub fn junction_trim_m(widest_width: f32, arms: usize) -> f32 {
-    if arms <= 2 {
-        return (widest_width * 0.5 + 2.0).min(8.0);
-    }
-    let kerb_return = if widest_width >= 12.0 {
-        12.0
-    } else if widest_width >= 6.5 {
-        8.0
-    } else {
-        5.0
-    };
-    widest_width * 0.5 + kerb_return + 1.0
+    worldgen_contracts::junction_trim_m(f64::from(widest_width), arms) as f32
 }
 
 /// How important a street is: larger is wider and busier. The enum is declared
