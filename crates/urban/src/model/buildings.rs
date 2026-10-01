@@ -10,6 +10,10 @@ pub enum ParcelUse {
     Commercial,
     Civic,
     Park,
+    /// A detached house with its own garden: the suburban belt around a town.
+    Villa,
+    /// A farmhouse and its yard, standing alone beside a country road.
+    Farmstead,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

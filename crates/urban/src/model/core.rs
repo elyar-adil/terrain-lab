@@ -34,6 +34,10 @@ pub enum RoofStyle {
     Terracotta,
     Flat,
     SetbackTower,
+    /// Two slopes meeting at a ridge along the long side (双坡顶).
+    Gable,
+    /// Four slopes (四坡顶).
+    Hip,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

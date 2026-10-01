@@ -580,6 +580,19 @@ export function createMaterials(
     { map: roofMap ?? undefined, normalMap: normalFor("roof", 1.4) ?? undefined, roughness: 0.94 },
     roofMap ? 0xffffff : 0x6a6862,
   );
+  // Pitched roofs: clay tile, terracotta and painted steel sheet.
+  for (const [key, roughness, metalness] of [
+    ["roof.tile", 0.82, 0],
+    ["roof.terracotta", 0.78, 0],
+    ["roof.steel", 0.45, 0.35],
+  ] as const) {
+    const map = textureFor(key);
+    standard(
+      key,
+      { map: map ?? undefined, normalMap: normalFor(key, 2.0) ?? undefined, roughness, metalness },
+      map ? 0xffffff : 0x5a4a44,
+    );
+  }
   for (let index = 0; index < FACADE_COUNT; index += 1) {
     const key = `facade/${index.toString().padStart(2, "0")}`;
     const map = textureFor(key);

@@ -307,6 +307,7 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
     let tree_output = trees::plant(
         &network,
         &city.parcels,
+        &city.buildings,
         city.river.as_deref(),
         city.river_width_metres,
         city.frame,

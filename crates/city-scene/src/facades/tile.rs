@@ -724,6 +724,130 @@ pub fn roof_texture(size: usize) -> BakedTexture {
     }
 }
 
+/// What a pitched roof is covered with.
+#[derive(Clone, Copy)]
+pub enum RoofCovering {
+    /// 小青瓦: grey clay pan-tiles, the roof of the Chinese village and suburb.
+    GreyClay,
+    /// 红瓦: terracotta, the villa roof of the 2000s.
+    Terracotta,
+    /// 彩钢瓦: blue painted steel sheet, on the farm shed and the factory.
+    BlueSteel,
+}
+
+impl RoofCovering {
+    pub const fn key(self) -> &'static str {
+        match self {
+            RoofCovering::GreyClay => "roof.tile",
+            RoofCovering::Terracotta => "roof.terracotta",
+            RoofCovering::BlueSteel => "roof.steel",
+        }
+    }
+    pub const ALL: [RoofCovering; 3] = [RoofCovering::GreyClay, RoofCovering::Terracotta, RoofCovering::BlueSteel];
+}
+
+/// A pitched roof's covering, baked in metres of slope. `u` runs across the
+/// slope (along the eave), `v` down it from the ridge, so tile columns and the
+/// ribs of a steel sheet run down the fall of the roof, and courses overlap
+/// along it. Linear reflectance; the alpha channel is the relief a renderer can
+/// differentiate into a normal map.
+pub fn pitched_roof_texture(covering: RoofCovering, size: usize) -> BakedTexture {
+    let n = size.max(16);
+    let tile_m = crate::facades::ROOF_TILE_M;
+    let px_per_m = n as f32 / tile_m;
+    let mut rgba = vec![0_u8; n * n * 4];
+    // The pitch of a tile column, and how far one course is laid over the next.
+    let (pitch, course) = match covering {
+        RoofCovering::GreyClay => (0.16_f32, 0.21_f32),
+        RoofCovering::Terracotta => (0.20, 0.27),
+        RoofCovering::BlueSteel => (0.30, 1.0),
+    };
+    let base: [f32; 3] = match covering {
+        RoofCovering::GreyClay => [0.118, 0.122, 0.132],
+        RoofCovering::Terracotta => [0.300, 0.115, 0.070],
+        RoofCovering::BlueSteel => [0.060, 0.110, 0.210],
+    };
+    for y in 0..n {
+        for x in 0..n {
+            let u = (x as f32 + 0.5) / px_per_m;
+            let v = (y as f32 + 0.5) / px_per_m;
+            let col = (u / pitch).floor();
+            let along = u / pitch - col;
+            let row = (v / course).floor();
+            let down = v / course - row;
+            // Each tile is its own: a shade of the clay, a bit of lichen or soot.
+            let tile = hash(11, col as i32, row as i32);
+            let tone = 0.80 + 0.40 * tile + (value_noise(23, u * 2.3, v * 2.3) - 0.5) * 0.16;
+            let grain = (hash(41, x as i32, y as i32) - 0.5) * 0.07;
+            let mut relief;
+            let mut value;
+            match covering {
+                RoofCovering::BlueSteel => {
+                    // Trapezoid ribs and the flat between them; a lap every
+                    // sheet length, not a course.
+                    let rib = (1.0 - ((along - 0.5).abs() * 4.2)).clamp(0.0, 1.0);
+                    relief = rib;
+                    value = tone.max(0.9) * (0.86 + 0.20 * rib);
+                    let lap = ((v / 2.0) - (v / 2.0).floor()) < 0.05;
+                    if lap {
+                        value *= 0.78;
+                        relief += 0.3;
+                    }
+                    // Rust at the fixing lines, streaking down the fall.
+                    let streak = (value_noise(61, u * 9.0, v * 0.7) - 0.62).max(0.0) * 1.6;
+                    value *= 1.0 - streak * 0.45;
+                }
+                _ => {
+                    // Convex cover tile on the column line, the concave pan between.
+                    let curve = 0.5 + 0.5 * (std::f32::consts::TAU * along).cos();
+                    relief = curve * 0.7;
+                    value = tone * (0.80 + 0.30 * curve);
+                    // The lip of each course: a bright edge, then the shadow it throws.
+                    if down > 0.86 {
+                        let t = (down - 0.86) / 0.14;
+                        value *= 1.0 - 0.45 * t;
+                        relief += 0.2 * (1.0 - t);
+                    }
+                    if down < 0.07 {
+                        value *= 1.16;
+                    }
+                    // A cracked or slipped tile, and moss at the shaded foot.
+                    if hash(17, col as i32, row as i32) > 0.985 {
+                        value *= 0.55;
+                    }
+                    let moss = (value_noise(71, u * 3.1, v * 3.1) - 0.66).max(0.0) * 1.4;
+                    value *= 1.0 - moss * 0.3;
+                }
+            }
+            value *= 1.0 + grain;
+            let colour = [
+                base[0] * value * if matches!(covering, RoofCovering::GreyClay) { 1.0 + moss_tint(u, v) } else { 1.0 },
+                base[1] * value,
+                base[2] * value,
+            ];
+            let offset = (y * n + x) * 4;
+            rgba[offset] = srgb8(colour[0]);
+            rgba[offset + 1] = srgb8(colour[1]);
+            rgba[offset + 2] = srgb8(colour[2]);
+            rgba[offset + 3] = srgb8(relief.clamp(0.0, 1.0));
+        }
+    }
+    BakedTexture {
+        name: covering.key().into(),
+        width: n,
+        height: n,
+        tile_width_m: tile_m,
+        tile_height_m: tile_m,
+        has_normal_source: true,
+        rgba,
+    }
+}
+
+/// Weathering on grey tile: a faint warm cast where the sun has dried it.
+fn moss_tint(u: f32, v: f32) -> f32 {
+    (value_noise(83, u * 0.5, v * 0.5) - 0.5) * 0.10
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

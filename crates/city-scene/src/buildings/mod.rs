@@ -43,7 +43,8 @@
 
 pub(crate) mod details;
 pub(crate) mod roofscape;
-pub(crate) mod shell;
+pub(crate) mod house;
+mod shell;
 
 use urban::{
     CityFrameInfo, Compound, ModernBuilding, Parcel, ParcelUse, Point, RoofStyle, UrbanBlock, modern,
@@ -344,6 +345,9 @@ fn declare(builder: &mut MeshBuilder) {
         builder.style(kind, wall);
     }
     builder.style("roof", wall);
+    for covering in crate::facades::RoofCovering::ALL {
+        builder.style(covering.key(), wall);
+    }
     builder.style("sign/shop", wall);
     builder.style("trim.light", wall);
     builder.style("trim.dark", wall);
@@ -397,7 +401,7 @@ pub fn build(
         }
         // Residential compounds are landscaped (lawn, hedges, paths); only
         // commercial, mixed and civic plots are hard-paved forecourts.
-        let material = if matches!(parcel.use_type, ParcelUse::Park | ParcelUse::Residential) {
+        let material = if matches!(parcel.use_type, ParcelUse::Park | ParcelUse::Residential | ParcelUse::Villa | ParcelUse::Farmstead) {
             "parcel.green"
         } else {
             "parcel.paving"
@@ -410,6 +414,11 @@ pub fn build(
             continue;
         }
         builder.ambient_tint = Some(building_tint(building.id));
+        if matches!(building.use_type, ParcelUse::Villa | ParcelUse::Farmstead) {
+            house::house_volume(building, &ring, builder);
+            builder.ambient_tint = None;
+            continue;
+        }
         building_shell(building, &ring, builder);
         builder.ambient_tint = None;
     }

@@ -4,6 +4,7 @@ mod graph;
 mod landscape;
 mod parcels;
 mod roads;
+mod suburb;
 
 pub use graph::junction_trim_m;
 use graph::{GraphOutput, build_graph, legacy_hash, modern_hash, modern_phase};

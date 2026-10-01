@@ -51,6 +51,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         city.nodes.len(), city.sd_roads.len(), city.blocks.len(), city.parcels.len(), city.buildings.len()
     );
 
+    let count = |u: urban::ParcelUse| city.parcels.iter().filter(|p| p.use_type == u).count();
+    eprintln!(
+        "  parcels: villa {}, farmstead {}, residential {}, commercial {}, mixed {}, civic {}, park {}",
+        count(urban::ParcelUse::Villa),
+        count(urban::ParcelUse::Farmstead),
+        count(urban::ParcelUse::Residential),
+        count(urban::ParcelUse::Commercial),
+        count(urban::ParcelUse::MixedUse),
+        count(urban::ParcelUse::Civic),
+        count(urban::ParcelUse::Park)
+    );
+
     // Bounds from the roads.
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     for n in &city.nodes {
@@ -76,7 +88,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     for b in &city.buildings {
         let pts: Vec<String> = b.footprint.iter().map(|p| { let (x, y) = tx(p); format!("{x:.1},{y:.1}") }).collect();
-        writeln!(svg, r##"<polygon points="{}" fill="#b9a99a" stroke="#8d7f73" stroke-width="0.3"/>"##, pts.join(" "))?;
+        let fill = match b.use_type {
+            urban::ParcelUse::Villa => "#d9895a",
+            urban::ParcelUse::Farmstead => "#a8552e",
+            _ => "#b9a99a",
+        };
+        writeln!(svg, r##"<polygon points="{}" fill="{fill}" stroke="#8d7f73" stroke-width="0.3"/>"##, pts.join(" "))?;
     }
     let mut roads: Vec<_> = city.hd_roads.iter().collect();
     roads.sort_by_key(|r| std::cmp::Reverse(r.class as u8));

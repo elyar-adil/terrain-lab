@@ -14,6 +14,7 @@ use super::geom::{
     signed_area,
 };
 use super::graph::{QUAY_OFF_M, modern_hash};
+use super::suburb;
 use crate::model::cross_section;
 use crate::{
     BuildingFacade, ModernBuilding, ModernRoadClass, Parcel, ParcelUse, Point, RoofStyle, SdNode,
@@ -40,7 +41,7 @@ const BUILDING_LINE_M: f32 = 1.5;
 const RIVER_BANK_M: f32 = 4.0;
 
 /// Distance from a street centreline to the nearest permitted wall.
-fn right_of_way(class: ModernRoadClass) -> f32 {
+pub(super) fn right_of_way(class: ModernRoadClass) -> f32 {
     let s = cross_section(class);
     s.width_metres * 0.5 + s.sidewalk_metres + BUILDING_LINE_M
 }
@@ -88,7 +89,16 @@ pub(super) fn build_parcels(
         // How built-up this block is: 1 in the town, thinning to scattered houses
         // at the edge, where buildings are also lower and more widely spaced.
         let built = frame.urbanness(centre.0, centre.1);
-        if frame.organic_footprint && built < 0.06 {
+        // A big face of the country can have its middle in the fields and its
+        // edge in the suburb: judge it by the most built-up place on its boundary.
+        let face_built = if frame.external.is_some() {
+            face.ring.iter().fold(built, |m, p| m.max(frame.urbanness(p.0, p.1)))
+        } else {
+            built
+        };
+        if frame.organic_footprint
+            && face_built < if frame.external.is_some() { suburb::OPEN_BUILT } else { 0.06 }
+        {
             continue;
         }
         if signed_area(&face.ring) < 900.0 {
@@ -170,6 +180,31 @@ pub(super) fn build_parcels(
         }
         // Parcels reference the block that contains their envelope.
         let block_base = (blocks.len() - block_rings.len()) as u32;
+
+        // Outside the town proper, houses follow the streets instead of filling
+        // the block: the suburb, then the farmsteads.
+        if frame.external.is_some() && built < suburb::TOWN_BUILT {
+            suburb::place_frontage(
+                &suburb::Frontage {
+                    frame,
+                    face,
+                    face_index: fi,
+                    envelopes: &envelopes,
+                    spurs: &spurs,
+                    river: &river_local,
+                    river_half,
+                    seed,
+                    block_base,
+                },
+                &mut suburb::Sink {
+                    parcels: &mut parcels,
+                    buildings: &mut buildings,
+                    next_parcel: &mut next_parcel,
+                    next_building: &mut next_building,
+                },
+            );
+            continue;
+        }
 
         let block_noise = modern_hash(seed, fi, 0, 701);
         let face_area = signed_area(&face.ring);
@@ -327,8 +362,10 @@ pub(super) fn build_parcels(
                         ParcelUse::Commercial => procedural::FacadeKind::CurtainWall,
                         ParcelUse::MixedUse => procedural::FacadeKind::ConcreteGlass,
                         ParcelUse::Civic => procedural::FacadeKind::StoneCivic,
-                        ParcelUse::Residential => procedural::FacadeKind::Residential,
-                        ParcelUse::Park => procedural::FacadeKind::Residential,
+                        ParcelUse::Residential
+                        | ParcelUse::Villa
+                        | ParcelUse::Farmstead
+                        | ParcelUse::Park => procedural::FacadeKind::Residential,
                     };
                     let mut floors = floors;
                     // On a landscape the town grew on its own, a village is low and only a
@@ -552,7 +589,7 @@ pub(super) fn build_parcels(
                             }
                         }
                     }
-                    ParcelUse::Park => {}
+                    ParcelUse::Park | ParcelUse::Villa | ParcelUse::Farmstead => {}
                 }
             }
         }

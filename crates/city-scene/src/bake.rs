@@ -29,6 +29,9 @@ pub fn standard_set(facade_size: usize, ground_size: usize) -> Vec<BakedTexture>
     let mut set = facade_textures(facade_size);
     set.extend(ground_floor_textures(ground_size));
     set.push(roof_texture(ground_size));
+    for covering in crate::facades::RoofCovering::ALL {
+        set.push(crate::facades::pitched_roof_texture(covering, ground_size));
+    }
     set.push(asphalt_texture(ground_size));
     set.push(paving_texture(ground_size));
     set.push(grass_texture(ground_size));
