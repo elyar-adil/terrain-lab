@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             _ => Landform::Plains,
         },
         grid_size: grid,
-        world_size_km: 80.0,
+        world_size_km: env::var("WORLD_KM").ok().and_then(|s| s.parse().ok()).unwrap_or(80.0),
         rainfall: 1275.0,
         evaporation: 600.0,
         wind_speed: 7.0,
