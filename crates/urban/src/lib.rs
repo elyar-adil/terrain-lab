@@ -15,7 +15,10 @@ pub use model::{
     TreeSpecies, TrafficRules, TurnArrow, UrbanBlock, UrbanModel, cross_section, measure,
     sample_action, synthesize_junction,
 };
-pub use modern::{generate_modern_chinese_city, hash_u32};
+pub use modern::{
+    REGIONAL_ROAD_HANDOVER, RegionalApproach, generate_modern_chinese_city, generate_modern_chinese_city_with_approaches,
+    hash_u32,
+};
 
 /// Public style dispatcher. Modern Chinese generation stays in `modern`,
 /// legacy styles stay in `legacy`, and this API layer is the only place that
@@ -221,5 +224,79 @@ mod tests {
                 .first()
                 .map(|building| building.height_metres.to_bits())
         );
+    }
+
+    #[test]
+    fn a_regional_road_enters_town_as_the_same_road() {
+        let spec = ModernChinaSpec {
+            centre: Point { x_km: 10.0, y_km: 10.0 },
+            radius_km: 1.2,
+            seed: 7,
+            ..ModernChinaSpec::default()
+        };
+        // Roads reach the town from the west and the south and stop in the middle.
+        let road = |dx: f32, dy: f32| RegionalApproach {
+            class: ModernRoadClass::Arterial,
+            path_km: (0..=40)
+                .map(|i| {
+                    let t = i as f32 / 40.0;
+                    Point {
+                        x_km: spec.centre.x_km - dx * (1.0 - t),
+                        y_km: spec.centre.y_km - dy * (1.0 - t),
+                    }
+                })
+                .collect(),
+        };
+        let approaches = [road(3.0, 0.4), road(-0.3, 3.0)];
+        let city = generate_modern_chinese_city_with_approaches(spec, &approaches);
+        let plain = generate_modern_chinese_city(spec);
+        assert_ne!(city.sd_roads.len(), plain.sd_roads.len());
+
+        let ring_m = spec.radius_km * 1000.0;
+        for approach in &approaches {
+            // Where the road crosses the outer ring, there must be a street node
+            // within a junction's width, and an arterial leaving it.
+            let r = |p: Point| (p.x_km - spec.centre.x_km).hypot(p.y_km - spec.centre.y_km) * 1000.0;
+            let entry = approach
+                .path_km
+                .windows(2)
+                .find_map(|w| {
+                    (r(w[0]) > ring_m && r(w[1]) <= ring_m).then(|| {
+                        let t = (r(w[0]) - ring_m) / (r(w[0]) - r(w[1]));
+                        Point {
+                            x_km: w[0].x_km + (w[1].x_km - w[0].x_km) * t,
+                            y_km: w[0].y_km + (w[1].y_km - w[0].y_km) * t,
+                        }
+                    })
+                })
+                .expect("road crosses the ring");
+            // An arterial street must leave the ring right at the entry and run inward.
+            let to_entry = |n: &SdNode| (n.point.x_km - entry.x_km).hypot(n.point.y_km - entry.y_km) * 1000.0;
+            let from_centre = |n: &SdNode| (n.point.x_km - spec.centre.x_km).hypot(n.point.y_km - spec.centre.y_km) * 1000.0;
+            let found = city.sd_roads.iter().any(|r| {
+                if r.class != ModernRoadClass::Arterial {
+                    return false;
+                }
+                let (a, b) = (&city.nodes[r.from as usize], &city.nodes[r.to as usize]);
+                let (outer, inner) = if from_centre(a) > from_centre(b) { (a, b) } else { (b, a) };
+                to_entry(outer) < 40.0 && from_centre(inner) < from_centre(outer) - 20.0
+            });
+            assert!(found, "no arterial street leaves the ring at the regional road's entry");
+        }
+        // One connected network: every road reaches every other.
+        let mut parent: Vec<usize> = (0..city.nodes.len()).collect();
+        fn root(p: &mut [usize], mut x: usize) -> usize {
+            while p[x] != x {
+                p[x] = p[p[x]];
+                x = p[x];
+            }
+            x
+        }
+        for r in &city.sd_roads {
+            let (a, b) = (root(&mut parent, r.from as usize), root(&mut parent, r.to as usize));
+            parent[a] = b;
+        }
+        let first = root(&mut parent, city.sd_roads[0].from as usize);
+        assert!(city.sd_roads.iter().all(|r| root(&mut parent, r.to as usize) == first));
     }
 }

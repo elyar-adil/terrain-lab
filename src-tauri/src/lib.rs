@@ -75,27 +75,44 @@ struct RenderRoad {
     path_km: Vec<[f32; 2]>,
 }
 
-fn render_roads(infrastructure: &InfrastructureData) -> Vec<RenderRoad> {
+/// Regional roads in world kilometres, minus the stretch inside every town: a
+/// town's own street plan carries the road through, so drawing the regional
+/// polyline there as well put two disagreeing road networks on top of each other.
+fn regional_road_pieces(infrastructure: &InfrastructureData) -> Vec<(&infrastructure::Road, Vec<[f32; 2]>)> {
     let grid = infrastructure.urban_land.grid;
     let denominator = (grid.size - 1) as f32;
-    infrastructure
-        .roads
-        .iter()
-        .map(|road| RenderRoad {
+    let footprints = infrastructure.footprints();
+    let mut out = Vec::new();
+    for road in &infrastructure.roads {
+        let path_km: Vec<[f32; 2]> = road
+            .path
+            .iter()
+            .map(|point| {
+                [
+                    point.x as f32 / denominator * grid.world_size_km,
+                    point.y as f32 / denominator * grid.world_size_km,
+                ]
+            })
+            .collect();
+        for piece in infrastructure::clip_outside_footprints(&path_km, &footprints) {
+            out.push((road, piece));
+        }
+    }
+    out
+}
+
+fn render_roads(infrastructure: &InfrastructureData) -> Vec<RenderRoad> {
+    regional_road_pieces(infrastructure)
+        .into_iter()
+        .map(|(road, path_km)| RenderRoad {
             id: road.id,
             class: road.class,
             profile: road.class.profile(),
-            length_km: road.length_km,
-            path_km: road
-                .path
-                .iter()
-                .map(|point| {
-                    [
-                        point.x as f32 / denominator * grid.world_size_km,
-                        point.y as f32 / denominator * grid.world_size_km,
-                    ]
-                })
-                .collect(),
+            length_km: path_km
+                .windows(2)
+                .map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]))
+                .sum(),
+            path_km,
         })
         .collect()
 }
@@ -526,7 +543,8 @@ fn composite_world_surface(
     let scale_x = (width - 1) as f32 / (terrain.size - 1) as f32;
     let scale_y = (height - 1) as f32 / (terrain.size - 1) as f32;
     let metres_per_pixel = world_km * 1000.0 / width.max(height) as f32;
-    for road in &infrastructure.roads {
+    let world_km_for_roads = infrastructure.urban_land.grid.world_size_km;
+    for (road, piece) in regional_road_pieces(infrastructure) {
         let width_metres = road.class.profile().carriageway_width_metres;
         let road_color = match road.class {
             infrastructure::RoadClass::Motorway => [145.0, 143.0, 136.0],
@@ -536,10 +554,14 @@ fn composite_world_surface(
             infrastructure::RoadClass::Rural => [118.0, 109.0, 91.0],
         };
         let width_pixels = width_metres / metres_per_pixel;
-        let mut centreline: Vec<(f32, f32)> = road
-            .path
+        let mut centreline: Vec<(f32, f32)> = piece
             .iter()
-            .map(|point| (point.x as f32 * scale_x, point.y as f32 * scale_y))
+            .map(|point| {
+                (
+                    point[0] / world_km_for_roads * (terrain.size - 1) as f32 * scale_x,
+                    point[1] / world_km_for_roads * (terrain.size - 1) as f32 * scale_y,
+                )
+            })
             .collect();
         for _ in 0..3 {
             if centreline.len() < 3 {

@@ -99,7 +99,30 @@ impl CityFrame {
     }
 }
 
+/// Fraction of a city's radius inside which its own street plan owns every
+/// regional road, and outside which the regional renderer does.  The city plans
+/// each road from the ring in to a little *deeper* than this, so the two overlap
+/// on the same line and a road that grazes the edge of town still has a drawer.
+pub const REGIONAL_ROAD_HANDOVER: f32 = 0.9;
+
+/// A regional road as the world planner routed it: a polyline in world
+/// kilometres (the same frame as `ModernChinaSpec::centre`).  The city clips it
+/// to its outer ring and plans the part inside as one of its own streets, so a
+/// road that arrives at the edge of town is the same road inside it.
+#[derive(Debug, Clone)]
+pub struct RegionalApproach {
+    pub class: crate::ModernRoadClass,
+    pub path_km: Vec<Point>,
+}
+
 pub fn generate_modern_chinese_city(spec: ModernChinaSpec) -> ModernCity {
+    generate_modern_chinese_city_with_approaches(spec, &[])
+}
+
+pub fn generate_modern_chinese_city_with_approaches(
+    spec: ModernChinaSpec,
+    approaches: &[RegionalApproach],
+) -> ModernCity {
     let frame = CityFrame::new(spec);
     let GraphOutput {
         nodes,
@@ -107,7 +130,7 @@ pub fn generate_modern_chinese_city(spec: ModernChinaSpec) -> ModernCity {
         hd_roads,
         river,
         morphology_score,
-    } = build_graph(&frame);
+    } = build_graph(&frame, approaches);
     let ParcelOutput {
         blocks,
         parcels,
