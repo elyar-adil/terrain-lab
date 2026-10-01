@@ -49,6 +49,25 @@ pub trait WaterField: Send + Sync {
     }
 }
 
+/// How built-up a place is, from 0 (open country) to 1 (the dense core of a city).
+///
+/// One number is deliberately all the roads layer needs to decide how fine its
+/// street grid is and whether a road is a country road or a city street. A
+/// settlement layer, a land-use map or a hand-painted mask can all supply it.
+pub trait UrbanField: Send + Sync {
+    fn urbanness(&self, p: V2) -> f64;
+}
+
+/// The same everywhere.
+#[derive(Debug, Clone, Copy)]
+pub struct ConstantUrban(pub f64);
+
+impl UrbanField for ConstantUrban {
+    fn urbanness(&self, _: V2) -> f64 {
+        self.0
+    }
+}
+
 /// Flat ground at a fixed height. The terrain a standalone consumer uses.
 #[derive(Debug, Clone, Copy)]
 pub struct FlatGround(pub f64);

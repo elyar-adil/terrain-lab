@@ -15,6 +15,7 @@ pub mod cell;
 pub mod edge;
 pub mod engine;
 pub mod hash;
+pub mod noise;
 pub mod seed;
 
 pub use cell::{Cell, Frame, Rect};

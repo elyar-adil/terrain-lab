@@ -15,7 +15,7 @@ pub mod geom;
 pub mod network;
 pub mod road;
 
-pub use field::{DryLand, FlatGround, HeightField, PolylineRiver, WaterField, WaterHit};
+pub use field::{ConstantUrban, DryLand, FlatGround, HeightField, PolylineRiver, UrbanField, WaterField, WaterHit};
 pub use geom::{Polyline, V2, closest_on_segment, segment_intersection, v2};
 pub use network::{Conflict, EdgeId, NodeId, NodeKind, RoadEdge, RoadNetwork, RoadNode, RoadTile, Span, SpanKind};
 pub use road::{CrossSection, RoadClass, Setting, cross_section, junction_trim_m};
