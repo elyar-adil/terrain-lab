@@ -32,6 +32,8 @@ pub fn bend(fabric: Seed, cfg: &RoadsConfig, a: V2, b: V2, edge_key: u64, wiggle
     let n = ((len / cfg.sample_step_m).ceil() as usize).max(2);
     let side = (b - a).norm().perp();
     let noise_seed = fabric.derive("wiggle").derive_u64(edge_key);
+    // A short road cannot wander far without kinking.
+    let wiggle_scale = wiggle_scale.min(0.05 * len);
     let mut points = Vec::with_capacity(n + 1);
     points.push(warp(fabric, cfg, a));
     for k in 1..n {

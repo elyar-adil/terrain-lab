@@ -21,7 +21,7 @@ use worldgen_contracts::{NodeId, UrbanField, V2, segment_intersection};
 use worldgen_core::hash::{hash_words, to_unit};
 use worldgen_core::{Cell, Context, Dependency, Error, Layer, LayerId, Seed};
 
-use crate::config::RoadsConfig;
+use crate::config::{LEVELS, RoadsConfig, TOP_RUNG};
 use crate::lattice::{CHORDS, CellChords, Chord, corner, corner_id, fabric_seed, make_chord_below};
 
 pub const QUADS: LayerId = LayerId("roads.quads");
@@ -29,7 +29,7 @@ pub const QUADS: LayerId = LayerId("roads.quads");
 /// How likely a street of each rung is to be built where its divisions match.
 /// The finest streets are the ones most often left out, which is what gives a
 /// town blocks of different sizes instead of one uniform grid.
-const PRESENT: [f64; 4] = [0.8, 0.92, 0.985, 1.0];
+const PRESENT: [f64; 5] = [0.78, 0.88, 0.95, 0.99, 1.0];
 
 /// One road between two nodes inside a quadrilateral, before the grid is bent.
 #[derive(Debug, Clone, PartialEq)]
@@ -108,7 +108,7 @@ impl Layer for QuadLayer {
                 chord: c,
                 used: BTreeSet::new(),
                 crossings: Vec::new(),
-                rung: 3,
+                rung: TOP_RUNG,
                 start: NodeId(0),
                 end: NodeId(0),
             });
@@ -120,9 +120,9 @@ impl Layer for QuadLayer {
             right: FaceSide { chord: 1, t0: 0.0, t1: 1.0, forward: true },
             top: FaceSide { chord: 2, t0: 0.0, t1: 1.0, forward: true },
             left: FaceSide { chord: 3, t0: 0.0, t1: 1.0, forward: true },
-            finest: 3,
+            finest: TOP_RUNG,
         };
-        build.expand(root, 3);
+        build.expand(root, TOP_RUNG as i8);
         let used = |k: usize| build.chords[k].used.iter().copied().collect::<Vec<_>>();
         let (used_bottom, used_right, used_top, used_left) = (used(0), used(1), used(2), used(3));
         let edges = build.edges();
@@ -314,6 +314,10 @@ impl Build<'_> {
             if to_unit(hash_words(&[self.fabric.0, id, 0x9E])) >= PRESENT[usize::from(rung)] {
                 continue;
             }
+            // A street through open country is not a street, however its ends came to match.
+            if !self.is_built_along(df.pos, dt.pos, rung) {
+                continue;
+            }
             let chord = make_chord_below(self.fabric, self.urban, id, df.pos, dt.pos, i8::try_from(rung).unwrap() - 1);
             out.push(Street {
                 chord,
@@ -327,6 +331,20 @@ impl Build<'_> {
             });
         }
         out
+    }
+
+    /// Is most of the straight line `a`-`b` somewhere a street of this rung belongs?
+    fn is_built_along(&self, a: V2, b: V2, rung: u8) -> bool {
+        let spec = &LEVELS[usize::from(rung)];
+        if spec.min_urban <= 0.0 {
+            return true;
+        }
+        let n = ((a.dist(b) / 60.0).ceil() as usize).max(2);
+        // A little slack: a street along the edge of a town belongs to it.
+        let built = (0..=n)
+            .filter(|&k| self.urban.urbanness(a.lerp(b, k as f64 / n as f64)) >= 0.7 * spec.min_urban)
+            .count();
+        built * 2 >= n + 1
     }
 
     /// Make streets part of the world: record the divisions they use, and drop the

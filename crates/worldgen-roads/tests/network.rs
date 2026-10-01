@@ -236,7 +236,7 @@ fn city_blocks_have_a_realistic_size_and_most_of_a_block_is_not_a_sliver() {
         for di in -1..=1 {
             let q = e.get::<Quad>(QUADS, cell.neighbour(di, dj)).unwrap();
             for b in &q.blocks {
-                if b.rung > 1 {
+                if b.rung > 2 {
                     continue; // only blocks of the town's own streets
                 }
                 let c = b.corners;

@@ -12,7 +12,7 @@ use worldgen_contracts::{
 };
 use worldgen_core::{Cell, Context, Dependency, Error, Layer, LayerId, Seed};
 
-use crate::config::{Fields, RoadsConfig};
+use crate::config::{Fields, RoadsConfig, TOP_RUNG};
 use crate::lattice::{CHORDS, CellChords, Chord, corner, corner_id, fabric_seed};
 use crate::quad::{QUADS, Quad};
 use crate::shape::{bend, warp};
@@ -39,11 +39,12 @@ struct Vertex {
 }
 
 fn level_class(level: u8) -> RoadClass {
-    match level {
-        3 => RoadClass::Arterial,
-        2 => RoadClass::Collector,
-        1 => RoadClass::Local,
-        _ => RoadClass::Service,
+    match TOP_RUNG.saturating_sub(level) {
+        0 => RoadClass::Arterial,
+        1 => RoadClass::Collector,
+        2 => RoadClass::Local,
+        3 => RoadClass::Service,
+        _ => RoadClass::Track,
     }
 }
 
@@ -180,7 +181,7 @@ fn chord_edges(b: &mut Builder<'_>, chord: &Chord, from: Vertex, to: Vertex, sid
     let mut chain = vec![from];
     chain.extend(used.iter().map(|&k| Vertex { id: chord.divisions[k].id, pos: chord.divisions[k].pos }));
     chain.push(to);
-    b.chain(&chain, chord.id, 3);
+    b.chain(&chain, chord.id, TOP_RUNG);
 }
 
 fn interior(b: &mut Builder<'_>, quad: &Quad) {

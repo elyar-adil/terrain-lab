@@ -18,7 +18,7 @@ use worldgen_contracts::{NodeId, UrbanField, V2, v2};
 use worldgen_core::hash::{hash_str, hash_words, to_unit};
 use worldgen_core::{Cell, Context, Dependency, Error, Frame, Layer, LayerId, Seed};
 
-use crate::config::{LEVELS, RoadsConfig, spacing};
+use crate::config::{LEVELS, RoadsConfig, TOP_RUNG, spacing};
 
 pub const CHORDS: LayerId = LayerId("roads.chords");
 
@@ -108,7 +108,7 @@ impl Layer for ChordLayer {
 /// Divide a chord at every rung. A pure function of the chord's ends, its id and
 /// the urban field.
 pub(crate) fn make_chord(fabric: Seed, urban: &dyn UrbanField, id: u64, a: V2, b: V2) -> Chord {
-    make_chord_below(fabric, urban, id, a, b, 3)
+    make_chord_below(fabric, urban, id, a, b, TOP_RUNG as i8)
 }
 
 /// Divide a chord at rungs up to and including `top_rung`. A street of rung `r`
@@ -117,13 +117,50 @@ pub(crate) fn make_chord_below(fabric: Seed, urban: &dyn UrbanField, id: u64, a:
     let len = a.dist(b);
     let n = ((len / 14.0).ceil() as usize).max(4);
     let step = len / n as f64;
-    let u: Vec<f64> = (0..n).map(|k| urban.urbanness(a.lerp(b, (k as f64 + 0.5) / n as f64))).collect();
+    let raw: Vec<f64> = (0..=n).map(|k| urban.urbanness(a.lerp(b, k as f64 / n as f64))).collect();
+    // How built up it is for a given rung: the most built-up point within the
+    // rung's reach. Evaluated every few steps and interpolated between, since the
+    // reach-wide maximum varies slowly.
+    let reached = |spec: &crate::config::LevelSpec| -> Vec<f64> {
+        if spec.reach_m <= 0.0 {
+            return raw.clone();
+        }
+        let stride = ((spec.reach_m / 28.0).ceil() as usize).max(1);
+        let anchors: Vec<usize> = (0..=n).step_by(stride).chain(std::iter::once(n)).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+        let values: Vec<f64> = anchors
+            .iter()
+            .map(|&k| {
+                let p = a.lerp(b, k as f64 / n as f64);
+                (0..8).fold(raw[k], |best, d| {
+                    best.max(urban.urbanness(p + v2(0.0, 0.0) + V2::from_angle(d as f64 * std::f64::consts::FRAC_PI_4) * spec.reach_m))
+                })
+            })
+            .collect();
+        (0..=n)
+            .map(|k| {
+                let hi = anchors.partition_point(|&x| x < k).min(anchors.len() - 1);
+                let lo = hi.saturating_sub(1);
+                if anchors[hi] == anchors[lo] {
+                    return values[hi].max(raw[k]);
+                }
+                let t = (k - anchors[lo]) as f64 / (anchors[hi] - anchors[lo]) as f64;
+                (values[lo] + (values[hi] - values[lo]) * t).max(raw[k])
+            })
+            .collect()
+    };
 
     let mut kept: Vec<Division> = Vec::new();
     for spec in LEVELS.iter().rev().filter(|s| i8::try_from(s.level).unwrap() <= top_rung) {
         // Cumulative count of this rung's streets along the chord.
+        let built = reached(spec);
+        let at = |t: f64| {
+            let x = t * n as f64;
+            let k = (x.floor() as usize).min(n - 1);
+            built[k] + (built[k + 1] - built[k]) * (x - k as f64)
+        };
         let mut cumulative = vec![0.0];
-        for &urbanness in &u {
+        for k in 0..n {
+            let urbanness = 0.5 * (built[k] + built[k + 1]);
             let per_metre = spacing(spec, urbanness).map_or(0.0, |s| 1.0 / s);
             cumulative.push(cumulative.last().unwrap() + step * per_metre);
         }
@@ -131,7 +168,7 @@ pub(crate) fn make_chord_below(fabric: Seed, urban: &dyn UrbanField, id: u64, a:
         let mut m = 0_u64;
         loop {
             let jitter = to_unit(hash_words(&[fabric.0, id, u64::from(spec.level), m, 0xD1]));
-            let target = m as f64 + 0.5 + (jitter - 0.5) * 0.6;
+            let target = m as f64 + 0.5 + (jitter - 0.5) * 0.45;
             if target >= total {
                 break;
             }
@@ -143,7 +180,7 @@ pub(crate) fn make_chord_below(fabric: Seed, urban: &dyn UrbanField, id: u64, a:
             }
             let t = (k as f64 + (target - cumulative[k]) / span) / n as f64;
             let pos = a.lerp(b, t);
-            let local = spacing(spec, urban.urbanness(pos)).unwrap_or(spec.base_spacing_m);
+            let local = spacing(spec, at(t)).unwrap_or(spec.base_spacing_m);
             let from_ends = (t * len).min((1.0 - t) * len);
             if from_ends < (0.22 * local).max(16.0) {
                 continue;
@@ -181,13 +218,13 @@ mod tests {
         let country = chord(0.0, 2048.0);
         assert!(town.divisions.len() > 8 * country.divisions.len().max(1), "{} vs {}", town.divisions.len(), country.divisions.len());
         // The countryside only has the coarsest rung.
-        assert!(country.divisions.iter().all(|d| d.level == 3));
+        assert!(country.divisions.iter().all(|d| d.level == TOP_RUNG));
         // A town has all four.
-        for level in 0..4 {
+        for level in 0..=TOP_RUNG {
             assert!(town.divisions.iter().any(|d| d.level == level), "no level {level}");
         }
         // Dropping the finer rungs leaves exactly the coarser divisions, unmoved.
-        let coarse: Vec<_> = town.divisions.iter().filter(|d| d.level >= 2).collect();
+        let coarse: Vec<_> = town.divisions.iter().filter(|d| d.level >= 3).collect();
         assert!(coarse.len() < town.divisions.len());
     }
 
@@ -206,9 +243,9 @@ mod tests {
     #[test]
     fn dense_spacing_is_close_to_the_specification_and_no_two_streets_are_on_top_of_each_other() {
         let town = chord(1.0, 4096.0);
-        let lanes: Vec<_> = town.divisions.iter().filter(|d| d.level == 1).collect();
+        let lanes: Vec<_> = town.divisions.iter().filter(|d| d.level == 2).collect();
         let mean = 4096.0 / lanes.len() as f64;
-        assert!((100.0..260.0).contains(&mean), "level-1 mean spacing {mean}");
+        assert!((180.0..520.0).contains(&mean), "rung-2 mean spacing {mean}");
         let min_gap = town.divisions.windows(2).map(|w| (w[1].t - w[0].t) * town.len).fold(f64::INFINITY, f64::min);
         assert!(min_gap > 14.0, "two divisions {min_gap} m apart");
     }
