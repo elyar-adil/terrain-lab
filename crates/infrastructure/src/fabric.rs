@@ -360,6 +360,17 @@ impl WorldFabric {
         let (centre, radius) = (self.centre_m(settlement), self.radius_m(settlement) * 1.35);
         let net = self.network(centre, radius + 600.0)?;
         let urban_field = self.urban.clone();
+        // The waterways through the town: the longest is the river, the rest are
+        // drawn as tributaries; a creek too narrow to see is stepped over, not bridged.
+        let mut waterways: Vec<(Polyline, f64)> =
+            self.rivers.through(centre, radius).into_iter().filter(|(_, width)| *width >= 9.0).collect();
+        waterways.sort_by(|a, b| b.0.length().total_cmp(&a.0.length()));
+        let over_drawn_water = |edge: &worldgen_contracts::RoadEdge| {
+            edge.spans.iter().any(|span| {
+                let mid = span.from.lerp(span.to, 0.5);
+                waterways.iter().any(|(line, width)| line.closest(mid).is_some_and(|(d, _)| d < width * 0.5 + 14.0))
+            })
+        };
         let mut node_points: std::collections::HashMap<u64, urban::Point> = std::collections::HashMap::new();
         let km = |p: V2| urban::Point { x_km: (p.x / 1000.0) as f32, y_km: (p.y / 1000.0) as f32 };
         let mut roads = Vec::new();
@@ -395,25 +406,22 @@ impl WorldFabric {
                         from,
                         to,
                         class: modern_road_class(edge.class),
-                        bridge: !edge.spans.is_empty(),
+                        bridge: over_drawn_water(edge),
                         centreline: run.0.iter().map(|p| km(*p)).collect(),
                     });
                 }
             }
         }
         let nodes = node_points.into_iter().map(|(id, point)| urban::ExternalNode { id, point }).collect();
-        // The river that runs through the town: the longest piece inside the circle.
-        let (river, river_width_m) = self
-            .rivers
-            .through(centre, radius)
-            .into_iter()
-            .max_by(|a, b| a.0.length().total_cmp(&b.0.length()))
-            .map_or((Vec::new(), 0.0), |(line, width)| (line.0.iter().map(|p| km(*p)).collect(), width as f32));
+        let to_km = |line: &Polyline| -> Vec<urban::Point> { line.0.iter().map(|p| km(*p)).collect() };
+        let mut waterways = waterways.into_iter();
+        let (river, river_width_m) = waterways.next().map_or((Vec::new(), 0.0), |(line, width)| (to_km(&line), width as f32));
+        let tributaries: Vec<(Vec<urban::Point>, f32)> = waterways.map(|(line, width)| (to_km(&line), width as f32)).collect();
         let (u2, i2) = (self.urban.clone(), self.urban.clone());
         let fields = urban::ExternalFields {
             urbanness: Box::new(move |p| u2.urbanness(v2(f64::from(p.x_km) * 1000.0, f64::from(p.y_km) * 1000.0)) as f32),
             intensity: Box::new(move |p| i2.intensity(v2(f64::from(p.x_km) * 1000.0, f64::from(p.y_km) * 1000.0)) as f32),
         };
-        Ok(TownStreets { streets: urban::ExternalStreets { nodes, roads, river }, fields, river_width_m })
+        Ok(TownStreets { streets: urban::ExternalStreets { nodes, roads, river, tributaries }, fields, river_width_m })
     }
 }

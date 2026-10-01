@@ -13,6 +13,8 @@ use terrain_core::TerrainData;
 use world_core::WorldGrid;
 use worldgen_contracts::{Polyline, V2, WaterField, WaterHit, closest_on_segment, v2};
 use worldgen_core::hash::hash_words;
+use worldgen_core::noise::fbm;
+use worldgen_core::Seed;
 use worldgen_roads::shape::round_corners;
 
 /// Height below which the ground is sea, metres.
@@ -119,6 +121,7 @@ impl Rivers {
                 out
             };
             let id = hash_words(&[cells[0] as u64, cells.len() as u64, 0x817E]);
+            let (line, width) = meander(&line, &width, Seed::new(id));
             rivers.push(River { id, line, width });
         }
         let mut index: HashMap<(i64, i64), Vec<(usize, usize)>> = HashMap::new();
@@ -197,6 +200,36 @@ impl Rivers {
         }
         out
     }
+}
+
+/// A river runs through its valley in bends much finer than a grid of hundreds of
+/// metres can show. Add them: a lateral wander whose wavelength and amplitude
+/// scale with the width (meander wavelength is about eleven channel widths), tapered
+/// to nothing at both ends so a tributary still reaches the river it joins.
+fn meander(line: &Polyline, width: &[f64], seed: Seed) -> (Polyline, Vec<f64>) {
+    let total = line.length();
+    if total < 100.0 || line.0.len() < 2 {
+        return (line.clone(), width.to_vec());
+    }
+    let mean = width.iter().sum::<f64>() / width.len().max(1) as f64;
+    let step = (mean * 0.9).clamp(18.0, 60.0);
+    let n = (total / step).ceil() as usize;
+    let mut points = Vec::with_capacity(n + 1);
+    let mut widths = Vec::with_capacity(n + 1);
+    for k in 0..=n {
+        let s = total * k as f64 / n as f64;
+        let Some((p, tangent)) = line.at(s) else { continue };
+        // Width here, by arc fraction through the original vertices.
+        let f = (s / total * (width.len() - 1) as f64).clamp(0.0, (width.len() - 1) as f64);
+        let (lo, hi) = (f.floor() as usize, (f.ceil() as usize).min(width.len() - 1));
+        let w = width[lo] + (width[hi] - width[lo]) * (f - lo as f64);
+        let (wavelength, amplitude) = ((11.0 * w).clamp(90.0, 1200.0), (2.0 * w).clamp(5.0, 70.0));
+        let taper = ((s / 220.0).min(1.0) * ((total - s) / 220.0).min(1.0)).clamp(0.0, 1.0);
+        let wander = (fbm(seed, s / wavelength, 0.37, 2, 0.5) - 0.5) * 2.0;
+        points.push(p + tangent.perp() * (wander * amplitude * taper));
+        widths.push(w);
+    }
+    (Polyline(points), widths)
 }
 
 /// Rivers, and the still water of lakes and the sea, as one `WaterField`.

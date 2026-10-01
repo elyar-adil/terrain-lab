@@ -37,6 +37,14 @@ impl CityFrameInfo {
 }
 
 /// Rich output used by the Rust renderer.  `sd` is the city-scale graph,
+/// A waterway besides the main river.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tributary {
+    pub line: Vec<Point>,
+    pub width_metres: f32,
+}
+
 /// `hd` contains physical road cross-sections and centre lines, while blocks,
 /// parcels and buildings retain stable ids for incremental rendering and
 /// inspection.  All fields are deterministic for the same specification.
@@ -58,6 +66,10 @@ pub struct ModernCity {
     pub trees: Vec<TreeInstance>,
     pub river: Option<Vec<Point>>,
     pub river_width_metres: f32,
+    /// Other waterways through the town, each with its own width: a plan made on a
+    /// real landscape has more than one.
+    #[serde(default)]
+    pub tributaries: Vec<Tributary>,
     /// Squared deviation of the SD graph from the realistic Chinese morphology
     /// prior (`MorphologyPrior::default`).  Exposed so callers and tests can
     /// assert a generated plan actually reads like a Chinese street network.

@@ -121,7 +121,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if scene_only {
         let (_result, infrastructure) =
             wind_water_terrain_lab_lib::build_payload(config.clone(), &|_, _| {})?;
-        let scenes: Vec<_> = (0..keep.min(infrastructure.modern_cities.len()))
+        // `--only I` builds just settlement I (a village is a few megabytes, a town
+        // hundreds), which is what a quick look at a plan needs.
+        let indices: Vec<usize> = match flag("--only").and_then(|value| value.parse::<usize>().ok()) {
+            Some(only) => vec![only],
+            None => (0..keep.min(infrastructure.modern_cities.len())).collect(),
+        };
+        let scenes: Vec<_> = indices
+            .into_iter()
             .filter_map(|index| infrastructure.build_city_scene(index))
             .collect();
         for (index, scene) in scenes.iter().enumerate() {

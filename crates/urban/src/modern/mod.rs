@@ -303,6 +303,7 @@ pub fn generate_modern_chinese_city_with_options(
         trees,
         river: Some(river),
         river_width_metres: frame.river_half * 2.0,
+        tributaries: Vec::new(),
         morphology_score,
     }
 }
@@ -316,6 +317,8 @@ pub struct ExternalStreets {
     pub roads: Vec<ExternalRoad>,
     /// The river through the town in world kilometres, source to mouth; may be empty.
     pub river: Vec<Point>,
+    /// Other waterways, each as a line in world kilometres and a width in metres.
+    pub tributaries: Vec<(Vec<Point>, f32)>,
 }
 
 pub struct ExternalNode {
@@ -435,6 +438,11 @@ pub fn generate_modern_chinese_city_from_streets(
         trees,
         river: (!streets.river.is_empty()).then_some(streets.river),
         river_width_metres: frame.river_half * 2.0,
+        tributaries: streets
+            .tributaries
+            .into_iter()
+            .map(|(line, width_metres)| crate::Tributary { line, width_metres })
+            .collect(),
         morphology_score,
     }
 }

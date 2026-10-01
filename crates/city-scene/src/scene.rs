@@ -325,7 +325,7 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
         &mut builder,
     );
 
-    if let Some(river) = city.river.as_deref() {
+    if city.river.is_some() || !city.tributaries.is_empty() {
         // Discs along every river bridge: the quay stops short of them.
         let mut crossings: Vec<(crate::math::Vec2, f32)> = Vec::new();
         for road in network.roads.iter().filter(|road| road.bridge) {
@@ -337,7 +337,12 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
                 station += 6.0;
             }
         }
-        buildings::build_water(river, city.river_width_metres, city.frame, &crossings, &mut builder);
+        if let Some(river) = city.river.as_deref() {
+            buildings::build_water(river, city.river_width_metres, city.frame, &crossings, &mut builder);
+        }
+        for tributary in &city.tributaries {
+            buildings::build_water(&tributary.line, tributary.width_metres, city.frame, &crossings, &mut builder);
+        }
     }
 
     let geometry = builder.build();

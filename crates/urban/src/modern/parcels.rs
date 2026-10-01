@@ -331,6 +331,12 @@ pub(super) fn build_parcels(
                         ParcelUse::Park => procedural::FacadeKind::Residential,
                     };
                     let mut floors = floors;
+                    // On a landscape the town grew on its own, a village is low and only a
+                    // downtown is tall: the storeys a building may have follow how intense
+                    // the development is where it stands.
+                    if frame.external.is_some() {
+                        floors = floors.min((2.0 + 40.0 * centrality.powi(3)) as u16).max(2);
+                    }
                     let mut metrics =
                         procedural::facade_metrics(max_side, max_side * 0.8, floors, facade_kind);
                     let podium_height = podium_floors as f32 * PODIUM_FLOOR_M;

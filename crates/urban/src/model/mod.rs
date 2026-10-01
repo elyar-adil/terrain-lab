@@ -26,4 +26,4 @@ pub use roads::{
     Movement, RoadConnector, RoadCrossSection, SdNode, SdRoad, SignalHead, TurnArrow, cross_section,
 };
 pub use traffic::{ApproachSpec, synthesize_junction};
-pub use scene::{CityFrameInfo, ModernCity};
+pub use scene::{CityFrameInfo, ModernCity, Tributary};

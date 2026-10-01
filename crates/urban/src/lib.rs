@@ -12,7 +12,7 @@ pub use model::{
     ModelWeights, ModernBuilding, ModernChinaSpec, ModernCity, ModernRoadClass, MorphologyPrior,
     MorphologyStats, Movement, Parcel, ParcelUse, Point, RoadConnector, RoadCrossSection, RoofStyle,
     SdNode, SdRoad, SignalHead, SignalStyle, SplitMix64, StreetClass, StreetSegment, TreeInstance,
-    TreeSpecies, TrafficRules, TurnArrow, UrbanBlock, UrbanModel, cross_section, measure,
+    TreeSpecies, TrafficRules, Tributary, TurnArrow, UrbanBlock, UrbanModel, cross_section, measure,
     sample_action, synthesize_junction,
 };
 pub use modern::{
@@ -430,7 +430,7 @@ mod tests {
                 }
             }
         }
-        (ExternalStreets { nodes, roads, river }, half)
+        (ExternalStreets { nodes, roads, river, tributaries: Vec::new() }, half)
     }
 
     #[test]
