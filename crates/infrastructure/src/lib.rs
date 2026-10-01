@@ -1281,12 +1281,15 @@ mod tests {
                         continue;
                     };
                     // The road carries on as a street of its class or better: some
-                    // street of the town's plan passes right through this point.
+                    // street of the town's plan passes through this point. Within
+                    // 45 m, not on it: the planner merges nodes closer than 16 m and
+                    // straightens near-straight chains, so the street can sit a
+                    // few tens of metres off the regional road's own polyline.
                     let class = modern_class(road.class) as i32;
                     let ok = city.sd_roads.iter().any(|r| {
                         let (a, b) = (&city.nodes[r.from as usize].point, &city.nodes[r.to as usize].point);
                         (r.class as i32) <= class
-                            && segment_distance_km(end, [a.x_km, a.y_km], [b.x_km, b.y_km]) * 1000.0 < 30.0
+                            && segment_distance_km(end, [a.x_km, a.y_km], [b.x_km, b.y_km]) * 1000.0 < 45.0
                     });
                     assert!(
                         ok,

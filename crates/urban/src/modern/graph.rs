@@ -51,6 +51,13 @@ impl CityGraph for GraphProbe<'_> {
     }
 }
 
+/// How important a street is: larger is wider and busier. The enum is declared
+/// widest first (`Expressway` is 0), so comparing its discriminant directly picks
+/// the *lowest* class; every "keep the higher class" below goes through this.
+fn importance(class: ModernRoadClass) -> i32 {
+    3 - class as i32
+}
+
 /// Which family a segment came from, kept through planarisation so junction
 /// roles can still be assigned.
 const ORIGIN_GRID: u8 = 4;
@@ -254,15 +261,20 @@ fn tie_run_into_plan(frame: &CityFrame, outer: &[V], pts: &[V], segs: &[Seg], mu
     let zone = frame.river_half + QUAY_OFF_M + 12.0;
     let in_zone = |p: V| (p.0 - frame.river_x(p.1)).abs() <= zone;
     let dry = |p: V| !in_zone(p);
+    // Only an end that lies in the channel itself (where no junction may stand)
+    // is moved to the bank. One merely in the quay zone keeps its place: the road
+    // crosses the water from there as a bridge, and trimming it would drop the
+    // whole crossing and leave a gap between the regional road and the town.
+    let in_channel = |p: V| (p.0 - frame.river_x(p.1)).abs() <= frame.river_half + SNAP_M + 2.0;
     let deeper = frame.radius_m * (super::REGIONAL_ROAD_HANDOVER - 0.03);
     let (mut start_on, mut end_on) = (on_ring(outer, run[0]), on_ring(outer, *run.last().unwrap()));
     // Move river-bound ends to dry land.
     let (mut start_wet, mut end_wet) = (false, false);
-    while run.len() > 2 && in_zone(run[0]) {
+    while run.len() > 2 && in_channel(run[0]) {
         run.remove(0);
         start_wet = true;
     }
-    while run.len() > 2 && in_zone(*run.last().unwrap()) {
+    while run.len() > 2 && in_channel(*run.last().unwrap()) {
         run.pop();
         end_wet = true;
     }
@@ -552,7 +564,7 @@ fn merge_close(pts: &mut Vec<V>, segs: &mut Vec<Seg>) -> bool {
         }
         let key = (a.min(b), a.max(b));
         if let Some(existing) = out.iter_mut().find(|e| (e.a.min(e.b), e.a.max(e.b)) == key) {
-            if (s.class as i32) > (existing.class as i32) {
+            if importance(s.class) > importance(existing.class) {
                 existing.class = s.class;
                 existing.origin = s.origin;
             }
@@ -870,7 +882,7 @@ pub(super) fn build_graph(frame: &CityFrame, approaches: &[super::RegionalApproa
                 continue;
             }
             if seg_intersect(pts[si.a], pts[si.b], pts[sj.a], pts[sj.b]).is_some() {
-                let loser = if (si.class as i32) < (sj.class as i32) { j } else if (sj.class as i32) < (si.class as i32) { i } else if si.origin == ORIGIN_INNER { i } else { j };
+                let loser = if importance(si.class) < importance(sj.class) { j } else if importance(sj.class) < importance(si.class) { i } else if si.origin == ORIGIN_INNER { i } else { j };
                 drop[loser] = true;
             }
         }
@@ -935,7 +947,7 @@ pub(super) fn build_graph(frame: &CityFrame, approaches: &[super::RegionalApproa
             let key = (e.a.min(e.b), e.a.max(e.b));
             match first.get(&key) {
                 Some(&k) => {
-                    if (e.class as i32) > (kept[k].0.class as i32) {
+                    if importance(e.class) > importance(kept[k].0.class) {
                         kept[k] = kept[i];
                     }
                     dead[i] = true;
@@ -984,7 +996,7 @@ pub(super) fn build_graph(frame: &CityFrame, approaches: &[super::RegionalApproa
                 let (s, bridge) = &kept[i];
                 (
                     (s.origin & ORIGIN_APPROACH != 0) as i32,
-                    s.class as i32,
+                    importance(s.class),
                     *bridge as i32,
                     -((pts[s.a].0 - pts[s.b].0).hypot(pts[s.a].1 - pts[s.b].1) * 10.0) as i32,
                 )

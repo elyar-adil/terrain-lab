@@ -13,6 +13,10 @@ name = "render_fixture"
 path = "examples/render_fixture.rs"
 
 [[example]]
+name = "erosion_probe"
+path = "examples/erosion_probe.rs"
+
+[[example]]
 name = "analyze_frames"
 path = "examples/analyze_frames.rs"
 

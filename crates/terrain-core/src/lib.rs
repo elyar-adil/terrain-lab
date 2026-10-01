@@ -8,6 +8,7 @@ use std::{
 use thiserror::Error;
 
 pub mod evolution;
+pub mod fluvial;
 pub mod geology;
 pub mod sites;
 
@@ -195,6 +196,14 @@ impl TerrainPreset {
     }
 }
 
+static FLUVIAL_EROSION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Switch the fluvial landscape evolution pass on or off (on by default). Probes
+/// and tests use it to compare a landscape with and without it.
+pub fn set_fluvial_erosion(enabled: bool) {
+    FLUVIAL_EROSION.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn generate<F>(config: &SimulationConfig, mut progress: F) -> Result<TerrainData, TerrainError>
 where
     F: FnMut(f32, &str),
@@ -326,6 +335,22 @@ where
         });
     geology_model.expose_surface(&height);
 
+    let fluvial_enabled = FLUVIAL_EROSION.load(std::sync::atomic::Ordering::Relaxed);
+    if fluvial_enabled {
+        // The formulas above only plan the large-scale shape; rivers carve the rest.
+        progress(0.10, "河流侵蚀塑造山谷与山脊");
+        let cell_metres = config.world_size_km * 1000.0 / n as f32;
+        fluvial::evolve(
+            &mut height,
+            &geology_model.erosion_resistance,
+            n,
+            cell_metres,
+            config.seed,
+            &mut |fraction| progress(0.10 + 0.10 * fraction, "河流侵蚀塑造山谷与山脊"),
+        );
+        geology_model.expose_surface(&height);
+    }
+
     progress(0.20, "计算迎风降水、温度与地表湿度");
     let mut moisture = vec![0.0_f32; len];
     let mut temperature = vec![0.0_f32; len];
@@ -390,14 +415,16 @@ where
         );
         if iteration < 3 {
             geology_model.expose_surface(&height);
-            erode_channels(
-                &mut height,
-                &flow,
-                &receiver,
-                &geology_model.erosion_resistance,
-                n,
-                preset.erosion,
-            );
+            if !fluvial_enabled {
+                erode_channels(
+                    &mut height,
+                    &flow,
+                    &receiver,
+                    &geology_model.erosion_resistance,
+                    n,
+                    preset.erosion,
+                );
+            }
             breach_overflowing_spillways(&mut height, &filled_height, &flow, &receiver, n);
             diffuse_slopes(&mut height, n, 0.06 + preset.roughness * 0.015);
         }
@@ -482,8 +509,13 @@ where
                     * preset.vegetation_gain
                     * 1.65,
             );
+            // Snow lies where the climate allows it, but it slides off steep
+            // ground, leaving bare rock on ridge flanks and snow on benches and
+            // in gullies. A uniform white mountain is a cone drawn with a rule.
+            let shedding = 1.0 - smoothstep(0.30, 0.80, slope);
             *snow_value = clamp01(
-                (-temperature[index] + 1.5) / 10.0 * preset.snow_gain + height[index] / 9000.0,
+                ((-temperature[index] + 1.5) / 10.0 * preset.snow_gain + height[index] / 9000.0)
+                    * (0.12 + 0.88 * shedding),
             );
             let boundary_water = if height[index] < 58.0 {
                 clamp01((58.0 - height[index]) / 30.0)
