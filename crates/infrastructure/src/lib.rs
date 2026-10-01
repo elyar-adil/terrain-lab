@@ -5,8 +5,8 @@ use std::{cmp::Ordering, collections::BinaryHeap};
 use terrain_core::{SimulationConfig, TerrainData};
 use thiserror::Error;
 use urban::{
-    ModernChinaSpec, ModernCity, ModernRoadClass, Point as UrbanPoint, RegionalApproach,
-    UrbanModel, generate_modern_chinese_city_with_approaches,
+    CityOptions, ModernChinaSpec, ModernCity, ModernRoadClass, Point as UrbanPoint,
+    RegionalApproach, UrbanModel, generate_modern_chinese_city_with_options,
 };
 use world_core::{GridPoint, ScalarLayer, WorldError, WorldGrid};
 
@@ -266,7 +266,7 @@ pub fn generate_infrastructure(
             let radius_km = settlement_radius_km(settlement.class);
             let centre = settlement_centre_km(grid, settlement);
             let approaches = road_approaches(&roads, grid, centre, radius_km);
-            generate_modern_chinese_city_with_approaches(ModernChinaSpec {
+            generate_modern_chinese_city_with_options(ModernChinaSpec {
                 centre,
                 radius_km,
                 rotation_radians: (config.seed ^ settlement.id.wrapping_mul(7919)) as f32
@@ -276,7 +276,7 @@ pub fn generate_infrastructure(
                 block_size_metres: 120.0,
                 organic: 0.68,
                 river_width_metres: 64.0,
-            }, &approaches)
+            }, &approaches, CityOptions { organic_footprint: true })
         })
         .collect();
     let cities = modern_cities.iter().map(ModernCity::urban_model).collect();
@@ -333,9 +333,12 @@ pub fn generate_infrastructure(
 /// neighbourhood dot that vanished at regional zoom.
 fn settlement_radius_km(class: SettlementClass) -> f32 {
     match class {
-        SettlementClass::RegionalCentre => 1.8,
-        SettlementClass::Town => 0.8,
-        SettlementClass::Village => 0.30,
+        // The radius bounds the planned area; the built-up area inside it is
+        // irregular and averages about two thirds of it, running out further
+        // along the roads, so these are larger than the discs they replace.
+        SettlementClass::RegionalCentre => 2.5,
+        SettlementClass::Town => 1.1,
+        SettlementClass::Village => 0.42,
     }
 }
 

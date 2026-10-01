@@ -33,6 +33,11 @@ struct CityFrame {
     /// local metres.  Seeded, so the tallest district is not always dead centre.
     core: geom::V,
     sub_core: geom::V,
+    /// Grow an irregular built-up area (see `urbanness`) instead of a disc.
+    organic_footprint: bool,
+    /// Directions (local angle, strength 0..1) along which the town runs out
+    /// beside its regional roads.
+    lobes: Vec<(f32, f32)>,
 }
 
 impl CityFrame {
@@ -46,6 +51,8 @@ impl CityFrame {
         let core = place(1, 0.04, 0.32);
         let sub_core = place(2, 0.35, 0.65);
         Self {
+            organic_footprint: false,
+            lobes: Vec::new(),
             core,
             sub_core,
             radius_m: spec.radius_km.max(0.2) * 1_000.0,
@@ -90,6 +97,39 @@ impl CityFrame {
         (base + wob * (0.4 + base)).clamp(0.0, 1.0)
     }
 
+    /// How built-up the ground is at a local point, 1 in the town proper fading to
+    /// 0 past its edge. A real town is not a disc: its outline is lumpy, it runs
+    /// out along the roads that feed it, and it thins into scattered houses and
+    /// then fields rather than stopping at a ring. Without the organic footprint
+    /// this is the old disc.
+    fn urbanness(&self, x: f32, z: f32) -> f32 {
+        let r = x.hypot(z);
+        if !self.organic_footprint {
+            return if r <= self.radius_m * 1.04 { 1.0 } else { 0.0 };
+        }
+        use std::f32::consts::{PI, TAU};
+        let th = z.atan2(x);
+        let ph = modern_phase(self.spec.seed);
+        let lump = 0.66
+            + 0.12 * (2.0 * th + ph).sin()
+            + 0.07 * (3.0 * th + ph * 1.9).sin()
+            + 0.04 * (5.0 * th - ph * 0.7).sin();
+        let mut reach = self.radius_m * lump;
+        for &(angle, strength) in &self.lobes {
+            let mut d = (th - angle).abs() % TAU;
+            if d > PI {
+                d = TAU - d;
+            }
+            reach += self.radius_m * 0.42 * strength * (-(d / 0.38).powi(2)).exp();
+        }
+        // Ragged edge: the outline wanders by a block or two.
+        let jag = 1.0
+            + 0.16 * ((x / 210.0 + ph).sin() * (z / 170.0 - ph).cos())
+            + 0.08 * ((x + z) / 90.0).sin();
+        let reach = reach * jag;
+        ((reach * 1.12 - r) / (reach * 0.42)).clamp(0.0, 1.0)
+    }
+
     fn river_x(&self, z_m: f32) -> f32 {
         let radius_m = self.radius_m;
         let phase = modern_phase(self.spec.seed);
@@ -119,11 +159,59 @@ pub fn generate_modern_chinese_city(spec: ModernChinaSpec) -> ModernCity {
     generate_modern_chinese_city_with_approaches(spec, &[])
 }
 
+/// Optional behaviour of the city generator. The default reproduces the plain
+/// disc the generator always made.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CityOptions {
+    /// Grow an irregular built-up area that runs out along the regional roads.
+    pub organic_footprint: bool,
+}
+
 pub fn generate_modern_chinese_city_with_approaches(
     spec: ModernChinaSpec,
     approaches: &[RegionalApproach],
 ) -> ModernCity {
-    let frame = CityFrame::new(spec);
+    generate_modern_chinese_city_with_options(spec, approaches, CityOptions::default())
+}
+
+/// Directions in which the town should run out: one lobe per regional road that
+/// reaches it, stronger for bigger roads.
+fn approach_lobes(frame: &CityFrame, approaches: &[RegionalApproach]) -> Vec<(f32, f32)> {
+    let mut lobes: Vec<(f32, f32)> = Vec::new();
+    for approach in approaches {
+        let local: Vec<(f32, f32)> = approach.path_km.iter().map(|p| frame.to_local(*p)).collect();
+        // The point of the road nearest 0.9 of the radius gives its bearing.
+        let target = frame.radius_m * 0.9;
+        let Some(best) = local.iter().min_by(|a, b| {
+            (a.0.hypot(a.1) - target).abs().total_cmp(&(b.0.hypot(b.1) - target).abs())
+        }) else {
+            continue;
+        };
+        if (best.0.hypot(best.1) - target).abs() > frame.radius_m * 0.5 {
+            continue;
+        }
+        let strength = match approach.class {
+            crate::ModernRoadClass::Expressway => 1.0,
+            crate::ModernRoadClass::Arterial => 0.8,
+            crate::ModernRoadClass::Collector => 0.5,
+            crate::ModernRoadClass::Local => 0.25,
+        };
+        lobes.push((best.1.atan2(best.0), strength));
+    }
+    lobes
+}
+
+pub fn generate_modern_chinese_city_with_options(
+    spec: ModernChinaSpec,
+    approaches: &[RegionalApproach],
+    options: CityOptions,
+) -> ModernCity {
+    let mut frame = CityFrame::new(spec);
+    if options.organic_footprint {
+        frame.organic_footprint = true;
+        frame.lobes = approach_lobes(&frame, approaches);
+    }
+    let frame = frame;
     let GraphOutput {
         nodes,
         sd_roads,

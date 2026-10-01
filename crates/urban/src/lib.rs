@@ -16,7 +16,8 @@ pub use model::{
     sample_action, synthesize_junction,
 };
 pub use modern::{
-    REGIONAL_ROAD_HANDOVER, RegionalApproach, generate_modern_chinese_city, generate_modern_chinese_city_with_approaches,
+    CityOptions, REGIONAL_ROAD_HANDOVER, RegionalApproach, generate_modern_chinese_city,
+    generate_modern_chinese_city_with_approaches, generate_modern_chinese_city_with_options,
     hash_u32,
 };
 
@@ -298,5 +299,45 @@ mod tests {
         }
         let first = root(&mut parent, city.sd_roads[0].from as usize);
         assert!(city.sd_roads.iter().all(|r| root(&mut parent, r.to as usize) == first));
+    }
+
+    #[test]
+    fn an_organic_town_is_not_a_disc() {
+        let spec = ModernChinaSpec {
+            centre: Point { x_km: 10.0, y_km: 10.0 },
+            radius_km: 1.6,
+            seed: 31,
+            ..ModernChinaSpec::default()
+        };
+        let disc = generate_modern_chinese_city(spec);
+        let organic = generate_modern_chinese_city_with_options(
+            spec,
+            &[],
+            CityOptions { organic_footprint: true },
+        );
+        assert!(!organic.buildings.is_empty());
+        assert!(organic.buildings.len() < disc.buildings.len(), "the built-up area must be smaller than the disc");
+        // Reach of the buildings in twelve compass sectors: a disc is the same
+        // in all of them, a real town is not.
+        let reach = |city: &ModernCity| -> Vec<f32> {
+            let mut sectors = vec![0.0_f32; 12];
+            for b in &city.buildings {
+                let c = &b.footprint[0];
+                let (dx, dy) = ((c.x_km - spec.centre.x_km) * 1000.0, (c.y_km - spec.centre.y_km) * 1000.0);
+                let sector = ((dy.atan2(dx) + std::f32::consts::PI) / std::f32::consts::TAU * 12.0) as usize % 12;
+                sectors[sector] = sectors[sector].max(dx.hypot(dy));
+            }
+            sectors
+        };
+        let spread = |v: &[f32]| {
+            let mean = v.iter().sum::<f32>() / v.len() as f32;
+            (v.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / v.len() as f32).sqrt() / mean
+        };
+        assert!(spread(&reach(&organic)) > spread(&reach(&disc)) * 1.5, "outline is as round as a disc");
+        // No ring road bounds it.
+        assert!(
+            organic.nodes.iter().all(|n| n.role != "regional-gateway"),
+            "an organic town has no outer ring to put gateways on"
+        );
     }
 }

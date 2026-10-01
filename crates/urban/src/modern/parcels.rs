@@ -90,11 +90,18 @@ pub(super) fn build_parcels(
         if centre.0.hypot(centre.1) > radius_m * 1.04 {
             continue;
         }
+        // How built-up this block is: 1 in the town, thinning to scattered houses
+        // at the edge, where buildings are also lower and more widely spaced.
+        let built = frame.urbanness(centre.0, centre.1);
+        if frame.organic_footprint && built < 0.06 {
+            continue;
+        }
         if signed_area(&face.ring) < 900.0 {
             continue;
         }
         let fi = face_index as i32;
-        let centrality = frame.core_weight(centre.0, centre.1);
+        let centrality = frame.core_weight(centre.0, centre.1)
+            * if frame.organic_footprint { 0.35 + 0.65 * built } else { 1.0 };
 
         // ---- street setbacks -> buildable envelope ----
         let mut envelope = face.ring.clone();
@@ -207,6 +214,14 @@ pub(super) fn build_parcels(
                 let key = fi * 64 + (env_index as i32) * 16 + lot_index as i32;
                 let n = modern_hash(seed, key, 1, 719);
                 let noise = |salt: i32| modern_hash(seed, key, 2, salt);
+                // The fringe is patchy: lots drop out more often the nearer the edge.
+                if frame.organic_footprint && built < 1.0 {
+                    let lot_c = centroid(lot);
+                    let lot_built = frame.urbanness(lot_c.0, lot_c.1);
+                    if noise(791) < (1.0 - lot_built).powf(0.8) * 0.9 {
+                        continue;
+                    }
+                }
                 let waterfront = ring_polyline_dist(lot, &river_local)
                     < river_half + QUAY_OFF_M + 45.0;
                 let plaza = centrality > 0.45 && lot_area < 3_400.0 && noise(777) < 0.09;

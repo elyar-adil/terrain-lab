@@ -558,29 +558,47 @@ impl TrafficSim {
                     false,
                 ),
             };
-            let replacement = origin_lane
-                .and_then(|lane| self.plan(lane, self.agents[index].rng.wrapping_add(1)));
+            let rng = self.agents[index].rng.wrapping_add(1);
+            let mut replacement = origin_lane.and_then(|lane| self.plan(lane, rng));
+            // A dead end (a cul-de-sac, or a street whose far junction has no
+            // onward lane) has no route forward. Turn round onto the opposite lane
+            // of the same road instead of stopping for good.
+            let mut turned_round = false;
+            if replacement.is_none() {
+                let opposite = origin_lane.and_then(|lane| {
+                    let here = &self.network.lanes[lane];
+                    self.network.lanes.iter().position(|other| {
+                        other.road == here.road && other.direction == -here.direction && other.index == here.index
+                    })
+                });
+                replacement = opposite.and_then(|lane| self.plan(lane, rng));
+                turned_round = replacement.is_some();
+            }
             let agent = &mut self.agents[index];
-            agent.piece = 0;
             agent.blocked_for = 0.0;
             match replacement {
                 Some(route) => {
                     // Seat the vehicle at the same world point it already
                     // occupies: the far end of its current lane, or the near end
-                    // of the next one if it was already on a connector.
-                    let seat = if ended_on_lane {
+                    // of the next one if it was already on a connector. A vehicle
+                    // that turned round starts at the near end of the opposite
+                    // lane, which is where this lane's far end is.
+                    let seat = if ended_on_lane && !turned_round {
                         route[0].length
                     } else {
                         0.0
                     };
+                    agent.piece = 0;
                     agent.route = route;
                     agent.s = seat;
                 }
                 None => {
-                    // No route could be planned.  Stay exactly where the
-                    // vehicle is — re-seating `s` without its piece's
-                    // `start_s` would teleport it backwards down its own lane —
-                    // and let the stall counter report it.
+                    // No route could be planned. Stay exactly where the vehicle
+                    // is: on the same route piece, at the end of it. (Resetting
+                    // the piece to the first one while `s` still counts along
+                    // the old route put the vehicle at the end of the *first*
+                    // lane, a jump of the whole route's length.)
+                    agent.piece = piece;
                     agent.s = entry.start_s + entry.length;
                     if !ended_on_lane {
                         agent.s = entry.start_s;
