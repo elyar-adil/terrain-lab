@@ -52,11 +52,16 @@ function Harness() {
           ? fixture.config.worldSizeKm * 0.55
           : focusParam === 1 ? 6 : focusParam <= 4 ? 3.5 : 1.6;
         if (focusParam < 0) {
+          // `fx`/`fy` (km) aim at any point; `pitch`/`az` (degrees) set the view
+          // direction, 90 being straight down.
+          const num = (name: string) => (params.has(name) ? Number(params.get(name)) : undefined);
           return {
-            xKm: fixture.config.worldSizeKm / 2,
-            yKm: fixture.config.worldSizeKm / 2,
+            xKm: num("fx") ?? fixture.config.worldSizeKm / 2,
+            yKm: num("fy") ?? fixture.config.worldSizeKm / 2,
             spanKm,
             nonce: 1,
+            pitchDeg: num("pitch"),
+            azimuthDeg: num("az"),
           };
         }
         const city = fixture.result.modernCities?.[focusParam - 1];

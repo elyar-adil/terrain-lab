@@ -84,12 +84,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| PathBuf::from("render-fixture.json"));
     let config = SimulationConfig {
         seed: 284_735,
-        preset: TerrainPreset::Temperate,
-        landform: Landform::Coastal,
+        // `FIXTURE_LANDFORM=mountainRange|hills|plains|plateau|coastal|archipelago`
+        // and `FIXTURE_PRESET=arid|temperate|glacial` pick the scene to audit.
+        preset: match env::var("FIXTURE_PRESET").as_deref() {
+            Ok("arid") => TerrainPreset::Arid,
+            Ok("glacial") => TerrainPreset::Glacial,
+            _ => TerrainPreset::Temperate,
+        },
+        landform: match env::var("FIXTURE_LANDFORM").as_deref() {
+            Ok("mountainRange") => Landform::MountainRange,
+            Ok("hills") => Landform::Hills,
+            Ok("plains") => Landform::Plains,
+            Ok("plateau") => Landform::Plateau,
+            Ok("archipelago") => Landform::Archipelago,
+            _ => Landform::Coastal,
+        },
         // The validation harness exercises shaders and scene evolution with a
         // representative mesh. Product generation still uses the 512-cell LOD;
         // software WebGL does not need four full-resolution renders per check.
-        grid_size: 128,
+        grid_size: env::var("FIXTURE_GRID").ok().and_then(|v| v.parse().ok()).unwrap_or(128),
         world_size_km: 80.0,
         rainfall: 1275.0,
         evaporation: 600.0,
@@ -102,7 +115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cloud_speed: 24.0,
     };
     let terrain = generate(&config, |_, _| {})?;
-    let mesh_size = 128_usize.min(terrain.size);
+    let mesh_size = env::var("FIXTURE_GRID").ok().and_then(|v| v.parse().ok()).unwrap_or(128_usize).min(terrain.size);
     // `FIXTURE_CITY_RADIUS_M=900` declares one city site at the world centre (where
     // the harness's `?city=1` mounts a scene) and levels/clears the ground under
     // it exactly as the desktop payload does.
