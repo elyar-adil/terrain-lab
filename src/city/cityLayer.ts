@@ -15,8 +15,8 @@
 import * as THREE from "three";
 
 import { CityLod, LOD } from "./cityLod";
-import { UniqueForest, preloadTreeGrower, treeGrowerIfReady } from "../trees";
-import { plantFromInstances } from "../trees/plant";
+import { preloadTreeGrower } from "../trees";
+import { installUniqueTrees } from "../trees/plant";
 import { perfTiming } from "./perf";
 import {
   type CityBuild,
@@ -195,18 +195,8 @@ function finishLayer(
 
   // Every tree grown for itself: replace the prototype trees by a forest that
   // grows each one from its own seed, finer the nearer the camera is.
-  let forest: UniqueForest | null = null;
-  const grower = treeGrowerIfReady();
-  if (grower) {
-    const planting = plantFromInstances(handles.lodSets, grower, scene.seed);
-    if (planting.trees.length > 0) {
-      forest = new UniqueForest(grower, planting.trees);
-      group.add(forest.group);
-      for (const mesh of planting.replaced) mesh.removeFromParent();
-      const gone = new Set(planting.sets);
-      handles.lodSets = handles.lodSets.filter((set) => !gone.has(set));
-    }
-  }
+  const forest = installUniqueTrees(handles, scene);
+  if (forest) group.add(forest.group);
 
   const lod = new CityLod(handles);
   const inverse = new THREE.Matrix4();

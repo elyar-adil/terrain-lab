@@ -23,6 +23,7 @@ import {
   foliageMaskTexture,
 } from "./cityScene";
 import { createPost } from "./post";
+import { installUniqueTrees } from "../trees/plant";
 import {
   SKY_FOG,
   SUN_DIR,
@@ -263,6 +264,9 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
       mark(`materials (${materials.textures.length} textures)`);
       const handles: CityHandles = buildCityScene(scene, materials);
       world.add(handles.group);
+      // Trees grown one by one from their own seeds, in place of the prototypes.
+      const forest = hidden.has("trees") ? null : installUniqueTrees(handles, scene);
+      if (forest) world.add(forest.group);
       if (hidden.has("ground")) mark("hiding the ground plane");
       else world.add(createGround(extent));
       if (hidden.has("sky")) {
@@ -448,13 +452,14 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
         if (disposed) return;
         const elapsed = (performance.now() - started) / 1000;
         sky.update(elapsed);
+        forest?.update(camera.position, 40);
         frame += 1;
         if (post) post.render();
         else renderer.render(world, camera);
         // The audit needs to know a frame has actually been composed, not that
         // the scene graph was populated. Under software WebGL those are seconds
         // apart, and reporting the second one produced blank screenshots.
-        if (frame >= 3 && frame > sizedAt + 1 && !window.__CITY_READY__) {
+        if (frame >= 3 && frame > sizedAt + 1 && !window.__CITY_READY__ && (!forest || forest.pending === 0)) {
           mark("first frames");
           window.__CITY_DIAGNOSTICS__ = {
             preset,
@@ -550,6 +555,7 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
         observer.disconnect();
         window.removeEventListener("resize", onResize);
         post?.dispose();
+        forest?.dispose();
         handles.dispose();
         materials.dispose();
         sky.dispose();

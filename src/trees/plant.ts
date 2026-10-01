@@ -1,7 +1,8 @@
 import * as THREE from "three";
 
-import { type PlantedTree } from "./forest";
-import { treeSeed } from "./index";
+import type { CityHandles, CityScene } from "../city/cityScene";
+import { type PlantedTree, UniqueForest } from "./forest";
+import { treeGrowerIfReady, treeSeed } from "./index";
 import { type TreeGrower } from "./wasm";
 
 /** What this module needs of an instance list: the city renderer's `LodInstanceSet`. */
@@ -82,4 +83,22 @@ export function plantFromInstances(sets: TreeInstanceSet[], grower: TreeGrower, 
     }
   }
   return { trees, replaced, sets: used };
+}
+
+/**
+ * Replace a built city's prototype trees by a forest of individually grown ones.
+ * Returns null (and leaves the city as it was) if the grower has not loaded or
+ * the city has no trees. The forest is not added to any scene; the caller mounts
+ * `forest.group` beside the city and calls `forest.update` each frame.
+ */
+export function installUniqueTrees(handles: CityHandles, scene: CityScene): UniqueForest | null {
+  const grower = treeGrowerIfReady();
+  if (!grower) return null;
+  const planting = plantFromInstances(handles.lodSets, grower, scene.seed);
+  if (planting.trees.length === 0) return null;
+  const forest = new UniqueForest(grower, planting.trees);
+  for (const mesh of planting.replaced) mesh.removeFromParent();
+  const gone = new Set(planting.sets);
+  handles.lodSets = handles.lodSets.filter((set) => !gone.has(set));
+  return forest;
 }
