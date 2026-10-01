@@ -328,7 +328,7 @@ export class UniqueForest {
       [...lin(d.foliage), d.leafForm],
       [...lin(d.autumnColour), d.autumn],
       [...lin(d.bloomColour), d.bloom],
-      [...lin(d.bark), d.fissure],
+      [...lin(d.bark).map((x) => x * 1.3), d.fissure],
       [d.flush, d.leafAspect, d.cover, 0],
     ]);
     this.rowDone[id] = 1;

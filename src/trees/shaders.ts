@@ -251,13 +251,13 @@ float leafOutline(vec2 q, float form, float hw, vec4 sh, out float vein) {
   if (form < 3.5) {
     // A spray of needles.
     float d = 1.0;
-    float spread = 0.17 + 0.07 * sh.x;
-    for (int k = 0; k < 5; k++) {
-      float fk = float(k) - 2.0;
+    float spread = 0.095 + 0.04 * sh.x;
+    for (int k = 0; k < 7; k++) {
+      float fk = float(k) - 3.0;
       float phi = fk * spread + (sh.z - 0.5) * 0.1;
       float lk = 0.72 + 0.28 * fract(sin(float(k) * 91.7 + sh.y * 40.0) * 437.5);
       vec2 tip = vec2(sin(phi), cos(phi)) * lk;
-      d = min(d, sdSeg(q, vec2(0.0), tip) - 0.016 * (1.0 - 0.55 * t));
+      d = min(d, sdSeg(q, vec2(0.0), tip) - 0.042 * (1.0 - 0.6 * t));
     }
     vein = 0.0;
     return d;
@@ -296,6 +296,10 @@ float treeLeafCoverage(out float vein, out float inner) {
   float d = leafOutline(vTreeB.xy, vTreeB.z, vTreeB.w, vTreeA, vein);
   float aa = max(fwidth(d), 1e-5);
   inner = clamp(-d / 0.08, 0.0, 1.0);
+  // A feature thinner than a pixel (a needle, a twig of leaflets, a distant leaf)
+  // must fade towards the mass it belongs to, not vanish: grow the outline by half
+  // a pixel, so nothing is ever drawn thinner than one.
+  d -= 0.5 * aa;
   return clamp(0.5 - d / aa, 0.0, 1.0);
 }
 `;
