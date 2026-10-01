@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::geom::{Polyline, V2};
+use crate::geom::{Polyline, V2, v2};
 use crate::road::RoadClass;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,16 +49,21 @@ impl PinnedSet {
         let roads: Vec<Arc<PinnedRoad>> = roads.into_iter().map(Arc::new).collect();
         let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
         for (k, road) in roads.iter().enumerate() {
-            // Index every cell the road's segments touch, not its whole bounding
-            // box: a long diagonal road would otherwise sit in thousands of cells.
+            // Index every cell a segment actually passes through (not its bounding
+            // box, which for a long diagonal road would be thousands of cells, and
+            // not samples along it, which miss a cell the road only clips).
             for w in road.path.0.windows(2) {
-                let steps = (w[0].dist(w[1]) / (cell_m * 0.5)).ceil().max(1.0) as usize;
-                for s in 0..=steps {
-                    let p = w[0].lerp(w[1], s as f64 / steps as f64);
-                    let key = ((p.x / cell_m).floor() as i64, (p.y / cell_m).floor() as i64);
-                    let slot = grid.entry(key).or_default();
-                    if slot.last() != Some(&k) {
-                        slot.push(k);
+                let (lo, hi) = (v2(w[0].x.min(w[1].x), w[0].y.min(w[1].y)), v2(w[0].x.max(w[1].x), w[0].y.max(w[1].y)));
+                let (x0, x1) = ((lo.x / cell_m).floor() as i64, (hi.x / cell_m).floor() as i64);
+                let (y0, y1) = ((lo.y / cell_m).floor() as i64, (hi.y / cell_m).floor() as i64);
+                for cy in y0..=y1 {
+                    for cx in x0..=x1 {
+                        if segment_meets_square(w[0], w[1], cx as f64 * cell_m, cy as f64 * cell_m, cell_m) {
+                            let slot = grid.entry((cx, cy)).or_default();
+                            if slot.last() != Some(&k) {
+                                slot.push(k);
+                            }
+                        }
                     }
                 }
             }
@@ -101,6 +106,30 @@ impl PinnedRoads for PinnedSet {
     }
 }
 
+/// Does the segment `a`-`b` touch the square with corner `(x, y)` and side `size`?
+fn segment_meets_square(a: V2, b: V2, x: f64, y: f64, size: f64) -> bool {
+    let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+    let d = b - a;
+    for (lo, hi, p, dd) in [(x, x + size, a.x, d.x), (y, y + size, a.y, d.y)] {
+        if dd == 0.0 {
+            if p < lo || p > hi {
+                return false;
+            }
+        } else {
+            let (mut ta, mut tb) = ((lo - p) / dd, (hi - p) / dd);
+            if ta > tb {
+                std::mem::swap(&mut ta, &mut tb);
+            }
+            t0 = t0.max(ta);
+            t1 = t1.min(tb);
+            if t0 > t1 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,6 +151,10 @@ mod tests {
         assert_eq!(ids(v2(0.0, 8_500.0), v2(500.0, 9_500.0)), vec![2]);
         assert!(ids(v2(2_000.0, 8_000.0), v2(2_500.0, 8_500.0)).is_empty());
         assert_eq!(ids(v2(-1e6, -1e6), v2(1e6, 1e6)), vec![1, 2, 3]);
+        // A road that only clips the corner of a cell is still found there.
+        let grazing = PinnedSet::new(vec![road(9, &[(0.0, 1_990.0), (4_000.0, 2_020.0)])]);
+        assert_eq!(grazing.within(v2(3_000.0, 1_990.0), v2(3_100.0, 2_100.0)).len(), 1);
+        assert_eq!(grazing.within(v2(1_900.0, 1_000.0), v2(2_000.0, 1_990.0)).len(), 1);
         assert_eq!(set.len(), 3);
         assert!(NoPinnedRoads.within(v2(0.0, 0.0), v2(1.0, 1.0)).is_empty());
     }

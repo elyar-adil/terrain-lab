@@ -338,8 +338,7 @@ fn no_two_roads_run_side_by_side_for_no_reason() {
     let net = network(&tiles(&e, 11, CITY, 1500.0));
     let total: f64 = net.edges.values().flat_map(|e| e.pieces.iter()).map(Polyline::length).sum();
     let (overlap, examples) = parallel_overlap(&net, 14.0, 45.0);
-    let (wide, _) = parallel_overlap(&net, 28.0, 45.0);
-    eprintln!("parallel overlap: {overlap:.0} m within 14 m, {wide:.0} m within 28 m, of {total:.0} m of road");
+
     assert!(overlap < 0.01 * total, "{overlap:.0} m of {total:.0} m of road runs within 14 m of another road: {examples:?}");
 }
 

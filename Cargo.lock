@@ -1534,6 +1534,8 @@ dependencies = [
  "urban",
  "world-core",
  "worldgen-contracts",
+ "worldgen-core",
+ "worldgen-roads",
 ]
 
 [[package]]

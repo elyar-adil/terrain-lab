@@ -10,12 +10,17 @@ use urban::{
 };
 use world_core::{GridPoint, ScalarLayer, WorldError, WorldGrid};
 
+pub mod fabric;
+pub mod rivers;
+
 #[derive(Debug, Error)]
 pub enum InfrastructureError {
     #[error(transparent)]
     World(#[from] WorldError),
     #[error("terrain fields do not match the configured grid")]
     InvalidTerrain,
+    #[error("the road layer could not be built: {0}")]
+    Fabric(String),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -155,9 +160,26 @@ impl Ord for QueueNode {
     }
 }
 
+/// Which planner lays out a town's streets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CityPlanner {
+    /// The original generator: a plan of its own for each town, made at once.
+    Legacy,
+    /// The roads layer: one network for the whole world, of which a town is a window.
+    Fabric,
+}
+
 pub fn generate_infrastructure(
     terrain: &TerrainData,
     config: &SimulationConfig,
+) -> Result<InfrastructureData, InfrastructureError> {
+    generate_infrastructure_with(terrain, config, CityPlanner::Fabric)
+}
+
+pub fn generate_infrastructure_with(
+    terrain: &TerrainData,
+    config: &SimulationConfig,
+    planner: CityPlanner,
 ) -> Result<InfrastructureData, InfrastructureError> {
     let grid = WorldGrid::new(terrain.size, config.world_size_km)?;
     if terrain.height.len() != grid.len() || terrain.water.len() != grid.len() {
@@ -244,25 +266,56 @@ pub fn generate_infrastructure(
     let cultivated_land =
         realize_cultivated_land(grid, &agricultural_suitability, &urban_land, &settlements);
     let crossings = find_crossings(terrain, grid, &roads);
-    let modern_cities: Vec<ModernCity> = settlements
-        .iter()
-        .map(|settlement| {
-            let radius_km = settlement_radius_km(settlement.class);
-            let centre = settlement_centre_km(grid, settlement);
-            let approaches = road_approaches(&roads, grid, centre, radius_km);
-            generate_modern_chinese_city_with_options(ModernChinaSpec {
+    let legacy_city = |settlement: &SettlementSite| {
+        let radius_km = settlement_radius_km(settlement.class);
+        let centre = settlement_centre_km(grid, settlement);
+        let approaches = road_approaches(&roads, grid, centre, radius_km);
+        generate_modern_chinese_city_with_options(
+            ModernChinaSpec {
                 centre,
                 radius_km,
-                rotation_radians: (config.seed ^ settlement.id.wrapping_mul(7919)) as f32
-                    * 0.000_013,
+                rotation_radians: (config.seed ^ settlement.id.wrapping_mul(7919)) as f32 * 0.000_013,
                 seed: config.seed ^ settlement.id.wrapping_mul(0x9e37_79b9),
                 density: (0.58 + settlement.score * 0.32).clamp(0.35, 0.92),
                 block_size_metres: 120.0,
                 organic: 0.68,
                 river_width_metres: 64.0,
-            }, &approaches, CityOptions { organic_footprint: true })
-        })
-        .collect();
+            },
+            &approaches,
+            CityOptions { organic_footprint: true },
+        )
+    };
+    let modern_cities: Vec<ModernCity> = match planner {
+        CityPlanner::Legacy => settlements.iter().map(legacy_city).collect(),
+        CityPlanner::Fabric => {
+            let fabric = fabric::WorldFabric::new(terrain, grid, &settlements, &roads, u64::from(config.seed))
+                .map_err(|e| InfrastructureError::Fabric(e.to_string()))?;
+            settlements
+                .iter()
+                .enumerate()
+                .map(|(index, settlement)| match fabric.town_streets(index) {
+                    Ok(town) => {
+                        let radius_km = settlement_radius_km(settlement.class) * 1.35;
+                        urban::generate_modern_chinese_city_from_streets(
+                            ModernChinaSpec {
+                                centre: settlement_centre_km(grid, settlement),
+                                radius_km,
+                                rotation_radians: 0.0,
+                                seed: config.seed ^ settlement.id.wrapping_mul(0x9e37_79b9),
+                                density: (0.58 + settlement.score * 0.32).clamp(0.35, 0.92),
+                                block_size_metres: 120.0,
+                                organic: 0.68,
+                                river_width_metres: if town.river_width_m > 0.0 { town.river_width_m } else { 64.0 },
+                            },
+                            town.streets,
+                            town.fields,
+                        )
+                    }
+                    Err(_) => legacy_city(settlement),
+                })
+                .collect()
+        }
+    };
     let cities = modern_cities.iter().map(ModernCity::urban_model).collect();
     Ok(InfrastructureData {
         travel_cost: ScalarLayer::new("travelCost", grid, travel_cost)?,
@@ -324,7 +377,7 @@ impl InfrastructureData {
 /// county-level city (县城, ~10 km² built-up area), towns (镇区) span roughly
 /// 2 km², villages stay compact.  The earlier 0.9 km cap made every city a
 /// neighbourhood dot that vanished at regional zoom.
-fn settlement_radius_km(class: SettlementClass) -> f32 {
+pub(crate) fn settlement_radius_km(class: SettlementClass) -> f32 {
     match class {
         // The radius bounds the planned area; the built-up area inside it is
         // irregular and averages about two thirds of it, running out further
@@ -342,23 +395,19 @@ fn settlement_centre_km(grid: WorldGrid, settlement: &SettlementSite) -> UrbanPo
     }
 }
 
+/// A regional road's centreline in world kilometres: the router's grid path with
+/// its corners rounded to the curvature the class is built to. The regional
+/// renderer and the town's street plan both draw this one line.
 fn road_path_km(road: &Road, grid: WorldGrid) -> Vec<UrbanPoint> {
-    road.path
+    fabric::road_centreline_m(road, grid)
+        .0
         .iter()
-        .map(|p| UrbanPoint {
-            x_km: p.x as f32 / (grid.size - 1) as f32 * grid.world_size_km,
-            y_km: p.y as f32 / (grid.size - 1) as f32 * grid.world_size_km,
-        })
+        .map(|p| UrbanPoint { x_km: (p.x / 1000.0) as f32, y_km: (p.y / 1000.0) as f32 })
         .collect()
 }
 
 fn modern_class(class: RoadClass) -> ModernRoadClass {
-    match class {
-        RoadClass::Motorway => ModernRoadClass::Expressway,
-        RoadClass::Arterial => ModernRoadClass::Arterial,
-        RoadClass::Collector | RoadClass::Rural => ModernRoadClass::Collector,
-        RoadClass::Local => ModernRoadClass::Local,
-    }
+    fabric::modern_road_class(class.contract())
 }
 
 /// Every regional road that reaches a settlement, handed to its city so the

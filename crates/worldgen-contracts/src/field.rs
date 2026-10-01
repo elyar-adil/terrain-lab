@@ -56,6 +56,15 @@ pub trait WaterField: Send + Sync {
 /// settlement layer, a land-use map or a hand-painted mask can all supply it.
 pub trait UrbanField: Send + Sync {
     fn urbanness(&self, p: V2) -> f64;
+
+    /// How intense the development is, from 0 at the thin edge of a town to 1 at
+    /// its heart: building height and the share of shops follow it. Where a field
+    /// does not say, the middle of anything built up counts as more intense than
+    /// its fringe.
+    fn intensity(&self, p: V2) -> f64 {
+        let u = self.urbanness(p);
+        u * u
+    }
 }
 
 /// The same everywhere.

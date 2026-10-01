@@ -21,8 +21,8 @@ use worldgen_contracts::{NodeId, UrbanField, V2, segment_intersection};
 use worldgen_core::hash::{hash_words, to_unit};
 use worldgen_core::{Cell, Context, Dependency, Error, Layer, LayerId, Seed};
 
-use crate::config::{LEVELS, RoadsConfig, TOP_RUNG};
-use crate::lattice::{CHORDS, CellChords, Chord, corner, corner_id, fabric_seed, make_chord_below};
+use crate::config::{RoadsConfig, TOP_RUNG};
+use crate::lattice::{CHORDS, CellChords, Chord, Division, corner, corner_id, fabric_seed, make_chord_reaching};
 
 pub const QUADS: LayerId = LayerId("roads.quads");
 
@@ -53,16 +53,25 @@ pub struct Block {
     pub rung: u8,
 }
 
+/// A node on a lattice chord that a street of this quadrilateral uses.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsedNode {
+    pub id: NodeId,
+    /// Fraction of the way along the chord.
+    pub t: f64,
+    pub pos: V2,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Quad {
     pub corners: [V2; 4], // (i, j), (i+1, j), (i+1, j+1), (i, j+1)
     pub edges: Vec<QEdge>,
     pub blocks: Vec<Block>,
     /// Which divisions of each lattice chord a street of this quadrilateral uses.
-    pub used_bottom: Vec<usize>,
-    pub used_top: Vec<usize>,
-    pub used_left: Vec<usize>,
-    pub used_right: Vec<usize>,
+    pub used_bottom: Vec<UsedNode>,
+    pub used_top: Vec<UsedNode>,
+    pub used_left: Vec<UsedNode>,
+    pub used_right: Vec<UsedNode>,
 }
 
 pub struct QuadLayer {
@@ -123,7 +132,16 @@ impl Layer for QuadLayer {
             finest: TOP_RUNG,
         };
         build.expand(root, TOP_RUNG as i8);
-        let used = |k: usize| build.chords[k].used.iter().copied().collect::<Vec<_>>();
+        let used = |k: usize| -> Vec<UsedNode> {
+            let chord = &build.chords[k].chord;
+            let mut nodes: Vec<UsedNode> = build.chords[k]
+                .used
+                .iter()
+                .map(|&i| UsedNode { id: chord.divisions[i].id, t: chord.divisions[i].t, pos: chord.divisions[i].pos })
+                .collect();
+            nodes.sort_by(|a, b| a.t.partial_cmp(&b.t).unwrap());
+            nodes
+        };
         let (used_bottom, used_right, used_top, used_left) = (used(0), used(1), used(2), used(3));
         let edges = build.edges();
         Ok(Quad { corners, edges, blocks: build.blocks, used_bottom, used_top, used_left, used_right })
@@ -239,8 +257,10 @@ impl Build<'_> {
         let Some(grid) = grid(&face, &mut a_lines, &mut b_lines) else {
             return self.expand(face, rung - 1);
         };
-        let a_index = self.commit(a_lines, r);
-        let b_index = self.commit(b_lines, r);
+        let a_reach = reaches(&grid, na_of(&a_lines), true);
+        let b_reach = reaches(&grid, na_of(&b_lines), false);
+        let a_index = self.commit(a_lines, r, &a_reach);
+        let b_index = self.commit(b_lines, r, &b_reach);
 
         let (na, nb) = (a_index.len(), b_index.len());
         let whole = |chord: usize| Boundary { chord, t0: 0.0, t1: 1.0, forward: true };
@@ -277,31 +297,107 @@ impl Build<'_> {
         self.blocks.push(Block { id, corners: face.corners, rung: face.finest });
     }
 
-    /// Match divisions of one rung on two opposite sides.
-    fn match_sides(&self, from: &FaceSide, to: &FaceSide, rung: u8, len_from: f64, len_to: f64, extent: f64) -> Vec<(usize, f64, usize, f64)> {
+    /// Match divisions of one rung on two opposite sides. A division with no partner
+    /// on the other side still starts a street: it is given a partner on the far side
+    /// at the same fraction of the way along, so a town beside one side of a face is
+    /// served by streets that run across the face from it.
+    fn match_sides(&mut self, from: &FaceSide, to: &FaceSide, rung: u8, len_from: f64, len_to: f64, extent: f64) -> Vec<(usize, f64, usize, f64)> {
         let (f, t) = (self.divisions_on(from, rung), self.divisions_on(to, rung));
         let mean_len = 0.5 * (len_from + len_to);
-        let mut accepted: Vec<(usize, usize, f64, f64)> = Vec::new(); // (index in f, index in t, s_f, s_t)
-        let mut taken = vec![false; t.len()];
+        let mut pairs: Vec<(usize, f64, usize, f64)> = Vec::new(); // (division on from, s, division on to, s)
+        let (mut from_taken, mut to_taken) = (vec![false; f.len()], vec![false; t.len()]);
+        // A street may join the others only if it keeps their order and is not squeezed
+        // up against one of them, at either end: the two sides each had a say in where
+        // streets go, and both sets of streets together must still look like one spacing.
+        let monotone = |pairs: &[(usize, f64, usize, f64)], sf: f64, st: f64, spacing: f64| {
+            pairs.iter().all(|p| {
+                (sf - p.1).signum() == (st - p.3).signum()
+                    && (sf - p.1).abs() * len_from >= 0.6 * spacing
+                    && (st - p.3).abs() * len_to >= 0.6 * spacing
+            })
+        };
         for (fi, &(sf, fk)) in f.iter().enumerate() {
             let spacing = self.chords[from.chord].chord.divisions[fk].spacing_m;
             let tolerance = (0.4 * spacing).min(0.3 * extent);
             let best = t
                 .iter()
                 .enumerate()
-                .filter(|(ti, _)| !taken[*ti])
+                .filter(|(ti, _)| !to_taken[*ti])
                 .map(|(ti, &(st, _))| (ti, (st - sf).abs() * mean_len))
                 .filter(|(_, miss)| *miss <= tolerance)
                 .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
             if let Some((ti, _)) = best {
-                if accepted.iter().all(|&(fi2, ti2, _, _)| (fi as i64 - fi2 as i64).signum() == (ti as i64 - ti2 as i64).signum()) {
-                    accepted.push((fi, ti, sf, t[ti].0));
-                    taken[ti] = true;
+                if monotone(&pairs, sf, t[ti].0, 0.0) {
+                    pairs.push((fk, sf, t[ti].1, t[ti].0));
+                    from_taken[fi] = true;
+                    to_taken[ti] = true;
                 }
             }
         }
-        accepted.sort_unstable_by_key(|a| a.0);
-        accepted.into_iter().map(|(fi, ti, sf, st)| (f[fi].1, sf, t[ti].1, st)).collect()
+        // Whatever found no partner reaches across to a new one.
+        for (fi, &(sf, fk)) in f.iter().enumerate().filter(|(i, _)| !from_taken[*i]) {
+            let spacing = self.chords[from.chord].chord.divisions[fk].spacing_m;
+            if let Some((tk, st)) = self.mirror(to, sf, rung, spacing) {
+                if monotone(&pairs, sf, st, spacing) {
+                    pairs.push((fk, sf, tk, st));
+                }
+            }
+            let _ = fi;
+        }
+        for (ti, &(st, tk)) in t.iter().enumerate().filter(|(i, _)| !to_taken[*i]) {
+            let spacing = self.chords[to.chord].chord.divisions[tk].spacing_m;
+            if let Some((fk, sf)) = self.mirror(from, st, rung, spacing) {
+                if monotone(&pairs, sf, st, spacing) {
+                    pairs.push((fk, sf, tk, st));
+                }
+            }
+            let _ = ti;
+        }
+        pairs.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        pairs
+    }
+
+    /// A node on `side` at about fraction `s` of the way along it, for a street from
+    /// the opposite side to end at. Positions snap to a lattice of 30 m slots along
+    /// the whole chord, so two quadrilaterals that put a street on the same chord
+    /// near the same place share a node, and no two nodes are a few metres apart.
+    fn mirror(&mut self, side: &FaceSide, s: f64, rung: u8, spacing: f64) -> Option<(usize, f64)> {
+        const SLOT_M: f64 = 30.0;
+        let chord = &self.chords[side.chord].chord;
+        let t_raw = if side.forward { side.t0 + (side.t1 - side.t0) * s } else { side.t1 - (side.t1 - side.t0) * s };
+        let slot = (t_raw * chord.len / SLOT_M).round();
+        let t = slot * SLOT_M / chord.len;
+        let (near_start, near_end) = (t * chord.len, (1.0 - t) * chord.len);
+        let inside = |t: f64| t > side.t0 + 14.0 / chord.len && t < side.t1 - 14.0 / chord.len;
+        if near_start < 16.0 || near_end < 16.0 || !inside(t) {
+            return None;
+        }
+        let s_of = |t: f64| {
+            let f = (t - side.t0) / (side.t1 - side.t0);
+            if side.forward { f } else { 1.0 - f }
+        };
+        // An existing node close by is the node: reuse it rather than put another beside it.
+        let keep_apart = (0.35 * spacing).max(26.0);
+        if let Some((k, d)) = chord
+            .divisions
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| d.t > side.t0 && d.t < side.t1)
+            .min_by(|a, b| (a.1.t - t).abs().partial_cmp(&(b.1.t - t).abs()).unwrap())
+        {
+            let apart = (d.t - t).abs() * chord.len;
+            if apart < 14.0 {
+                return Some((k, s_of(d.t)));
+            }
+            if apart < keep_apart {
+                return None;
+            }
+        }
+        let id = NodeId(hash_words(&[chord.id, slot as i64 as u64, 0x5107]));
+        let pos = chord.a.lerp(chord.b, t);
+        let chord = &mut self.chords[side.chord].chord;
+        chord.divisions.push(Division { id, t, level: rung, pos, spacing_m: spacing });
+        Some((chord.divisions.len() - 1, s_of(t)))
     }
 
     /// Make the streets of a family: new chords with their own finer divisions.
@@ -314,11 +410,8 @@ impl Build<'_> {
             if to_unit(hash_words(&[self.fabric.0, id, 0x9E])) >= PRESENT[usize::from(rung)] {
                 continue;
             }
-            // A street through open country is not a street, however its ends came to match.
-            if !self.is_built_along(df.pos, dt.pos, rung) {
-                continue;
-            }
-            let chord = make_chord_below(self.fabric, self.urban, id, df.pos, dt.pos, i8::try_from(rung).unwrap() - 1);
+            // Its own divisions are made once the grid says how wide the faces beside it are.
+            let chord = Chord { id, a: df.pos, b: dt.pos, len: df.pos.dist(dt.pos), divisions: Vec::new() };
             out.push(Street {
                 chord,
                 from: (from.chord, fk),
@@ -333,30 +426,26 @@ impl Build<'_> {
         out
     }
 
-    /// Is most of the straight line `a`-`b` somewhere a street of this rung belongs?
-    fn is_built_along(&self, a: V2, b: V2, rung: u8) -> bool {
-        let spec = &LEVELS[usize::from(rung)];
-        if spec.min_urban <= 0.0 {
-            return true;
-        }
-        let n = ((a.dist(b) / 60.0).ceil() as usize).max(2);
-        // A little slack: a street along the edge of a town belongs to it.
-        let built = (0..=n)
-            .filter(|&k| self.urban.urbanness(a.lerp(b, k as f64 / n as f64)) >= 0.7 * spec.min_urban)
-            .count();
-        built * 2 >= n + 1
-    }
-
     /// Make streets part of the world: record the divisions they use, and drop the
     /// finer divisions that would start a few metres from a crossing. Returns each
     /// street's chord index.
-    fn commit(&mut self, streets: Vec<Street>, rung: u8) -> Vec<usize> {
+    fn commit(&mut self, streets: Vec<Street>, rung: u8, reach_m: &[f64]) -> Vec<usize> {
         let mut index = Vec::new();
-        for st in streets {
+        for (k, st) in streets.into_iter().enumerate() {
             self.chords[st.from.0].used.insert(st.from.1);
             self.chords[st.to.0].used.insert(st.to.1);
             let len = st.chord.len;
-            let mut chord = st.chord;
+            // Streets of the finer rungs leave from this one wherever a town is within
+            // reach of it: as far as the middle of the faces on either side.
+            let mut chord = make_chord_reaching(
+                self.fabric,
+                self.urban,
+                st.chord.id,
+                st.chord.a,
+                st.chord.b,
+                i8::try_from(rung).unwrap() - 1,
+                reach_m[k].max(1.0),
+            );
             chord.divisions.retain(|d| st.crossings.iter().all(|c| (c.0 - d.t).abs() * len > 0.3 * d.spacing_m));
             self.chords.push(ChordObj {
                 chord,
@@ -392,6 +481,29 @@ impl Build<'_> {
         }
         out
     }
+}
+
+fn na_of(streets: &[Street]) -> usize {
+    streets.len()
+}
+
+/// For each street of a family, how far its neighbours on either side lie: half the
+/// width of the wider of the two faces beside it. `columns` means the family runs
+/// bottom to top (so its neighbours differ along the row direction).
+fn reaches(grid: &Grid, count: usize, columns: bool) -> Vec<f64> {
+    let (n_cols, n_rows) = (grid.pos.len(), grid.pos[0].len());
+    let mut out = Vec::with_capacity(count);
+    for k in 1..=count {
+        let gap = |a: usize, b: usize| -> f64 {
+            let (lo, hi) = if columns { (0, n_rows) } else { (0, n_cols) };
+            let samples: Vec<f64> = (lo..hi)
+                .map(|t| if columns { grid.pos[a][t].dist(grid.pos[b][t]) } else { grid.pos[t][a].dist(grid.pos[t][b]) })
+                .collect();
+            samples.iter().sum::<f64>() / samples.len().max(1) as f64
+        };
+        out.push(0.5 * gap(k - 1, k).max(gap(k, k + 1)));
+    }
+    out
 }
 
 struct Street {

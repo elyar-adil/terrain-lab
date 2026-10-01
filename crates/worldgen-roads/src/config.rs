@@ -22,9 +22,9 @@ pub struct LevelSpec {
 /// From the arterial grid down to the alleys between buildings: 主干路, 次干路,
 /// 支路, 小区路, 巷.
 pub const LEVELS: [LevelSpec; 5] = [
-    LevelSpec { level: 0, base_spacing_m: 65.0, min_urban: 0.7, reach_m: 50.0 },
-    LevelSpec { level: 1, base_spacing_m: 125.0, min_urban: 0.5, reach_m: 110.0 },
-    LevelSpec { level: 2, base_spacing_m: 250.0, min_urban: 0.3, reach_m: 240.0 },
+    LevelSpec { level: 0, base_spacing_m: 78.0, min_urban: 0.7, reach_m: 50.0 },
+    LevelSpec { level: 1, base_spacing_m: 150.0, min_urban: 0.5, reach_m: 110.0 },
+    LevelSpec { level: 2, base_spacing_m: 290.0, min_urban: 0.3, reach_m: 240.0 },
     LevelSpec { level: 3, base_spacing_m: 520.0, min_urban: 0.15, reach_m: 500.0 },
     LevelSpec { level: 4, base_spacing_m: 1000.0, min_urban: 0.0, reach_m: 0.0 },
 ];

@@ -70,6 +70,16 @@ pub struct Span {
     pub to: V2,
 }
 
+/// Where a road came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EdgeSource {
+    /// Made by the roads layer from its own rules.
+    #[default]
+    Generated,
+    /// Laid down as given by a planner (a regional road routed over the terrain).
+    Given,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RoadEdge {
     pub id: EdgeId,
@@ -78,6 +88,7 @@ pub struct RoadEdge {
     pub class: RoadClass,
     pub setting: Setting,
     pub spans: Vec<Span>,
+    pub source: EdgeSource,
     /// The parts of the centreline that fall inside the tile this edge arrived in,
     /// running from `a` towards `b`, at the tile's level of detail. A whole edge
     /// is one piece; an edge crossing several tiles is one piece per tile.
@@ -86,8 +97,8 @@ pub struct RoadEdge {
 
 impl RoadEdge {
     /// Everything about the edge except its geometry, for consistency checks.
-    fn identity(&self) -> (NodeId, NodeId, RoadClass, Setting, &[Span]) {
-        (self.a, self.b, self.class, self.setting, &self.spans)
+    fn identity(&self) -> (NodeId, NodeId, RoadClass, Setting, &[Span], EdgeSource) {
+        (self.a, self.b, self.class, self.setting, &self.spans, self.source)
     }
 }
 
@@ -206,6 +217,7 @@ mod tests {
             class: RoadClass::Collector,
             setting: Setting::Rural,
             spans: vec![],
+            source: EdgeSource::Generated,
             pieces: pieces.into_iter().map(Polyline).collect(),
         }
     }

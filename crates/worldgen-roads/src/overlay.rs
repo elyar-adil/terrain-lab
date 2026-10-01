@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use worldgen_contracts::{
-    EdgeId, NodeId, NodeKind, PinnedRoad, Polyline, RoadEdge, RoadNode, Setting, Span, SpanKind, V2, closest_on_segment,
+    EdgeId, EdgeSource, NodeId, NodeKind, PinnedRoad, Polyline, RoadEdge, RoadNode, Setting, Span, SpanKind, V2, closest_on_segment,
     segment_intersection, v2,
 };
 use worldgen_core::hash::hash_words;
@@ -320,6 +320,7 @@ impl Layer for OverlayLayer {
                         class: road.class,
                         setting,
                         spans,
+                        source: EdgeSource::Given,
                         pieces: vec![piece],
                     });
                 }

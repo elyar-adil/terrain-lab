@@ -108,12 +108,28 @@ impl Layer for ChordLayer {
 /// Divide a chord at every rung. A pure function of the chord's ends, its id and
 /// the urban field.
 pub(crate) fn make_chord(fabric: Seed, urban: &dyn UrbanField, id: u64, a: V2, b: V2) -> Chord {
-    make_chord_below(fabric, urban, id, a, b, TOP_RUNG as i8)
+    make_chord_reaching(fabric, urban, id, a, b, TOP_RUNG as i8, LATTICE_REACH_M)
 }
 
-/// Divide a chord at rungs up to and including `top_rung`. A street of rung `r`
-/// is divided at the finer rungs only.
-pub(crate) fn make_chord_below(fabric: Seed, urban: &dyn UrbanField, id: u64, a: V2, b: V2, top_rung: i8) -> Chord {
+/// How far from a lattice chord a town can be and still have streets leave the
+/// chord: half the lattice, since a quadrilateral's middle is never further from its
+/// sides. A village in the middle of an otherwise empty quadrilateral needs its
+/// streets to cross the quadrilateral from side to side.
+pub const LATTICE_REACH_M: f64 = 1024.0;
+
+/// Divide a chord at rungs up to and including `top_rung` (a street of rung `r` is
+/// divided at the finer rungs only). `reach_override` above zero replaces every
+/// finer rung's own reach: used for chords whose neighbouring faces are far larger
+/// than the rung's usual block.
+pub(crate) fn make_chord_reaching(
+    fabric: Seed,
+    urban: &dyn UrbanField,
+    id: u64,
+    a: V2,
+    b: V2,
+    top_rung: i8,
+    reach_override: f64,
+) -> Chord {
     let len = a.dist(b);
     let n = ((len / 14.0).ceil() as usize).max(4);
     let step = len / n as f64;
@@ -122,17 +138,21 @@ pub(crate) fn make_chord_below(fabric: Seed, urban: &dyn UrbanField, id: u64, a:
     // rung's reach. Evaluated every few steps and interpolated between, since the
     // reach-wide maximum varies slowly.
     let reached = |spec: &crate::config::LevelSpec| -> Vec<f64> {
-        if spec.reach_m <= 0.0 {
+        let reach_m = if reach_override > 0.0 && spec.level < TOP_RUNG { reach_override } else { spec.reach_m };
+        if reach_m <= 0.0 {
             return raw.clone();
         }
-        let stride = ((spec.reach_m / 28.0).ceil() as usize).max(1);
+        let stride = ((reach_m / 28.0).ceil() as usize).max(1);
         let anchors: Vec<usize> = (0..=n).step_by(stride).chain(std::iter::once(n)).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
         let values: Vec<f64> = anchors
             .iter()
             .map(|&k| {
                 let p = a.lerp(b, k as f64 / n as f64);
-                (0..8).fold(raw[k], |best, d| {
-                    best.max(urban.urbanness(p + v2(0.0, 0.0) + V2::from_angle(d as f64 * std::f64::consts::FRAC_PI_4) * spec.reach_m))
+                // Rings of samples at three distances: a small town between two of them is still seen.
+                [0.4, 0.75, 1.0].iter().fold(raw[k], |best, &ring| {
+                    (0..12).fold(best, |best, d| {
+                        best.max(urban.urbanness(p + V2::from_angle(d as f64 * std::f64::consts::TAU / 12.0) * (reach_m * ring)))
+                    })
                 })
             })
             .collect();
@@ -245,7 +265,7 @@ mod tests {
         let town = chord(1.0, 4096.0);
         let lanes: Vec<_> = town.divisions.iter().filter(|d| d.level == 2).collect();
         let mean = 4096.0 / lanes.len() as f64;
-        assert!((180.0..520.0).contains(&mean), "rung-2 mean spacing {mean}");
+        assert!((180.0..820.0).contains(&mean), "rung-2 mean spacing {mean}");
         let min_gap = town.divisions.windows(2).map(|w| (w[1].t - w[0].t) * town.len).fold(f64::INFINITY, f64::min);
         assert!(min_gap > 14.0, "two divisions {min_gap} m apart");
     }

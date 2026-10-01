@@ -8,14 +8,14 @@
 use std::collections::BTreeMap;
 
 use worldgen_contracts::{
-    EdgeId, HeightField, NodeId, NodeKind, Polyline, RoadClass, RoadEdge, RoadNode, Setting, Span, SpanKind, V2,
+    EdgeId, EdgeSource, HeightField, NodeId, NodeKind, Polyline, RoadClass, RoadEdge, RoadNode, Setting, Span, SpanKind, V2,
     WaterField,
 };
 use worldgen_core::{Cell, Context, Dependency, Error, Layer, LayerId, Seed};
 
-use crate::config::{Fields, RoadsConfig, TOP_RUNG};
+use crate::config::{Fields, LEVELS, RoadsConfig, TOP_RUNG};
 use crate::lattice::{CHORDS, CellChords, Chord, corner, corner_id, fabric_seed};
-use crate::quad::{QUADS, Quad};
+use crate::quad::{QUADS, Quad, UsedNode};
 use crate::shape::{bend, warp};
 
 pub const CELLS: LayerId = LayerId("roads.cells");
@@ -49,6 +49,10 @@ fn level_class(level: u8) -> RoadClass {
     }
 }
 
+fn demote(class: RoadClass, steps: u8) -> RoadClass {
+    (0..steps).fold(class, |c, _| c.demoted())
+}
+
 /// How crooked a street of each class is allowed to be.
 fn wiggle_factor(class: RoadClass) -> f64 {
     match class {
@@ -79,8 +83,18 @@ impl Builder<'_> {
     fn edge(&mut self, a: Vertex, b: Vertex, slot: u64, level: u8) {
         let mid = a.pos.lerp(b.pos, 0.5);
         let urbanness = self.fields.urban.urbanness(mid);
+        // A street is only built where there is a town for it to serve. The layout
+        // (which streets cross which) is decided for the whole face, so a street that
+        // runs on into the fields is simply not built there, and ends.
+        if level < TOP_RUNG && urbanness < 0.7 * LEVELS[usize::from(level)].min_urban {
+            return;
+        }
+        // What a street is called follows its rung, but a small place does not have
+        // arterials: how intense the development is steps the class down.
         let (class, setting) = if urbanness >= self.cfg.urban_threshold {
-            (level_class(level), Setting::Urban)
+            let intensity = self.fields.urban.intensity(mid);
+            let steps = if intensity >= 0.4 { 0 } else if intensity >= 0.12 { 1 } else { 2 };
+            (demote(level_class(level), steps), Setting::Urban)
         } else {
             (level_class(level).demoted(), Setting::Rural)
         };
@@ -94,7 +108,16 @@ impl Builder<'_> {
         };
         self.node(a);
         self.node(b);
-        self.edges.push(RoadEdge { id, a: a.id, b: b.id, class, setting, spans, pieces: vec![line] });
+        self.edges.push(RoadEdge {
+            id,
+            a: a.id,
+            b: b.id,
+            class,
+            setting,
+            spans,
+            source: EdgeSource::Generated,
+            pieces: vec![line],
+        });
     }
 
     /// A chain of vertices as consecutive roads.
@@ -205,12 +228,13 @@ impl Layer for CellLayer {
     }
 }
 
-fn chord_edges(b: &mut Builder<'_>, chord: &Chord, from: Vertex, to: Vertex, side_a: &[usize], side_b: &[usize]) {
-    let mut used: Vec<usize> = side_a.iter().chain(side_b).copied().collect();
-    used.sort_unstable();
-    used.dedup();
+fn chord_edges(b: &mut Builder<'_>, chord: &Chord, from: Vertex, to: Vertex, side_a: &[UsedNode], side_b: &[UsedNode]) {
+    // A node is a junction if a street of either neighbouring quadrilateral uses it.
+    let mut used: Vec<&UsedNode> = side_a.iter().chain(side_b).collect();
+    used.sort_by(|x, y| x.t.partial_cmp(&y.t).unwrap().then(x.id.cmp(&y.id)));
+    used.dedup_by(|y, x| x.id == y.id);
     let mut chain = vec![from];
-    chain.extend(used.iter().map(|&k| Vertex { id: chord.divisions[k].id, pos: chord.divisions[k].pos }));
+    chain.extend(used.into_iter().map(|u| Vertex { id: u.id, pos: u.pos }));
     chain.push(to);
     b.chain(&chain, chord.id, TOP_RUNG);
 }
