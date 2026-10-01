@@ -329,7 +329,13 @@ if (vTreeKind > 0.5) {
 }
 `;
 
+const DEBUG = typeof location !== "undefined" ? new URLSearchParams(location.search).get("treedebug") : null;
+
 const FRAGMENT_TRANSLUCENCY = /* glsl */ `
+${DEBUG === "normal" ? "if (vTreeKind > 0.5) { totalEmissiveRadiance = normal * 0.5 + 0.5; diffuseColor.rgb = vec3(0.0); }" : ""}
+${DEBUG === "albedo" ? "if (vTreeKind > 0.5) { totalEmissiveRadiance = diffuseColor.rgb; diffuseColor.rgb = vec3(0.0); }" : ""}
+${DEBUG === "sun" ? "if (vTreeKind > 0.5) { totalEmissiveRadiance = vec3(max(dot(normal, directionalLights[0].direction), 0.0)); diffuseColor.rgb = vec3(0.0); }" : ""}
+${DEBUG === "front" ? "if (vTreeKind > 0.5) { totalEmissiveRadiance = gl_FrontFacing ? vec3(0.0,1.0,0.0) : vec3(1.0,0.0,0.0); diffuseColor.rgb = vec3(0.0); }" : ""}
 #if NUM_DIR_LIGHTS > 0
 if (vTreeKind > 1.5) {
   vec3 toLight = directionalLights[0].direction;

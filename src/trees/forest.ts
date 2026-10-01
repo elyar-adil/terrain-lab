@@ -322,8 +322,8 @@ export class UniqueForest {
   }
 
   private writeRow(id: number, d: TreeData): void {
-    // The grower speaks sRGB colours; the shaders light in linear.
-    const lin = (c: [number, number, number]) => c.map((x) => x ** 2.2);
+    // The grower's colours are linear reflectances, which is what the shaders light.
+    const lin = (c: [number, number, number]) => [...c];
     treeTable.put(this.rowBase + id, [
       [...lin(d.foliage), d.leafForm],
       [...lin(d.autumnColour), d.autumn],
