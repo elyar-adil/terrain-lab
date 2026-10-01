@@ -23,6 +23,7 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 
 [dev-dependencies]
+urban = { path = "../urban" }
 city-scene = { path = "../city-scene" }
 base64 = "0.22"
 serde_json = "1"

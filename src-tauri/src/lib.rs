@@ -517,25 +517,11 @@ fn composite_world_surface(
             }
 
             if urban > 0.055 {
-                let world_x = output_x as f32 / (width - 1) as f32 * world_km;
-                let world_y = output_y as f32 / (height - 1) as f32 * world_km;
-                let warped_x = world_x + (world_y * 0.43).sin() * 0.075;
-                let warped_y = world_y + (world_x * 0.37).sin() * 0.065;
-                let block_width = 0.31;
-                let block_height = 0.24;
-                let block_x = (warped_x / block_width).floor() as i32;
-                let block_y = (warped_y / block_height).floor() as i32;
-                let roof = surface_hash(block_x, block_y, 71);
-                let local_x = (warped_x / block_width).rem_euclid(1.0);
-                let local_y = (warped_y / block_height).rem_euclid(1.0);
-                let street_distance = local_x.min(1.0 - local_x).min(local_y.min(1.0 - local_y));
-                if street_distance < 0.105 {
-                    blend_surface(pixel, [91.0, 91.0, 86.0], urban.powf(0.68) * 0.63);
-                } else {
-                    let urban_color =
-                        [108.0 + roof * 61.0, 103.0 + roof * 48.0, 94.0 + roof * 39.0];
-                    blend_surface(pixel, urban_color, urban.powf(0.68) * 0.84);
-                }
+                // Only a ground tone. The streets, blocks and buildings of a town
+                // are drawn from its real plan (`city::cityMass` on the client), so
+                // painting an invented block grid here would contradict them and
+                // show through wherever the two meet.
+                blend_surface(pixel, [104.0, 100.0, 92.0], urban.powf(0.68) * 0.7);
             }
         }
     }

@@ -37,6 +37,7 @@ struct FixtureResult {
     road_data_base64: String,
     roads: Vec<()>,
     cities: Vec<()>,
+    modern_cities: Vec<urban::ModernCity>,
     water_height_data_base64: String,
     water_mask_base64: String,
     water_kind_base64: String,
@@ -116,6 +117,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }]
         })
         .unwrap_or_default();
+    // The same site also gets its city plan, as the desktop payload does, so the
+    // harness can show the far and middle form of a city drawn from it.
+    let modern_cities: Vec<urban::ModernCity> = city_sites
+        .iter()
+        .map(|site| {
+            urban::generate_modern_chinese_city(urban::ModernChinaSpec {
+                centre: urban::Point { x_km: site.x_km, y_km: site.y_km },
+                radius_km: site.radius_m / 1000.0,
+                seed: 4242,
+                ..urban::ModernChinaSpec::default()
+            })
+        })
+        .collect();
     let mut mesh_heights = downsample_height(&terrain, mesh_size);
     flatten_heights(&mut mesh_heights, mesh_size, config.world_size_km, &city_sites);
     let mut exclusion = vec![0_u8; mesh_size * mesh_size];
@@ -208,6 +222,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             road_data_base64: STANDARD.encode(vec![0_u8; mesh_size * mesh_size]),
             roads: Vec::new(),
             cities: Vec::new(),
+            modern_cities,
             water_height_data_base64: STANDARD.encode(water_height_bytes),
             water_mask_base64: STANDARD.encode(water_mask),
             water_kind_base64: STANDARD.encode(water_kind),

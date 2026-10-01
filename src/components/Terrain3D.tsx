@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { beginCityLayer, type CityLayer, type CityLayerBuild } from "../city/cityLayer";
+import { buildCityMass, type CityMass } from "../city/cityMass";
 import { createFramePerf, perfEnabled, perfTiming } from "../city/perf";
 import { Roam } from "../city/roam";
 import type { CityScene } from "../city/cityScene";
@@ -1393,6 +1394,8 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
     // the GPU buffers a few megabytes a frame on a layer the main camera does not
     // see, and only when both are finished does the city appear. So the approach
     // to a city never shows a half-built one and never stalls on the build.
+    const CITY_LOAD_DISTANCE_M = 6500;
+    const CITY_UNLOAD_DISTANCE_M = 13000;
     const CITY_SLICE_MS = 4;
     // A frame already taking 60 ms+ is hitching regardless (software GL, a huge
     // window), and 4 ms slices would take minutes: scale the slice with it.
@@ -1543,6 +1546,31 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
     };
     cityMountRef.current = mountCity;
     mountCity(cityLoadedRef.current);
+
+    // --- the far and middle form of every city ------------------------------
+    // Built from the plan that is already in the payload, so a city has its real
+    // silhouette (same footprints, heights and street lines as the metre-scale
+    // scene) at every zoom, with nothing to load. The detailed scene replaces it
+    // in place once mounted, instead of a city appearing from a patch of texture.
+    const cityMasses: Array<CityMass | null> = (result.modernCities ?? []).map((plan) => {
+      const mass = buildCityMass(plan, {
+        toScene: (xKm, yKm) => [(xKm - cityHalfExtentKm) * kilometreToScene, (yKm - cityHalfExtentKm) * kilometreToScene],
+        heightAt: terrainHeightAt,
+        metresToScene,
+      });
+      scene.add(mass.mesh);
+      return mass;
+    });
+    const updateCityMasses = () => {
+      const detailed = cityLayer ? cityLoadedRef.current : null;
+      cityMasses.forEach((mass, index) => {
+        const site = citySites[index];
+        if (!mass || !site) return;
+        const replaced = detailed !== null
+          && Math.hypot(detailed.origin[0] - site.xKm, detailed.origin[1] - site.yKm) < 0.05;
+        if (mass.mesh.visible === replaced) mass.mesh.visible = !replaced;
+      });
+    };
     let cityCheckFrame = 0;
     const requestNearbyCity = () => {
       cityCheckFrame += 1;
@@ -1561,11 +1589,15 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
         }
       });
       const loaded = cityLoadedRef.current;
-      if (nearest >= 0 && nearestDistance < 3500) {
+      // The mass layer already shows the whole city, so the detailed scene is a
+      // replacement, not an arrival. Start loading while the swap is still
+      // invisible (a few pixels of surface detail on an identical silhouette),
+      // and unload with a wide margin so hovering at the boundary never thrashes.
+      if (nearest >= 0 && nearestDistance < CITY_LOAD_DISTANCE_M) {
         if (!loaded || Math.hypot(loaded.origin[0] - citySites[nearest].xKm, loaded.origin[1] - citySites[nearest].yKm) > 0.05) {
           onNeedCityRef.current?.(nearest);
         }
-      } else if (loaded && cityAnchor && nearestDistance > 9000) {
+      } else if (loaded && cityAnchor && nearestDistance > CITY_UNLOAD_DISTANCE_M) {
         onNeedCityRef.current?.(null);
       }
     };
@@ -3502,6 +3534,7 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
         if (gtaoPassRef.enabled !== wantAo) gtaoPassRef.enabled = wantAo;
       }
       stepCityMount(delta);
+      updateCityMasses();
       if (perfEnabled) {
         if (cityLayer) {
           const lod = cityLayer.lodStats();
@@ -3565,6 +3598,11 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       abandonCityMount();
       cityWarmTarget?.dispose();
       cityLayer?.dispose();
+      for (const mass of cityMasses) {
+        if (!mass) continue;
+        scene.remove(mass.mesh);
+        mass.dispose();
+      }
       controls.dispose();
       texture.dispose();
       geometry.dispose();
