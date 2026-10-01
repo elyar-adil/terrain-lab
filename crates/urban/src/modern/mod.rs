@@ -5,6 +5,7 @@ mod landscape;
 mod parcels;
 mod roads;
 
+pub use graph::junction_trim_m;
 use graph::{GraphOutput, build_graph, legacy_hash, modern_hash, modern_phase};
 use landscape::derive_compounds_and_trees;
 use parcels::{ParcelOutput, build_parcels};

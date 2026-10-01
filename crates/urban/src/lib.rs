@@ -18,7 +18,7 @@ pub use model::{
 pub use modern::{
     CityOptions, REGIONAL_ROAD_HANDOVER, RegionalApproach, generate_modern_chinese_city,
     generate_modern_chinese_city_with_approaches, generate_modern_chinese_city_with_options,
-    hash_u32,
+    hash_u32, junction_trim_m,
 };
 
 /// Public style dispatcher. Modern Chinese generation stays in `modern`,

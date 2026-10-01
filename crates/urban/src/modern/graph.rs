@@ -51,6 +51,32 @@ impl CityGraph for GraphProbe<'_> {
     }
 }
 
+/// How far back from a node a street is trimmed to make room for the junction,
+/// in metres. Both the street planner (which must not leave a link shorter than
+/// its two boxes) and the scene builder (which draws the boxes) use this one
+/// number, or one of them is wrong about whether a road fits.
+///
+/// At a junction it is the widest street's half width plus the kerb-return
+/// radius, because that is where the kerb leaves the straight to turn the corner:
+/// the return radius is about 12 m where an arterial is involved, 8 m for
+/// collectors and 5 m for local streets (the scale of the 缘石转弯半径 in CJJ 37,
+/// reduced a little for a compact block grid). The earlier formula, about 9 m for
+/// an arterial, left a corner radius of three metres, which reads as a square
+/// corner. A node with two streets is a bend and gets a small trim.
+pub fn junction_trim_m(widest_width: f32, arms: usize) -> f32 {
+    if arms <= 2 {
+        return (widest_width * 0.5 + 2.0).min(8.0);
+    }
+    let kerb_return = if widest_width >= 12.0 {
+        12.0
+    } else if widest_width >= 6.5 {
+        8.0
+    } else {
+        5.0
+    };
+    widest_width * 0.5 + kerb_return + 1.0
+}
+
 /// How important a street is: larger is wider and busier. The enum is declared
 /// widest first (`Expressway` is 0), so comparing its discriminant directly picks
 /// the *lowest* class; every "keep the higher class" below goes through this.
@@ -931,8 +957,8 @@ pub(super) fn build_graph(frame: &CityFrame, approaches: &[super::RegionalApproa
                 widest[n] = widest[n].max(s.class.width_metres());
             }
         }
-        // Mirrors the junction radius the scene builder uses.
-        let need = |n: usize| if degree[n] > 2 { widest[n] * 0.5 + 3.0 } else { (widest[n] * 0.5 + 2.0).min(8.0) };
+        // The junction radius the scene builder uses (the same function).
+        let need = |n: usize| junction_trim_m(widest[n], degree[n] as usize);
         let victim = kept
             .iter()
             .enumerate()
