@@ -492,8 +492,10 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     materialTexture.wrapS = materialTexture.wrapT = THREE.ClampToEdgeWrapping;
     materialTexture.generateMipmaps = false;
     materialTexture.needsUpdate = true;
+    const snowWindAngle = THREE.MathUtils.degToRad(config.windDirection);
     const terrainShadowUniforms = {
       uMaterialTex: { value: materialTexture },
+      uWindDir: { value: new THREE.Vector2(Math.cos(snowWindAngle), Math.sin(snowWindAngle)) },
       uHeightTex: { value: heightTexture },
       uHeightN: { value: result.meshSize },
       uM2S: { value: metresToScene },
@@ -561,6 +563,8 @@ float gErodeH;
 vec2 gErodeG;
 uniform sampler2D uHeightTex;
 uniform sampler2D uMaterialTex;
+uniform vec2 uWindDir;
+float gSnow = 0.0;
 uniform float uHeightN;
 uniform float uM2S;
 uniform float uMaxHeightScene;
@@ -571,6 +575,16 @@ float gSunLit = 1.0;
 float terrainHeightScene(vec2 xz) {
   vec2 uv = ((xz + 1.6) / 3.2 * (uHeightN - 1.0) + 0.5) / uHeightN;
   return texture2D(uHeightTex, uv).r * uM2S;
+}
+// Wind-sculpted snow surface in metres: long drifts stretched along the wind,
+// and finer ripples (sastrugi) that fade out with the pixel footprint.
+float snowSurface(vec2 p, float foot) {
+  vec2 w = uWindDir;
+  vec2 pw = vec2(-w.y, w.x);
+  vec2 q = vec2(dot(p, w) / 300.0, dot(p, pw) / 75.0);
+  float drifts = dFbm(q) * 9.0 + dFbm(q * 3.3 + 5.0) * 2.4;
+  float ripples = dNoise(vec2(dot(p, w) / 14.0, dot(p, pw) / 3.2) + 9.0) * 0.28 * (1.0 - smoothstep(0.8, 5.0, foot));
+  return drifts + ripples;
 }
 // Soft cast shadow: march toward the sun and track how close the ray comes to
 // the ground relative to how far it has travelled (a penumbra proportional to
@@ -704,7 +718,11 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       vec3 scree = mix(rock, soil, 0.45) * (0.92 + 0.22 * dNoise(pm / 1.7) * a1);
       vec3 grass = vec3(0.075, 0.098, 0.034) * (0.72 + 0.55 * dFbm(pm / 36.0)) * (0.9 + 0.2 * dNoise(pm / 2.3) * a1);
       vec3 forest = vec3(0.028, 0.052, 0.024) * (0.62 + 0.75 * dNoise(pm / 9.0) * a2 + 0.3 * dFbm(pm / 260.0));
-      vec3 snow = vec3(0.93, 0.95, 0.98) * (0.93 + 0.07 * dNoise(vec2(pm.x / 11.0, pm.y / 80.0)) * a2);
+      // Old snow is grey-white, not paper: packed drifts, wind crust and a little
+      // dust, in a cool tint that sky light turns bluer in shade.
+      float packed = dFbm(vec2(dot(pm, uWindDir) / 420.0, dot(pm, vec2(-uWindDir.y, uWindDir.x)) / 90.0));
+      float streak = dNoise(vec2(dot(pm, uWindDir) / 40.0, dot(pm, vec2(-uWindDir.y, uWindDir.x)) / 5.5)) * a2;
+      vec3 snow = vec3(0.60, 0.635, 0.69) * (0.72 + 0.42 * packed + 0.10 * streak);
 
       // The gully pattern only means anything where the ground is sloped; on a
       // bench or a plateau it would imprint noise blotches on snow and grass.
@@ -714,15 +732,18 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       float forestW = ctrl.r * vegLimit * mix(0.5, 1.0, 1.0 - hnm);
       float grassW = ctrl.g * vegLimit * mix(0.7, 1.0, 1.0 - hnm);
       float screeW = smoothstep(0.08, 0.15, sf) * (1.0 - smoothstep(0.24, 0.36, sf)) * (1.0 - 0.5 * hn) * (1.0 - ctrl.r);
-      float snowW = ctrl.b * (1.0 - smoothstep(0.20, 0.46, sf)) * mix(0.55, 1.0, 1.0 - hnm)
-        * (0.90 + 0.10 * smoothstep(0.30, 0.60, dFbm(pm / 300.0)));
-      snowW = smoothstep(0.15, 0.55, snowW);
+      // Snow is a layer of varying depth, not a tint: it thins over ridges and
+      // steep ground until rock shows through, in ragged islands and tongues.
+      float depthNoise = dFbm(pm / 130.0) * 0.8 + dFbm(pm / 17.0) * 0.25 * a2;
+      float depth = ctrl.b * (0.55 + depthNoise) + 0.30 * (1.0 - hnm) - 0.30;
+      float snowW = smoothstep(0.26, 0.40, depth) * (1.0 - smoothstep(0.20, 0.46, sf));
       vec3 c = soil;
       c = mix(c, grass, grassW * (1.0 - rockW));
       c = mix(c, forest, forestW * (1.0 - rockW));
       c = mix(c, scree, screeW * 0.6);
       c = mix(c, rock, rockW);
       c = mix(c, snow, clamp(snowW, 0.0, 1.0));
+      gSnow = clamp(snowW, 0.0, 1.0) * ctrl.a;
       diffuseColor.rgb = mix(diffuseColor.rgb, c, ctrl.a);
     }
     // Contact shadow in gully floors and on the lee of spurs.
@@ -762,6 +783,15 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     normal = normalize(normal + gm);
   }
   normal = normalize(normal + mat3(viewMatrix) * vec3(-gErodeG.x, 0.0, -gErodeG.y));
+  if (gSnow > 0.01) {
+    vec2 ps = vDetailP.xz * uMetres;
+    float fs = length(vDetailP - cameraPosition) * uMetres * 0.0016;
+    float es = max(1.5, fs * 1.2);
+    float s0 = snowSurface(ps, fs);
+    float sx = snowSurface(ps + vec2(es, 0.0), fs);
+    float sz = snowSurface(ps + vec2(0.0, es), fs);
+    normal = normalize(normal + mat3(viewMatrix) * vec3(-(sx - s0) / es, 0.0, -(sz - s0) / es) * gSnow);
+  }
 }`);
     };
     const terrain = new THREE.Mesh(geometry, terrainMaterial);
