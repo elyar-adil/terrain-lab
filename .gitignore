@@ -16,6 +16,7 @@ src-tauri/target/
 # history for no benefit, and every regeneration would rewrite them.
 /public/render-fixture.json
 /public/city-scenes.json
+/public/city-lite.json
 /public/tiny-city.json
 /public/tiny-baseline.json
 
