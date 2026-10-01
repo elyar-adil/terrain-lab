@@ -107,6 +107,14 @@ impl ModernCity {
         out.buildings.retain(|b| parcels.contains(&b.parcel_id));
         out.compounds.retain(|c| parcels.contains(&c.parcel_id));
         out.trees.retain(|t| near(&t.point, 0.0));
+        // Waterways are cut to the neighbourhood too, or the water alone would be the
+        // whole size of the plan.
+        let cut = |line: &[Point]| -> Vec<Point> { line.iter().copied().filter(|p| near(p, 250.0)).collect() };
+        out.river = out.river.as_ref().map(|line| cut(line)).filter(|line| line.len() >= 2);
+        for tributary in &mut out.tributaries {
+            tributary.line = cut(&tributary.line);
+        }
+        out.tributaries.retain(|t| t.line.len() >= 2);
         out
     }
 }
