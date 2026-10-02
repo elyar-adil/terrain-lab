@@ -15,7 +15,7 @@
 
 import * as THREE from "three";
 
-import { type TreeData, type TreeGrower } from "./wasm";
+import { type TreeData, type TreeGrower, type TreePool } from "./wasm";
 import { type TreeMaterials, createTreeMaterials, treeTable } from "./shaders";
 
 export interface PlantedTree {
@@ -69,6 +69,11 @@ interface Job {
   lod: number;
   next: number;
   grown: TreeData[];
+  /** Trees handed to the workers whose results are not back yet (async growth). */
+  requested: number;
+  arrived: number;
+  generation: number;
+  failed: boolean;
 }
 
 let contact: THREE.MeshBasicMaterial | null = null;
@@ -189,6 +194,7 @@ export class UniqueForest {
     private readonly grower: TreeGrower,
     trees: PlantedTree[],
     options: ForestOptions = {},
+    private readonly pool: TreePool | null = null,
   ) {
     this.trees = trees;
     this.lodDistances = options.lodDistancesM ?? [22, 60, 160];
@@ -323,7 +329,7 @@ export class UniqueForest {
     queue.sort((p, q) => p.distance - q.distance);
     for (const chunk of queue) {
       if (performance.now() - started >= budgetMs) break;
-      chunk.job ??= { chunk, lod: chunk.wanted, next: 0, grown: [] };
+      chunk.job ??= { chunk, lod: chunk.wanted, next: 0, grown: [], requested: 0, arrived: 0, generation: this.generation, failed: false };
       if (this.advance(chunk.job, started + budgetMs)) changed = true;
     }
     return changed;
@@ -337,6 +343,7 @@ export class UniqueForest {
 
   /** Grow trees for a job until the deadline; finish the chunk when all are grown. */
   private advance(job: Job, deadline: number): boolean {
+    if (this.pool) return this.advanceAsync(job);
     const { chunk } = job;
     const generation = this.generation;
     while (job.next < chunk.trees.length) {
@@ -363,6 +370,54 @@ export class UniqueForest {
       if (performance.now() >= deadline && job.next < chunk.trees.length) return false;
     }
     if (generation !== this.generation) return false;
+    this.finish(job);
+    return true;
+  }
+
+  /**
+   * Same job, grown by the workers: keep a few requests in flight (nearest chunks first, by
+   * the order `update` calls this), and finish the chunk on the frame its last tree arrives.
+   */
+  private advanceAsync(job: Job): boolean {
+    const { chunk } = job;
+    const pool = this.pool!;
+    while (job.requested < chunk.trees.length && pool.inFlight < pool.capacity) {
+      const k = job.requested;
+      job.requested += 1;
+      const tree = this.trees[chunk.trees[k]];
+      const t0 = performance.now();
+      pool
+        .grow(
+          {
+            species: tree.species,
+            seed: tree.seed,
+            height: tree.height,
+            openness: tree.openness,
+            age: tree.age,
+            season: this.season,
+            health: tree.health,
+            lift: tree.lift,
+          },
+          job.lod,
+        )
+        .then((data) => {
+          this.stats.growMs += performance.now() - t0;
+          job.grown[k] = data;
+          job.arrived += 1;
+        })
+        .catch(() => {
+          job.failed = true;
+          job.arrived += 1;
+        });
+    }
+    if (job.arrived < chunk.trees.length) return false;
+    if (job.failed || job.generation !== this.generation || chunk.job !== job) {
+      chunk.job = null;
+      return false;
+    }
+    chunk.trees.forEach((id, k) => {
+      if (!this.rowDone[id]) this.writeRow(id, job.grown[k]);
+    });
     this.finish(job);
     return true;
   }

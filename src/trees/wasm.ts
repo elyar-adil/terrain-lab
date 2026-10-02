@@ -172,3 +172,62 @@ export class TreeGrower {
     };
   }
 }
+
+/** A few workers, each with its own grower; `grow` hands a tree to the least busy one. */
+export class TreePool {
+  private readonly workers: Worker[] = [];
+  private readonly busy: number[] = [];
+  private readonly waiting = new Map<number, { resolve: (d: TreeData) => void; reject: (e: Error) => void; worker: number }>();
+  private next = 1;
+
+  /** Null if workers are not available here. */
+  static create(count = Math.max(1, Math.min(3, (navigator.hardwareConcurrency ?? 4) - 1)), url = "/worldgen_trees.wasm"): TreePool | null {
+    if (typeof Worker === "undefined") return null;
+    try {
+      const pool = new TreePool();
+      const absolute = new URL(url, location.href).href;
+      for (let i = 0; i < count; i += 1) {
+        const worker = new Worker(new URL("./growWorker.ts", import.meta.url), { type: "module" });
+        worker.postMessage({ init: absolute });
+        worker.onmessage = (event: MessageEvent<{ id: number; data?: TreeData; error?: string }>) => {
+          const entry = pool.waiting.get(event.data.id);
+          if (!entry) return;
+          pool.waiting.delete(event.data.id);
+          pool.busy[entry.worker] -= 1;
+          if (event.data.data) entry.resolve(event.data.data);
+          else entry.reject(new Error(event.data.error ?? "worker failed"));
+        };
+        pool.workers.push(worker);
+        pool.busy.push(0);
+      }
+      return pool;
+    } catch {
+      return null;
+    }
+  }
+
+  /** How many requests are in flight. */
+  get inFlight(): number {
+    return this.busy.reduce((a, b) => a + b, 0);
+  }
+
+  get capacity(): number {
+    return this.workers.length * 2;
+  }
+
+  grow(spec: TreeSpec, lod: number): Promise<TreeData> {
+    let best = 0;
+    for (let i = 1; i < this.busy.length; i += 1) if (this.busy[i] < this.busy[best]) best = i;
+    const id = this.next++;
+    this.busy[best] += 1;
+    return new Promise((resolve, reject) => {
+      this.waiting.set(id, { resolve, reject, worker: best });
+      this.workers[best].postMessage({ id, spec, lod });
+    });
+  }
+
+  dispose(): void {
+    for (const w of this.workers) w.terminate();
+    this.workers.length = 0;
+  }
+}

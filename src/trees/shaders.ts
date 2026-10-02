@@ -148,8 +148,8 @@ void treeShape(out vec3 pos, out vec3 nor) {
     ao *= mix(0.78, 1.12, lobe);
     // Shade is cooler and bluer (skylight), sun is warm and yellow.
     vec3 shaded = col * vec3(0.55, 0.78, 0.82);
-    vec3 sunlit = col * vec3(1.18, 1.14, 0.78);
-    col = mix(shaded, sunlit, clamp(ao, 0.0, 1.0)) * clamp(ao * 1.15, 0.12, 1.2);
+    vec3 sunlit = col * vec3(1.12, 1.10, 0.86);
+    col = mix(shaded, sunlit, clamp(ao, 0.0, 1.0)) * clamp(0.38 + 0.80 * ao, 0.38, 1.15);
     vTreeColour = vec4(col, tn.y * ao);
     vTreeA = sh;
     vTreeB = vec4(x * hw, y, f, hw);

@@ -70,6 +70,11 @@ fn tiled_noise(seed: u32, x: f32, y: f32, period: i32) -> f32 {
     a + (b - a) * sy
 }
 
+fn smooth01(x: f32) -> f32 {
+    let t = x.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 fn srgb8(linear: f32) -> u8 {
     let c = linear.clamp(0.0, 1.0);
     let encoded = if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
@@ -109,7 +114,7 @@ fn crop_texel(crop: CropKind, variant: u8, u: f32, v: f32, x: i32, y: i32, n: i3
         }
         CropKind::Rice => {
             let hill = 0.25;
-            let (pu, pv) = ((u / hill).fract() - 0.5, (v / 0.30).fract() - 0.5);
+            let (pu, pv) = ((u / hill).fract() - 0.5, (v / (4.0 / 14.0)).fract() - 0.5);
             let plant = (-((pu * pu * 4.0 + pv * pv * 4.0).sqrt() - 0.42) * 7.0).clamp(0.0, 1.0);
             match variant {
                 0 => {
@@ -144,7 +149,7 @@ fn crop_texel(crop: CropKind, variant: u8, u: f32, v: f32, x: i32, y: i32, n: i3
         }
         CropKind::Corn => {
             // Rows 0.6 m apart, plants every 0.25 m, soil between.
-            let spacing = 0.6;
+            let spacing = 4.0 / 7.0;
             let phase = (v / spacing).fract();
             let band = (-(((phase - 0.5).abs() - 0.26) * 10.0)).clamp(0.0, 1.0);
             let plant = ((u / 0.25).fract() - 0.5).abs();
@@ -154,43 +159,48 @@ fn crop_texel(crop: CropKind, variant: u8, u: f32, v: f32, x: i32, y: i32, n: i3
             (colour, blades * 0.8)
         }
         CropKind::Vegetables => {
-            // Raised beds 1.2 m wide with a 0.3 m furrow between.
-            let bed = 1.5;
+            // Raised beds with a furrow between (three beds to the 4 m tile), plants in rows
+            // 1/3 m apart and 1/4 m along: every period divides the tile, so it repeats
+            // without a seam. Each plant is a round tuft of its own size and tone.
+            let bed = 4.0 / 3.0;
             let phase = (v / bed).fract();
-            let on_bed = ((0.80 - (phase - 0.5).abs() * 2.0).max(0.0) * 8.0).min(1.0);
+            let on_bed = smooth01((0.5 - (phase - 0.5).abs()) / 0.16);
             let furrow = 1.0 - on_bed;
-            let plant_row = ((((v / 0.30) + 0.5).fract() - 0.5).abs() < 0.30) as i32 as f32;
-            let dot = hash(41, (u / 0.28) as i32, (v / 0.30) as i32);
+            let (pu, pv) = (0.25_f32, 4.0 / 12.0);
+            let (iu, iv) = ((u / pu).floor(), (v / pv).floor());
+            let (lu, lv) = ((u / pu).fract() - 0.5, (v / pv).fract() - 0.5);
+            let (cu, cv) = (iu as i32 % 16, iv as i32 % 12);
+            let size = 0.42 + 0.30 * hash(41, cu, cv);
+            let tone = 0.75 + 0.5 * hash(43, cu, cv);
+            let d = ((lu * pu).powi(2) + (lv * pv).powi(2)).sqrt() / (0.5 * pu.min(pv)) / size.max(0.2);
+            // Lobed edge so a tuft is not a disc.
+            let ang = (lv * pv).atan2(lu * pu);
+            let lobes = 1.0 + 0.22 * (ang * 5.0 + hash(47, cu, cv) * 6.28).sin();
+            let blob = smooth01((1.0 - d / lobes) / 0.35);
             let bed_look = match variant {
                 0 => {
-                    let leafy = scale([0.085, 0.215, 0.050], 0.78 + 0.45 * dot + 0.2 * (fine - 0.5));
-                    (mix(scale(SOIL, 0.9), leafy, on_bed * (0.45 + 0.55 * plant_row)), on_bed * 0.7)
+                    let leafy = scale([0.085, 0.215, 0.050], tone * (0.85 + 0.3 * (fine - 0.5)));
+                    (mix(scale(SOIL, 0.9), leafy, on_bed * blob), on_bed * (0.25 + 0.6 * blob))
                 }
                 1 => {
                     // Black mulch film with the crop pushing through at intervals.
-                    let film = [0.020, 0.022, 0.026];
-                    let sprout = ((u / 0.35).fract() - 0.5).abs() < 0.12;
-                    let c = if on_bed > 0.5 && sprout && plant_row > 0.5 {
-                        scale([0.08, 0.19, 0.05], 0.8 + 0.4 * dot)
-                    } else if on_bed > 0.5 {
-                        scale(film, 1.0 + 0.5 * (fine - 0.5))
-                    } else {
-                        SOIL
-                    };
-                    (c, on_bed * 0.5)
+                    let film = scale([0.020, 0.022, 0.026], 1.0 + 0.6 * (fine - 0.5));
+                    let sprout = smooth01((1.0 - d / lobes * 1.9) / 0.4);
+                    let c = mix(film, scale([0.08, 0.19, 0.05], tone), sprout);
+                    (mix(scale(SOIL, 0.9), c, on_bed), on_bed * (0.2 + 0.5 * sprout))
                 }
                 _ => {
-                    let brassica = scale([0.075, 0.170, 0.100], 0.75 + 0.5 * dot + 0.2 * (fine - 0.5));
-                    (mix(SOIL, brassica, on_bed * (0.5 + 0.5 * plant_row)), on_bed * 0.8)
+                    let brassica = scale([0.075, 0.170, 0.100], tone * (0.85 + 0.3 * (fine - 0.5)));
+                    (mix(scale(SOIL, 0.9), brassica, on_bed * blob), on_bed * (0.25 + 0.7 * blob))
                 }
             };
-            bed_look.pipe_furrow(furrow)
+            bed_look.pipe_furrow(furrow * 0.7)
         }
         CropKind::Fallow => {
             match variant {
                 0 => {
                     // Ploughed: furrows 0.35 m, lit on one side.
-                    let ridge = 0.5 + 0.5 * (std::f32::consts::TAU * v / 0.35).sin();
+                    let ridge = 0.5 + 0.5 * (std::f32::consts::TAU * v / (4.0 / 12.0)).sin();
                     (scale(mix(SOIL, [0.17, 0.115, 0.075], 0.4 * patch), 0.65 + 0.55 * ridge * (0.7 + 0.5 * grain(43))), ridge)
                 }
                 1 => {
@@ -201,14 +211,14 @@ fn crop_texel(crop: CropKind, variant: u8, u: f32, v: f32, x: i32, y: i32, n: i3
                 _ => {
                     // Stubble and straw.
                     let straw = [0.27, 0.215, 0.105];
-                    let lines = (std::f32::consts::TAU * v / 0.22).sin() * 0.5 + 0.5;
+                    let lines = (std::f32::consts::TAU * v / 0.2).sin() * 0.5 + 0.5;
                     (mix(scale(SOIL, 1.2), scale(straw, 0.7 + 0.4 * grain(47) + 0.25 * patch), 0.55 + 0.35 * lines), 0.4 * lines)
                 }
             }
         }
         CropKind::Orchard => {
             // The floor under the trees: grass, with a mown strip down the middle of each alley.
-            let alley = (v / 5.0).fract();
+            let alley = (v / 4.0).fract();
             let strip = ((alley - 0.5).abs() < 0.22) as i32 as f32;
             let grass = scale([0.075, 0.125, 0.040], 0.75 + 0.5 * grain(49) + 0.3 * (fine - 0.5));
             let bare = mix(SOIL, [0.13, 0.10, 0.07], patch);

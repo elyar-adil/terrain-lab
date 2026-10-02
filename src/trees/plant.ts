@@ -2,7 +2,7 @@ import * as THREE from "three";
 
 import type { CityHandles, CityScene } from "../city/cityScene";
 import { type PlantedTree, UniqueForest } from "./forest";
-import { treeGrowerIfReady, treeSeed } from "./index";
+import { treeGrowerIfReady, treePoolOrNull, treeSeed } from "./index";
 import { type TreeGrower } from "./wasm";
 
 /** What this module needs of an instance list: the city renderer's `LodInstanceSet`. */
@@ -106,7 +106,7 @@ export function installUniqueTrees(handles: CityHandles, scene: CityScene): Uniq
     }));
   const planting = plantFromInstances(sets, grower, scene.seed);
   if (planting.trees.length === 0) return null;
-  const forest = new UniqueForest(grower, planting.trees);
+  const forest = new UniqueForest(grower, planting.trees, {}, treePoolOrNull());
   for (const mesh of planting.replaced) mesh.removeFromParent();
   const gone = new Set(planting.sets);
   handles.lodSets = handles.lodSets.filter((set) => !gone.has(set));

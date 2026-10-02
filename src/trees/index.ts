@@ -1,4 +1,4 @@
-import { TreeGrower } from "./wasm";
+import { TreeGrower, TreePool } from "./wasm";
 
 export { TreeGrower, type TreeData, type TreeSpec } from "./wasm";
 export { UniqueForest, type ForestOptions, type PlantedTree } from "./forest";
@@ -43,4 +43,12 @@ export function treeSeed(...parts: number[]): number {
   a = Math.imul(a ^ (a >>> 15), 0x2c1b3c6d);
   b = Math.imul(b ^ (b >>> 12), 0x297a2d39);
   return ((b >>> 0) & 0x1fffff) * 4294967296 + (a >>> 0);
+}
+
+let pool: TreePool | null | undefined;
+
+/** The shared worker pool, made on first use; null where workers are not available. */
+export function treePoolOrNull(): TreePool | null {
+  if (pool === undefined) pool = new URLSearchParams(location.search).get("workers") === "0" ? null : TreePool.create();
+  return pool;
 }
