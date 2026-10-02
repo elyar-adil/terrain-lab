@@ -103,7 +103,7 @@ pub struct Tree {
 }
 
 /// How many leaves each level of detail draws, at most.
-pub const LEAF_BUDGET: [usize; 4] = [16_000, 3_500, 700, 120];
+pub const LEAF_BUDGET: [usize; 4] = [30_000, 6_500, 1_100, 170];
 /// The deepest level of wood each level of detail draws.
 pub const WOOD_LEVEL: [u8; 4] = [3, 3, 2, 1];
 
@@ -212,8 +212,8 @@ impl Grower {
         // while before turning back (correlated curvature), so it makes long S-bends and
         // the occasional sharp kink, as a branch that has reached for the light does.
         let amp = match level {
-            1 => 0.95,
-            2 => 0.85,
+            1 => 0.60,
+            2 => 0.55,
             _ => 0.3,
         };
         let mut curv = rng.unit_vec() * amp;
@@ -229,6 +229,10 @@ impl Grower {
             }
             kink *= 0.8;
             d = d + curv * (step * (1.0 + kink));
+            // Reaching for the light: a branch that has dipped below level turns back up.
+            if level >= 1 {
+                d.y += (0.30 + 0.5 * (-d.y).max(0.0)) * step;
+            }
             // The crown holds the branch in: lean back inside the envelope.
             // A limb never dips below the bare stem: below it, it can only rise or run level.
             if level >= 1 && p.y < self.crown.z0 * 1.05 {
@@ -241,9 +245,9 @@ impl Grower {
                 d = d + inward * (0.5 * step);
             }
             d = d + wobble * (bend * step);
-            d.y -= sag * len * (0.4 + t) * step;
+            d.y -= 0.45 * sag * len * (0.4 + t) * step;
             d.y += up * 0.5 * step * (1.0 - t);
-            d.y -= droop * t * t * step * 2.5;
+            d.y -= 0.5 * droop * t * t * step * 2.5;
             // Nothing grows above the crown's top.
             if p.y + d.y * step > self.crown.height * 1.01 {
                 d.y = d.y.min(0.0) - 0.05;
@@ -363,7 +367,7 @@ impl Grower {
                     phi0 + g as f32 * GOLDEN_ANGLE + lr.range(-0.25, 0.25)
                 };
                 let theta = a.limb_down.0 + (a.limb_down.1 - a.limb_down.0) * hrel + lr.normal() * 0.10;
-                let theta = theta.clamp(0.12, 1.65);
+                let theta = theta.clamp(0.12, 1.05);
                 let dir = Self::spawn_dir(axis, theta, phi);
                 // A limb reaches as far as the crown envelope allows in its direction.
                 let ask = (self.crown.radius * 3.0).max(2.0);
@@ -453,10 +457,10 @@ impl Grower {
         for i in 0..n {
             let t = rng.range(0.30, 0.72);
             let (pos, axis, r_par) = limb.at(t);
-            let theta = rng.range(0.45, 1.05);
+            let theta = rng.range(0.32, 0.72);
             let phi = rng.range(0.0, std::f32::consts::TAU);
             let mut dir = Self::spawn_dir(axis, theta, phi);
-            dir.y += 0.25;
+            dir.y += 0.35;
             let dir = dir.norm();
             let remaining = limb.len() * (1.0 - t);
             let ask = (remaining * rng.range(0.8, 1.3) + 1.0).max(1.0);
@@ -482,7 +486,7 @@ impl Grower {
             let t = (0.14 + 0.86 * ((i as f32 + br.range(0.1, 0.9)) / n as f32)).clamp(0.1, 0.99);
             let (pos, axis, r_parent) = limb.at(t);
             let phi = phi0 + i as f32 * GOLDEN_ANGLE + br.range(-0.3, 0.3);
-            let theta = (a.branch_down.0 + (a.branch_down.1 - a.branch_down.0) * t + br.normal() * 0.12).clamp(0.2, 1.5);
+            let theta = (a.branch_down.0 + (a.branch_down.1 - a.branch_down.0) * t + br.normal() * 0.12).clamp(0.25, 1.0);
             let dir = Self::spawn_dir(axis, theta, phi);
             let mut blen = a.branch_len * limb.len() * (1.0 - t).max(0.12).powf(0.75) * br.range(0.7, 1.2);
             blen = blen.clamp(0.25, 7.0);
@@ -515,7 +519,7 @@ impl Grower {
                 (axis + tr.unit_vec() * 0.25).norm()
             } else {
                 let phi = phi0 + i as f32 * GOLDEN_ANGLE + tr.range(-0.4, 0.4);
-                let theta = tr.range(0.55, 1.15);
+                let theta = tr.range(0.40, 0.85);
                 Self::spawn_dir(axis, theta, phi)
             };
             let dir = if a.tip_droop >= 1.0 { (dir + v3(0.0, -1.1, 0.0)).norm() } else { dir };
@@ -625,7 +629,7 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
         let per_m = n_target / total_twig;
         // Leaf size: the crown's leaf area, shared out among the leaves drawn.
         let crown_area = std::f32::consts::PI * grower.crown.radius * grower.crown.radius;
-        let area_total = sp.leaf_cover * cover * keep_twigs * (0.55 + 0.45 * spec.openness) * crown_area;
+        let area_total = 1.9 * sp.leaf_cover * cover * keep_twigs * (0.55 + 0.45 * spec.openness) * crown_area;
         let k = 0.70 * sp.leaf_aspect.min(1.1);
         // A farther level draws fewer, bigger leaves; the ceiling on their size rises with
         // how many fewer, so the crown keeps its mass.
