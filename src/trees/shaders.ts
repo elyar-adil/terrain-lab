@@ -20,6 +20,9 @@ import * as THREE from "three";
 export const TABLE_TEXELS = 5;
 export const TABLE_PER_ROW = 256;
 
+const NOBUMP = typeof location !== "undefined" && new URLSearchParams(location.search).get("treedebug") === "nobump" ? "true" : "false";
+const NODISP = typeof location !== "undefined" && new URLSearchParams(location.search).get("treedebug") === "nodisp" ? "0.0" : "1.0";
+
 const VERTEX_COMMON = /* glsl */ `
 attribute float aTreeKind;
 attribute vec4 aSegA;
@@ -35,6 +38,7 @@ varying float vTreeKind;
 varying vec4 vTreeColour;
 varying vec4 vTreeA;
 varying vec4 vTreeB;
+varying vec2 vBarkAR;
 
 vec4 treeRow(float id, int k) {
   int i = int(id + 0.5);
@@ -57,24 +61,29 @@ void treeShape(out vec3 pos, out vec3 nor) {
     vec3 v = cross(w, u);
     vec4 bark = treeRow(aTreeId, 3);
     float t = clamp(position.y, 0.0, 1.0);
-    float r = mix(aSegA.w, aSegB.w, t);
     // Each tube runs a little past both ends, so where a branch bends the joint is
     // overlapped wood and not a crack.
     float ext = min(0.8 * max(aSegA.w, aSegB.w), 0.35 * len) / len;
     float tt = mix(-ext, 1.0 + ext, position.y);
+    // The taper carries on through the extension, so it meets the next tube's surface.
+    float r = max(mix(aSegA.w, aSegB.w, tt), 0.002);
     // Bark is not a cylinder: ridges and furrows run along it and shift the surface.
-    float ang = atan(position.z, position.x);
+    vec3 radialW = u * position.x + v * position.z;
+    // The angle about the axis in the world's own frame, so the relief is the same on
+    // both tubes where two overlap, whatever way each happens to be oriented.
+    float ang = atan(radialW.z, radialW.x);
     vec3 centre = mix(aSegA.xyz, aSegB.xyz, tt);
     float hsh = treeHash(vec3(float(aTreeId), 3.7, 1.3));
     float ridge = sin(ang * 5.0 + centre.y * 0.8 + hsh * 6.0) + 0.6 * sin(ang * 11.0 - centre.y * 1.9 + hsh * 11.0) + 0.35 * sin(ang * 23.0 + centre.y * 3.1);
     float flare = r > 0.05 ? 1.0 : 0.0;
-    r *= 1.0 + flare * bark.w * 0.075 * ridge;
+    r *= 1.0 + flare * bark.w * 0.11 * ridge * ${NODISP};
     vec3 radial = u * position.x + v * position.z;
     pos = centre + radial * r;
     nor = normalize(radial * len + w * (aSegA.w - aSegB.w));
     vTreeColour = vec4(bark.rgb, 1.0);
     vTreeA = vec4(w, bark.w);
     vTreeB = vec4(pos, 0.0);
+    vBarkAR = vec2(ang, r);
   } else {
     float form = treeRow(aTreeId, 0).w;
     vec4 foliage = treeRow(aTreeId, 0);
@@ -124,6 +133,7 @@ void treeShape(out vec3 pos, out vec3 nor) {
     vTreeColour = vec4(col, tn.y);
     vTreeA = sh;
     vTreeB = vec4(x * hw, y, f, hw);
+    vBarkAR = vec2(0.0);
   }
 }
 `;
@@ -176,11 +186,14 @@ varying float vTreeKind;
 varying vec4 vTreeColour;
 varying vec4 vTreeA;
 varying vec4 vTreeB;
+varying vec2 vBarkAR;
 
 float tHash(vec3 p) {
-  p = fract(p * 0.3183099 + 0.1);
-  p *= 17.0;
-  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+  // Wrapped, then a Hoskins-style hash: stable far from the origin and not degenerate at it.
+  p = mod(p, vec3(251.0, 241.0, 239.0));
+  p = fract(p * 0.1031);
+  p += dot(p, p.zyx + 31.32);
+  return fract((p.x + p.y) * p.z);
 }
 
 float tNoise(vec3 x) {
@@ -191,6 +204,30 @@ float tNoise(vec3 x) {
     mix(mix(tHash(i), tHash(i + vec3(1, 0, 0)), f.x), mix(tHash(i + vec3(0, 1, 0)), tHash(i + vec3(1, 1, 0)), f.x), f.y),
     mix(mix(tHash(i + vec3(0, 0, 1)), tHash(i + vec3(1, 0, 1)), f.x), mix(tHash(i + vec3(0, 1, 1)), tHash(i + vec3(1, 1, 1)), f.x), f.y),
     f.z);
+}
+
+// Worley cells in space: F1, F2 and a per-cell id. F2 - F1 is the network of edges
+// between cells, which is what the furrows between bark plates are. In world space, so
+// it is seamless over every joint and every branch.
+vec3 tWorley(vec3 p) {
+  vec3 ip = floor(p);
+  vec3 fp = fract(p);
+  float f1 = 8.0;
+  float f2 = 8.0;
+  float id = 0.0;
+  for (int k = -1; k <= 1; k++) {
+    for (int j = -1; j <= 1; j++) {
+      for (int i = -1; i <= 1; i++) {
+        vec3 g = vec3(float(i), float(j), float(k));
+        vec3 cell = ip + g;
+        vec3 o = vec3(tHash(cell + 1.7), tHash(cell + 5.3), tHash(cell + 9.1));
+        float d = length(g + o - fp);
+        if (d < f1) { f2 = f1; f1 = d; id = tHash(cell + 13.0); }
+        else if (d < f2) { f2 = d; }
+      }
+    }
+  }
+  return vec3(f1, f2, id);
 }
 
 float sdSeg(vec2 p, vec2 a, vec2 b) {
@@ -324,20 +361,47 @@ if (vTreeKind > 0.5) {
     float fissure = vTreeA.w;
     float vert = smoothstep(0.5, 0.9, abs(axis.y));
     vec3 q = vTreeB.xyz;
-    q.y = mix(q.y, q.y * 0.16, vert);
-    // A network of furrows (ridged noise at three scales) with plates between.
-    float n1 = abs(tNoise(q * 17.0) - 0.5) * 2.0;
-    float n2 = abs(tNoise(q * 41.0 + 7.1) - 0.5) * 2.0;
-    float n3 = tNoise(q * 120.0 + 2.3);
-    float plate = tNoise(q * 5.0 + 3.3);
-    float furrow = 1.0 - smoothstep(0.0, 0.10 + 0.22 * fissure, n1);
-    float crack = 1.0 - smoothstep(0.0, 0.10, n2);
-    tBark = (1.0 - furrow) * 0.55 + (1.0 - crack) * 0.2 + n3 * 0.08;
-    vec3 col = vTreeColour.rgb * vec3(1.05, 0.93, 0.80) * (0.85 + 0.30 * n3) * (0.84 + 0.32 * plate);
-    // Lichen and damp, in patches.
-    float lichen = smoothstep(0.62, 0.8, tNoise(q * 4.0 + 9.0));
-    col = mix(col, col * vec3(0.8, 1.15, 0.7), lichen * 0.35);
-    col *= 1.0 - furrow * (0.22 + 0.40 * fissure) - crack * 0.10;
+    // Plates about ten centimetres across the grain and several times that along it.
+    vec3 sq = vec3(1.0, 1.0, 1.0);
+    vec3 qa = q * 10.0;
+    vec3 qb = q * 20.0;
+    float vv = vert;
+    qa.y = mix(qa.y, qa.y * 0.13, vv);
+    qb.y = mix(qb.y, qb.y * 0.38, vv);
+    vec3 wv = vec3(tNoise(qa * 0.35), tNoise(qa * 0.35 + 7.0), tNoise(qa * 0.35 + 17.0)) - 0.5;
+    qa += wv * 1.6;
+    vec3 wa = tWorley(qa);
+    // Ragged edges: the furrow wanders, and pinches shut in places.
+    float edge = wa.y - wa.x + (tNoise(qa * 2.3 + 3.0) - 0.5) * 0.22 + (tNoise(qa * 7.0) - 0.5) * 0.08;
+    float furrow = 1.0 - smoothstep(0.0, 0.045 + 0.06 * fissure, edge);
+    float rounding = smoothstep(0.0, 0.42, edge);
+    vec3 wb = tWorley(qb + wv * 1.5);
+    float crack = (1.0 - smoothstep(0.0, 0.05, wb.y - wb.x + (tNoise(qb * 1.5) - 0.5) * 0.12)) * (1.0 - furrow) * 0.6;
+    float grain = tNoise(vec3(q.x * 40.0 + q.z * 40.0, q.y * 6.0, 0.5));
+    float fine = tNoise(q * 200.0);
+    float along = q.y;
+    float plateId = wa.z;
+    float dome = 1.0 - smoothstep(0.0, 0.75, wa.x);
+    float plate = 0.35 + 0.65 * plateId;
+    // Height in metres: each plate is a low dome, split by deep furrows, cracked across and fibrous.
+    float h = (1.0 - furrow) * (0.020 + 0.040 * dome) * (0.7 + 0.8 * fissure) - crack * 0.004 + grain * 0.003;
+    // Plates that have flaked off show bare wood.
+    float flake = smoothstep(0.88, 0.95, plateId) * smoothstep(0.30, 0.55, tNoise(q * 5.0));
+    float wornMask = flake * (1.0 - furrow);
+    h -= wornMask * 0.012;
+    tBark = h;
+    float woodGrain = 0.55 + 0.45 * sin(q.x * 90.0 + q.z * 90.0 + 9.0 * tNoise(q * vec3(18.0, 4.0, 18.0)));
+    vec3 woodCol = mix(vec3(0.30, 0.13, 0.045), vec3(0.78, 0.43, 0.15), woodGrain) * (0.8 + 0.4 * fine);
+    // Bark itself: warm grey-brown, each plate its own tone, silvered on the high ones, near-black in the furrows.
+    vec3 base = mix(vTreeColour.rgb, vec3(0.17, 0.105, 0.068), 0.62) * vec3(1.15, 0.95, 0.74);
+    vec3 plateCol = base * (0.50 + 0.9 * plate) * (0.8 + 0.4 * grain) * (0.85 + 0.3 * dome) * mix(0.55, 1.0, rounding);
+    plateCol = mix(plateCol, vec3(0.36, 0.33, 0.29), smoothstep(0.55, 1.0, dome * plate) * 0.3);
+    vec3 creviceCol = vec3(0.030, 0.020, 0.014);
+    vec3 col = mix(plateCol, creviceCol, clamp(furrow * 0.96 + crack * 0.65, 0.0, 1.0));
+    col = mix(col, woodCol, wornMask);
+    // Lichen and damp in patches, on the shaded faces.
+    float lichen = smoothstep(0.66, 0.84, tNoise(q * 4.5 + 9.0));
+    col = mix(col, col * vec3(0.78, 1.18, 0.62) + vec3(0.01, 0.02, 0.0), lichen * 0.45 * (1.0 - wornMask));
     diffuseColor.rgb = col;
   } else {
     float vein;
@@ -355,8 +419,8 @@ if (vTreeKind > 0.5) {
 const DEBUG = typeof location !== "undefined" ? new URLSearchParams(location.search).get("treedebug") : null;
 
 const FRAGMENT_BUMP = /* glsl */ `
-if (vTreeKind > 0.5 && vTreeKind < 1.5) {
-  // Bump from the bark height, by screen-space derivatives.
+if (vTreeKind > 0.5 && vTreeKind < 1.5 && !${NOBUMP}) {
+  // Bump from the bark height (metres), by screen-space derivatives.
   vec3 sx = dFdx(-vViewPosition);
   vec3 sy = dFdy(-vViewPosition);
   float hx = dFdx(tBark);
@@ -365,7 +429,7 @@ if (vTreeKind > 0.5 && vTreeKind < 1.5) {
   vec3 r2 = cross(normal, sx);
   float det = dot(sx, r1);
   vec3 grad = sign(det) * (hx * r1 + hy * r2);
-  normal = normalize(abs(det) * normal - 0.012 * grad / max(length(sx) + length(sy), 1e-4) * 6.0);
+  normal = normalize(abs(det) * normal - grad);
 }
 `;
 
