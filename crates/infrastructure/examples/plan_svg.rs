@@ -143,6 +143,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         let pts: Vec<String> = b.boundary.iter().map(|p| { let (x, y) = tx(p); format!("{x:.1},{y:.1}") }).collect();
         writeln!(svg, r##"<polygon points="{}" fill="#cfd8b8" stroke="none"/>"##, pts.join(" "))?;
     }
+    for t in &city.tributaries {
+        let pts: Vec<String> = t.line.iter().map(|p| { let (x, y) = tx(p); format!("{x:.1},{y:.1}") }).collect();
+        writeln!(svg, r##"<polyline points="{}" fill="none" stroke="#9ec3dd" stroke-width="{:.1}" stroke-linecap="round"/>"##, pts.join(" "), t.width_metres / 1000.0 * k)?;
+    }
     for fl in &city.fields {
         let pts: Vec<String> = fl.ring.iter().map(|p| { let (x, y) = tx(p); format!("{x:.1},{y:.1}") }).collect();
         let fill = match fl.crop {
