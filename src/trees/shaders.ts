@@ -141,7 +141,7 @@ void treeShape(out vec3 pos, out vec3 nor) {
     float nrm = length(rel);
     float depthIn = clamp(1.0 - nrm, 0.0, 1.0);
     float under = smoothstep(-0.2, -0.9, rel.y);
-    float ao = mix(1.0, 0.30, smoothstep(0.0, 0.55, depthIn));
+    float ao = mix(1.0, 0.42, smoothstep(0.0, 0.55, depthIn));
     ao *= 1.0 - 0.45 * under;
     // The same noise that breaks a crown into clumps: lobes of light and dark.
     float lobe = treeHash(floor(aLeafPos.xyz * 0.9)) * 0.5 + 0.5;
@@ -652,7 +652,8 @@ export function createTreeMaterials(): TreeMaterials {
     metalness: 0,
     side: THREE.DoubleSide,
     alphaTest: 0.5,
-    alphaToCoverage: true,
+    // (Alpha-to-coverage needs multisampling; without it it turns into a random dot pattern.)
+    alphaToCoverage: false,
   });
   patchTreeMaterial(leaf, "lit");
   const woodDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
