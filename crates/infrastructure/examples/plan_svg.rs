@@ -55,6 +55,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     eprintln!("  fields: {}", city.fields.len());
+    for fl in city.fields.iter().step_by(97).take(6) {
+        let l: Vec<[f32; 2]> = fl.ring.iter().map(|q| city.frame.to_local(*q)).collect();
+        let c = [l.iter().map(|q| q[0]).sum::<f32>() / 4.0, l.iter().map(|q| q[1]).sum::<f32>() / 4.0];
+        eprintln!("  field {:?}.{} at {:.0},{:.0}", fl.crop, fl.variant, c[0], c[1]);
+    }
     let count = |u: urban::ParcelUse| city.parcels.iter().filter(|p| p.use_type == u).count();
     eprintln!(
         "  parcels: villa {}, farmstead {}, residential {}, commercial {}, mixed {}, civic {}, park {}",
