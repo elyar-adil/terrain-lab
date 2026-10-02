@@ -14,6 +14,7 @@
 import * as THREE from "three";
 
 import { bakeSkyEnvironment, createFog, createLighting, createSky } from "./city/sky";
+import { applyGrassFur } from "./city/grassFur";
 import { createPost } from "./city/post";
 import { TreeGrower, UniqueForest, type PlantedTree } from "./trees";
 
@@ -88,7 +89,7 @@ async function main() {
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(4000, 4000).rotateX(-Math.PI / 2),
-    new THREE.MeshStandardMaterial({ color: 0x5b6b3a, roughness: 1 }),
+    applyGrassFur(new THREE.MeshStandardMaterial({ color: 0x5b6b3a, roughness: 1 })),
   );
   ground.receiveShadow = true;
   world.add(ground);

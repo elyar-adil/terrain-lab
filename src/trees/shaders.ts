@@ -17,7 +17,7 @@
 import * as THREE from "three";
 
 /** Texels per tree in the table, and trees per table row. */
-export const TABLE_TEXELS = 5;
+export const TABLE_TEXELS = 6;
 export const TABLE_PER_ROW = 256;
 
 const NOBUMP = typeof location !== "undefined" && new URLSearchParams(location.search).get("treedebug") === "nobump" ? "true" : "false";
@@ -90,6 +90,7 @@ void treeShape(out vec3 pos, out vec3 nor) {
     vec4 autumn = treeRow(aTreeId, 1);
     vec4 bloom = treeRow(aTreeId, 2);
     vec4 extra = treeRow(aTreeId, 4);
+    vec4 crown = treeRow(aTreeId, 5);
     float len = aLeafPos.w;
     vec3 d = normalize(aLeafDir.xyz);
     vec3 n = normalize(aLeafNor.xyz - d * dot(aLeafNor.xyz, d));
@@ -130,7 +131,24 @@ void treeShape(out vec3 pos, out vec3 nor) {
     col = mix(col, col * vec3(1.22, 1.28, 0.62), extra.x);
     if (flower) col = bloom.rgb * (0.88 + 0.24 * tn.x);
 
-    vTreeColour = vec4(col, tn.y);
+    // Where this leaf sits in the crown, as a (squashed) ellipsoid: 1 at the lit outer
+    // surface, 0 on the axis. Light reaching a leaf falls off steeply with depth, and
+    // faster under the crown than on top of it, so the inside is deep shade, the underside
+    // dark, and the sunlit skin bright: the contrast that makes a crown read as a volume.
+    vec3 rel = (aLeafPos.xyz - crown.xyz) / vec3(max(extra.w, 0.5), max(crown.w, 0.5), max(extra.w, 0.5));
+    float nrm = length(rel);
+    float depthIn = clamp(1.0 - nrm, 0.0, 1.0);
+    float under = smoothstep(-0.2, -0.9, rel.y);
+    float ao = mix(1.0, 0.16, smoothstep(0.0, 0.55, depthIn));
+    ao *= 1.0 - 0.45 * under;
+    // The same noise that breaks a crown into clumps: lobes of light and dark.
+    float lobe = treeHash(floor(aLeafPos.xyz * 0.9)) * 0.5 + 0.5;
+    ao *= mix(0.78, 1.12, lobe);
+    // Shade is cooler and bluer (skylight), sun is warm and yellow.
+    vec3 shaded = col * vec3(0.55, 0.78, 0.82);
+    vec3 sunlit = col * vec3(1.18, 1.14, 0.78);
+    col = mix(shaded, sunlit, clamp(ao, 0.0, 1.0)) * clamp(ao * 1.15, 0.12, 1.2);
+    vTreeColour = vec4(col, tn.y * ao);
     vTreeA = sh;
     vTreeB = vec4(x * hw, y, f, hw);
     vBarkAR = vec2(0.0);
@@ -593,7 +611,7 @@ export interface TreeMaterials {
 }
 
 export function createTreeMaterials(): TreeMaterials {
-  const wood = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0, envMapIntensity: 0.35 });
   patchTreeMaterial(wood, "lit");
   const leaf = new THREE.MeshStandardMaterial({
     color: 0xffffff,

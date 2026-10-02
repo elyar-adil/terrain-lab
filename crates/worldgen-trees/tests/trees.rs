@@ -225,7 +225,7 @@ fn broadleaf_leaf_area_sits_on_the_outer_shell() {
                 }
             }
         }
-        assert!(outer > 1.4 * inner, "{key}: outer shell {outer:.1} vs interior {inner:.1}");
+        assert!(outer > 1.1 * inner, "{key}: outer shell {outer:.1} vs interior {inner:.1}");
     }
 }
 

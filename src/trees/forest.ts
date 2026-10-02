@@ -329,7 +329,14 @@ export class UniqueForest {
       [...lin(d.autumnColour), d.autumn],
       [...lin(d.bloomColour), d.bloom],
       [...lin(d.bark).map((x) => x * 1.3), d.fissure],
-      [d.flush, d.leafAspect, d.cover, 0],
+      [d.flush, d.leafAspect, d.cover, d.crownRadius],
+      // The crown as an ellipsoid in world space: centre, and half its height.
+      [
+        this.trees[id].x,
+        this.trees[id].y + d.crownBase + 0.5 * (d.height - d.crownBase),
+        this.trees[id].z,
+        0.5 * (d.height - d.crownBase),
+      ],
     ]);
     this.rowDone[id] = 1;
   }

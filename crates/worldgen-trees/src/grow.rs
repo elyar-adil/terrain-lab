@@ -656,7 +656,7 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
             let side = (reach - radial).max(0.0);
             let top = (h - p.y).max(0.0);
             let depth = side.min(top);
-            0.02 + 0.98 * (-depth / 0.9).exp()
+            0.12 + 0.88 * (-depth / 1.8).exp()
         };
         let weight_total: f32 = grower.twigs.iter().map(|t| t.0.dist(t.1) * light(t.1)).sum::<f32>().max(0.05);
         let per_m = n_target / weight_total;
