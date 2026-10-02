@@ -361,6 +361,7 @@ if (vTreeKind > 0.5) {
     float fissure = vTreeA.w;
     float vert = smoothstep(0.5, 0.9, abs(axis.y));
     vec3 q = vTreeB.xyz;
+    float R = max(vBarkAR.y, 0.004);
     // Plates about ten centimetres across the grain and several times that along it.
     vec3 sq = vec3(1.0, 1.0, 1.0);
     vec3 qa = q * 10.0;
@@ -393,9 +394,20 @@ if (vTreeKind > 0.5) {
     float woodGrain = 0.55 + 0.45 * sin(q.x * 90.0 + q.z * 90.0 + 9.0 * tNoise(q * vec3(18.0, 4.0, 18.0)));
     vec3 woodCol = mix(vec3(0.30, 0.13, 0.045), vec3(0.78, 0.43, 0.15), woodGrain) * (0.8 + 0.4 * fine);
     // Bark itself: warm grey-brown, each plate its own tone, silvered on the high ones, near-black in the furrows.
-    vec3 base = mix(vTreeColour.rgb, vec3(0.17, 0.105, 0.068), 0.62) * vec3(1.15, 0.95, 0.74);
-    vec3 plateCol = base * (0.50 + 0.9 * plate) * (0.8 + 0.4 * grain) * (0.85 + 0.3 * dome) * mix(0.55, 1.0, rounding);
-    plateCol = mix(plateCol, vec3(0.36, 0.33, 0.29), smoothstep(0.55, 1.0, dome * plate) * 0.3);
+    // Colour by age of the wood: thin young twigs are warm tan-brown, old thick limbs
+    // dark brown. Only smooth-barked species (plane, ginkgo) stay pale, and mottled.
+    float thick = smoothstep(0.015, 0.14, R);
+    vec3 youngC = vec3(0.30, 0.175, 0.105);
+    vec3 oldC = vec3(0.085, 0.056, 0.038);
+    vec3 woody = mix(youngC, oldC, thick);
+    float smoothBark = 1.0 - smoothstep(0.18, 0.40, fissure);
+    vec3 paleC = mix(vTreeColour.rgb, vec3(0.30, 0.22, 0.15), 0.35) * vec3(1.25, 1.0, 0.72);
+    vec3 base = mix(woody, mix(paleC, woody, 0.15 * thick), smoothBark);
+    base *= mix(vec3(1.0), vTreeColour.rgb / max(dot(vTreeColour.rgb, vec3(0.33)), 0.02) * 0.9, 0.18);
+    vec3 plateCol = base * (0.55 + 0.80 * plate) * (0.82 + 0.36 * grain) * (0.88 + 0.24 * dome);
+    // Mottling on smooth bark: flaked patches of olive-grey and cream.
+    float mott = tNoise(q * 6.0 + 21.0);
+    plateCol = mix(plateCol, plateCol * vec3(0.78, 0.88, 0.70), smoothBark * smoothstep(0.5, 0.75, mott) * 0.7);
     vec3 creviceCol = vec3(0.030, 0.020, 0.014);
     vec3 col = mix(plateCol, creviceCol, clamp(furrow * 0.96 + crack * 0.65, 0.0, 1.0));
     col = mix(col, woodCol, wornMask);

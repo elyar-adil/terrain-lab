@@ -208,9 +208,38 @@ impl Grower {
         let mut rad = vec![r0];
         let mut cum = vec![0.0];
         let (mut p, mut d) = (start, dir.norm());
+        // A limb does not run straight: it turns, and keeps turning the same way for a
+        // while before turning back (correlated curvature), so it makes long S-bends and
+        // the occasional sharp kink, as a branch that has reached for the light does.
+        let amp = match level {
+            1 => 0.95,
+            2 => 0.85,
+            _ => 0.3,
+        };
+        let mut curv = rng.unit_vec() * amp;
+        let mut kink = 0.0_f32;
         for i in 0..n {
             let t = (i + 1) as f32 / n as f32;
             let wobble = rng.unit_vec();
+            curv = curv * 0.90 + rng.unit_vec() * (amp * 0.45);
+            // Now and then the leader dies back and a side shoot takes over: a sudden bend.
+            if rng.u() < 0.035 * level as f32 {
+                kink = 0.5 + rng.u();
+                curv = curv + rng.unit_vec() * (amp * 2.2);
+            }
+            kink *= 0.8;
+            d = d + curv * (step * (1.0 + kink));
+            // The crown holds the branch in: lean back inside the envelope.
+            // A limb never dips below the bare stem: below it, it can only rise or run level.
+            if level >= 1 && p.y < self.crown.z0 * 1.05 {
+                d.y = d.y.max(0.15);
+            }
+            let radial = (p.x * p.x + p.z * p.z).sqrt();
+            let reach = self.crown.reach(p.y, p.z.atan2(p.x));
+            if radial > reach * 1.02 {
+                let inward = v3(-p.x, 0.0, -p.z).norm();
+                d = d + inward * (0.5 * step);
+            }
             d = d + wobble * (bend * step);
             d.y -= sag * len * (0.4 + t) * step;
             d.y += up * 0.5 * step * (1.0 - t);
@@ -232,6 +261,11 @@ impl Grower {
             }
         }
         Path { pts, rad, cum }
+    }
+
+    /// A broadleaf tree divides into spreading limbs; a conifer keeps one leader to the top.
+    fn decurrent(&self) -> bool {
+        !matches!(self.crown.habit, Habit::Layered | Habit::Conical | Habit::Fastigiate | Habit::Fan)
     }
 
     fn trunk(&mut self, spec: &TreeSpec, r_dbh: f32, rng: &mut R) -> Path {
@@ -261,7 +295,14 @@ impl Grower {
             let rel = (pt.y / h).clamp(0.0, 1.0);
             let base = r_dbh * ((1.0 - rel) / norm).max(0.0).powf(self.arch.trunk_taper);
             let foot = 1.0 + flare * 0.55 * (-pt.y / 0.45).exp();
-            rad[k] = (base * foot).max(0.012);
+            let mut r = (base * foot).max(0.012);
+            if self.decurrent() {
+                // The trunk gives way to its limbs: above the first third of the crown it thins
+                // fast, and the limbs carry on upward.
+                let u = ((rel - 0.50) / 0.45).clamp(0.0, 1.0);
+                r *= 1.0 - 0.62 * u * u * (3.0 - 2.0 * u);
+            }
+            rad[k] = r;
         }
         for i in 1..pts.len() {
             self.segments.push(Segment { a: pts[i - 1], b: pts[i], ra: rad[i - 1], rb: rad[i], level: 0 });
@@ -305,6 +346,7 @@ impl Grower {
         let whorl = a.whorl.max(1) as usize;
         let groups = if a.whorl > 0 { count.div_ceil(whorl) } else { count };
         let phi0 = rng.range(0.0, std::f32::consts::TAU);
+        let r_ref = trunk.at((z0 / (h * 1.02)).clamp(0.0, 0.9)).2;
         for g in 0..groups {
             // Even spacing up the crown with jitter; a whorl is all at one height.
             let hrel = (g as f32 + 0.5 + 0.35 * rng.normal().clamp(-1.5, 1.5)) / groups as f32;
@@ -327,10 +369,18 @@ impl Grower {
                 let ask = (self.crown.radius * 3.0).max(2.0);
                 let mut len = self.fit(pos, dir, ask, 1.0, 0.25) * a.limb_len * lr.range(0.80, 1.05);
                 len = len.clamp(0.25, 16.0);
-                let r0 = (r_trunk * a.limb_radius).min(r_trunk * 0.9).max(0.010);
+                let mut r0 = (r_trunk * a.limb_radius).min(r_trunk * 0.9).max(0.010);
+                if self.decurrent() {
+                    // Big limbs: each is a good fraction of the trunk at the crown's base.
+                    let big = r_ref * (0.62 - 0.30 * hrel) * lr.range(0.8, 1.1);
+                    r0 = big.min(r_ref * 0.8).max(r0);
+                }
                 let sag = a.limb_sag * lr.range(0.6, 1.5);
                 let path = self.trace(pos, dir, len, r0, 0.012, 0.9, 0.35, 0.10, sag, a.limb_up, a.tip_droop * 0.6, 1, &mut lr, true);
                 self.branches(&path, spec, seed, &mut lr);
+                if self.decurrent() {
+                    self.forks(&path, 2, spec, seed, &mut lr);
+                }
                 if a.limb_twigs > 0.0 {
                     // Clothed along its length, as a conifer's limb is.
                     self.twigs_on_density(&path, seed.derive("limbtwigs"), a.limb_twigs, &mut lr);
@@ -388,6 +438,35 @@ impl Grower {
                     wood.push((seg.a, seg.b, seg.ra));
                 }
             }
+        }
+    }
+
+    /// A limb divides: partway along, one or two stout forks leave it at a wide angle and
+    /// carry on bending toward the light, and each may divide again. This is what makes
+    /// the framework of an old broadleaf tree: a few great arms, each splitting.
+    fn forks(&mut self, limb: &Path, depth: u8, spec: &TreeSpec, seed: Seed, rng: &mut R) {
+        if depth == 0 || limb.len() < 1.2 {
+            return;
+        }
+        let a = self.arch;
+        let n = if depth == 2 { 2 } else { 1 };
+        for i in 0..n {
+            let t = rng.range(0.30, 0.72);
+            let (pos, axis, r_par) = limb.at(t);
+            let theta = rng.range(0.45, 1.05);
+            let phi = rng.range(0.0, std::f32::consts::TAU);
+            let mut dir = Self::spawn_dir(axis, theta, phi);
+            dir.y += 0.25;
+            let dir = dir.norm();
+            let remaining = limb.len() * (1.0 - t);
+            let ask = (remaining * rng.range(0.8, 1.3) + 1.0).max(1.0);
+            let len = self.fit(pos, dir, ask, 1.0, 0.4).clamp(0.4, 12.0);
+            let r0 = (r_par * 0.72).clamp(0.01, 0.6);
+            let fseed = seed.derive_u64(0x7000 + u64::from(depth) * 8 + i as u64);
+            let mut fr = R::of(fseed);
+            let path = self.trace(pos, dir, len, r0, 0.012, 0.9, 0.35, 0.10, a.limb_sag * 0.8, a.limb_up, a.tip_droop * 0.6, 1, &mut fr, true);
+            self.branches(&path, spec, fseed, &mut fr);
+            self.forks(&path, depth - 1, spec, fseed, &mut fr);
         }
     }
 
@@ -449,6 +528,10 @@ impl Grower {
             let (mut mid, end_y) = (mid, end.y.min(ymax));
             end.y = end_y;
             mid.y = mid.y.min(ymax);
+            // Nothing hangs below the bare stem: a twig that would is simply not grown.
+            if end.y < self.crown.z0 * 0.97 || mid.y < self.crown.z0 * 0.97 {
+                continue;
+            }
             let r0 = (r_parent * 0.6).clamp(0.003, 0.012);
             self.segments.push(Segment { a: pos, b: mid, ra: r0, rb: r0 * 0.7, level: 3 });
             self.segments.push(Segment { a: mid, b: end, ra: r0 * 0.7, rb: 0.0015, level: 3 });
@@ -581,7 +664,11 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
                 let length = size * (kr.normal() * 0.18).exp() * (0.92 + 0.14 * kr.u());
                 let depth = (base.dist(crown_centre) / (grower.crown.radius.max(0.5) * 1.1)).clamp(0.0, 1.0);
                 leaves.push(Leaf {
-                    pos: base + dir * (length * 0.10),
+                    pos: {
+                        let mut pos = base + dir * (length * 0.10);
+                        pos.y = pos.y.max(grower.crown.z0 * 0.97);
+                        pos
+                    },
                     dir,
                     normal,
                     length,
