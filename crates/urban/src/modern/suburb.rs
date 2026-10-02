@@ -15,7 +15,7 @@
 
 use super::CityFrame;
 use super::blocks::Face;
-use super::geom::{V, centroid, point_in, point_seg_dist, ring_polyline_dist, signed_area};
+use super::geom::{V, centroid, point_in, point_seg_dist, signed_area};
 use super::graph::modern_hash;
 use super::parcels::right_of_way;
 use crate::{
@@ -182,8 +182,7 @@ pub(super) fn place_frontage(f: &Frontage<'_>, sink: &mut Sink<'_>) {
                 continue;
             }
             let inside = f.envelopes.iter().any(|env| lot.iter().all(|p| point_in(env, *p)));
-            let near_river =
-                !f.river.is_empty() && ring_polyline_dist(&lot, f.river) < f.river_half + 8.0;
+            let near_river = f.frame.near_water(&lot, 8.0);
             let clear_of_spurs = f.spurs.iter().all(|(p, q, class)| {
                 let clear = right_of_way(*class);
                 lot.iter().all(|c| point_seg_dist(*c, *p, *q) >= clear)
@@ -478,7 +477,7 @@ pub(super) fn place_fields(f: &Frontage<'_>, lots: &[Vec<V>], sink: &mut Sink<'_
                     if lots.iter().any(|l| overlap(&corners, l, 4.0)) {
                         continue;
                     }
-                    if !f.river.is_empty() && ring_polyline_dist(&corners, f.river) < f.river_half + 8.0 {
+                    if f.frame.near_water(&corners, 6.0) {
                         continue;
                     }
                     let c = centroid(&corners);
@@ -519,8 +518,8 @@ pub(super) fn roadside_fields(
     frame: &CityFrame,
     pts: &[V],
     edges: &[(usize, usize, ModernRoadClass)],
-    river: &[V],
-    river_half: f32,
+    _river: &[V],
+    _river_half: f32,
     seed: u32,
     occupied: &mut Vec<Vec<V>>,
     fields: &mut Vec<Field>,
@@ -572,7 +571,7 @@ pub(super) fn roadside_fields(
                     if !clear {
                         continue;
                     }
-                    if !river.is_empty() && ring_polyline_dist(&corners, river) < river_half + 8.0 {
+                    if frame.near_water(&corners, 6.0) {
                         continue;
                     }
                     if occupied.iter().any(|o| overlap(&corners, o, 2.0)) {

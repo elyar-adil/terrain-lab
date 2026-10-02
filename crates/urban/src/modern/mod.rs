@@ -31,6 +31,8 @@ pub(super) struct ExternalFrame {
     intensity: Box<dyn Fn(f32, f32) -> f32 + Send + Sync>,
     /// The river in local metres, source to mouth.
     river: Vec<geom::V>,
+    /// Other waterways in local metres, each with its half width.
+    tributaries: Vec<(Vec<geom::V>, f32)>,
 }
 
 struct CityFrame {
@@ -75,6 +77,18 @@ impl CityFrame {
             river_half: spec.river_width_metres.clamp(24.0, 140.0) * 0.5,
             spec,
         }
+    }
+
+    /// Whether a ring lies within `margin` metres of any water: the river or a tributary.
+    /// Farmland and houses are stopped by water, not laid over it.
+    fn near_water(&self, ring: &[geom::V], margin: f32) -> bool {
+        let river = self.river_line();
+        if !river.is_empty() && geom::ring_polyline_dist(ring, &river) < self.river_half + margin {
+            return true;
+        }
+        self.external.as_ref().is_some_and(|e| {
+            e.tributaries.iter().any(|(line, half)| line.len() >= 2 && geom::ring_polyline_dist(ring, line) < half + margin)
+        })
     }
 
     fn to_world(&self, x_m: f32, z_m: f32) -> Point {
@@ -370,6 +384,11 @@ pub fn generate_modern_chinese_city_from_streets(
         urbanness: Box::new(move |x, z| u2(world_of(x, z))),
         intensity: Box::new(move |x, z| i2(world_of(x, z))),
         river,
+        tributaries: streets
+            .tributaries
+            .iter()
+            .map(|(line, width)| (line.iter().map(|p| frame.to_local(*p)).collect(), width * 0.5))
+            .collect(),
     });
     let frame = frame;
 
