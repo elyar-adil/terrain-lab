@@ -35,7 +35,7 @@ pub fn standard_set(facade_size: usize, ground_size: usize) -> Vec<BakedTexture>
     set.push(asphalt_texture(ground_size));
     set.push(paving_texture(ground_size));
     set.push(grass_texture(ground_size));
-    set.extend(crate::crops::crop_textures(ground_size));
+    set.extend(crate::crops::crop_textures((ground_size * 2).max(256)));
     set.push(crosswalk_texture(ground_size));
     set.push(dashed_line_texture(64, 3.0, 5.0));
     set.push(dashed_line_texture(64, 6.0, 9.0));

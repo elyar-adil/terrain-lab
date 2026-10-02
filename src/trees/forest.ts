@@ -67,7 +67,7 @@ interface Job {
   grown: TreeData[];
 }
 
-const SIDES = [10, 8, 6, 5];
+const SIDES = [24, 16, 10, 6];
 
 function woodBase(sides: number): THREE.InstancedBufferGeometry {
   const columns = sides + 1;

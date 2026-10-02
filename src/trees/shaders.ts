@@ -55,11 +55,23 @@ void treeShape(out vec3 pos, out vec3 nor) {
     vec3 refv = abs(w.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
     vec3 u = normalize(cross(refv, w));
     vec3 v = cross(w, u);
-    float r = mix(aSegA.w, aSegB.w, position.y);
-    vec3 radial = u * position.x + v * position.z;
-    pos = mix(aSegA.xyz, aSegB.xyz, position.y) + radial * r;
-    nor = normalize(radial * len + w * (aSegA.w - aSegB.w));
     vec4 bark = treeRow(aTreeId, 3);
+    float t = clamp(position.y, 0.0, 1.0);
+    float r = mix(aSegA.w, aSegB.w, t);
+    // Each tube runs a little past both ends, so where a branch bends the joint is
+    // overlapped wood and not a crack.
+    float ext = min(0.8 * max(aSegA.w, aSegB.w), 0.35 * len) / len;
+    float tt = mix(-ext, 1.0 + ext, position.y);
+    // Bark is not a cylinder: ridges and furrows run along it and shift the surface.
+    float ang = atan(position.z, position.x);
+    vec3 centre = mix(aSegA.xyz, aSegB.xyz, tt);
+    float hsh = treeHash(vec3(float(aTreeId), 3.7, 1.3));
+    float ridge = sin(ang * 5.0 + centre.y * 0.8 + hsh * 6.0) + 0.6 * sin(ang * 11.0 - centre.y * 1.9 + hsh * 11.0) + 0.35 * sin(ang * 23.0 + centre.y * 3.1);
+    float flare = r > 0.05 ? 1.0 : 0.0;
+    r *= 1.0 + flare * bark.w * 0.075 * ridge;
+    vec3 radial = u * position.x + v * position.z;
+    pos = centre + radial * r;
+    nor = normalize(radial * len + w * (aSegA.w - aSegB.w));
     vTreeColour = vec4(bark.rgb, 1.0);
     vTreeA = vec4(w, bark.w);
     vTreeB = vec4(pos, 0.0);
@@ -305,20 +317,27 @@ float treeLeafCoverage(out float vein, out float inner) {
 `;
 
 const FRAGMENT_SURFACE = /* glsl */ `
+float tBark = 0.0;
 if (vTreeKind > 0.5) {
   if (vTreeKind < 1.5) {
     vec3 axis = normalize(vTreeA.xyz);
     float fissure = vTreeA.w;
-    vec3 p = vTreeB.xyz;
-    float along = dot(p, axis);
-    vec3 perp = p - axis * along;
-    float n1 = tNoise(perp * 16.0 + axis * along * 2.4);
-    float n2 = tNoise(perp * 46.0 + axis * along * 6.0 + 7.1);
-    float ridge = abs(n1 - 0.5) * 2.0;
-    float groove = smoothstep(0.30 * fissure + 0.04, 0.0, ridge);
-    float plate = tNoise(perp * 5.0 + axis * along * 0.8 + 3.3);
-    vec3 col = vTreeColour.rgb * (0.78 + 0.34 * n2) * (0.88 + 0.24 * plate);
-    col *= 1.0 - groove * (0.30 + 0.45 * fissure);
+    float vert = smoothstep(0.5, 0.9, abs(axis.y));
+    vec3 q = vTreeB.xyz;
+    q.y = mix(q.y, q.y * 0.16, vert);
+    // A network of furrows (ridged noise at three scales) with plates between.
+    float n1 = abs(tNoise(q * 17.0) - 0.5) * 2.0;
+    float n2 = abs(tNoise(q * 41.0 + 7.1) - 0.5) * 2.0;
+    float n3 = tNoise(q * 120.0 + 2.3);
+    float plate = tNoise(q * 5.0 + 3.3);
+    float furrow = 1.0 - smoothstep(0.0, 0.10 + 0.22 * fissure, n1);
+    float crack = 1.0 - smoothstep(0.0, 0.10, n2);
+    tBark = (1.0 - furrow) * 0.55 + (1.0 - crack) * 0.2 + n3 * 0.08;
+    vec3 col = vTreeColour.rgb * vec3(1.05, 0.93, 0.80) * (0.85 + 0.30 * n3) * (0.84 + 0.32 * plate);
+    // Lichen and damp, in patches.
+    float lichen = smoothstep(0.62, 0.8, tNoise(q * 4.0 + 9.0));
+    col = mix(col, col * vec3(0.8, 1.15, 0.7), lichen * 0.35);
+    col *= 1.0 - furrow * (0.22 + 0.40 * fissure) - crack * 0.10;
     diffuseColor.rgb = col;
   } else {
     float vein;
@@ -334,6 +353,21 @@ if (vTreeKind > 0.5) {
 `;
 
 const DEBUG = typeof location !== "undefined" ? new URLSearchParams(location.search).get("treedebug") : null;
+
+const FRAGMENT_BUMP = /* glsl */ `
+if (vTreeKind > 0.5 && vTreeKind < 1.5) {
+  // Bump from the bark height, by screen-space derivatives.
+  vec3 sx = dFdx(-vViewPosition);
+  vec3 sy = dFdy(-vViewPosition);
+  float hx = dFdx(tBark);
+  float hy = dFdy(tBark);
+  vec3 r1 = cross(sy, normal);
+  vec3 r2 = cross(normal, sx);
+  float det = dot(sx, r1);
+  vec3 grad = sign(det) * (hx * r1 + hy * r2);
+  normal = normalize(abs(det) * normal - 0.012 * grad / max(length(sx) + length(sy), 1e-4) * 6.0);
+}
+`;
 
 const FRAGMENT_TRANSLUCENCY = /* glsl */ `
 ${DEBUG === "normal" ? "if (vTreeKind > 0.5) { totalEmissiveRadiance = normal * 0.5 + 0.5; diffuseColor.rgb = vec3(0.0); }" : ""}
@@ -458,6 +492,7 @@ export function patchTreeMaterial(material: THREE.Material, mode: "lit" | "depth
     fragment = fragment.replace("void main() {", `${FRAGMENT_COMMON}\nvoid main() {`);
     if (mode === "lit") {
       fragment = fragment.replace("#include <color_fragment>", `#include <color_fragment>\n${FRAGMENT_SURFACE}`);
+      fragment = fragment.replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>\n${FRAGMENT_BUMP}`);
       fragment = fragment.replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>\n${FRAGMENT_TRANSLUCENCY}`);
     } else if (mode === "depth") {
       fragment = fragment.replace(
