@@ -215,7 +215,7 @@ impl Grower {
             1 => 0.60,
             2 => 0.55,
             _ => 0.3,
-        };
+        } * if self.decurrent() { 1.0 } else { 0.18 };
         let mut curv = rng.unit_vec() * amp;
         let mut kink = 0.0_f32;
         for i in 0..n {
@@ -231,7 +231,8 @@ impl Grower {
             d = d + curv * (step * (1.0 + kink));
             // Reaching for the light: a branch that has dipped below level turns back up.
             if level >= 1 {
-                d.y += (0.30 + 0.5 * (-d.y).max(0.0)) * step;
+                let k = if self.decurrent() { 1.0 } else { 0.10 };
+                d.y += k * (0.30 + 0.5 * (-d.y).max(0.0)) * step;
             }
             // The crown holds the branch in: lean back inside the envelope.
             // A limb never dips below the bare stem: below it, it can only rise or run level.

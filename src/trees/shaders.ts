@@ -106,7 +106,7 @@ void treeShape(out vec3 pos, out vec3 nor) {
     if (flower) hw = 0.5;
     else if (form < 0.5 || (form > 1.5 && form < 2.5) || form > 4.5 && form < 5.5) hw = clamp(0.5 * extra.y * (0.9 + 0.25 * sh.z), 0.14, 0.62);
     else if (form < 1.5) hw = 0.62;
-    else if (form < 3.5) hw = 0.34;
+    else if (form < 3.5) hw = 0.62;
     else if (form < 4.5) hw = 0.38;
     else hw = 0.6;
 
@@ -298,17 +298,16 @@ float leafOutline(vec2 q, float form, float hw, vec4 sh, out float vein) {
     return d;
   }
   if (form < 3.5) {
-    // A spray of needles.
-    float d = 1.0;
-    float spread = 0.095 + 0.04 * sh.x;
-    for (int k = 0; k < 7; k++) {
-      float fk = float(k) - 3.0;
-      float phi = fk * spread + (sh.z - 0.5) * 0.1;
-      float lk = 0.72 + 0.28 * fract(sin(float(k) * 91.7 + sh.y * 40.0) * 437.5);
-      vec2 tip = vec2(sin(phi), cos(phi)) * lk;
-      d = min(d, sdSeg(q, vec2(0.0), tip) - 0.042 * (1.0 - 0.6 * t));
-    }
-    vein = 0.0;
+    // A shoot of needles: a flat feathery fan, a rachis down the middle with needles combed
+    // out on both sides, so the spray reads as a soft filled shape and not a few hairs.
+    vec2 v = q - vec2(0.0, 0.04);
+    float r = length(v);
+    float th = atan(v.x, v.y);
+    float spread = 0.62 + 0.30 * sh.x;
+    float teeth = 0.80 + 0.20 * abs(sin(th * (9.0 + 6.0 * sh.y) + sh.z * 6.0));
+    float R = 0.96 * teeth * (1.0 - 0.18 * abs(th) / spread);
+    float d = max(r - R, (abs(th) - spread) * max(r, 0.12));
+    vein = (1.0 - smoothstep(0.0, 0.018, abs(q.x))) * step(0.04, q.y) * 0.7;
     return d;
   }
   if (form < 4.5) {
