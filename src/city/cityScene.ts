@@ -18,6 +18,7 @@
 import * as THREE from "three";
 
 import { applyAntiTiling } from "./antiTile";
+import { applyGrassFur } from "./grassFur";
 
 /** One vertex buffer group from the payload. */
 export interface SceneMesh {
@@ -449,7 +450,7 @@ export function createMaterials(
 
   const grassMap = textureFor("ground/grass");
   for (const key of ["block.ground", "parcel.green", "median.plant"]) {
-    applyAntiTiling(standard(
+    applyGrassFur(applyAntiTiling(standard(
       key,
       {
         map: grassMap ?? undefined,
@@ -460,7 +461,7 @@ export function createMaterials(
         ...(key === "block.ground" ? { polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 } : {}),
       },
       grassMap ? 0xffffff : 0x2e3a22,
-    ), "grass");
+    ), "grass") as THREE.MeshStandardMaterial);
   }
   {
     // Water is lit like a smooth dielectric and shaped by moving ripples: a few

@@ -15,6 +15,7 @@
 import * as THREE from "three";
 
 import { CityLod, LOD } from "./cityLod";
+import { GrassShells } from "./grassFur";
 import { preloadTreeGrower } from "../trees";
 import { installUniqueTrees } from "../trees/plant";
 import { perfTiming } from "./perf";
@@ -198,6 +199,8 @@ function finishLayer(
   const forest = installUniqueTrees(handles, scene);
   if (forest) group.add(forest.group);
 
+  const lawns = handles.statics.filter((m) => /^(parcel\.green|block\.ground)$/.test(m.name));
+  const shells = lawns.length > 0 ? new GrassShells(lawns, materials.get("parcel.green") as THREE.MeshStandardMaterial) : null;
   const lod = new CityLod(handles);
   const inverse = new THREE.Matrix4();
   const viewProjection = new THREE.Matrix4();
@@ -224,6 +227,7 @@ function finishLayer(
       viewProjection.premultiply(camera.projectionMatrix).multiply(group.matrixWorld);
       frustum.setFromProjectionMatrix(viewProjection);
       let changed = lod.update(local, forward, frustum, cameraDistanceM);
+      shells?.update(local);
       if (forest) {
         forest.setCasting(cameraDistanceM < LOD.shadowTrees);
         changed = forest.update(local, 6) || changed;
@@ -236,6 +240,7 @@ function finishLayer(
     dispose() {
       group.removeFromParent();
       forest?.dispose();
+      shells?.dispose();
       for (const mesh of owned) mesh.dispose();
       handles.dispose();
       materials.dispose();
