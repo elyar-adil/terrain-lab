@@ -33,7 +33,9 @@ const num = (key: string, fallback: number) => {
 async function main() {
   const grower = await TreeGrower.load();
   const wanted = params.get("species") ?? "xiang-zhang";
-  const species = wanted === "all" ? grower.speciesKeys.map((_, i) => i) : [Math.max(0, grower.speciesIndex(wanted))];
+  // `species=all` draws every species; `from`/`to` pick a slice of the catalogue.
+  const everyone = grower.speciesKeys.map((_, i) => i).slice(num("from", 0), num("to", 99));
+  const species = wanted === "all" ? everyone : [Math.max(0, grower.speciesIndex(wanted))];
   const count = Math.max(1, Math.floor(num("n", 1)));
   const height = num("h", 12);
   const seed0 = num("seed", 1);
