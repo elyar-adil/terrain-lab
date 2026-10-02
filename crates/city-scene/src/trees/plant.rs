@@ -32,6 +32,8 @@ pub enum TreeRole {
     Waterfront,
     /// Roundabout island.
     Island,
+    /// A fruit tree in an orchard row.
+    Orchard,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -104,6 +106,13 @@ const COMPOUND: &[&str] = &[
 /// country.
 const WATERFRONT: &[&str] = &["liu-shu", "shui-shan", "yang-shu", "yu-shu"];
 
+/// An orchard is peach and its cousins; the grower knows more fruit than the old
+/// prototype set does, and will say so when the set is widened.
+const ORCHARD: &[&str] = &["tao-shu"];
+
+/// A farmyard: poplars and willows, the locust and the elm, a peach by the door.
+const FARM: &[&str] = &["yang-shu", "liu-shu", "huai-shu", "yu-shu", "tao-shu", "ci-huai", "xiang-zhang"];
+
 /// A roundabout island is visible from every approach, so it gets the showy
 /// small trees and the ginkgo.
 const ISLAND: &[&str] = &["tao-shu", "he-huan", "gui-hua", "yin-xing"];
@@ -113,6 +122,8 @@ const ISLAND: &[&str] = &["tao-shu", "he-huan", "gui-hua", "yin-xing"];
 pub fn plant(
     network: &Network,
     parcels: &[Parcel],
+    buildings: &[urban::ModernBuilding],
+    fields: &[urban::Field],
     river: Option<&[Point]>,
     river_width: f32,
     frame: CityFrameInfo,
@@ -257,6 +268,21 @@ pub fn plant(
     }
 
     // --- park groves and compound interiors ---------------------------------
+    // Where the houses of a garden stand, so a tree is not planted through one.
+    let mut footprints: std::collections::HashMap<u32, Vec<Vec<Vec2>>> = std::collections::HashMap::new();
+    for building in buildings {
+        if matches!(building.use_type, ParcelUse::Villa | ParcelUse::Farmstead) {
+            let ring: Vec<Vec2> = building
+                .footprint
+                .iter()
+                .map(|point| {
+                    let [x, z] = frame.to_local(*point);
+                    Vec2::new(x, z)
+                })
+                .collect();
+            footprints.entry(building.parcel_id).or_default().push(ring);
+        }
+    }
     for parcel in parcels {
         let ring: Vec<Vec2> = parcel
             .ring
@@ -278,8 +304,11 @@ pub fn plant(
             ParcelUse::Park => (TreeRole::Park, 10, PARK),
             ParcelUse::Residential if parcel.compound => (TreeRole::Compound, 8, COMPOUND),
             ParcelUse::Civic => (TreeRole::Park, 5, PARK),
+            ParcelUse::Villa => (TreeRole::Compound, 3 + (parcel.id % 4) as usize, COMPOUND),
+            ParcelUse::Farmstead => (TreeRole::Compound, 2 + (parcel.id % 5) as usize, FARM),
             _ => continue,
         };
+        let houses = footprints.get(&parcel.id);
         for _ in 0..count {
             // Rejection-sample inside the parcel: scatter trees in a bounding box
             // and keep the ones that actually land on green.
@@ -288,7 +317,15 @@ pub fn plant(
                     bounds.0 + rng.unit() * (bounds.2 - bounds.0),
                     bounds.1 + rng.unit() * (bounds.3 - bounds.1),
                 );
-                if crate::math::point_in_ring(candidate, &interior) {
+                let blocked = houses.is_some_and(|rings| {
+                    rings.iter().any(|house| {
+                        crate::math::point_in_ring(candidate, house)
+                            || (0..house.len()).any(|i| {
+                                segment_distance(candidate, house[i], house[(i + 1) % house.len()]) < 3.2
+                            })
+                    })
+                });
+                if !blocked && crate::math::point_in_ring(candidate, &interior) {
                     place(
                         role,
                         candidate,
@@ -302,6 +339,48 @@ pub fn plant(
                     break;
                 }
             }
+        }
+    }
+
+    // --- orchards: fruit trees in rows ------------------------------------------
+    for field in fields.iter().filter(|f| f.crop == urban::CropKind::Orchard) {
+        let ring: Vec<Vec2> = field
+            .ring
+            .iter()
+            .map(|point| {
+                let [x, z] = frame.to_local(*point);
+                Vec2::new(x, z)
+            })
+            .collect();
+        let inner = crate::math::inset_ring(&ring, 2.0);
+        if inner.len() < 3 {
+            continue;
+        }
+        let (sin, cos) = field.row_angle.sin_cos();
+        let (mut u0, mut u1, mut v0, mut v1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for p in &ring {
+            let (u, v) = (p.x * cos + p.y * sin, -p.x * sin + p.y * cos);
+            u0 = u0.min(u);
+            u1 = u1.max(u);
+            v0 = v0.min(v);
+            v1 = v1.max(v);
+        }
+        let mut planted = 0;
+        let mut v = v0 + 3.0;
+        while v < v1 - 1.5 && planted < 70 {
+            let mut u = u0 + 3.0 + rng.unit() * 1.5;
+            while u < u1 - 1.5 && planted < 70 {
+                let spot = Vec2::new(
+                    (u + (rng.unit() - 0.5) * 0.8) * cos - v * sin,
+                    (u + (rng.unit() - 0.5) * 0.8) * sin + v * cos,
+                );
+                if crate::math::point_in_ring(spot, &inner) {
+                    place(TreeRole::Orchard, spot, ORCHARD, prototypes, &mut rng, builder, &mut output, &mut counts);
+                    planted += 1;
+                }
+                u += 5.0;
+            }
+            v += 5.5;
         }
     }
 
@@ -419,6 +498,15 @@ pub fn plant(
         .map(|(role, count)| (format!("{role:?}").to_lowercase(), count))
         .collect();
     output
+}
+
+/// Distance from a point to a segment, plan metres.
+fn segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f32 {
+    let ab = b - a;
+    let len2 = ab.x * ab.x + ab.y * ab.y;
+    let t = if len2 < 1.0e-9 { 0.0 } else { (((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / len2).clamp(0.0, 1.0) };
+    let q = Vec2::new(a.x + ab.x * t, a.y + ab.y * t);
+    ((p.x - q.x).powi(2) + (p.y - q.y).powi(2)).sqrt()
 }
 
 fn variants_of(species: &crate::species::Species) -> usize {

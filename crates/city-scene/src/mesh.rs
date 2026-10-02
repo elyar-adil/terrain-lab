@@ -919,8 +919,12 @@ pub fn box_at(
         point(hw, hd),
         point(-hw, hd),
     ];
+    // `wall` faces to the left of a -> b. The corners above run the other way
+    // round the box than the ring convention the building shells use, so walk
+    // each edge backwards or every side faces into the box and is culled from
+    // outside, leaving only its inside walls visible.
     for index in 0..4 {
-        builder.wall(material, corners[index], corners[(index + 1) % 4], y0, y1, None);
+        builder.wall(material, corners[(index + 1) % 4], corners[index], y0, y1, None);
     }
     builder.quad(
         material,
@@ -1005,6 +1009,31 @@ mod tests {
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].indices, vec![0, 1, 2, 0, 2, 3]);
         assert_eq!(groups[0].normals, vec![0.0, 1.0, 0.0].repeat(4));
+    }
+
+    /// Every face of a box must face away from its centre, whatever the box is
+    /// rotated to. A wall wound the other way is culled from outside and the box
+    /// shows its inside: roof plant, condensers and gate piers with missing sides.
+    #[test]
+    fn every_face_of_a_box_faces_outward() {
+        for rotation in [0.0_f32, 0.7, 2.4, -1.3] {
+            let mut builder = MeshBuilder::new();
+            let centre = Vec2::new(3.0, -2.0);
+            box_at(&mut builder, "metal", centre, 5.0, 2.0, 1.2, 0.8, rotation);
+            let group = &builder.build().meshes[0];
+            assert_eq!(group.indices.len() / 3, 12, "a box is twelve triangles");
+            for tri in group.indices.chunks(3) {
+                let p = |i: u32| {
+                    let k = i as usize * 3;
+                    Vec3::new(group.positions[k], group.positions[k + 1], group.positions[k + 2])
+                };
+                let (a, b, c) = (p(tri[0]), p(tri[1]), p(tri[2]));
+                let geometric = (b - a).cross(c - a);
+                let middle = Vec3::new((a.x + b.x + c.x) / 3.0 - centre.x, (a.y + b.y + c.y) / 3.0 - 5.0, (a.z + b.z + c.z) / 3.0 - centre.y);
+                let outward = geometric.x * middle.x + geometric.y * middle.y + geometric.z * middle.z;
+                assert!(outward > 0.0, "a face points into the box at rotation {rotation}: {geometric:?}");
+            }
+        }
     }
 
     #[test]

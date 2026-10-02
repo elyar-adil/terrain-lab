@@ -41,6 +41,8 @@ export interface GenerationResult {
   waterDataSize: number;
   heightDataBase64: string;
   forestDataBase64: string;
+  /** RGBA8 ground cover at mesh size: forest, grass+shrub, snow, naturalness (255 = paint procedurally). */
+  materialDataBase64: string;
   vegetationExclusionDataBase64: string;
   /** Settlement footprints; heights and the exclusion mask are already levelled/cleared under them (Rust). */
   /** Far-LOD tree prototypes from Rust (species x lod), typed arrays as base64. */

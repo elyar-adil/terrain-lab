@@ -43,7 +43,8 @@
 
 pub(crate) mod details;
 pub(crate) mod roofscape;
-pub(crate) mod shell;
+pub(crate) mod house;
+mod shell;
 
 use urban::{
     CityFrameInfo, Compound, ModernBuilding, Parcel, ParcelUse, Point, RoofStyle, UrbanBlock, modern,
@@ -344,6 +345,9 @@ fn declare(builder: &mut MeshBuilder) {
         builder.style(kind, wall);
     }
     builder.style("roof", wall);
+    for covering in crate::facades::RoofCovering::ALL {
+        builder.style(covering.key(), wall);
+    }
     builder.style("sign/shop", wall);
     builder.style("trim.light", wall);
     builder.style("trim.dark", wall);
@@ -351,6 +355,12 @@ fn declare(builder: &mut MeshBuilder) {
     builder.style("metal.ac", wall);
     builder.style("awning", wall);
     builder.style("wall.render", wall);
+    for crop in crate::crops::ALL_CROPS {
+        for variant in 0..3 {
+            builder.style(&crate::crops::crop_key(crop, variant), ground);
+        }
+    }
+    builder.style("field.ridge", wall);
     builder.style("block.ground", ground);
     builder.style("parcel.paving", ground);
     builder.style("parcel.green", ground);
@@ -373,6 +383,7 @@ pub fn build(
     parcels: &[Parcel],
     buildings: &[ModernBuilding],
     compounds: &[Compound],
+    fields: &[urban::Field],
     frame: CityFrameInfo,
     builder: &mut MeshBuilder,
 ) {
@@ -397,12 +408,19 @@ pub fn build(
         }
         // Residential compounds are landscaped (lawn, hedges, paths); only
         // commercial, mixed and civic plots are hard-paved forecourts.
-        let material = if matches!(parcel.use_type, ParcelUse::Park | ParcelUse::Residential) {
+        let material = if matches!(parcel.use_type, ParcelUse::Park | ParcelUse::Residential | ParcelUse::Villa | ParcelUse::Farmstead) {
             "parcel.green"
         } else {
             "parcel.paving"
         };
         builder.ground_uv(material, &ring, level::GROUND - 0.004, None);
+    }
+    for field in fields {
+        let ring = ring_of(&field.ring, frame);
+        if ring.len() < 3 {
+            continue;
+        }
+        draw_field(field, &ring, builder);
     }
     for building in buildings {
         let ring = ring_of(&building.footprint, frame);
@@ -410,6 +428,11 @@ pub fn build(
             continue;
         }
         builder.ambient_tint = Some(building_tint(building.id));
+        if matches!(building.use_type, ParcelUse::Villa | ParcelUse::Farmstead) {
+            house::house_volume(building, &ring, builder);
+            builder.ambient_tint = None;
+            continue;
+        }
         building_shell(building, &ring, builder);
         builder.ambient_tint = None;
     }
@@ -624,7 +647,7 @@ mod tests {
         let city = city();
         let mut checked = 0;
         let mut outward = 0;
-        for building in city.buildings.iter().take(12) {
+        for building in city.buildings.iter().take(40) {
             let ring = ring_of(&building.footprint, city.frame);
             if ring.len() < 3 {
                 continue;
@@ -644,10 +667,12 @@ mod tests {
                         continue; // not a wall
                     }
                     let mid = Vec2::new((a.x + b.x + c.x) / 3.0, (a.z + b.z + c.z) / 3.0);
+                    let mid = Vec2::new((a.x + b.x + c.x) / 3.0, (a.z + b.z + c.z) / 3.0);
                     let out = Vec2::new(mid.x - centre.x, mid.y - centre.y);
-                    // A concave footprint (courtyard, carved slab) has genuine
-                    // wall faces that point toward the centroid, so count
-                    // rather than assert per triangle.
+                    // A concave footprint (courtyard, carved slab) and a stepped
+                    // tower have genuine wall faces that point toward the centroid
+                    // (the inner wall of a notch, the wall of an upper tier over a
+                    // podium), so count rather than assert per triangle.
                     if n.x * out.x + n.z * out.y > 0.0 {
                         outward += 1;
                     }
@@ -657,7 +682,7 @@ mod tests {
         }
         assert!(checked > 50, "only {checked} wall triangles checked");
         assert!(
-            outward as f32 >= checked as f32 * 0.9,
+            outward as f32 >= checked as f32 * 0.88,
             "only {outward} of {checked} facade triangles face outward"
         );
     }
@@ -670,6 +695,7 @@ mod tests {
             &city.parcels,
             &city.buildings,
             &city.compounds,
+            &city.fields,
             city.frame,
             &mut builder,
         );
@@ -938,7 +964,17 @@ mod tests {
     /// no building can ever pick is a tile that was baked for nothing.
     #[test]
     fn both_facade_families_reach_the_city() {
-        let groups = built().meshes;
+        // A city big enough to have a downtown: whether a few dozen buildings
+        // include a curtain wall is luck of the seed, not a property of the code.
+        let city = generate_modern_chinese_city(ModernChinaSpec {
+            seed: 42,
+            radius_km: 1.0,
+            block_size_metres: 110.0,
+            ..ModernChinaSpec::default()
+        });
+        let mut builder = MeshBuilder::new();
+        build(&city.blocks, &city.parcels, &city.buildings, &city.compounds, &city.fields, city.frame, &mut builder);
+        let groups = builder.build().meshes;
         let mut glazed = 0;
         let mut masonry = 0;
         for group in groups.iter().filter(|g| g.material.starts_with("facade/")) {
@@ -1004,5 +1040,43 @@ mod tests {
         assert!(slabs > 0, "no 板楼 in a Chinese city");
         assert!(low > 0, "no 多层 in a Chinese city");
         assert!(tall + slabs + low == city.buildings.len());
+    }
+}
+
+/// One plot of farmland: the crop's texture laid on the ground with its rows along the
+/// plot, and a low bund (田埂) round the edge.
+fn draw_field(field: &urban::Field, ring: &[Vec2], builder: &mut MeshBuilder) {
+    let mut plot = ring.to_vec();
+    if signed_area(&plot) < 0.0 {
+        plot.reverse();
+    }
+    let material = crate::crops::crop_key(field.crop, field.variant);
+    // UVs in metres along and across the rows.
+    let (sin, cos) = field.row_angle.sin_cos();
+    let uv = |p: Vec2| (p.x * cos + p.y * sin, -p.x * sin + p.y * cos);
+    let y = level::GROUND - 0.012;
+    for [a, b, c] in crate::math::triangulate(&plot) {
+        let (pa, pb, pc) = (plot[a], plot[b], plot[c]);
+        // `triangulate` returns counter-clockwise indices, which face down: flip.
+        builder.tri_uv(
+            &material,
+            Vec3::from_plan(pa, y),
+            Vec3::from_plan(pc, y),
+            Vec3::from_plan(pb, y),
+            [uv(pa), uv(pc), uv(pb)],
+            None,
+        );
+    }
+    // The bund: a low earth ridge, 0.3 m wide and 0.15 m high.
+    for index in 0..plot.len() {
+        let a = plot[index];
+        let b = plot[(index + 1) % plot.len()];
+        if a.distance(b) < 1.0 {
+            continue;
+        }
+        let along = (b - a).normalize();
+        let out = Vec2::new(along.y, -along.x);
+        let (a_out, b_out) = (a + out * 0.30, b + out * 0.30);
+        builder.quad("field.ridge", Vec3::from_plan(a, y + 0.14), Vec3::from_plan(b, y + 0.14), Vec3::from_plan(b_out, y), Vec3::from_plan(a_out, y), None);
     }
 }

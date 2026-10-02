@@ -14,7 +14,10 @@
 
 import * as THREE from "three";
 
-import { CityLod } from "./cityLod";
+import { CityLod, LOD } from "./cityLod";
+import { GrassShells } from "./grassFur";
+import { preloadTreeGrower } from "../trees";
+import { installUniqueTrees } from "../trees/plant";
 import { perfTiming } from "./perf";
 import {
   type CityBuild,
@@ -51,6 +54,10 @@ export interface CityLayerBuild {
   step(budgetMs: number): boolean;
   cancel(): void;
 }
+
+// Start fetching the tree grower as soon as a city could be wanted; by the time a
+// scene has downloaded it is ready. Without it the city keeps its prototype trees.
+void preloadTreeGrower();
 
 const PAINTS = [
   0xf1f1ee, 0xf1f1ee, 0xf1f1ee, 0x17181a, 0x17181a, 0x17181a,
@@ -187,6 +194,13 @@ function finishLayer(
     group.add(mesh);
   });
 
+  // Every tree grown for itself: replace the prototype trees by a forest that
+  // grows each one from its own seed, finer the nearer the camera is.
+  const forest = installUniqueTrees(handles, scene);
+  if (forest) group.add(forest.group);
+
+  const lawns = handles.statics.filter((m) => /^(parcel\.green|block\.ground)$/.test(m.name));
+  const shells = lawns.length > 0 ? new GrassShells(lawns, materials.get("parcel.green") as THREE.MeshStandardMaterial) : null;
   const lod = new CityLod(handles);
   const inverse = new THREE.Matrix4();
   const viewProjection = new THREE.Matrix4();
@@ -212,13 +226,21 @@ function finishLayer(
       viewProjection.copy(camera.matrixWorld).invert();
       viewProjection.premultiply(camera.projectionMatrix).multiply(group.matrixWorld);
       frustum.setFromProjectionMatrix(viewProjection);
-      return lod.update(local, forward, frustum, cameraDistanceM);
+      let changed = lod.update(local, forward, frustum, cameraDistanceM);
+      shells?.update(local);
+      if (forest) {
+        forest.setCasting(cameraDistanceM < LOD.shadowTrees);
+        changed = forest.update(local, 6) || changed;
+      }
+      return changed;
     },
     lodStats() {
       return { hiddenStatics: lod.hiddenStatics, instances: lod.keptInstances };
     },
     dispose() {
       group.removeFromParent();
+      forest?.dispose();
+      shells?.dispose();
       for (const mesh of owned) mesh.dispose();
       handles.dispose();
       materials.dispose();

@@ -51,12 +51,38 @@ impl CityGraph for GraphProbe<'_> {
     }
 }
 
+/// How far back from a node a street is trimmed to make room for the junction,
+/// in metres. Both the street planner (which must not leave a link shorter than
+/// its two boxes) and the scene builder (which draws the boxes) use this one
+/// number, or one of them is wrong about whether a road fits.
+///
+/// At a junction it is the widest street's half width plus the kerb-return
+/// radius, because that is where the kerb leaves the straight to turn the corner:
+/// the return radius is about 12 m where an arterial is involved, 8 m for
+/// collectors and 5 m for local streets (the scale of the 缘石转弯半径 in CJJ 37,
+/// reduced a little for a compact block grid). The earlier formula, about 9 m for
+/// an arterial, left a corner radius of three metres, which reads as a square
+/// corner. A node with two streets is a bend and gets a small trim.
+pub fn junction_trim_m(widest_width: f32, arms: usize) -> f32 {
+    worldgen_contracts::junction_trim_m(f64::from(widest_width), arms) as f32
+}
+
+/// How important a street is: larger is wider and busier. The enum is declared
+/// widest first (`Expressway` is 0), so comparing its discriminant directly picks
+/// the *lowest* class; every "keep the higher class" below goes through this.
+fn importance(class: ModernRoadClass) -> i32 {
+    3 - class as i32
+}
+
 /// Which family a segment came from, kept through planarisation so junction
 /// roles can still be assigned.
 const ORIGIN_GRID: u8 = 4;
 const ORIGIN_QUAY: u8 = 8;
 const ORIGIN_OUTER: u8 = 1;
 const ORIGIN_INNER: u8 = 2;
+/// A regional road continued into town.  Kept through planarisation so junction
+/// tidying can favour it over a grid street of the same class.
+const ORIGIN_APPROACH: u8 = 16;
 
 #[derive(Clone, Copy)]
 struct Seg {
@@ -103,6 +129,230 @@ fn clip_line(poly: &[V], p: V, d: V) -> Option<(V, V)> {
     }
     (t1 - t0 > MIN_EDGE_M)
         .then(|| ((p.0 + d.0 * t0, p.1 + d.1 * t0), (p.0 + d.0 * t1, p.1 + d.1 * t1)))
+}
+
+/// Clip the segment `a..b` to a convex counter-clockwise polygon.
+fn clip_segment(poly: &[V], a: V, b: V) -> Option<(V, V)> {
+    let d = (b.0 - a.0, b.1 - a.1);
+    let (mut t0, mut t1) = (0.0_f32, 1.0_f32);
+    for i in 0..poly.len() {
+        let p = poly[i];
+        let q = poly[(i + 1) % poly.len()];
+        let (ex, ez) = (q.0 - p.0, q.1 - p.1);
+        let len = ex.hypot(ez);
+        let n = (-ez / len, ex / len);
+        let num = n.0 * (a.0 - p.0) + n.1 * (a.1 - p.1);
+        let den = n.0 * d.0 + n.1 * d.1;
+        if den.abs() < 1.0e-9 {
+            if num < 0.0 {
+                return None;
+            }
+        } else {
+            let t = -num / den;
+            if den > 0.0 {
+                t0 = t0.max(t);
+            } else {
+                t1 = t1.min(t);
+            }
+        }
+        if t1 <= t0 {
+            return None;
+        }
+    }
+    Some(((a.0 + d.0 * t0, a.1 + d.1 * t0), (a.0 + d.0 * t1, a.1 + d.1 * t1)))
+}
+
+/// The parts of a regional road that lie inside the outer ring, in local
+/// metres.  Each starts exactly on the ring where the road enters; a road that
+/// ends in town simply stops at the end of its path.
+fn approach_runs(frame: &CityFrame, outer: &[V], path: &[Point]) -> Vec<Vec<V>> {
+    let local: Vec<V> = path.iter().map(|p| frame.to_local(*p)).collect();
+    let mut runs: Vec<Vec<V>> = Vec::new();
+    let mut open = false;
+    for w in local.windows(2) {
+        let Some((c, d)) = clip_segment(outer, w[0], w[1]) else {
+            open = false;
+            continue;
+        };
+        let continues = open && runs.last().is_some_and(|r| {
+            r.last().is_some_and(|l| (l.0 - c.0).hypot(l.1 - c.1) < 0.5)
+        });
+        if continues {
+            runs.last_mut().unwrap().push(d);
+        } else {
+            runs.push(vec![c, d]);
+        }
+        // The run stays open only while the segment's own end is inside.
+        open = (d.0 - w[1].0).hypot(d.1 - w[1].1) < 0.5;
+    }
+    runs.retain(|r| {
+        r.windows(2).map(|s| (s[1].0 - s[0].0).hypot(s[1].1 - s[0].1)).sum::<f32>() > 3.0 * MIN_EDGE_M
+    });
+    runs
+}
+
+/// Streets a regional road may join: collector or better, and not the outer ring
+/// unless the caller says so (a road that enters town in the river reaches the
+/// ring from the bank).
+fn joinable(s: &Seg, allow_ring: bool) -> bool {
+    (allow_ring || s.origin != ORIGIN_OUTER)
+        && matches!(
+            s.class,
+            ModernRoadClass::Expressway | ModernRoadClass::Arterial | ModernRoadClass::Collector
+        )
+}
+
+/// Cut `run` at the first joinable street it crosses (where `valid` allows a
+/// junction) deeper than `deeper_than` metres from the centre, walking from its start (the anchored end).  Anything
+/// within a junction's width of the start is ignored: that is the ring itself.
+fn cut_at_first_street(
+    pts: &[V],
+    segs: &[Seg],
+    run: &mut Vec<V>,
+    deeper_than: f32,
+    valid: &dyn Fn(V) -> bool,
+) -> bool {
+    let mut walked = 0.0_f32;
+    for i in 0..run.len() - 1 {
+        let (a, b) = (run[i], run[i + 1]);
+        let len = (b.0 - a.0).hypot(b.1 - a.1);
+        let mut best: Option<(f32, V)> = None;
+        for s in segs.iter().filter(|s| joinable(s, false)) {
+            if let Some((t, _, p)) = seg_intersect(a, b, pts[s.a], pts[s.b]) {
+                // Never cut before the handover radius: the regional renderer draws
+                // the road up to there and the city must carry it the rest of the way.
+                if walked + t * len > 2.0 * MIN_EDGE_M
+                    && p.0.hypot(p.1) < deeper_than
+                    && valid(p)
+                    && best.is_none_or(|(bt, _)| t < bt)
+                {
+                    best = Some((t, p));
+                }
+            }
+        }
+        if let Some((_, p)) = best {
+            run.truncate(i + 1);
+            run.push(p);
+            return true;
+        }
+        walked += len;
+    }
+    false
+}
+
+/// Carry the end of `run` on to the nearest joinable street.
+fn reach_nearest_street(
+    pts: &[V],
+    segs: &[Seg],
+    run: &mut Vec<V>,
+    allow_ring: bool,
+    dry: &dyn Fn(V) -> bool,
+) {
+    let end = *run.last().unwrap();
+    let nearest = segs
+        .iter()
+        .filter(|s| joinable(s, allow_ring))
+        .flat_map(|s| {
+            // Candidate joins are sampled along the street, and only on dry land:
+            // a junction in the channel is never allowed.
+            let (a, b) = (pts[s.a], pts[s.b]);
+            let steps = (((b.0 - a.0).hypot(b.1 - a.1) / 8.0).ceil() as usize).max(1);
+            (0..=steps).map(move |k| {
+                let t = k as f32 / steps as f32;
+                (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t)
+            })
+        })
+        .filter(|p| dry(*p))
+        .map(|p| ((p.0 - end.0).hypot(p.1 - end.1), p))
+        .min_by(|x, y| x.0.total_cmp(&y.0));
+    if let Some((d, p)) = nearest {
+        if d > 1.0 {
+            run.push(p);
+        }
+    }
+}
+
+/// A road that ends in town must end *on* the street plan, not in the middle of
+/// a block: a dangling street is pruned back to its last junction, taking the
+/// regional road with it.  So:
+/// - the end on the outer ring is the entry and stays where it is;
+/// - an end that stops in town is cut at the first collector-or-better street it
+///   meets (or carried on to the nearest one);
+/// - an end that lands in the river is moved to the bank and joined to the
+///   nearest street, ring included, because the ring bridges the water there.
+fn tie_run_into_plan(frame: &CityFrame, outer: &[V], pts: &[V], segs: &[Seg], mut run: Vec<V>) -> Vec<V> {
+    let zone = frame.river_half + QUAY_OFF_M + 12.0;
+    let in_zone = |p: V| (p.0 - frame.river_x(p.1)).abs() <= zone;
+    let dry = |p: V| !in_zone(p) && (!frame.organic_footprint || frame.urbanness(p.0, p.1) > 0.3 || p.0.hypot(p.1) > frame.radius_m * 0.95);
+    // Only an end that lies in the channel itself (where no junction may stand)
+    // is moved to the bank. One merely in the quay zone keeps its place: the road
+    // crosses the water from there as a bridge, and trimming it would drop the
+    // whole crossing and leave a gap between the regional road and the town.
+    let in_channel = |p: V| (p.0 - frame.river_x(p.1)).abs() <= frame.river_half + SNAP_M + 2.0;
+    let deeper = frame.radius_m * (super::REGIONAL_ROAD_HANDOVER - 0.03);
+    // With an irregular built-up area the grid outside it is pruned, so a road
+    // may only join streets that will survive: those inside the town proper.
+    let in_town = |p: V| !frame.organic_footprint || frame.urbanness(p.0, p.1) > 0.3;
+    let (mut start_on, mut end_on) = (on_ring(outer, run[0]), on_ring(outer, *run.last().unwrap()));
+    // Move river-bound ends to dry land.
+    let (mut start_wet, mut end_wet) = (false, false);
+    while run.len() > 2 && in_channel(run[0]) {
+        run.remove(0);
+        start_wet = true;
+    }
+    while run.len() > 2 && in_channel(*run.last().unwrap()) {
+        run.pop();
+        end_wet = true;
+    }
+    if start_wet {
+        start_on = false;
+    }
+    if end_wet {
+        end_on = false;
+    }
+    if start_wet {
+        run.reverse();
+        reach_nearest_street(pts, segs, &mut run, true, &dry);
+        run.reverse();
+    }
+    if end_wet {
+        reach_nearest_street(pts, segs, &mut run, true, &dry);
+    }
+    // Ends that were never on the ring and did not need the bank fix stop in town.
+    let free_start = !start_on && !start_wet;
+    let free_end = !end_on && !end_wet;
+    match (free_start, free_end) {
+        (false, false) => {}
+        (false, true) => {
+            if !cut_at_first_street(pts, segs, &mut run, deeper, &in_town) {
+                reach_nearest_street(pts, segs, &mut run, false, &dry);
+            }
+        }
+        (true, false) => {
+            run.reverse();
+            if !cut_at_first_street(pts, segs, &mut run, deeper, &in_town) {
+                reach_nearest_street(pts, segs, &mut run, false, &dry);
+            }
+            run.reverse();
+        }
+        (true, true) => {
+            reach_nearest_street(pts, segs, &mut run, false, &dry);
+            run.reverse();
+            reach_nearest_street(pts, segs, &mut run, false, &dry);
+            run.reverse();
+        }
+    }
+    run
+}
+
+/// Whether `p` lies on the boundary of the convex counter-clockwise polygon.
+fn on_ring(poly: &[V], p: V) -> bool {
+    (0..poly.len()).any(|i| {
+        let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+        let (ex, ez) = (b.0 - a.0, b.1 - a.1);
+        let len = ex.hypot(ez);
+        ((-ez / len) * (p.0 - a.0) + (ex / len) * (p.1 - a.1)).abs() < 0.75
+    })
 }
 
 fn add_edge(pts: &mut Vec<V>, segs: &mut Vec<Seg>, a: V, b: V, class: ModernRoadClass, origin: u8) {
@@ -340,7 +590,7 @@ fn merge_close(pts: &mut Vec<V>, segs: &mut Vec<Seg>) -> bool {
         }
         let key = (a.min(b), a.max(b));
         if let Some(existing) = out.iter_mut().find(|e| (e.a.min(e.b), e.a.max(e.b)) == key) {
-            if (s.class as i32) > (existing.class as i32) {
+            if importance(s.class) > importance(existing.class) {
                 existing.class = s.class;
                 existing.origin = s.origin;
             }
@@ -459,7 +709,7 @@ fn planarize(pts: &mut Vec<V>, segs: &mut Vec<Seg>, forbid: &dyn Fn(V) -> bool) 
     merge_close(pts, segs);
 }
 
-pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
+pub(super) fn build_graph(frame: &CityFrame, approaches: &[super::RegionalApproach]) -> GraphOutput {
     let radius_m = frame.radius_m;
     let block_m = frame.block_m;
     let river_half = frame.river_half;
@@ -567,6 +817,16 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
         add_polyline(frame, &mut pts, &mut segs, &samples, class, ORIGIN_INNER);
     }
 
+    // Regional roads enter through the outer ring and carry on as streets of
+    // their own class, so the road seen from the air is the road in town.  The
+    // planarisation pass below joins them to the grid wherever they cross it.
+    for approach in approaches {
+        for run in approach_runs(frame, &outer, &approach.path_km) {
+            let run = tie_run_into_plan(frame, &outer, &pts, &segs, run);
+            add_polyline(frame, &mut pts, &mut segs, &run, approach.class, ORIGIN_APPROACH);
+        }
+    }
+
     // ---- 2. planarise: every crossing and T-junction becomes a node ----
     let in_river = |v: V| (v.0 - frame.river_x(v.1)).abs() < river_half + SNAP_M;
     planarize(&mut pts, &mut segs, &in_river);
@@ -614,13 +874,30 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
             let clear = river_half;
             let crosses = (bank(p) < -clear && bank(q) > clear)
                 || (bank(p) > clear && bank(q) < -clear);
-            if !major || !crosses {
+            // A regional road that crosses the water outside town bridges it in
+            // town too, whatever its class.
+            let approach = s.origin & ORIGIN_APPROACH != 0;
+            // A street that runs along the water has no business existing, but a
+            // regional road must not vanish because the town's own river happens
+            // to lie along it: it stays, as a causeway on the water.
+            if !(major || approach) || (!crosses && !approach) {
                 continue;
             }
         }
-        if s.class == ModernRoadClass::Local && !river_hit {
-            let mid = ((p.0 + q.0) * 0.5, (p.1 + q.1) * 0.5);
-            let centrality = frame.core_weight(mid.0, mid.1);
+        // Beyond the built-up area there are no town streets: the grid lines and
+        // the ring road that bounded the disc stop where the town does. A regional
+        // road is not a town street and keeps running.
+        let mid = ((p.0 + q.0) * 0.5, (p.1 + q.1) * 0.5);
+        if frame.organic_footprint && s.origin & ORIGIN_APPROACH == 0 {
+            let built = frame.urbanness(mid.0, mid.1);
+            if s.origin & ORIGIN_OUTER != 0 || built < 0.10 {
+                continue;
+            }
+        }
+        // Local streets are discretionary; a regional road is not.
+        if s.class == ModernRoadClass::Local && !river_hit && s.origin & ORIGIN_APPROACH == 0 {
+            let centrality = frame.core_weight(mid.0, mid.1)
+                * if frame.organic_footprint { 0.35 + 0.65 * frame.urbanness(mid.0, mid.1) } else { 1.0 };
             if !local_segment_built(centrality) {
                 continue;
             }
@@ -644,7 +921,7 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
                 continue;
             }
             if seg_intersect(pts[si.a], pts[si.b], pts[sj.a], pts[sj.b]).is_some() {
-                let loser = if (si.class as i32) < (sj.class as i32) { j } else if (sj.class as i32) < (si.class as i32) { i } else if si.origin == ORIGIN_INNER { i } else { j };
+                let loser = if importance(si.class) < importance(sj.class) { j } else if importance(sj.class) < importance(si.class) { i } else if si.origin == ORIGIN_INNER { i } else { j };
                 drop[loser] = true;
             }
         }
@@ -670,8 +947,8 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
                 widest[n] = widest[n].max(s.class.width_metres());
             }
         }
-        // Mirrors the junction radius the scene builder uses.
-        let need = |n: usize| if degree[n] > 2 { widest[n] * 0.5 + 3.0 } else { (widest[n] * 0.5 + 2.0).min(8.0) };
+        // The junction radius the scene builder uses (the same function).
+        let need = |n: usize| junction_trim_m(widest[n], degree[n] as usize);
         let victim = kept
             .iter()
             .enumerate()
@@ -709,7 +986,7 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
             let key = (e.a.min(e.b), e.a.max(e.b));
             match first.get(&key) {
                 Some(&k) => {
-                    if (e.class as i32) > (kept[k].0.class as i32) {
+                    if importance(e.class) > importance(kept[k].0.class) {
                         kept[k] = kept[i];
                     }
                     dead[i] = true;
@@ -756,7 +1033,12 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
             }
             let rank = |i: usize| {
                 let (s, bridge) = &kept[i];
-                (s.class as i32, *bridge as i32, -((pts[s.a].0 - pts[s.b].0).hypot(pts[s.a].1 - pts[s.b].1) * 10.0) as i32)
+                (
+                    (s.origin & ORIGIN_APPROACH != 0) as i32,
+                    importance(s.class),
+                    *bridge as i32,
+                    -((pts[s.a].0 - pts[s.b].0).hypot(pts[s.a].1 - pts[s.b].1) * 10.0) as i32,
+                )
             };
             let mut offenders: Vec<usize> = Vec::new();
             for x in 0..arms.len() {
@@ -842,6 +1124,17 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
             degree[s.a] += 1;
             degree[s.b] += 1;
         }
+        // A regional road runs on past the town's edge to where the regional
+        // renderer takes over; its far end is not a dead end to be trimmed.
+        for (s, _) in &kept {
+            if s.origin & ORIGIN_APPROACH != 0 {
+                for n in [s.a, s.b] {
+                    if degree[n] == 1 {
+                        protected[n] = true;
+                    }
+                }
+            }
+        }
         for (i, (s, bridge)) in kept.iter().enumerate() {
             let (leaf, other) = if degree[s.a] == 1 { (s.a, s.b) } else { (s.b, s.a) };
             let len = (pts[s.a].0 - pts[s.b].0).hypot(pts[s.a].1 - pts[s.b].1);
@@ -883,7 +1176,10 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
         size[root] += 1;
     }
     if let Some(main) = (0..pts.len()).max_by_key(|r| size[*r]) {
-        kept.retain(|(s, _)| find(&mut parent, s.a) == main);
+        // A regional road is kept even when it ends up apart from the town's
+        // network (the town's own river may cut it off): it is a real road, and
+        // dropping it would leave a gap between the regional road and the town.
+        kept.retain(|(s, _)| find(&mut parent, s.a) == main || s.origin & ORIGIN_APPROACH != 0);
     }
 
     // ---- 5. emit SD / HD graph ----
@@ -916,6 +1212,11 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
             SdNode { id: id as u32, point: frame.to_world(x, z), role: role.into() }
         })
         .collect();
+    let mut adjacency: Vec<Vec<(usize, usize)>> = vec![Vec::new(); pts.len()];
+    for (i, (s, _)) in kept.iter().enumerate() {
+        adjacency[s.a].push((s.b, i));
+        adjacency[s.b].push((s.a, i));
+    }
     let mut sd_roads = Vec::with_capacity(kept.len());
     let mut hd_roads = Vec::with_capacity(kept.len());
     for (id, (s, bridge)) in kept.iter().enumerate() {
@@ -930,11 +1231,7 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
             class: s.class,
             width_metres: s.class.width_metres(),
             median_metres: s.class.median_metres(),
-            centreline: vec![
-                p0,
-                Point { x_km: (p0.x_km + p1.x_km) * 0.5, y_km: (p0.y_km + p1.y_km) * 0.5 },
-                p1,
-            ],
+            centreline: smooth_centreline(frame, &pts, &kept, &adjacency, id as usize, p0, p1),
             bridge: *bridge,
             layer: if *bridge { 1 } else { 0 },
             lanes: lanes_for_modern_road(id, s.class, &rules),
@@ -949,6 +1246,93 @@ pub(super) fn build_graph(frame: &CityFrame) -> GraphOutput {
     });
 
     GraphOutput { nodes, sd_roads, hd_roads, river, morphology_score }
+}
+
+/// The centreline of one street between two nodes. A node where only two streets
+/// of the same class meet is a bend, not a junction, and drawing each street as a
+/// straight chord puts a kink in the kerb at every bend: the road reads as a
+/// zigzag. So a street runs on a cubic through its two ends whose tangent at a
+/// bend is the direction through the bend, which makes the road continuous in
+/// direction across it. Sharp turns, true junctions and bridge decks stay as the
+/// straight chord.
+fn smooth_centreline(
+    frame: &CityFrame,
+    pts: &[V],
+    kept: &[(Seg, bool)],
+    adjacency: &[Vec<(usize, usize)>],
+    edge: usize,
+    p0_world: Point,
+    p1_world: Point,
+) -> Vec<Point> {
+    let (seg, bridge) = kept[edge];
+    let (a, b) = (pts[seg.a], pts[seg.b]);
+    let chord = (b.0 - a.0, b.1 - a.1);
+    let length = chord.0.hypot(chord.1);
+    let straight = || {
+        vec![
+            p0_world,
+            Point { x_km: (p0_world.x_km + p1_world.x_km) * 0.5, y_km: (p0_world.y_km + p1_world.y_km) * 0.5 },
+            p1_world,
+        ]
+    };
+    if bridge || length < 12.0 {
+        return straight();
+    }
+    // Unit direction through a bend node, in the sense of travel `from -> to` of
+    // the street being drawn, or None where the node is a junction or a sharp turn.
+    let through = |node: usize, toward: usize| -> Option<V> {
+        let list = &adjacency[node];
+        if list.len() != 2 {
+            return None;
+        }
+        let ((u, eu), (v, ev)) = (list[0], list[1]);
+        if kept[eu].1 || kept[ev].1 || kept[eu].0.class != kept[ev].0.class {
+            return None;
+        }
+        let into = (pts[node].0 - pts[u].0, pts[node].1 - pts[u].1);
+        let out = (pts[v].0 - pts[node].0, pts[v].1 - pts[node].1);
+        let (li, lo) = (into.0.hypot(into.1), out.0.hypot(out.1));
+        if li < 1.0e-3 || lo < 1.0e-3 {
+            return None;
+        }
+        // Turns sharper than 35 degrees are corners, not bends.
+        if (into.0 * out.0 + into.1 * out.1) / (li * lo) < 0.82 {
+            return None;
+        }
+        let d = (pts[v].0 - pts[u].0, pts[v].1 - pts[u].1);
+        let ld = d.0.hypot(d.1).max(1.0e-3);
+        let d = (d.0 / ld, d.1 / ld);
+        // `d` runs u -> v; flip it to point toward `toward`.
+        if toward == v { Some(d) } else { Some((-d.0, -d.1)) }
+    };
+    let dir = (chord.0 / length, chord.1 / length);
+    let t0 = through(seg.a, seg.b).unwrap_or(dir);
+    let t1 = through(seg.b, seg.a).map(|t| (-t.0, -t.1)).unwrap_or(dir);
+    if t0 == dir && t1 == dir {
+        return straight();
+    }
+    let k = length * 0.9;
+    let (m0, m1) = ((t0.0 * k, t0.1 * k), (t1.0 * k, t1.1 * k));
+    // Dense enough that the first and last chord run along the end tangent: with
+    // a point only every 20 m the polyline still kinks at the bend by half its turn.
+    let steps = ((length / 4.0).ceil() as usize).max(10);
+    (0..=steps)
+        .map(|i| {
+            let t = i as f32 / steps as f32;
+            let (t2, t3) = (t * t, t * t * t);
+            let (h00, h10, h01, h11) =
+                (2.0 * t3 - 3.0 * t2 + 1.0, t3 - 2.0 * t2 + t, -2.0 * t3 + 3.0 * t2, t3 - t2);
+            let x = h00 * a.0 + h10 * m0.0 + h01 * b.0 + h11 * m1.0;
+            let z = h00 * a.1 + h10 * m0.1 + h01 * b.1 + h11 * m1.1;
+            if i == 0 {
+                p0_world
+            } else if i == steps {
+                p1_world
+            } else {
+                frame.to_world(x, z)
+            }
+        })
+        .collect()
 }
 
 pub(super) fn modern_phase(seed: u32) -> f32 {

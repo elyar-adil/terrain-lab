@@ -29,6 +29,7 @@ pub struct GenerationResult {
     pub water_data_size: usize,
     pub height_data_base64: String,
     pub forest_data_base64: String,
+    pub material_data_base64: String,
     pub vegetation_exclusion_data_base64: String,
     pub urban_data_base64: String,
     pub cultivated_data_base64: String,
@@ -75,27 +76,35 @@ struct RenderRoad {
     path_km: Vec<[f32; 2]>,
 }
 
-fn render_roads(infrastructure: &InfrastructureData) -> Vec<RenderRoad> {
+/// Regional roads in world kilometres, minus the stretch inside every town: a
+/// town's own street plan carries the road through, so drawing the regional
+/// polyline there as well put two disagreeing road networks on top of each other.
+fn regional_road_pieces(infrastructure: &InfrastructureData) -> Vec<(&infrastructure::Road, Vec<[f32; 2]>)> {
     let grid = infrastructure.urban_land.grid;
-    let denominator = (grid.size - 1) as f32;
-    infrastructure
-        .roads
-        .iter()
-        .map(|road| RenderRoad {
+    let footprints = infrastructure.footprints();
+    let mut out = Vec::new();
+    for road in &infrastructure.roads {
+        // The line the town's own street plan carries on, not the router's raw path.
+        let path_km: Vec<[f32; 2]> = infrastructure::road_centreline_km(road, grid);
+        for piece in infrastructure::clip_outside_footprints(&path_km, &footprints) {
+            out.push((road, piece));
+        }
+    }
+    out
+}
+
+fn render_roads(infrastructure: &InfrastructureData) -> Vec<RenderRoad> {
+    regional_road_pieces(infrastructure)
+        .into_iter()
+        .map(|(road, path_km)| RenderRoad {
             id: road.id,
             class: road.class,
             profile: road.class.profile(),
-            length_km: road.length_km,
-            path_km: road
-                .path
-                .iter()
-                .map(|point| {
-                    [
-                        point.x as f32 / denominator * grid.world_size_km,
-                        point.y as f32 / denominator * grid.world_size_km,
-                    ]
-                })
-                .collect(),
+            length_km: path_km
+                .windows(2)
+                .map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]))
+                .sum(),
+            path_km,
         })
         .collect()
 }
@@ -341,7 +350,7 @@ fn rasterize_road_coverage(
     roads: &[infrastructure::Road],
     right_of_way: bool,
 ) {
-    let scale = (target_size - 1) as f32 / (source_size - 1) as f32;
+    let grid = infrastructure::WorldGrid::new(source_size, world_size_km).expect("a valid world grid");
     let metres_per_pixel = world_size_km * 1000.0 / (target_size - 1) as f32;
     for road in roads {
         let profile = road.class.profile();
@@ -351,11 +360,14 @@ fn rasterize_road_coverage(
             profile.carriageway_width_metres
         };
         let width_pixels = width_metres / metres_per_pixel;
-        for segment in road.path.windows(2) {
-            let ax = segment[0].x as f32 * scale;
-            let ay = segment[0].y as f32 * scale;
-            let bx = segment[1].x as f32 * scale;
-            let by = segment[1].y as f32 * scale;
+        // The same smoothed line the town plans carry on, in target pixels.
+        let line = infrastructure::road_centreline_km(road, grid);
+        let pixels_per_km = (target_size - 1) as f32 / world_size_km;
+        for segment in line.windows(2) {
+            let ax = segment[0][0] * pixels_per_km;
+            let ay = segment[0][1] * pixels_per_km;
+            let bx = segment[1][0] * pixels_per_km;
+            let by = segment[1][1] * pixels_per_km;
             let reach = (width_pixels * 0.5 + 1.0).max(1.0);
             let min_x = (ax.min(bx) - reach).floor().max(0.0) as usize;
             let max_x = (ax.max(bx) + reach).ceil().min((target_size - 1) as f32) as usize;
@@ -500,25 +512,11 @@ fn composite_world_surface(
             }
 
             if urban > 0.055 {
-                let world_x = output_x as f32 / (width - 1) as f32 * world_km;
-                let world_y = output_y as f32 / (height - 1) as f32 * world_km;
-                let warped_x = world_x + (world_y * 0.43).sin() * 0.075;
-                let warped_y = world_y + (world_x * 0.37).sin() * 0.065;
-                let block_width = 0.31;
-                let block_height = 0.24;
-                let block_x = (warped_x / block_width).floor() as i32;
-                let block_y = (warped_y / block_height).floor() as i32;
-                let roof = surface_hash(block_x, block_y, 71);
-                let local_x = (warped_x / block_width).rem_euclid(1.0);
-                let local_y = (warped_y / block_height).rem_euclid(1.0);
-                let street_distance = local_x.min(1.0 - local_x).min(local_y.min(1.0 - local_y));
-                if street_distance < 0.105 {
-                    blend_surface(pixel, [91.0, 91.0, 86.0], urban.powf(0.68) * 0.63);
-                } else {
-                    let urban_color =
-                        [108.0 + roof * 61.0, 103.0 + roof * 48.0, 94.0 + roof * 39.0];
-                    blend_surface(pixel, urban_color, urban.powf(0.68) * 0.84);
-                }
+                // Only a ground tone. The streets, blocks and buildings of a town
+                // are drawn from its real plan (`city::cityMass` on the client), so
+                // painting an invented block grid here would contradict them and
+                // show through wherever the two meet.
+                blend_surface(pixel, [104.0, 100.0, 92.0], urban.powf(0.68) * 0.7);
             }
         }
     }
@@ -526,7 +524,8 @@ fn composite_world_surface(
     let scale_x = (width - 1) as f32 / (terrain.size - 1) as f32;
     let scale_y = (height - 1) as f32 / (terrain.size - 1) as f32;
     let metres_per_pixel = world_km * 1000.0 / width.max(height) as f32;
-    for road in &infrastructure.roads {
+    let world_km_for_roads = infrastructure.urban_land.grid.world_size_km;
+    for (road, piece) in regional_road_pieces(infrastructure) {
         let width_metres = road.class.profile().carriageway_width_metres;
         let road_color = match road.class {
             infrastructure::RoadClass::Motorway => [145.0, 143.0, 136.0],
@@ -536,10 +535,14 @@ fn composite_world_surface(
             infrastructure::RoadClass::Rural => [118.0, 109.0, 91.0],
         };
         let width_pixels = width_metres / metres_per_pixel;
-        let mut centreline: Vec<(f32, f32)> = road
-            .path
+        let mut centreline: Vec<(f32, f32)> = piece
             .iter()
-            .map(|point| (point.x as f32 * scale_x, point.y as f32 * scale_y))
+            .map(|point| {
+                (
+                    point[0] / world_km_for_roads * (terrain.size - 1) as f32 * scale_x,
+                    point[1] / world_km_for_roads * (terrain.size - 1) as f32 * scale_y,
+                )
+            })
             .collect();
         for _ in 0..3 {
             if centreline.len() < 3 {
@@ -826,74 +829,116 @@ async fn generate_terrain(
             emit_progress(&app, progress, stage)
         })?;
         install_traffic(&infrastructure);
-        // The city scenes are cached for `city_scene` to serve on demand, and
-        // deliberately **not** returned here.
-        //
-        // A scene is tens of megabytes of base64 vertex buffers per city. The
-        // renderer's current city view needs none of it — it reads the
-        // `modernCities` plan — so including it in the generate response handed
-        // the webview several hundred megabytes of JSON it never looked at, and
-        // the webview died on arrival. Serialising it across the IPC boundary is
-        // the expensive part, not building it, so a city is fetched when
-        // something asks to draw it.
-        install_city_scenes(&infrastructure);
+        // Only the city *plans* are kept. A scene is tens of megabytes of vertex
+        // buffers, textures and a traffic fleet, so it is built the first time
+        // `city_scene` is asked for that city, and not returned here: a generate
+        // response carrying every scene was hundreds of megabytes of JSON that
+        // killed the webview on arrival.
+        install_city_plans(&infrastructure);
         Ok(result)
     })
     .await
     .map_err(|error| format!("native generation task failed: {error}"))?
 }
 
-/// The scenes from the most recent generation, served one at a time.
+/// The cities of the most recent generation: their *plans* (all of them, cheap),
+/// and the scenes built so far (only the ones something has asked to draw).
 ///
-/// Held rather than returned from `generate_terrain` because the payload is far
-/// too large to ship unconditionally: a three-city world is over 400 MB of
-/// base64, and it crosses the IPC boundary as one JSON document.
-static CITY_SCENES: std::sync::Mutex<Option<Vec<city_scene::CityScene>>> =
-    std::sync::Mutex::new(None);
+/// A scene is tens of megabytes of vertex buffers, textures and a traffic fleet,
+/// so none is built when the world is generated. The first request for a city
+/// builds it from its plan, on a worker thread, and caches it. It is a pure
+/// function of the plan, so a city built later (or after the cache is dropped and
+/// rebuilt) is the same city.
+struct CityWorld {
+    plans: Vec<(infrastructure::SettlementClass, urban::ModernCity)>,
+    scenes: std::collections::HashMap<usize, std::sync::Arc<city_scene::CityScene>>,
+}
 
-fn install_city_scenes(infrastructure: &InfrastructureData) {
-    *CITY_SCENES.lock().unwrap_or_else(|error| error.into_inner()) =
-        Some(infrastructure.city_scenes.clone());
+static CITY_WORLD: std::sync::Mutex<Option<CityWorld>> = std::sync::Mutex::new(None);
+
+fn install_city_plans(infrastructure: &InfrastructureData) {
+    let plans = infrastructure
+        .settlements
+        .iter()
+        .zip(infrastructure.modern_cities.iter())
+        .map(|(settlement, city)| (settlement.class, city.clone()))
+        .collect();
+    *CITY_WORLD.lock().unwrap_or_else(|error| error.into_inner()) =
+        Some(CityWorld { plans, scenes: std::collections::HashMap::new() });
+}
+
+/// The finished scene of one city, building it on the first request.
+async fn ensure_city_scene(index: usize) -> Result<std::sync::Arc<city_scene::CityScene>, String> {
+    let (class, city) = {
+        let guard = CITY_WORLD.lock().map_err(|_| "the city cache is poisoned")?;
+        let world = guard
+            .as_ref()
+            .ok_or_else(|| "no cities: generate the world first".to_owned())?;
+        if let Some(scene) = world.scenes.get(&index) {
+            return Ok(scene.clone());
+        }
+        let (class, city) = world
+            .plans
+            .get(index)
+            .ok_or_else(|| format!("city {index} does not exist ({} cities)", world.plans.len()))?;
+        (*class, city.clone())
+    };
+    let (scene, sim) = tauri::async_runtime::spawn_blocking(move || {
+        let scene = city_scene::build_city_scene(&city, infrastructure::scene_budget(class));
+        // The traffic fleet runs on the same lane graph the road surface was drawn
+        // from, so it is built here, with the scene it belongs to.
+        let network = city_scene::network::derive(
+            &city.nodes,
+            &city.sd_roads,
+            &city.hd_roads,
+            city.frame,
+            city_scene::JunctionSpec::default(),
+            city.seed,
+        );
+        let sim = city_scene::traffic::simulate(&network, scene.signals.clone(), city.seed, 44);
+        (scene, sim)
+    })
+    .await
+    .map_err(|error| format!("building the city scene failed: {error}"))?;
+    let scene = std::sync::Arc::new(scene);
+    {
+        let mut guard = CITY_WORLD.lock().map_err(|_| "the city cache is poisoned")?;
+        if let Some(world) = guard.as_mut() {
+            // A concurrent request may have built it first; keep that one.
+            world.scenes.entry(index).or_insert_with(|| scene.clone());
+        }
+    }
+    if let Ok(mut slot) = TRAFFIC.lock() {
+        if let Some(world) = slot.as_mut() {
+            if let Some(entry) = world.get_mut(index) {
+                *entry = sim;
+            }
+        }
+    }
+    Ok(scene)
 }
 
 /// One city's finished scene: vertex buffers, prototypes, textures, signals and
-/// a traffic state.
+/// a traffic state, built on first request.
 ///
 /// Fails with a clear message rather than an empty scene when asked before a
 /// generation has run, so a caller cannot mistake "not generated yet" for "this
 /// city is empty".
 #[tauri::command]
 async fn city_scene(index: usize) -> Result<city_scene::CityScene, String> {
-    let guard = CITY_SCENES
-        .lock()
-        .map_err(|_| "the city scene cache is poisoned")?;
-    let scenes = guard
-        .as_ref()
-        .ok_or_else(|| "no city scenes: generate the world first".to_owned())?;
-    scenes
-        .get(index)
-        .cloned()
-        .ok_or_else(|| format!("city {index} does not exist ({} cities)", scenes.len()))
+    let scene = ensure_city_scene(index).await?;
+    Ok((*scene).clone())
 }
 
 /// The same scene as `city_scene`, as the binary container
 /// (`city_scene::scene::encode_binary`) sent as a raw `ArrayBuffer`.
 ///
 /// This is what the app uses: no base64, no JSON of a 100 MB string, and the
-/// webview can view the buffers in place. It also encodes under the lock instead
-/// of cloning the whole scene first.
+/// webview can view the buffers in place.
 #[tauri::command]
 async fn city_scene_bin(index: usize) -> Result<tauri::ipc::Response, String> {
-    let guard = CITY_SCENES
-        .lock()
-        .map_err(|_| "the city scene cache is poisoned")?;
-    let scenes = guard
-        .as_ref()
-        .ok_or_else(|| "no city scenes: generate the world first".to_owned())?;
-    let scene = scenes
-        .get(index)
-        .ok_or_else(|| format!("city {index} does not exist ({} cities)", scenes.len()))?;
-    let bytes = city_scene::scene::encode_binary(scene)?;
+    let scene = ensure_city_scene(index).await?;
+    let bytes = city_scene::scene::encode_binary(&scene)?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -972,6 +1017,12 @@ pub fn build_payload(
         );
         let (urban_bytes, cultivated_bytes, crop_bytes, road_bytes) =
             infrastructure_surface_masks(&infrastructure, mesh_size);
+        // Ground the shader may paint procedurally: everything but built-up land,
+        // fields and roads (kept as baked) and water.
+        let built: Vec<u8> = (0..mesh_size * mesh_size)
+            .map(|i| urban_bytes[i].max(cultivated_bytes[i]).max(road_bytes[i]))
+            .collect();
+        let material_bytes = terrain_core::material_control_map(&terrain, mesh_size, Some(&built));
         let max_flow = terrain.flow.iter().copied().fold(1.0_f32, f32::max);
         let max_flow_log = max_flow.ln_1p();
         let mut water_height_bytes = Vec::with_capacity(mesh_size * mesh_size * 4);
@@ -1046,6 +1097,7 @@ pub fn build_payload(
             water_data_size,
             height_data_base64: STANDARD.encode(height_bytes),
             forest_data_base64: STANDARD.encode(forest_bytes),
+            material_data_base64: STANDARD.encode(material_bytes),
             vegetation_exclusion_data_base64: STANDARD.encode(vegetation_exclusion_bytes),
             urban_data_base64: STANDARD.encode(urban_bytes),
             cultivated_data_base64: STANDARD.encode(cultivated_bytes),
@@ -1163,32 +1215,11 @@ async fn load_project(input_path: String) -> Result<ProjectDocument, String> {
 static TRAFFIC: std::sync::Mutex<Option<Vec<Option<city_scene::traffic::TrafficSim>>>> =
     std::sync::Mutex::new(None);
 
-/// Rebuild the traffic fleets for a set of cities.
-///
-/// Only the *network* is re-derived here — no geometry, no textures — so this is
-/// cheap enough to run once per generation.
+/// Reset the traffic fleets: one empty slot per city, filled when that city's
+/// scene is built (the fleet needs the scene's signal rigs).
 fn install_traffic(infrastructure: &InfrastructureData) {
-    let world: Vec<Option<city_scene::traffic::TrafficSim>> = infrastructure
-        .modern_cities
-        .iter()
-        .enumerate()
-        .map(|(index, city)| {
-            let network = city_scene::network::derive(
-                &city.nodes,
-                &city.sd_roads,
-                &city.hd_roads,
-                city.frame,
-                city_scene::JunctionSpec::default(),
-                city.seed,
-            );
-            let signals = infrastructure
-                .city_scenes
-                .get(index)
-                .map(|scene| scene.signals.clone())
-                .unwrap_or_default();
-            city_scene::traffic::simulate(&network, signals, city.seed, 44)
-        })
-        .collect();
+    let world: Vec<Option<city_scene::traffic::TrafficSim>> =
+        infrastructure.modern_cities.iter().map(|_| None).collect();
     if let Ok(mut slot) = TRAFFIC.lock() {
         *slot = Some(world);
     }

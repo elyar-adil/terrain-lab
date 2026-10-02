@@ -65,6 +65,8 @@ pub(super) fn derive_compounds_and_trees(
             ParcelUse::Residential => 3,
             ParcelUse::MixedUse | ParcelUse::Commercial => 2,
             ParcelUse::Civic => 4,
+            ParcelUse::Villa => 4,
+            ParcelUse::Farmstead => 3,
         };
         if parcel.ring.len() < 2 {
             continue;

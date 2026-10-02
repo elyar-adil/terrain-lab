@@ -8,6 +8,7 @@
 
 pub mod bake;
 pub mod buildings;
+pub mod crops;
 pub mod facades;
 pub mod furniture;
 /// Facade for the leaf-card work, which lives in [`trees::cards`] with the

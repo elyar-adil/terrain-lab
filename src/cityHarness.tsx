@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import { CityViewer } from "./city/CityViewer";
 import type { CityScene } from "./city/cityScene";
+import { preloadTreeGrower } from "./trees";
 import "./styles.css";
 
 declare global {
@@ -42,7 +43,9 @@ function Harness() {
     // scratch scene (`?scene=audit-trees.json`) without clobbering the shared
     // city fixture another audit may be reading.
     const sceneUrl = params.get("scene") ?? "/city-scenes.json";
-    fetch(sceneUrl)
+    // The tree grower is loaded first, so the city is built with its trees.
+    preloadTreeGrower()
+      .then(() => fetch(sceneUrl))
       .then((response) => {
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         return response.json();
@@ -80,6 +83,8 @@ function Harness() {
         // has not been composed yet.
         window.__RENDER_READY__ = true;
         document.documentElement.dataset.renderReady = "true";
+        // For audits: the numbers, readable from the DOM.
+        document.documentElement.dataset.diagnostics = JSON.stringify(window.__CITY_DIAGNOSTICS__ ?? {});
       }}
     />
   );

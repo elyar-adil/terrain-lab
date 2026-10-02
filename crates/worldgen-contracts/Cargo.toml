@@ -1,0 +1,8 @@
+[package]
+name = "worldgen-contracts"
+version = "0.1.0"
+edition = "2024"
+description = "Small stable types and interfaces that procedural-world layers exchange: geometry, road classes and cross-sections, height and water fields, road networks."
+
+[dependencies]
+worldgen-core = { path = "../worldgen-core" }

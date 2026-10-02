@@ -121,11 +121,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if scene_only {
         let (_result, infrastructure) =
             wind_water_terrain_lab_lib::build_payload(config.clone(), &|_, _| {})?;
-        let scenes: Vec<_> = infrastructure
-            .city_scenes
-            .iter()
-            .take(keep)
-            .cloned()
+        // `--only I` builds just settlement I (a village is a few megabytes, a town
+        // hundreds), which is what a quick look at a plan needs.
+        let indices: Vec<usize> = match flag("--only").and_then(|value| value.parse::<usize>().ok()) {
+            Some(only) => vec![only],
+            None => (0..keep.min(infrastructure.modern_cities.len())).collect(),
+        };
+        // `--clip X,Z,R` keeps only the plan within R metres of local point (X, Z).
+        let clip: Option<[f32; 3]> = flag("--clip").and_then(|value| {
+            let parts: Vec<f32> = value.split(',').filter_map(|part| part.parse().ok()).collect();
+            (parts.len() == 3).then(|| [parts[0], parts[1], parts[2]])
+        });
+        let scenes: Vec<_> = indices
+            .into_iter()
+            .filter_map(|index| match clip {
+                Some([x, z, r]) => infrastructure.build_city_scene_clipped(index, [x, z], r),
+                None => infrastructure.build_city_scene(index),
+            })
             .collect();
         for (index, scene) in scenes.iter().enumerate() {
             report_scene(index, scene);
@@ -175,8 +187,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  {key:<32} {:>8.1} MB", *size as f32 / 1_048_576.0);
         }
     }
-    for (index, scene) in infrastructure.city_scenes.iter().take(keep).enumerate() {
-        report_scene(index, scene);
+    for index in 0..keep.min(infrastructure.modern_cities.len()) {
+        if let Some(scene) = infrastructure.build_city_scene(index) {
+            report_scene(index, &scene);
+        }
     }
     Ok(())
 }

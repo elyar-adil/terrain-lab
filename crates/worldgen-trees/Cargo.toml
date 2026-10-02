@@ -1,0 +1,11 @@
+[package]
+name = "worldgen-trees"
+version = "0.1.0"
+edition = "2024"
+description = "Stateless, per-tree and per-leaf unique trees: a species catalogue as data and a grower that turns (species, seed, conditions) into a branch skeleton and individual leaves."
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+worldgen-core = { path = "../worldgen-core" }

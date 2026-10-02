@@ -37,6 +37,14 @@ impl CityFrameInfo {
 }
 
 /// Rich output used by the Rust renderer.  `sd` is the city-scale graph,
+/// A waterway besides the main river.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tributary {
+    pub line: Vec<Point>,
+    pub width_metres: f32,
+}
+
 /// `hd` contains physical road cross-sections and centre lines, while blocks,
 /// parcels and buildings retain stable ids for incremental rendering and
 /// inspection.  All fields are deterministic for the same specification.
@@ -56,10 +64,61 @@ pub struct ModernCity {
     pub buildings: Vec<ModernBuilding>,
     pub compounds: Vec<Compound>,
     pub trees: Vec<TreeInstance>,
+    /// Farmland around the town.
+    #[serde(default)]
+    pub fields: Vec<super::buildings::Field>,
     pub river: Option<Vec<Point>>,
     pub river_width_metres: f32,
+    /// Other waterways through the town, each with its own width: a plan made on a
+    /// real landscape has more than one.
+    #[serde(default)]
+    pub tributaries: Vec<Tributary>,
     /// Squared deviation of the SD graph from the realistic Chinese morphology
     /// prior (`MorphologyPrior::default`).  Exposed so callers and tests can
     /// assert a generated plan actually reads like a Chinese street network.
     pub morphology_score: f64,
+}
+
+impl ModernCity {
+    /// The part of the city within `radius_m` of a local point `(x, z)`: for looking at
+    /// one neighbourhood of a large plan without building the whole of it. Roads are
+    /// kept if any of their centreline is in range (nodes are all kept; unused ones
+    /// are harmless); everything else is kept by where its centre lies.
+    pub fn clipped(&self, centre: [f32; 2], radius_m: f32) -> ModernCity {
+        let local = |p: &Point| self.frame.to_local(*p);
+        let near = |p: &Point, extra: f32| {
+            let [x, z] = local(p);
+            (x - centre[0]).hypot(z - centre[1]) <= radius_m + extra
+        };
+        let middle = |ring: &[Point]| -> Option<Point> {
+            if ring.is_empty() {
+                return None;
+            }
+            let n = ring.len() as f32;
+            Some(Point {
+                x_km: ring.iter().map(|p| p.x_km).sum::<f32>() / n,
+                y_km: ring.iter().map(|p| p.y_km).sum::<f32>() / n,
+            })
+        };
+        let mut out = self.clone();
+        out.hd_roads.retain(|road| road.centreline.iter().any(|p| near(p, 60.0)));
+        let kept: std::collections::HashSet<u32> = out.hd_roads.iter().map(|road| road.sd_road).collect();
+        out.sd_roads.retain(|road| kept.contains(&road.id));
+        out.blocks.retain(|b| middle(&b.boundary).is_some_and(|c| near(&c, 0.0)));
+        out.parcels.retain(|b| middle(&b.ring).is_some_and(|c| near(&c, 0.0)));
+        let parcels: std::collections::HashSet<u32> = out.parcels.iter().map(|p| p.id).collect();
+        out.buildings.retain(|b| parcels.contains(&b.parcel_id));
+        out.compounds.retain(|c| parcels.contains(&c.parcel_id));
+        out.trees.retain(|t| near(&t.point, 0.0));
+        out.fields.retain(|f| middle(&f.ring).is_some_and(|c| near(&c, 0.0)));
+        // Waterways are cut to the neighbourhood too, or the water alone would be the
+        // whole size of the plan.
+        let cut = |line: &[Point]| -> Vec<Point> { line.iter().copied().filter(|p| near(p, 250.0)).collect() };
+        out.river = out.river.as_ref().map(|line| cut(line)).filter(|line| line.len() >= 2);
+        for tributary in &mut out.tributaries {
+            tributary.line = cut(&tributary.line);
+        }
+        out.tributaries.retain(|t| t.line.len() >= 2);
+        out
+    }
 }

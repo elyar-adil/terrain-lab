@@ -23,6 +23,8 @@ import {
   foliageMaskTexture,
 } from "./cityScene";
 import { createPost } from "./post";
+import { installUniqueTrees } from "../trees/plant";
+import { GrassShells, applyGrassFur } from "./grassFur";
 import {
   SKY_FOG,
   SUN_DIR,
@@ -89,11 +91,13 @@ function createGround(extent: number): THREE.Mesh {
   const size = Math.max(24000, extent * 24);
   const geometry = new THREE.PlaneGeometry(size, size, 1, 1);
   geometry.rotateX(-Math.PI / 2);
-  const material = new THREE.MeshStandardMaterial({
-    color: 0x5f6d47,
-    roughness: 0.96,
-    metalness: 0,
-  });
+  const material = applyGrassFur(
+    new THREE.MeshStandardMaterial({
+      color: 0x5f6d47,
+      roughness: 1,
+      metalness: 0,
+    }),
+  );
   const ground = new THREE.Mesh(geometry, material);
   ground.name = "ground";
   ground.receiveShadow = true;
@@ -263,8 +267,19 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
       mark(`materials (${materials.textures.length} textures)`);
       const handles: CityHandles = buildCityScene(scene, materials);
       world.add(handles.group);
+      // Trees grown one by one from their own seeds, in place of the prototypes.
+      const forest = hidden.has("trees") ? null : installUniqueTrees(handles, scene);
+      if (forest) world.add(forest.group);
+      // Real blades on the lawns the camera is near.
+      const lawns = handles.statics.filter((m) => /^(parcel\.green|block\.ground)$/.test(m.name));
+      const grassBase = materials.get("parcel.green") as THREE.MeshStandardMaterial;
+      const shells = new URLSearchParams(window.location.search).get("shells") !== "0" ? new GrassShells(lawns, grassBase) : null;
       if (hidden.has("ground")) mark("hiding the ground plane");
-      else world.add(createGround(extent));
+      else {
+        const ground = createGround(extent);
+        world.add(ground);
+        shells?.carpet(ground.position.y + 0.002, world);
+      }
       if (hidden.has("sky")) {
         mark("hiding the sky dome");
         sky.dome.visible = false;
@@ -448,13 +463,15 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
         if (disposed) return;
         const elapsed = (performance.now() - started) / 1000;
         sky.update(elapsed);
+        forest?.update(camera.position, 40);
+        shells?.update(camera.position);
         frame += 1;
         if (post) post.render();
         else renderer.render(world, camera);
         // The audit needs to know a frame has actually been composed, not that
         // the scene graph was populated. Under software WebGL those are seconds
         // apart, and reporting the second one produced blank screenshots.
-        if (frame >= 3 && frame > sizedAt + 1 && !window.__CITY_READY__) {
+        if (frame >= 3 && frame > sizedAt + 1 && !window.__CITY_READY__ && (!forest || forest.pending === 0)) {
           mark("first frames");
           window.__CITY_DIAGNOSTICS__ = {
             preset,
@@ -469,6 +486,7 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
             // material is the difference between "a wall looks wrong somewhere"
             // and a one-line fix in the scene layer.
             uvMismatch: [...materials.uvMismatch],
+            forest: forest ? { ...forest.stats, trees: forest.treeCount } : null,
             vehicles: agentCount,
             signals: scene.signals.length,
             lamps: lampsByAspect.map((mesh) => mesh.count),
@@ -507,6 +525,10 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
           window.__CITY_READY__ = true;
           document.documentElement.dataset.cityReady = "true";
           onReady?.(window.__CITY_DIAGNOSTICS__);
+          // `?once=1`: stop drawing once a finished frame exists, for audits on a
+          // software rasteriser that would otherwise keep redrawing while the
+          // screenshot waits for its clock.
+          if (new URLSearchParams(window.location.search).get("once") === "1") return;
         }
         window.requestAnimationFrame(tick);
       };
@@ -550,6 +572,8 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
         observer.disconnect();
         window.removeEventListener("resize", onResize);
         post?.dispose();
+        forest?.dispose();
+        shells?.dispose();
         handles.dispose();
         materials.dispose();
         sky.dispose();

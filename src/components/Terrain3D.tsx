@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { beginCityLayer, type CityLayer, type CityLayerBuild } from "../city/cityLayer";
+import { buildCityMass, type CityMass } from "../city/cityMass";
 import { createFramePerf, perfEnabled, perfTiming } from "../city/perf";
 import { Roam } from "../city/roam";
 import type { CityScene } from "../city/cityScene";
@@ -90,7 +91,9 @@ const cloudFragmentShader = `
 `;
 
 // ---- 路口工坊天空移植:物理感穹顶 + 太阳圆盘 + FBM 漂移积云 ----
-const SUN_DIR = new THREE.Vector3(-0.38, 0.74, -0.46).normalize();
+// About 31 degrees up: low enough that every spur and gully throws a readable
+// shadow, high enough that a street is still lit.
+const SUN_DIR = new THREE.Vector3(-0.55, 0.52, -0.66).normalize();
 const SKY_FOG = 0xc4d4e4;
 const skyVertShader = `
   varying vec3 vDir;
@@ -290,7 +293,7 @@ const waterFragmentShader = `
   }
 `;
 
-export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, onNeedCity }: { result: GenerationResult; config: SimulationConfig; cameraMode: "3d" | "satellite"; cityFocus?: { xKm: number; yKm: number; spanKm: number; nonce: number } | null; cityScene?: CityScene | null; onNeedCity?: (index: number | null) => void }) {
+export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, onNeedCity }: { result: GenerationResult; config: SimulationConfig; cameraMode: "3d" | "satellite"; cityFocus?: { xKm: number; yKm: number; spanKm: number; nonce: number; pitchDeg?: number; azimuthDeg?: number } | null; cityScene?: CityScene | null; onNeedCity?: (index: number | null) => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
   // The metre-scale city lives inside this scene. The scene is built once per
   // terrain, so the loaded city and the request callback travel by ref.
@@ -463,6 +466,43 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
     const terrainMaterial = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.96, metalness: 0.0 });
+    // The heightfield as a texture (metres above the lowest point, half float so
+    // it filters everywhere). The fragment shader marches it along the sun
+    // direction for cast shadows: a ridge shades the valley behind it at any
+    // zoom, which a shadow map sized for the view cannot do for a whole world.
+    const heightTexelData = new Uint16Array(heights.length);
+    let tallestRelative = 1;
+    for (let index = 0; index < heights.length; index += 1) {
+      const relative = Math.max(0, heights[index] - result.stats.minElevation);
+      tallestRelative = Math.max(tallestRelative, relative);
+      heightTexelData[index] = THREE.DataUtils.toHalfFloat(relative);
+    }
+    const heightTexture = new THREE.DataTexture(heightTexelData, result.meshSize, result.meshSize, THREE.RedFormat, THREE.HalfFloatType);
+    heightTexture.minFilter = THREE.LinearFilter;
+    heightTexture.magFilter = THREE.LinearFilter;
+    heightTexture.wrapS = heightTexture.wrapT = THREE.ClampToEdgeWrapping;
+    heightTexture.generateMipmaps = false;
+    heightTexture.needsUpdate = true;
+    // Ground cover (forest, grass, snow, naturalness) the shader builds materials
+    // from. Without it (older payloads) nothing is natural and the baked image rules.
+    const materialBytes = result.materialDataBase64 ? decodeBytes(result.materialDataBase64) : new Uint8Array(result.meshSize * result.meshSize * 4);
+    const materialTexture = new THREE.DataTexture(materialBytes, result.meshSize, result.meshSize, THREE.RGBAFormat, THREE.UnsignedByteType);
+    materialTexture.minFilter = THREE.LinearFilter;
+    materialTexture.magFilter = THREE.LinearFilter;
+    materialTexture.wrapS = materialTexture.wrapT = THREE.ClampToEdgeWrapping;
+    materialTexture.generateMipmaps = false;
+    materialTexture.needsUpdate = true;
+    const snowWindAngle = THREE.MathUtils.degToRad(config.windDirection);
+    const terrainShadowUniforms = {
+      uMaterialTex: { value: materialTexture },
+      uWindDir: { value: new THREE.Vector2(Math.cos(snowWindAngle), Math.sin(snowWindAngle)) },
+      uHeightTex: { value: heightTexture },
+      uHeightN: { value: result.meshSize },
+      uM2S: { value: metresToScene },
+      uMaxHeightScene: { value: tallestRelative * metresToScene },
+      uSunWorld: { value: SUN_DIR.clone() },
+      uSunViewDir: { value: SUN_DIR.clone() },
+    };
     // The satellite preview is one texel per ~40 m, so anything closer than a
     // few hundred metres is a blur. Detail is synthesised in the shader at four
     // scales in *world metres* and faded in by the camera's distance, so the
@@ -470,10 +510,23 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     // the whole-map view down to a footstep, with no extra texture memory.
     terrainMaterial.onBeforeCompile = (shader) => {
       shader.uniforms.uMetres = { value: sceneToMetres };
+      Object.assign(shader.uniforms, terrainShadowUniforms);
       shader.vertexShader = shader.vertexShader
         .replace("#include <common>", "#include <common>\nvarying vec3 vDetailP;")
         .replace("#include <begin_vertex>", "#include <begin_vertex>\nvDetailP = (modelMatrix * vec4(position, 1.0)).xyz;");
+      // Cast shadows from the heightfield, applied to the sun only (matched by
+      // direction, so the fill light is untouched). It is the last RE_Direct call
+      // in the chunk: point and spot lights come first.
+      const directCall = "RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );";
+      const lightsChunk = THREE.ShaderChunk.lights_fragment_begin;
+      const lastDirect = lightsChunk.lastIndexOf(directCall);
+      const shadowedLights = lastDirect < 0
+        ? lightsChunk
+        : lightsChunk.slice(0, lastDirect)
+          + "directLight.color *= mix(1.0, gSunLit, step(0.98, dot(directionalLight.direction, uSunViewDir)));\n\t\t"
+          + lightsChunk.slice(lastDirect);
       shader.fragmentShader = shader.fragmentShader
+        .replace("#include <lights_fragment_begin>", shadowedLights)
         .replace("#include <common>", `#include <common>
 varying vec3 vDetailP;
 uniform float uMetres;
@@ -483,7 +536,103 @@ float dNoise(vec2 p) {
   f = f * f * (3.0 - 2.0 * f);
   return mix(mix(dHash(i), dHash(i + vec2(1, 0)), f.x), mix(dHash(i + vec2(0, 1)), dHash(i + vec2(1, 1)), f.x), f.y);
 }
-float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2 * dNoise(p * 4.37 + 3.7); }`)
+float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2 * dNoise(p * 4.37 + 3.7); }
+// ---- eroded relief -------------------------------------------------------
+// The mesh is one sample per ~150 m, so every ridge, gully and spur finer than
+// that has to be synthesised. Gradient noise with analytic derivatives, folded
+// into ridges, with each octave damped by the slope the previous ones built:
+// flat ground between steep flanks stays smooth and the flanks themselves break
+// into branching gullies, which is what water does and plain fbm does not.
+vec2 eHash(vec2 p) {
+  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+  return fract(sin(p) * 43758.5453123) * 2.0 - 1.0;
+}
+vec3 eNoise(vec2 x) {
+  vec2 i = floor(x), f = fract(x);
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+  vec2 ga = eHash(i), gb = eHash(i + vec2(1.0, 0.0)), gc = eHash(i + vec2(0.0, 1.0)), gd = eHash(i + vec2(1.0, 1.0));
+  float va = dot(ga, f), vb = dot(gb, f - vec2(1.0, 0.0)), vc = dot(gc, f - vec2(0.0, 1.0)), vd = dot(gd, f - vec2(1.0, 1.0));
+  float k = va - vb - vc + vd;
+  float v = va + u.x * (vb - va) + u.y * (vc - va) + u.x * u.y * k;
+  vec2 d = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd) + du * (u.yx * k + vec2(vb - va, vc - va));
+  return vec3(v, d);
+}
+// x: relief height 0..1 (ridges high, gully floors low), yz: d(height in metres)/d(metre).
+float gErodeH;
+vec2 gErodeG;
+uniform sampler2D uHeightTex;
+uniform sampler2D uMaterialTex;
+uniform vec2 uWindDir;
+float gSnow = 0.0;
+uniform float uHeightN;
+uniform float uM2S;
+uniform float uMaxHeightScene;
+uniform vec3 uSunWorld;
+uniform vec3 uSunViewDir;
+float gSunLit = 1.0;
+// Height (scene units) of the terrain at scene x/z, bilinear.
+float terrainHeightScene(vec2 xz) {
+  vec2 uv = ((xz + 1.6) / 3.2 * (uHeightN - 1.0) + 0.5) / uHeightN;
+  return texture2D(uHeightTex, uv).r * uM2S;
+}
+// Wind-sculpted snow surface in metres: long drifts stretched along the wind,
+// and finer ripples (sastrugi) that fade out with the pixel footprint.
+float snowSurface(vec2 p, float foot) {
+  vec2 w = uWindDir;
+  vec2 pw = vec2(-w.y, w.x);
+  vec2 q = vec2(dot(p, w) / 300.0, dot(p, pw) / 75.0);
+  float drifts = dFbm(q) * 9.0 + dFbm(q * 3.3 + 5.0) * 2.4;
+  float ripples = dNoise(vec2(dot(p, w) / 14.0, dot(p, pw) / 3.2) + 9.0) * 0.28 * (1.0 - smoothstep(0.8, 5.0, foot));
+  return drifts + ripples;
+}
+// Soft cast shadow: march toward the sun and track how close the ray comes to
+// the ground relative to how far it has travelled (a penumbra proportional to
+// distance, as a real sun disc gives).
+float sunVisibility(vec3 P) {
+  float lit = 1.0;
+  float stepM = 30.0;
+  float t = 60.0;
+  for (int i = 0; i < 36; i++) {
+    vec3 q = P + uSunWorld * (t * uM2S);
+    if (q.y > uMaxHeightScene || abs(q.x) > 1.6 || abs(q.z) > 1.6) break;
+    // The mesh interpolates triangles while the texture interpolates bilinearly;
+    // on a sharp crest they differ by tens of metres, so give the ray that much
+    // slack or the ridge line shadows itself in dots.
+    float clearance = q.y - terrainHeightScene(q.xz) + 14.0 * uM2S;
+    lit = min(lit, clamp(clearance / (0.10 * t * uM2S) + 0.25, 0.0, 1.0));
+    if (lit <= 0.0) break;
+    t += stepM;
+    stepM *= 1.13;
+  }
+  return lit * lit * (3.0 - 2.0 * lit);
+}
+void erodedRelief(vec2 p, float footprint, float amplitude) {
+  float a = 0.0, b = 1.0, norm = 0.0;
+  vec2 d = vec2(0.0), g = vec2(0.0);
+  float f = 1.0 / 2400.0;
+  mat2 m = mat2(0.8, -0.6, 0.6, 0.8);
+  mat2 R = mat2(1.0, 0.0, 0.0, 1.0);
+  vec2 q = p * f;
+  for (int i = 0; i < 9; i++) {
+    float lambda = 1.0 / f;
+    float w = 1.0 - smoothstep(lambda * 0.08, lambda * 0.30, footprint);
+    vec3 n = eNoise(q);
+    float r = 1.0 - abs(n.x);
+    vec2 dr = -sign(n.x) * n.yz;
+    d += dr * 0.5;
+    float damp = 1.0 / (1.0 + dot(d, d));
+    a += b * w * r * damp;
+    g += (transpose(R) * dr) * (b * w * f * damp);
+    norm += b * damp;
+    b *= 0.46;
+    q = m * q * 2.0 + 17.3;
+    R = m * R;
+    f *= 2.0;
+  }
+  gErodeH = clamp(a / max(norm, 1e-4), 0.0, 1.0);
+  gErodeG = g * amplitude;
+}`)
         .replace("#include <map_fragment>", `#include <map_fragment>
 {
   vec2 pm = vDetailP.xz * uMetres;
@@ -521,6 +670,86 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
   // Dark, wetter hollows where the ground gathers water.
   float wet = smoothstep(0.62, 0.80, dFbm(pm * 0.045 + 31.0)) * veg;
   diffuseColor.rgb *= 1.0 - wet * 0.22 * (1.0 - smoothstep(800.0, 6000.0, dm));
+  // Eroded relief. Its strength follows the slope the mesh already has, so flat
+  // ground stays flat and steep ground breaks into spurs and gullies. The height
+  // and gradient are kept for the normal pass below.
+  {
+    vec3 wn = normalize(inverseTransformDirection(normalize(vNormal), viewMatrix));
+    float slope = 1.0 - clamp(wn.y, 0.0, 1.0);
+    float steep = smoothstep(0.06, 0.42, slope);
+    erodedRelief(pm, dm * 0.0016, 380.0 * (0.12 + 1.9 * steep));
+    float hn = smoothstep(0.18, 0.82, gErodeH);
+    // ---- natural ground, built from cover and relief ----------------------
+    // Colour is decided per pixel by what the ground is doing, not read from a
+    // 78 m image: steep ground is bare rock banded by strata and cut by cracks,
+    // scree gathers below it, soil and grass sit on the gentle ground, forest
+    // follows the gully floors, and snow lies on benches and in gullies while
+    // wind scours the ridges. The baked image supplies only the rock tint (the
+    // lithology colour) and everything that is not natural: water, roads, fields.
+    vec2 muv = ((vDetailP.xz + 1.6) / 3.2 * (uHeightN - 1.0) + 0.5) / uHeightN;
+    vec4 ctrl = texture2D(uMaterialTex, muv);
+    if (ctrl.a > 0.004) {
+      vec3 nf = normalize(wn + vec3(-gErodeG.x, 0.0, -gErodeG.y));
+      float sf = 1.0 - clamp(nf.y, 0.0, 1.0);
+      float foot = dm * 0.0016;
+      float altM = vDetailP.y * uMetres;
+      float bl = max(dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)), 0.05);
+      vec3 tint = mix(vec3(1.0), diffuseColor.rgb / bl, 0.7);
+      // Detail fades with the pixel footprint so far ground averages, not shimmers.
+      float a1 = 1.0 - smoothstep(0.4, 1.6, foot);
+      float a2 = 1.0 - smoothstep(2.0, 9.0, foot);
+      float a3 = 1.0 - smoothstep(10.0, 45.0, foot);
+      float warpS = dFbm(pm / 180.0);
+      // A band is only drawn while a pixel spans well under its thickness; on a
+      // cliff altitude changes fast across a pixel, so judge it by that, not by
+      // distance, or the bands alias into stripes.
+      float altStep = fwidth(altM);
+      float bandA = 1.0 - smoothstep(38.0 * 0.06, 38.0 * 0.28, altStep);
+      float bandB = 1.0 - smoothstep(7.5 * 0.06, 7.5 * 0.28, altStep);
+      float strata = mix(0.5, 0.5 + 0.5 * sin(altM / 38.0 * 6.2832 + 4.0 * warpS), bandA);
+      float strataF = mix(0.5, 0.5 + 0.5 * sin(altM / 7.5 * 6.2832 + 6.0 * dFbm(pm / 40.0)), bandB);
+      float cr = abs(dNoise(pm / 7.0) - 0.5);
+      float cracks = (1.0 - smoothstep(0.0, 0.05, cr)) * a1;
+      float rockLum = 0.115 + 0.075 * strata * (0.4 + 0.6 * a3) + 0.040 * strataF * a2
+        + 0.05 * (dFbm(pm / 23.0) - 0.5) * a2 + 0.05 * (dFbm(pm / 310.0) - 0.5);
+      rockLum *= (1.0 - 0.45 * cracks) * (0.86 + 0.28 * hn);
+      vec3 rock = tint * rockLum;
+      vec3 soil = tint * 0.105 * (0.88 + 0.24 * dNoise(pm / 5.0) * a2 + 0.12 * (dFbm(pm / 90.0) - 0.5));
+      vec3 scree = mix(rock, soil, 0.45) * (0.92 + 0.22 * dNoise(pm / 1.7) * a1);
+      vec3 grass = vec3(0.075, 0.098, 0.034) * (0.72 + 0.55 * dFbm(pm / 36.0)) * (0.9 + 0.2 * dNoise(pm / 2.3) * a1);
+      vec3 forest = vec3(0.028, 0.052, 0.024) * (0.62 + 0.75 * dNoise(pm / 9.0) * a2 + 0.3 * dFbm(pm / 260.0));
+      // Old snow is grey-white, not paper: packed drifts, wind crust and a little
+      // dust, in a cool tint that sky light turns bluer in shade.
+      float packed = dFbm(vec2(dot(pm, uWindDir) / 420.0, dot(pm, vec2(-uWindDir.y, uWindDir.x)) / 90.0));
+      float streak = dNoise(vec2(dot(pm, uWindDir) / 40.0, dot(pm, vec2(-uWindDir.y, uWindDir.x)) / 5.5)) * a2;
+      vec3 snow = vec3(0.60, 0.635, 0.69) * (0.72 + 0.42 * packed + 0.10 * streak);
+
+      // The gully pattern only means anything where the ground is sloped; on a
+      // bench or a plateau it would imprint noise blotches on snow and grass.
+      float hnm = mix(0.5, hn, smoothstep(0.03, 0.20, sf));
+      float vegLimit = 1.0 - smoothstep(0.10, 0.24, sf);
+      float rockW = smoothstep(0.15, 0.40, sf);
+      float forestW = ctrl.r * vegLimit * mix(0.5, 1.0, 1.0 - hnm);
+      float grassW = ctrl.g * vegLimit * mix(0.7, 1.0, 1.0 - hnm);
+      float screeW = smoothstep(0.08, 0.15, sf) * (1.0 - smoothstep(0.24, 0.36, sf)) * (1.0 - 0.5 * hn) * (1.0 - ctrl.r);
+      // Snow is a layer of varying depth, not a tint: it thins over ridges and
+      // steep ground until rock shows through, in ragged islands and tongues.
+      float depthNoise = dFbm(pm / 130.0) * 0.8 + dFbm(pm / 17.0) * 0.25 * a2;
+      float depth = ctrl.b * (0.55 + depthNoise) + 0.30 * (1.0 - hnm) - 0.30;
+      float snowW = smoothstep(0.26, 0.40, depth) * (1.0 - smoothstep(0.20, 0.46, sf));
+      vec3 c = soil;
+      c = mix(c, grass, grassW * (1.0 - rockW));
+      c = mix(c, forest, forestW * (1.0 - rockW));
+      c = mix(c, scree, screeW * 0.6);
+      c = mix(c, rock, rockW);
+      c = mix(c, snow, clamp(snowW, 0.0, 1.0));
+      gSnow = clamp(snowW, 0.0, 1.0) * ctrl.a;
+      diffuseColor.rgb = mix(diffuseColor.rgb, c, ctrl.a);
+    }
+    // Contact shadow in gully floors and on the lee of spurs.
+    diffuseColor.rgb *= mix(1.0, 0.55 + 0.65 * hn, 0.20 + 0.40 * steep);
+    gSunLit = sunVisibility(vDetailP);
+  }
 }`)
         .replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>
 {
@@ -552,6 +781,16 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
     float bz = dFbm((pb + vec2(0.0, eM)) * 0.021 + 17.0);
     vec3 gm = mat3(viewMatrix) * vec3(-(mx - m0) / em * 0.20 * wmid - (bx - b0) / eM * 2.6 * wmac, 0.0, -(mz - m0) / em * 0.20 * wmid - (bz - b0) / eM * 2.6 * wmac);
     normal = normalize(normal + gm);
+  }
+  normal = normalize(normal + mat3(viewMatrix) * vec3(-gErodeG.x, 0.0, -gErodeG.y));
+  if (gSnow > 0.01) {
+    vec2 ps = vDetailP.xz * uMetres;
+    float fs = length(vDetailP - cameraPosition) * uMetres * 0.0016;
+    float es = max(1.5, fs * 1.2);
+    float s0 = snowSurface(ps, fs);
+    float sx = snowSurface(ps + vec2(es, 0.0), fs);
+    float sz = snowSurface(ps + vec2(0.0, es), fs);
+    normal = normalize(normal + mat3(viewMatrix) * vec3(-(sx - s0) / es, 0.0, -(sz - s0) / es) * gSnow);
   }
 }`);
     };
@@ -1393,6 +1632,8 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
     // the GPU buffers a few megabytes a frame on a layer the main camera does not
     // see, and only when both are finished does the city appear. So the approach
     // to a city never shows a half-built one and never stalls on the build.
+    const CITY_LOAD_DISTANCE_M = 6500;
+    const CITY_UNLOAD_DISTANCE_M = 13000;
     const CITY_SLICE_MS = 4;
     // A frame already taking 60 ms+ is hitching regardless (software GL, a huge
     // window), and 4 ms slices would take minutes: scale the slice with it.
@@ -1543,6 +1784,31 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
     };
     cityMountRef.current = mountCity;
     mountCity(cityLoadedRef.current);
+
+    // --- the far and middle form of every city ------------------------------
+    // Built from the plan that is already in the payload, so a city has its real
+    // silhouette (same footprints, heights and street lines as the metre-scale
+    // scene) at every zoom, with nothing to load. The detailed scene replaces it
+    // in place once mounted, instead of a city appearing from a patch of texture.
+    const cityMasses: Array<CityMass | null> = (result.modernCities ?? []).map((plan) => {
+      const mass = buildCityMass(plan, {
+        toScene: (xKm, yKm) => [(xKm - cityHalfExtentKm) * kilometreToScene, (yKm - cityHalfExtentKm) * kilometreToScene],
+        heightAt: terrainHeightAt,
+        metresToScene,
+      });
+      scene.add(mass.mesh);
+      return mass;
+    });
+    const updateCityMasses = () => {
+      const detailed = cityLayer ? cityLoadedRef.current : null;
+      cityMasses.forEach((mass, index) => {
+        const site = citySites[index];
+        if (!mass || !site) return;
+        const replaced = detailed !== null
+          && Math.hypot(detailed.origin[0] - site.xKm, detailed.origin[1] - site.yKm) < 0.05;
+        if (mass.mesh.visible === replaced) mass.mesh.visible = !replaced;
+      });
+    };
     let cityCheckFrame = 0;
     const requestNearbyCity = () => {
       cityCheckFrame += 1;
@@ -1561,11 +1827,15 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
         }
       });
       const loaded = cityLoadedRef.current;
-      if (nearest >= 0 && nearestDistance < 3500) {
+      // The mass layer already shows the whole city, so the detailed scene is a
+      // replacement, not an arrival. Start loading while the swap is still
+      // invisible (a few pixels of surface detail on an identical silhouette),
+      // and unload with a wide margin so hovering at the boundary never thrashes.
+      if (nearest >= 0 && nearestDistance < CITY_LOAD_DISTANCE_M) {
         if (!loaded || Math.hypot(loaded.origin[0] - citySites[nearest].xKm, loaded.origin[1] - citySites[nearest].yKm) > 0.05) {
           onNeedCityRef.current?.(nearest);
         }
-      } else if (loaded && cityAnchor && nearestDistance > 9000) {
+      } else if (loaded && cityAnchor && nearestDistance > CITY_UNLOAD_DISTANCE_M) {
         onNeedCityRef.current?.(null);
       }
     };
@@ -3325,6 +3595,13 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
             / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)));
           const direction = camera.position.clone().sub(controls.target);
           if (direction.lengthSq() < 1e-9) direction.set(0.7, 0.55, 0.7);
+          // Audit views: look along an explicit pitch/azimuth instead of the
+          // current orbit direction (90 degrees is straight down).
+          if (focusRequest.pitchDeg !== undefined) {
+            const pitch = THREE.MathUtils.degToRad(Math.min(89.5, focusRequest.pitchDeg));
+            const bearing = THREE.MathUtils.degToRad(focusRequest.azimuthDeg ?? 200);
+            direction.set(Math.cos(pitch) * Math.sin(bearing), Math.sin(pitch), Math.cos(pitch) * Math.cos(bearing));
+          }
           camera.position.copy(controls.target).add(direction.setLength(distance));
         } else {
           const ortho = camera as THREE.OrthographicCamera;
@@ -3502,6 +3779,7 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
         if (gtaoPassRef.enabled !== wantAo) gtaoPassRef.enabled = wantAo;
       }
       stepCityMount(delta);
+      updateCityMasses();
       if (perfEnabled) {
         if (cityLayer) {
           const lod = cityLayer.lodStats();
@@ -3531,6 +3809,7 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       sun.shadow.camera.near = 0.0001;
       sun.shadow.camera.far = shadowSpan * 6 + 0.2;
       sun.shadow.camera.updateProjectionMatrix();
+      terrainShadowUniforms.uSunViewDir.value.copy(SUN_DIR).transformDirection(camera.matrixWorldInverse);
       requestNearbyCity();
       frameCounter += 1;
       if (frameCounter % 45 === 1) renderer.shadowMap.needsUpdate = true;
@@ -3565,6 +3844,11 @@ float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2
       abandonCityMount();
       cityWarmTarget?.dispose();
       cityLayer?.dispose();
+      for (const mass of cityMasses) {
+        if (!mass) continue;
+        scene.remove(mass.mesh);
+        mass.dispose();
+      }
       controls.dispose();
       texture.dispose();
       geometry.dispose();

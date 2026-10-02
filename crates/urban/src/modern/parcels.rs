@@ -14,6 +14,7 @@ use super::geom::{
     signed_area,
 };
 use super::graph::{QUAY_OFF_M, modern_hash};
+use super::suburb;
 use crate::model::cross_section;
 use crate::{
     BuildingFacade, ModernBuilding, ModernRoadClass, Parcel, ParcelUse, Point, RoofStyle, SdNode,
@@ -24,6 +25,7 @@ pub(super) struct ParcelOutput {
     pub blocks: Vec<UrbanBlock>,
     pub parcels: Vec<Parcel>,
     pub buildings: Vec<ModernBuilding>,
+    pub fields: Vec<crate::Field>,
 }
 
 /// Design floor-to-floor heights, metres.  Residential runs 2.95-3.0 m, offices
@@ -40,7 +42,7 @@ const BUILDING_LINE_M: f32 = 1.5;
 const RIVER_BANK_M: f32 = 4.0;
 
 /// Distance from a street centreline to the nearest permitted wall.
-fn right_of_way(class: ModernRoadClass) -> f32 {
+pub(super) fn right_of_way(class: ModernRoadClass) -> f32 {
     let s = cross_section(class);
     s.width_metres * 0.5 + s.sidewalk_metres + BUILDING_LINE_M
 }
@@ -70,18 +72,15 @@ pub(super) fn build_parcels(
     let Extraction { faces, spurs } = extract_faces(&pts, &edges);
     let faces: Vec<_> = faces.into_iter().flat_map(split_concave).collect();
 
-    let river_local: Vec<V> = (0..=48)
-        .map(|i| {
-            let z = -radius_m * 1.2 + 2.4 * radius_m * i as f32 / 48.0;
-            (frame.river_x(z), z)
-        })
-        .collect();
+    let river_local: Vec<V> = frame.river_line();
 
     let mut blocks: Vec<UrbanBlock> = Vec::new();
     let mut parcels: Vec<Parcel> = Vec::new();
     let mut buildings: Vec<ModernBuilding> = Vec::new();
     let mut next_parcel = 0_u32;
     let mut next_building = 0_u32;
+    let mut fields: Vec<crate::Field> = Vec::new();
+    let mut next_field = 0_u32;
     let to_world =
         |ring: &[V]| -> Vec<Point> { ring.iter().map(|p| frame.to_world(p.0, p.1)).collect() };
 
@@ -90,11 +89,26 @@ pub(super) fn build_parcels(
         if centre.0.hypot(centre.1) > radius_m * 1.04 {
             continue;
         }
+        // How built-up this block is: 1 in the town, thinning to scattered houses
+        // at the edge, where buildings are also lower and more widely spaced.
+        let built = frame.urbanness(centre.0, centre.1);
+        // A big face of the country can have its middle in the fields and its
+        // edge in the suburb: judge it by the most built-up place on its boundary.
+        let face_built = if frame.external.is_some() {
+            face.ring.iter().fold(built, |m, p| m.max(frame.urbanness(p.0, p.1)))
+        } else {
+            built
+        };
+        // (Open country is not skipped when the streets come from outside: it is farmland.)
+        if frame.organic_footprint && frame.external.is_none() && face_built < 0.06 {
+            continue;
+        }
         if signed_area(&face.ring) < 900.0 {
             continue;
         }
         let fi = face_index as i32;
-        let centrality = frame.core_weight(centre.0, centre.1);
+        let centrality = frame.core_weight(centre.0, centre.1)
+            * if frame.organic_footprint { 0.35 + 0.65 * built } else { 1.0 };
 
         // ---- street setbacks -> buildable envelope ----
         let mut envelope = face.ring.clone();
@@ -147,11 +161,7 @@ pub(super) fn build_parcels(
             let bank = river_half + RIVER_BANK_M;
             let split = |ring: &[V]| -> Vec<Vec<V>> {
                 let c = centroid(ring);
-                let rx = frame.river_x(c.1);
-                let slope = (frame.river_x(c.1 + 5.0) - frame.river_x(c.1 - 5.0)) / 10.0;
-                let norm = (1.0 + slope * slope).sqrt();
-                let n = (1.0 / norm, -slope / norm);
-                let d = n.0 * rx + n.1 * c.1;
+                let (n, d) = frame.river_split(c);
                 [clip_half(ring, n, d + bank), clip_half(ring, (-n.0, -n.1), -d + bank)]
                     .into_iter()
                     .filter(|p| p.len() >= 3 && signed_area(p) > 300.0)
@@ -172,6 +182,33 @@ pub(super) fn build_parcels(
         }
         // Parcels reference the block that contains their envelope.
         let block_base = (blocks.len() - block_rings.len()) as u32;
+
+        // Outside the town proper, houses follow the streets instead of filling
+        // the block: the suburb, then the farmsteads.
+        if frame.external.is_some() && built < suburb::TOWN_BUILT {
+            suburb::place_frontage(
+                &suburb::Frontage {
+                    frame,
+                    face,
+                    face_index: fi,
+                    envelopes: &envelopes,
+                    spurs: &spurs,
+                    river: &river_local,
+                    river_half,
+                    seed,
+                    block_base,
+                },
+                &mut suburb::Sink {
+                    parcels: &mut parcels,
+                    buildings: &mut buildings,
+                    next_parcel: &mut next_parcel,
+                    next_building: &mut next_building,
+                    fields: &mut fields,
+                    next_field: &mut next_field,
+                },
+            );
+            continue;
+        }
 
         let block_noise = modern_hash(seed, fi, 0, 701);
         let face_area = signed_area(&face.ring);
@@ -207,6 +244,14 @@ pub(super) fn build_parcels(
                 let key = fi * 64 + (env_index as i32) * 16 + lot_index as i32;
                 let n = modern_hash(seed, key, 1, 719);
                 let noise = |salt: i32| modern_hash(seed, key, 2, salt);
+                // The fringe is patchy: lots drop out more often the nearer the edge.
+                if frame.organic_footprint && built < 1.0 {
+                    let lot_c = centroid(lot);
+                    let lot_built = frame.urbanness(lot_c.0, lot_c.1);
+                    if noise(791) < (1.0 - lot_built).powf(0.8) * 0.9 {
+                        continue;
+                    }
+                }
                 let waterfront = ring_polyline_dist(lot, &river_local)
                     < river_half + QUAY_OFF_M + 45.0;
                 let plaza = centrality > 0.45 && lot_area < 3_400.0 && noise(777) < 0.09;
@@ -321,10 +366,18 @@ pub(super) fn build_parcels(
                         ParcelUse::Commercial => procedural::FacadeKind::CurtainWall,
                         ParcelUse::MixedUse => procedural::FacadeKind::ConcreteGlass,
                         ParcelUse::Civic => procedural::FacadeKind::StoneCivic,
-                        ParcelUse::Residential => procedural::FacadeKind::Residential,
-                        ParcelUse::Park => procedural::FacadeKind::Residential,
+                        ParcelUse::Residential
+                        | ParcelUse::Villa
+                        | ParcelUse::Farmstead
+                        | ParcelUse::Park => procedural::FacadeKind::Residential,
                     };
                     let mut floors = floors;
+                    // On a landscape the town grew on its own, a village is low and only a
+                    // downtown is tall: the storeys a building may have follow how intense
+                    // the development is where it stands.
+                    if frame.external.is_some() {
+                        floors = floors.min((2.0 + 40.0 * centrality.powi(3)) as u16).max(2);
+                    }
                     let mut metrics =
                         procedural::facade_metrics(max_side, max_side * 0.8, floors, facade_kind);
                     let podium_height = podium_floors as f32 * PODIUM_FLOOR_M;
@@ -540,12 +593,21 @@ pub(super) fn build_parcels(
                             }
                         }
                     }
-                    ParcelUse::Park => {}
+                    ParcelUse::Park | ParcelUse::Villa | ParcelUse::Farmstead => {}
                 }
             }
         }
     }
-    ParcelOutput { blocks, parcels, buildings }
+    // Farmland along the country streets, around what is already there.
+    let mut occupied: Vec<Vec<V>> = parcels
+        .iter()
+        .map(|p| p.ring.iter().map(|q| frame.to_local(*q)).collect())
+        .chain(fields.iter().map(|f| f.ring.iter().map(|q| frame.to_local(*q)).collect()))
+        .collect();
+    if frame.external.is_some() {
+        suburb::roadside_fields(frame, &pts, &edges, &river_local, river_half, seed, &mut occupied, &mut fields, &mut next_field);
+    }
+    ParcelOutput { blocks, parcels, buildings, fields }
 }
 
 /// Recursive oriented-box bisection into lots no larger than `target` m².

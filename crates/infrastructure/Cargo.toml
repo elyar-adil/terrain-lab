@@ -8,6 +8,10 @@ autoexamples = false
 name = "infrastructure_generate"
 path = "examples/generate.rs"
 
+[[example]]
+name = "plan_svg"
+path = "examples/plan_svg.rs"
+
 [dependencies]
 rayon = "1.10"
 serde = { version = "1", features = ["derive"] }
@@ -15,6 +19,9 @@ terrain-core = { path = "../terrain-core" }
 thiserror = "2"
 world-core = { path = "../world-core" }
 urban = { path = "../urban" }
+worldgen-contracts = { path = "../worldgen-contracts" }
+worldgen-core = { path = "../worldgen-core" }
+worldgen-roads = { path = "../worldgen-roads" }
 city-scene = { path = "../city-scene" }
 
 [dev-dependencies]

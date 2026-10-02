@@ -28,6 +28,7 @@ struct FixtureResult {
     water_data_size: usize,
     height_data_base64: String,
     forest_data_base64: String,
+    material_data_base64: String,
     vegetation_exclusion_data_base64: String,
     city_sites: Vec<CitySite>,
     far_trees: Vec<city_scene::trees::FarTreePayload>,
@@ -37,6 +38,7 @@ struct FixtureResult {
     road_data_base64: String,
     roads: Vec<()>,
     cities: Vec<()>,
+    modern_cities: Vec<urban::ModernCity>,
     water_height_data_base64: String,
     water_mask_base64: String,
     water_kind_base64: String,
@@ -83,12 +85,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| PathBuf::from("render-fixture.json"));
     let config = SimulationConfig {
         seed: 284_735,
-        preset: TerrainPreset::Temperate,
-        landform: Landform::Coastal,
+        // `FIXTURE_LANDFORM=mountainRange|hills|plains|plateau|coastal|archipelago`
+        // and `FIXTURE_PRESET=arid|temperate|glacial` pick the scene to audit.
+        preset: match env::var("FIXTURE_PRESET").as_deref() {
+            Ok("arid") => TerrainPreset::Arid,
+            Ok("glacial") => TerrainPreset::Glacial,
+            _ => TerrainPreset::Temperate,
+        },
+        landform: match env::var("FIXTURE_LANDFORM").as_deref() {
+            Ok("mountainRange") => Landform::MountainRange,
+            Ok("hills") => Landform::Hills,
+            Ok("plains") => Landform::Plains,
+            Ok("plateau") => Landform::Plateau,
+            Ok("archipelago") => Landform::Archipelago,
+            _ => Landform::Coastal,
+        },
         // The validation harness exercises shaders and scene evolution with a
         // representative mesh. Product generation still uses the 512-cell LOD;
         // software WebGL does not need four full-resolution renders per check.
-        grid_size: 128,
+        grid_size: env::var("FIXTURE_GRID").ok().and_then(|v| v.parse().ok()).unwrap_or(128),
         world_size_km: 80.0,
         rainfall: 1275.0,
         evaporation: 600.0,
@@ -101,7 +116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cloud_speed: 24.0,
     };
     let terrain = generate(&config, |_, _| {})?;
-    let mesh_size = 128_usize.min(terrain.size);
+    let mesh_size = env::var("FIXTURE_GRID").ok().and_then(|v| v.parse().ok()).unwrap_or(128_usize).min(terrain.size);
     // `FIXTURE_CITY_RADIUS_M=900` declares one city site at the world centre (where
     // the harness's `?city=1` mounts a scene) and levels/clears the ground under
     // it exactly as the desktop payload does.
@@ -116,6 +131,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }]
         })
         .unwrap_or_default();
+    // The same site also gets its city plan, as the desktop payload does, so the
+    // harness can show the far and middle form of a city drawn from it.
+    let modern_cities: Vec<urban::ModernCity> = city_sites
+        .iter()
+        .map(|site| {
+            urban::generate_modern_chinese_city(urban::ModernChinaSpec {
+                centre: urban::Point { x_km: site.x_km, y_km: site.y_km },
+                radius_km: site.radius_m / 1000.0,
+                seed: 4242,
+                ..urban::ModernChinaSpec::default()
+            })
+        })
+        .collect();
     let mut mesh_heights = downsample_height(&terrain, mesh_size);
     flatten_heights(&mut mesh_heights, mesh_size, config.world_size_km, &city_sites);
     let mut exclusion = vec![0_u8; mesh_size * mesh_size];
@@ -182,6 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dimensions = image.dimensions();
     let mut png = Cursor::new(Vec::new());
     image.write_to(&mut png, ImageFormat::Png)?;
+    let material_bytes = terrain_core::material_control_map(&terrain, mesh_size, None);
     let empty = String::new();
     let fixture = Fixture {
         config: config.clone(),
@@ -199,6 +228,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             water_data_size,
             height_data_base64: STANDARD.encode(height_bytes),
             forest_data_base64: STANDARD.encode(forest_bytes),
+            material_data_base64: STANDARD.encode(material_bytes),
             vegetation_exclusion_data_base64: STANDARD.encode(exclusion),
             city_sites,
             far_trees: city_scene::trees::far_tree_payload(),
@@ -208,6 +238,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             road_data_base64: STANDARD.encode(vec![0_u8; mesh_size * mesh_size]),
             roads: Vec::new(),
             cities: Vec::new(),
+            modern_cities,
             water_height_data_base64: STANDARD.encode(water_height_bytes),
             water_mask_base64: STANDARD.encode(water_mask),
             water_kind_base64: STANDARD.encode(water_kind),

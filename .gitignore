@@ -16,8 +16,12 @@ src-tauri/target/
 # history for no benefit, and every regeneration would rewrite them.
 /public/render-fixture.json
 /public/city-scenes.json
+/public/city-lite.json
 /public/tiny-city.json
 /public/tiny-baseline.json
 
 # scratch fixtures used by component agents / audits (regenerable, tens of MB)
 public/audit-*.json
+
+# The tree grower compiled to WebAssembly (npm run build:wasm).
+/public/worldgen_trees.wasm

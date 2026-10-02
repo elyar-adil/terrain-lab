@@ -1,3 +1,6 @@
+> **注意：** 本文描述的是早期面向地形→城市单一流水线的结构。项目已转向统一的生成式世界系统，
+> 新的设计见 [`docs/architecture/world-system.md`](docs/architecture/world-system.md)。
+
 # Procedural World Architecture
 
 当前阶段实现一个完整的程序化世界 baseline。它必须独立生成地形、水文、生态、道路、城市、桥梁、建筑和最终影像，并提供确定性输出与可量化指标。

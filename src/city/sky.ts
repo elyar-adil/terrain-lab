@@ -33,7 +33,7 @@ import * as THREE from "three";
  * without moving the sky produces a lit scene under a different sky, which reads
  * as wrong in a way that is hard to name and easy to see.
  */
-export const SUN_DIR = new THREE.Vector3(-0.38, 0.74, -0.46).normalize();
+export const SUN_DIR = new THREE.Vector3(-0.58, 0.55, -0.60).normalize();
 
 /**
  * Fog colour: the sky's horizon *after* the tone curve, not its linear value.
@@ -206,10 +206,10 @@ export function createLighting(): Lighting {
    * buildings. That is not a stylisation choice; it is a wrong assumption about
    * what is underneath, and it reads as "unlit" rather than as "in shade".
    */
-  const hemisphere = new THREE.HemisphereLight(0xbfd6f2, 0x8e8b82, 0.75);
+  const hemisphere = new THREE.HemisphereLight(0xb4cdf0, 0x8a8a78, 0.55);
   // Sunlight through a temperate sky is not white; it is warm, because the
   // atmosphere has taken the blue out of it on the way in.
-  const sun = new THREE.DirectionalLight(0xfff0d4, 2.6);
+  const sun = new THREE.DirectionalLight(0xffe6bd, 3.4);
   sun.position.copy(SUN_DIR).multiplyScalar(500);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);

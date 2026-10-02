@@ -4,6 +4,7 @@
 //! cargo run --release -p city-scene --example dump_scene -- \
 //!     [--radius-km 0.5] [--block-m 110] [--seed 42] [--out public/city-scenes.json]
 //!     [--bin city.bin]   also write the binary container the desktop app streams
+//!     [--lite]           small budgets, for headless software rendering
 
 use city_scene::{SceneBudget, build_city_scene};
 use urban::{ModernChinaSpec, generate_modern_chinese_city};
@@ -25,7 +26,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         block_size_metres: block,
         ..ModernChinaSpec::default()
     });
-    let scene = build_city_scene(&city, SceneBudget::default());
+    let budget = if std::env::args().any(|a| a == "--lite") {
+        SceneBudget {
+            max_buildings: 150,
+            max_trees: 120,
+            facade_texture_size: 128,
+            ground_texture_size: 128,
+            vehicles: 6,
+            ..SceneBudget::default()
+        }
+    } else {
+        SceneBudget::default()
+    };
+    let scene = build_city_scene(&city, budget);
     let s = &scene.stats;
     println!(
         "{} buildings, {} tree instances, {} draws, {} tris",

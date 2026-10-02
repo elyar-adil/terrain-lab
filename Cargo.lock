@@ -1533,6 +1533,9 @@ dependencies = [
  "thiserror 2.0.19",
  "urban",
  "world-core",
+ "worldgen-contracts",
+ "worldgen-core",
+ "worldgen-roads",
 ]
 
 [[package]]
@@ -3360,11 +3363,13 @@ name = "terrain-core"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "city-scene",
  "image",
  "rayon",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
+ "urban",
 ]
 
 [[package]]
@@ -3772,6 +3777,7 @@ version = "0.1.0"
 dependencies = [
  "procedural",
  "serde",
+ "worldgen-contracts",
 ]
 
 [[package]]
@@ -4542,6 +4548,32 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 2.0.19",
+]
+
+[[package]]
+name = "worldgen-contracts"
+version = "0.1.0"
+dependencies = [
+ "worldgen-core",
+]
+
+[[package]]
+name = "worldgen-core"
+version = "0.1.0"
+
+[[package]]
+name = "worldgen-roads"
+version = "0.1.0"
+dependencies = [
+ "worldgen-contracts",
+ "worldgen-core",
+]
+
+[[package]]
+name = "worldgen-trees"
+version = "0.1.0"
+dependencies = [
+ "worldgen-core",
 ]
 
 [[package]]

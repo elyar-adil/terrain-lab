@@ -8,7 +8,7 @@ pub mod scene;
 pub(crate) mod traffic;
 
 pub use buildings::{
-    BuildingFacade, Compound, ModernBuilding, Parcel, ParcelUse, TreeInstance, TreeSpecies,
+    BuildingFacade, Compound, CropKind, Field, ModernBuilding, Parcel, ParcelUse, TreeInstance, TreeSpecies,
 };
 pub use core::{
     BuildingMass, CitySpec, CityStyle, ModernChinaSpec, ModernRoadClass, Point, RoofStyle,
@@ -26,4 +26,4 @@ pub use roads::{
     Movement, RoadConnector, RoadCrossSection, SdNode, SdRoad, SignalHead, TurnArrow, cross_section,
 };
 pub use traffic::{ApproachSpec, synthesize_junction};
-pub use scene::{CityFrameInfo, ModernCity};
+pub use scene::{CityFrameInfo, ModernCity, Tributary};

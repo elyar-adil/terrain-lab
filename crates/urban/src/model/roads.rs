@@ -84,59 +84,23 @@ impl RoadCrossSection {
     }
 }
 
-/// Cross-sections for the four Chinese road classes.
+/// Cross-sections for the four Chinese road classes, in the planner's `f32` view.
 ///
-/// Every `width_metres` equals `derived_width()` for its own components — the
-/// test below locks that, so a future edit to a lane count or a sidewalk
-/// cannot silently desynchronise the total again. The values follow CJJ 37
-/// practice: 主干路 双向六车道 3.5 m + 独立非机动车道 3.5 m + 人行道 3.0 m,
-/// and so on down the hierarchy.
+/// The numbers are `worldgen_contracts::cross_section(.., Setting::Urban)`, the
+/// single table; the planner, the street scene and the regional network all read
+/// it. The values follow CJJ 37 practice: 主干路 双向六车道 3.5 m + 独立非机动车道
+/// 3.5 m + 人行道 3.0 m, and so on down the hierarchy.
 pub fn cross_section(class: ModernRoadClass) -> RoadCrossSection {
-    match class {
-        // 快速路: 双向八车道 + 中央隔离带 + 硬路肩, no non-motorized traffic.
-        ModernRoadClass::Expressway => RoadCrossSection {
-            width_metres: 34.0,
-            median_metres: 2.5,
-            motor_lanes_per_direction: 4,
-            motor_lane_width: 3.5,
-            shoulder_width: 1.0,
-            bike_lane_width: 0.0,
-            inner_shoulder: 0.75,
-            sidewalk_metres: 0.0,
-        },
-        // 主干路: 双向六车道 + 中央分隔带 + 机非分隔的非机动车道.
-        ModernRoadClass::Arterial => RoadCrossSection {
-            width_metres: 37.0,
-            median_metres: 2.0,
-            motor_lanes_per_direction: 3,
-            motor_lane_width: 3.5,
-            shoulder_width: 0.0,
-            bike_lane_width: 3.5,
-            inner_shoulder: 0.5,
-            sidewalk_metres: 3.0,
-        },
-        // 次干路: 双向四车道 + 非机动车道, no median.
-        ModernRoadClass::Collector => RoadCrossSection {
-            width_metres: 24.8,
-            median_metres: 0.0,
-            motor_lanes_per_direction: 2,
-            motor_lane_width: 3.25,
-            shoulder_width: 0.0,
-            bike_lane_width: 3.0,
-            inner_shoulder: 0.4,
-            sidewalk_metres: 2.5,
-        },
-        // 支路: 单车道双向混行, parking and shared non-motorized use.
-        ModernRoadClass::Local => RoadCrossSection {
-            width_metres: 11.3,
-            median_metres: 0.0,
-            motor_lanes_per_direction: 1,
-            motor_lane_width: 3.25,
-            shoulder_width: 0.0,
-            bike_lane_width: 0.0,
-            inner_shoulder: 0.4,
-            sidewalk_metres: 2.0,
-        },
+    let c = worldgen_contracts::cross_section(class.contract(), worldgen_contracts::Setting::Urban);
+    RoadCrossSection {
+        width_metres: c.width() as f32,
+        median_metres: c.median as f32,
+        motor_lanes_per_direction: c.lanes_per_direction,
+        motor_lane_width: c.lane_width as f32,
+        shoulder_width: c.shoulder as f32,
+        bike_lane_width: c.bike_lane as f32,
+        inner_shoulder: c.inner_shoulder as f32,
+        sidewalk_metres: c.sidewalk as f32,
     }
 }
 

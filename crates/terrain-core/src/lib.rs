@@ -8,6 +8,7 @@ use std::{
 use thiserror::Error;
 
 pub mod evolution;
+pub mod fluvial;
 pub mod geology;
 pub mod sites;
 
@@ -195,6 +196,14 @@ impl TerrainPreset {
     }
 }
 
+static FLUVIAL_EROSION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Switch the fluvial landscape evolution pass on or off (on by default). Probes
+/// and tests use it to compare a landscape with and without it.
+pub fn set_fluvial_erosion(enabled: bool) {
+    FLUVIAL_EROSION.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn generate<F>(config: &SimulationConfig, mut progress: F) -> Result<TerrainData, TerrainError>
 where
     F: FnMut(f32, &str),
@@ -326,6 +335,22 @@ where
         });
     geology_model.expose_surface(&height);
 
+    let fluvial_enabled = FLUVIAL_EROSION.load(std::sync::atomic::Ordering::Relaxed);
+    if fluvial_enabled {
+        // The formulas above only plan the large-scale shape; rivers carve the rest.
+        progress(0.10, "河流侵蚀塑造山谷与山脊");
+        let cell_metres = config.world_size_km * 1000.0 / n as f32;
+        fluvial::evolve(
+            &mut height,
+            &geology_model.erosion_resistance,
+            n,
+            cell_metres,
+            config.seed,
+            &mut |fraction| progress(0.10 + 0.10 * fraction, "河流侵蚀塑造山谷与山脊"),
+        );
+        geology_model.expose_surface(&height);
+    }
+
     progress(0.20, "计算迎风降水、温度与地表湿度");
     let mut moisture = vec![0.0_f32; len];
     let mut temperature = vec![0.0_f32; len];
@@ -390,14 +415,16 @@ where
         );
         if iteration < 3 {
             geology_model.expose_surface(&height);
-            erode_channels(
-                &mut height,
-                &flow,
-                &receiver,
-                &geology_model.erosion_resistance,
-                n,
-                preset.erosion,
-            );
+            if !fluvial_enabled {
+                erode_channels(
+                    &mut height,
+                    &flow,
+                    &receiver,
+                    &geology_model.erosion_resistance,
+                    n,
+                    preset.erosion,
+                );
+            }
             breach_overflowing_spillways(&mut height, &filled_height, &flow, &receiver, n);
             diffuse_slopes(&mut height, n, 0.06 + preset.roughness * 0.015);
         }
@@ -482,8 +509,13 @@ where
                     * preset.vegetation_gain
                     * 1.65,
             );
+            // Snow lies where the climate allows it, but it slides off steep
+            // ground, leaving bare rock on ridge flanks and snow on benches and
+            // in gullies. A uniform white mountain is a cone drawn with a rule.
+            let shedding = 1.0 - smoothstep(0.30, 0.80, slope);
             *snow_value = clamp01(
-                (-temperature[index] + 1.5) / 10.0 * preset.snow_gain + height[index] / 9000.0,
+                ((-temperature[index] + 1.5) / 10.0 * preset.snow_gain + height[index] / 9000.0)
+                    * (0.12 + 0.88 * shedding),
             );
             let boundary_water = if height[index] < 58.0 {
                 clamp01((58.0 - height[index]) / 30.0)
@@ -1002,6 +1034,33 @@ where
     progress(0.98, "编码正射自然色影像");
     ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(output_size as u32, output_size as u32, data)
         .ok_or(TerrainError::InvalidTerrain)
+}
+
+/// The semantic ground cover the terrain shader builds its materials from, as
+/// RGBA8 at `mesh_size` squared: R forest, G grass and shrub, B snow, A how
+/// natural the ground is (255 = paint it procedurally, 0 = keep the baked image,
+/// which is where water, roads, fields and towns are painted). `keep` is an
+/// optional 0..255 mask of such built or open-water surfaces to preserve.
+pub fn material_control_map(terrain: &TerrainData, mesh_size: usize, keep: Option<&[u8]>) -> Vec<u8> {
+    let source = terrain.size;
+    let scale = (source - 1) as f32 / (mesh_size - 1) as f32;
+    let mut out = vec![0_u8; mesh_size * mesh_size * 4];
+    out.par_chunks_mut(4).enumerate().for_each(|(i, px)| {
+        let sx = (i % mesh_size) as f32 * scale;
+        let sy = (i / mesh_size) as f32 * scale;
+        let forest = bilinear(&terrain.forest, source, sx, sy);
+        let grass = bilinear(&terrain.grassland, source, sx, sy)
+            .max(bilinear(&terrain.shrubland, source, sx, sy) * 0.85);
+        let snow = bilinear(&terrain.snow, source, sx, sy);
+        let water = bilinear(&terrain.water, source, sx, sy);
+        let kept = keep.map_or(0.0, |k| k[i] as f32 / 255.0);
+        let natural = clamp01(1.0 - (water * 1.5).max(kept * 1.5));
+        px[0] = (clamp01(forest) * 255.0) as u8;
+        px[1] = (clamp01(grass) * 255.0) as u8;
+        px[2] = (clamp01(snow) * 255.0) as u8;
+        px[3] = (natural * 255.0) as u8;
+    });
+    out
 }
 
 pub fn save_png(image: &RgbaImage, path: impl AsRef<std::path::Path>) -> Result<(), TerrainError> {
@@ -1961,5 +2020,40 @@ mod tests {
             });
             assert!(neighbours.count() > 0, "isolated incision at {x},{y}");
         }
+    }
+
+    #[test]
+    fn the_material_control_map_carries_cover_and_marks_built_and_wet_ground() {
+        let config = SimulationConfig {
+            seed: 11,
+            preset: TerrainPreset::Temperate,
+            landform: Landform::Hills,
+            grid_size: 128,
+            world_size_km: 40.0,
+            rainfall: 1200.0,
+            evaporation: 600.0,
+            wind_speed: 8.0,
+            wind_direction: 220.0,
+            sun_azimuth: 235.0,
+            sun_elevation: 42.0,
+            haze: 2.5,
+            cloud_coverage: 35.0,
+            cloud_speed: 24.0,
+        };
+        let terrain = generate(&config, |_, _| {}).unwrap();
+        let mesh = 64;
+        let free = material_control_map(&terrain, mesh, None);
+        assert_eq!(free.len(), mesh * mesh * 4);
+        // Cover follows the terrain: some forest and some natural ground exist.
+        assert!(free.chunks(4).any(|p| p[0] > 100), "no forest channel");
+        assert!(free.chunks(4).any(|p| p[3] == 255), "no fully natural ground");
+        // Open water is not painted procedurally.
+        let wet = free.chunks(4).zip(0..).filter(|(p, _)| p[3] < 128).count();
+        let any_water = terrain.water.iter().any(|w| *w > 0.7);
+        assert_eq!(wet > 0, any_water, "natural flag must mirror open water");
+        // A kept (built-up) region is excluded from procedural painting.
+        let keep = vec![255_u8; mesh * mesh];
+        let built = material_control_map(&terrain, mesh, Some(&keep));
+        assert!(built.chunks(4).all(|p| p[3] == 0));
     }
 }

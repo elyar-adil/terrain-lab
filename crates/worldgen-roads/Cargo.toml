@@ -1,0 +1,9 @@
+[package]
+name = "worldgen-roads"
+version = "0.1.0"
+edition = "2024"
+description = "A stateless, seamless, hierarchical road network layer: country roads to city streets, evaluated per address."
+
+[dependencies]
+worldgen-core = { path = "../worldgen-core" }
+worldgen-contracts = { path = "../worldgen-contracts" }

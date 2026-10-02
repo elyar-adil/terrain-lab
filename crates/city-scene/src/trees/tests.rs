@@ -883,6 +883,8 @@ fn a_city_is_thousands_of_trees_on_a_few_prototypes() {
     let output = super::plant(
         &network,
         &city.parcels,
+        &city.buildings,
+        &city.fields,
         city.river.as_deref(),
         city.river_width_metres,
         city.frame,
@@ -939,6 +941,8 @@ fn every_tree_instance_is_placed_inside_the_city() {
     let output = super::plant(
         &network,
         &city.parcels,
+        &city.buildings,
+        &city.fields,
         city.river.as_deref(),
         city.river_width_metres,
         city.frame,

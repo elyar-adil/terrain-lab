@@ -5,9 +5,14 @@ use std::{cmp::Ordering, collections::BinaryHeap};
 use terrain_core::{SimulationConfig, TerrainData};
 use thiserror::Error;
 use urban::{
-    ModernChinaSpec, ModernCity, Point as UrbanPoint, UrbanModel, generate_modern_chinese_city,
+    CityOptions, ModernChinaSpec, ModernCity, ModernRoadClass, Point as UrbanPoint,
+    RegionalApproach, UrbanModel, generate_modern_chinese_city_with_options,
 };
-use world_core::{GridPoint, ScalarLayer, WorldError, WorldGrid};
+use world_core::{GridPoint, ScalarLayer, WorldError};
+pub use world_core::WorldGrid;
+
+pub mod fabric;
+pub mod rivers;
 
 #[derive(Debug, Error)]
 pub enum InfrastructureError {
@@ -15,6 +20,8 @@ pub enum InfrastructureError {
     World(#[from] WorldError),
     #[error("terrain fields do not match the configured grid")]
     InvalidTerrain,
+    #[error("the road layer could not be built: {0}")]
+    Fabric(String),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,38 +64,27 @@ pub struct RoadProfile {
 }
 
 impl RoadClass {
-    pub const fn profile(self) -> RoadProfile {
+    /// This class in the shared road vocabulary. Regional roads run through open
+    /// country, so their cross-sections are the *rural* ones; the planner widens
+    /// them into the urban section where they enter a town.
+    pub const fn contract(self) -> worldgen_contracts::RoadClass {
+        use worldgen_contracts::RoadClass as C;
         match self {
-            Self::Motorway => RoadProfile {
-                carriageway_width_metres: 24.6,
-                right_of_way_width_metres: 38.0,
-                lanes: 4,
-                paved: true,
-            },
-            Self::Arterial => RoadProfile {
-                carriageway_width_metres: 13.2,
-                right_of_way_width_metres: 20.0,
-                lanes: 4,
-                paved: true,
-            },
-            Self::Collector => RoadProfile {
-                carriageway_width_metres: 7.2,
-                right_of_way_width_metres: 11.0,
-                lanes: 2,
-                paved: true,
-            },
-            Self::Local => RoadProfile {
-                carriageway_width_metres: 5.5,
-                right_of_way_width_metres: 8.0,
-                lanes: 2,
-                paved: true,
-            },
-            Self::Rural => RoadProfile {
-                carriageway_width_metres: 4.2,
-                right_of_way_width_metres: 6.5,
-                lanes: 1,
-                paved: false,
-            },
+            Self::Motorway => C::Motorway,
+            Self::Arterial => C::Arterial,
+            Self::Collector => C::Collector,
+            Self::Local => C::Local,
+            Self::Rural => C::Track,
+        }
+    }
+
+    pub fn profile(self) -> RoadProfile {
+        let section = worldgen_contracts::cross_section(self.contract(), worldgen_contracts::Setting::Rural);
+        RoadProfile {
+            carriageway_width_metres: section.width() as f32,
+            right_of_way_width_metres: section.right_of_way() as f32,
+            lanes: section.lanes(),
+            paved: section.paved,
         }
     }
 }
@@ -136,11 +132,6 @@ pub struct InfrastructureData {
     /// compatibility projection for the existing renderer, while this field
     /// preserves SD/HD roads, parcels, stable building ids and river geometry.
     pub modern_cities: Vec<ModernCity>,
-    /// Everything a renderer needs, derived once in Rust: finished vertex
-    /// buffers, instanced prototype lists, baked textures, signal states and a
-    /// traffic fleet.  `modern_cities` is the *plan*; this is the scene.
-    #[serde(skip)]
-    pub city_scenes: Vec<CityScene>,
     pub cities: Vec<UrbanModel>,
 }
 
@@ -170,9 +161,26 @@ impl Ord for QueueNode {
     }
 }
 
+/// Which planner lays out a town's streets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CityPlanner {
+    /// The original generator: a plan of its own for each town, made at once.
+    Legacy,
+    /// The roads layer: one network for the whole world, of which a town is a window.
+    Fabric,
+}
+
 pub fn generate_infrastructure(
     terrain: &TerrainData,
     config: &SimulationConfig,
+) -> Result<InfrastructureData, InfrastructureError> {
+    generate_infrastructure_with(terrain, config, CityPlanner::Fabric)
+}
+
+pub fn generate_infrastructure_with(
+    terrain: &TerrainData,
+    config: &SimulationConfig,
+    planner: CityPlanner,
 ) -> Result<InfrastructureData, InfrastructureError> {
     let grid = WorldGrid::new(terrain.size, config.world_size_km)?;
     if terrain.height.len() != grid.len() || terrain.water.len() != grid.len() {
@@ -259,65 +267,57 @@ pub fn generate_infrastructure(
     let cultivated_land =
         realize_cultivated_land(grid, &agricultural_suitability, &urban_land, &settlements);
     let crossings = find_crossings(terrain, grid, &roads);
-    let modern_cities: Vec<ModernCity> = settlements
-        .iter()
-        .map(|settlement| {
-            let radius_km = match settlement.class {
-                // Chinese settlement hierarchy on an 80 km map: the regional
-                // centre is a county-level city (县城, ~10 km² built-up area),
-                // towns (镇区) span roughly 2 km², villages stay compact.  The
-                // earlier 0.9 km cap made every city a neighbourhood dot that
-                // vanished at regional zoom.
-                SettlementClass::RegionalCentre => 1.8,
-                SettlementClass::Town => 0.8,
-                SettlementClass::Village => 0.30,
-            };
-            generate_modern_chinese_city(ModernChinaSpec {
-                centre: UrbanPoint {
-                    x_km: settlement.location.x as f32 / (grid.size - 1) as f32
-                        * grid.world_size_km,
-                    y_km: settlement.location.y as f32 / (grid.size - 1) as f32
-                        * grid.world_size_km,
-                },
+    let legacy_city = |settlement: &SettlementSite| {
+        let radius_km = settlement_radius_km(settlement.class);
+        let centre = settlement_centre_km(grid, settlement);
+        let approaches = road_approaches(&roads, grid, centre, radius_km);
+        generate_modern_chinese_city_with_options(
+            ModernChinaSpec {
+                centre,
                 radius_km,
-                rotation_radians: (config.seed ^ settlement.id.wrapping_mul(7919)) as f32
-                    * 0.000_013,
+                rotation_radians: (config.seed ^ settlement.id.wrapping_mul(7919)) as f32 * 0.000_013,
                 seed: config.seed ^ settlement.id.wrapping_mul(0x9e37_79b9),
                 density: (0.58 + settlement.score * 0.32).clamp(0.35, 0.92),
                 block_size_metres: 120.0,
                 organic: 0.68,
                 river_width_metres: 64.0,
-            })
-        })
-        .collect();
+            },
+            &approaches,
+            CityOptions { organic_footprint: true },
+        )
+    };
+    let modern_cities: Vec<ModernCity> = match planner {
+        CityPlanner::Legacy => settlements.iter().map(legacy_city).collect(),
+        CityPlanner::Fabric => {
+            let fabric = fabric::WorldFabric::new(terrain, grid, &settlements, &roads, u64::from(config.seed))
+                .map_err(|e| InfrastructureError::Fabric(e.to_string()))?;
+            settlements
+                .iter()
+                .enumerate()
+                .map(|(index, settlement)| match fabric.town_streets(index) {
+                    Ok(town) => {
+                        let radius_km = settlement_radius_km(settlement.class) * 1.35 + WINDOW_TAIL_KM;
+                        urban::generate_modern_chinese_city_from_streets(
+                            ModernChinaSpec {
+                                centre: settlement_centre_km(grid, settlement),
+                                radius_km,
+                                rotation_radians: 0.0,
+                                seed: config.seed ^ settlement.id.wrapping_mul(0x9e37_79b9),
+                                density: (0.58 + settlement.score * 0.32).clamp(0.35, 0.92),
+                                block_size_metres: 120.0,
+                                organic: 0.68,
+                                river_width_metres: if town.river_width_m > 0.0 { town.river_width_m } else { 64.0 },
+                            },
+                            town.streets,
+                            town.fields,
+                        )
+                    }
+                    Err(_) => legacy_city(settlement),
+                })
+                .collect()
+        }
+    };
     let cities = modern_cities.iter().map(ModernCity::urban_model).collect();
-    // The scene layer runs after the plan, per city, because a renderer must
-    // never re-derive geometry that the traffic model also needs.  Budgets
-    // scale with the settlement's class: a village does not need four thousand
-    // building shells.
-    let city_scenes: Vec<CityScene> = settlements
-        .iter()
-        .zip(modern_cities.iter())
-        .map(|(settlement, city)| {
-            let mut budget = SceneBudget::default();
-            match settlement.class {
-                SettlementClass::RegionalCentre => {}
-                SettlementClass::Town => {
-                    budget.max_buildings = 1600;
-                    budget.max_trees = 1400;
-                    budget.vehicles = 28;
-                }
-                SettlementClass::Village => {
-                    budget.max_buildings = 500;
-                    budget.max_trees = 500;
-                    budget.vehicles = 12;
-                    budget.facade_texture_size = 128;
-                    budget.ground_texture_size = 128;
-                }
-            }
-            build_city_scene(city, budget)
-        })
-        .collect();
     Ok(InfrastructureData {
         travel_cost: ScalarLayer::new("travelCost", grid, travel_cost)?,
         hazard: ScalarLayer::new("hazard", grid, hazard)?,
@@ -333,9 +333,198 @@ pub fn generate_infrastructure(
         roads,
         crossings,
         modern_cities,
-        city_scenes,
         cities,
     })
+}
+
+/// What a settlement's finished scene may cost. A village does not need four
+/// thousand building shells.
+pub fn scene_budget(class: SettlementClass) -> SceneBudget {
+    let mut budget = SceneBudget::default();
+    match class {
+        SettlementClass::RegionalCentre => {}
+        SettlementClass::Town => {
+            budget.max_buildings = 1600;
+            budget.max_trees = 1400;
+            budget.vehicles = 28;
+        }
+        SettlementClass::Village => {
+            budget.max_buildings = 500;
+            budget.max_trees = 500;
+            budget.vehicles = 12;
+            budget.facade_texture_size = 128;
+            budget.ground_texture_size = 128;
+        }
+    }
+    budget
+}
+
+impl InfrastructureData {
+    /// The finished scene of one city, built now from its plan.
+    ///
+    /// A city is *planned* when the world is generated (where it is, how big, which
+    /// roads reach it, its streets and buildings as data) but its scene (tens of
+    /// megabytes of vertex buffers, textures and a traffic fleet) is built only
+    /// when something asks to draw it. The scene is a pure function of the plan, so
+    /// building it later, or twice, gives the same city.
+    pub fn build_city_scene(&self, index: usize) -> Option<CityScene> {
+        let settlement = self.settlements.get(index)?;
+        let city = self.modern_cities.get(index)?;
+        Some(build_city_scene(city, scene_budget(settlement.class)))
+    }
+
+    /// Like [`Self::build_city_scene`], but only the part of the plan within `radius_m`
+    /// of a local point: a look at one neighbourhood of a big town.
+    pub fn build_city_scene_clipped(&self, index: usize, centre: [f32; 2], radius_m: f32) -> Option<CityScene> {
+        let settlement = self.settlements.get(index)?;
+        let city = self.modern_cities.get(index)?.clipped(centre, radius_m);
+        Some(build_city_scene(&city, scene_budget(settlement.class)))
+    }
+}
+
+/// How far past the planned area the town's plan reaches, so the suburb and the
+/// farms beyond it have ground to stand on.
+pub(crate) const WINDOW_TAIL_KM: f32 = 0.3;
+
+/// Chinese settlement hierarchy on an 80 km map: the regional centre is a
+/// county-level city (县城, ~10 km² built-up area), towns (镇区) span roughly
+/// 2 km², villages stay compact.  The earlier 0.9 km cap made every city a
+/// neighbourhood dot that vanished at regional zoom.
+pub(crate) fn settlement_radius_km(class: SettlementClass) -> f32 {
+    match class {
+        // The radius bounds the planned area; the built-up area inside it is
+        // irregular and averages about two thirds of it, running out further
+        // along the roads, so these are larger than the discs they replace.
+        SettlementClass::RegionalCentre => 2.5,
+        SettlementClass::Town => 1.1,
+        SettlementClass::Village => 0.42,
+    }
+}
+
+fn settlement_centre_km(grid: WorldGrid, settlement: &SettlementSite) -> UrbanPoint {
+    UrbanPoint {
+        x_km: settlement.location.x as f32 / (grid.size - 1) as f32 * grid.world_size_km,
+        y_km: settlement.location.y as f32 / (grid.size - 1) as f32 * grid.world_size_km,
+    }
+}
+
+/// A regional road's centreline in world kilometres: the router's grid path with
+/// its corners rounded to the curvature the class is built to. The regional
+/// renderer and the town's street plan both draw this one line.
+fn road_path_km(road: &Road, grid: WorldGrid) -> Vec<UrbanPoint> {
+    road_centreline_km(road, grid).iter().map(|p| UrbanPoint { x_km: p[0], y_km: p[1] }).collect()
+}
+
+/// The same line as plain `[x, y]` kilometres, for renderers.
+pub fn road_centreline_km(road: &Road, grid: WorldGrid) -> Vec<[f32; 2]> {
+    fabric::road_centreline_m(road, grid)
+        .0
+        .iter()
+        .map(|p| [(p.x / 1000.0) as f32, (p.y / 1000.0) as f32])
+        .collect()
+}
+
+fn modern_class(class: RoadClass) -> ModernRoadClass {
+    fabric::modern_road_class(class.contract())
+}
+
+/// Every regional road that reaches a settlement, handed to its city so the
+/// road is planned once, as one street, instead of being drawn twice.
+fn road_approaches(
+    roads: &[Road],
+    grid: WorldGrid,
+    centre: UrbanPoint,
+    radius_km: f32,
+) -> Vec<RegionalApproach> {
+    roads
+        .iter()
+        .filter_map(|road| {
+            let path_km = road_path_km(road, grid);
+            let reaches = path_km.windows(2).any(|w| {
+                segment_distance_km([centre.x_km, centre.y_km], [w[0].x_km, w[0].y_km], [w[1].x_km, w[1].y_km])
+                    < radius_km * 1.05
+            });
+            reaches.then(|| RegionalApproach { class: modern_class(road.class), path_km })
+        })
+        .collect()
+}
+
+fn segment_distance_km(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
+    let (vx, vy) = (b[0] - a[0], b[1] - a[1]);
+    let len2 = vx * vx + vy * vy;
+    let t = if len2 > 1.0e-12 {
+        (((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (p[0] - (a[0] + vx * t)).hypot(p[1] - (a[1] + vy * t))
+}
+
+/// A built-up area, in world kilometres: the circle inside which the city's own
+/// street plan owns every road.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Footprint {
+    pub centre_km: [f32; 2],
+    pub radius_km: f32,
+}
+
+impl InfrastructureData {
+    pub fn footprints(&self) -> Vec<Footprint> {
+        let grid = self.urban_land.grid;
+        self.settlements
+            .iter()
+            .map(|s| {
+                let c = settlement_centre_km(grid, s);
+                Footprint { centre_km: [c.x_km, c.y_km], radius_km: settlement_radius_km(s.class) }
+            })
+            .collect()
+    }
+}
+
+/// Fraction of a city's radius inside which a regional road is not drawn: the
+/// city plans that stretch itself, from its outer ring in to a little deeper
+/// than this, so the two overlap on the same line instead of leaving a gap.
+const FOOTPRINT_OWNERSHIP: f32 = urban::REGIONAL_ROAD_HANDOVER;
+
+/// The pieces of a regional road (world kilometres) that lie outside every
+/// built-up area.  A road that crosses a town comes back as two pieces that end
+/// at its edge; the town's own street plan carries it through.
+pub fn clip_outside_footprints(path_km: &[[f32; 2]], footprints: &[Footprint]) -> Vec<Vec<[f32; 2]>> {
+    let mut pieces: Vec<Vec<[f32; 2]>> = Vec::new();
+    let mut current: Vec<[f32; 2]> = Vec::new();
+    let inside = |p: [f32; 2]| {
+        footprints.iter().any(|f| {
+            (p[0] - f.centre_km[0]).hypot(p[1] - f.centre_km[1]) < f.radius_km * FOOTPRINT_OWNERSHIP
+        })
+    };
+    // Subdivide so a coarse segment cannot hop over a small village.
+    let mut samples: Vec<[f32; 2]> = Vec::new();
+    for w in path_km.windows(2) {
+        let len = (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]);
+        let n = ((len / 0.01).ceil() as usize).max(1);
+        for k in 0..n {
+            let t = k as f32 / n as f32;
+            samples.push([w[0][0] + (w[1][0] - w[0][0]) * t, w[0][1] + (w[1][1] - w[0][1]) * t]);
+        }
+    }
+    if let Some(last) = path_km.last() {
+        samples.push(*last);
+    }
+    for p in samples {
+        if inside(p) {
+            if current.len() >= 2 {
+                pieces.push(std::mem::take(&mut current));
+            } else {
+                current.clear();
+            }
+        } else {
+            current.push(p);
+        }
+    }
+    if current.len() >= 2 {
+        pieces.push(current);
+    }
+    pieces
 }
 
 fn realize_urban_land(
@@ -1133,5 +1322,94 @@ mod tests {
             vacant > developed / 8,
             "city must retain internal gaps instead of a filled blob"
         );
+    }
+
+    #[test]
+    fn regional_roads_meet_the_street_plan_of_every_town_they_reach() {
+        let config = config();
+        let terrain = generate(&config, |_, _| {}).unwrap();
+        let data = generate_infrastructure(&terrain, &config).unwrap();
+        let grid = data.urban_land.grid;
+        let footprints = data.footprints();
+        let mut checked = 0;
+        for road in &data.roads {
+            let path: Vec<[f32; 2]> = road_path_km(road, grid).iter().map(|p| [p.x_km, p.y_km]).collect();
+            for piece in clip_outside_footprints(&path, &footprints) {
+                for end in [piece[0], *piece.last().unwrap()] {
+                    // A piece ends either at a town's handover circle or at the end of the road.
+                    let Some((_, city)) = footprints.iter().zip(&data.modern_cities).find(|(f, _)| {
+                        let d = (end[0] - f.centre_km[0]).hypot(end[1] - f.centre_km[1]);
+                        (d - f.radius_km * FOOTPRINT_OWNERSHIP).abs() < 0.012
+                    }) else {
+                        continue;
+                    };
+                    // The road carries on as a street of its class or better: some
+                    // street of the town's plan passes through this point. Within
+                    // 45 m, not on it: the planner merges nodes closer than 16 m and
+                    // straightens near-straight chains, so the street can sit a
+                    // few tens of metres off the regional road's own polyline.
+                    let class = modern_class(road.class) as i32;
+                    let ok = city.sd_roads.iter().any(|r| {
+                        let (a, b) = (&city.nodes[r.from as usize].point, &city.nodes[r.to as usize].point);
+                        (r.class as i32) <= class
+                            && segment_distance_km(end, [a.x_km, a.y_km], [b.x_km, b.y_km]) * 1000.0 < 45.0
+                    });
+                    assert!(
+                        ok,
+                        "road {} ({:?}) is handed to a town at {:?} but no street of its class carries it on",
+                        road.id,
+                        road.class,
+                        end
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 0, "the fixture should have at least one road entering a town");
+    }
+
+    #[test]
+    fn a_road_through_a_town_is_clipped_to_two_pieces_at_its_edge() {
+        let town = Footprint { centre_km: [10.0, 10.0], radius_km: 1.0 };
+        let road: Vec<[f32; 2]> = vec![[5.0, 10.0], [8.0, 10.0], [12.0, 10.0], [15.0, 10.0]];
+        let pieces = clip_outside_footprints(&road, &[town]);
+        assert_eq!(pieces.len(), 2);
+        let west_end = pieces[0].last().unwrap();
+        let east_start = pieces[1][0];
+        let edge = town.radius_km * FOOTPRINT_OWNERSHIP;
+        // Pieces stop within one sample step (10 m) of the town's edge, never inside it.
+        assert!((10.0 - west_end[0] - edge).abs() < 0.011 && 10.0 - west_end[0] >= edge);
+        assert!((east_start[0] - 10.0 - edge).abs() < 0.011 && east_start[0] - 10.0 >= edge);
+        // A road that never touches the town is returned whole.
+        let far = clip_outside_footprints(&[[0.0, 0.0], [3.0, 0.0]], &[town]);
+        assert_eq!(far.len(), 1);
+        assert!((far[0].last().unwrap()[0] - 3.0).abs() < 1.0e-5);
+    }
+
+    /// The principle behind building scenes lazily: a city's scene is a pure
+    /// function of its plan, so drawing it later, or again, gives the same city,
+    /// down to the byte. And generating the world must not have built it.
+    #[test]
+    fn a_city_scene_is_built_on_demand_and_is_a_pure_function_of_its_plan() {
+        let config = config();
+        let terrain = generate(&config, |_, _| {}).unwrap();
+        let started = std::time::Instant::now();
+        let data = generate_infrastructure(&terrain, &config).unwrap();
+        let plan_time = started.elapsed();
+        assert!(!data.modern_cities.is_empty());
+        // Smallest city: keeps the test cheap.
+        let index = (0..data.settlements.len())
+            .min_by_key(|i| (data.modern_cities[*i].buildings.len(), *i))
+            .unwrap();
+        let started = std::time::Instant::now();
+        let first = data.build_city_scene(index).expect("the city has a plan");
+        let build_time = started.elapsed();
+        let second = data.build_city_scene(index).unwrap();
+        let a = city_scene::scene::encode_binary(&first).unwrap();
+        let b = city_scene::scene::encode_binary(&second).unwrap();
+        assert_eq!(a.len(), b.len());
+        assert!(a == b, "the same plan produced two different scenes");
+        assert!(data.build_city_scene(data.settlements.len()).is_none());
+        eprintln!("planning every city {plan_time:?}; building the smallest scene {build_time:?}");
     }
 }
