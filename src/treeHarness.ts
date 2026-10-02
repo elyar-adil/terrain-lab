@@ -56,7 +56,7 @@ async function main() {
         seed: seed0 + index,
         openness: num("open", 0.85),
         age: num("age", 0.8),
-        health: 1,
+        health: num("health", 1),
         lift: 0,
       });
       index += 1;

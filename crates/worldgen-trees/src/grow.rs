@@ -339,6 +339,58 @@ impl Grower {
         }
     }
 
+    /// Fill the voids a crown is left with: a few limbs, cut back to the envelope, leave
+    /// whole sectors bare. Sample the envelope; where no twig is near, grow a branch from
+    /// the nearest wood toward the spot, so the crown is a mass and not a handful of arms.
+    fn fill_gaps(&mut self, spec: &TreeSpec) {
+        if matches!(self.crown.habit, Habit::Layered | Habit::Conical | Habit::Fastigiate) {
+            return;
+        }
+        let a = self.arch;
+        let (z0, h) = (self.crown.z0, self.crown.height);
+        let stem = (h - z0).max(0.5);
+        let mut rng = R::of(self.seed.derive("fill"));
+        let want = (((self.crown.radius * stem).sqrt() * 22.0) as usize).clamp(60, 360);
+        let gap = (self.crown.radius * 0.20).max(0.35);
+        let mut wood: Vec<(V3, V3, f32)> =
+            self.segments.iter().filter(|s| s.level == 1 || s.level == 2).map(|s| (s.a, s.b, s.ra)).collect();
+        for i in 0..want {
+            let y = z0 + stem * (0.06 + 0.92 * rng.u());
+            let az = std::f32::consts::TAU * rng.u();
+            let rr = self.crown.reach(y, az) * (0.40 + 0.55 * rng.u());
+            let p = v3(rr * az.cos(), y, rr * az.sin());
+            let near = self.twigs.iter().map(|t| t.1.dist(p).min(t.0.dist(p))).fold(f32::INFINITY, f32::min);
+            if near < gap {
+                continue;
+            }
+            let Some(&(wa, wb, wr)) = wood
+                .iter()
+                .filter(|w| w.2 > 0.004)
+                .min_by(|x, y2| ((x.0 + x.1) * 0.5).dist(p).total_cmp(&((y2.0 + y2.1) * 0.5).dist(p)))
+            else {
+                continue;
+            };
+            let start = wa.lerp(wb, 0.5);
+            let dist = start.dist(p);
+            if dist > 6.5 {
+                continue;
+            }
+            let dir = (p - start).norm();
+            let bseed = self.seed.derive_u64(0x9000 + i as u64);
+            let mut br = R::of(bseed);
+            let blen = self.fit(start, dir, dist.clamp(0.5, 5.5) * 1.1, 1.08, 0.3);
+            let r0 = (wr * 0.6).clamp(0.006, 0.07);
+            let before = self.segments.len();
+            let path = self.trace(start, dir, blen, r0, 0.006, 0.9, 0.22, 0.12, a.branch_sag * 0.7, a.branch_up, a.tip_droop * 0.4, 2, &mut br, true);
+            self.twigs_on(&path, bseed, spec, &mut br);
+            for seg in &self.segments[before..] {
+                if seg.level == 2 {
+                    wood.push((seg.a, seg.b, seg.ra));
+                }
+            }
+        }
+    }
+
     fn branches(&mut self, limb: &Path, spec: &TreeSpec, seed: Seed, rng: &mut R) {
         let a = self.arch;
         let len = limb.len();
@@ -475,6 +527,7 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
     let trunk = grower.trunk(spec, trunk_r, &mut trng);
     let mut lrng = R::of(seed.derive("limbs"));
     grower.limbs(&trunk, spec, &mut lrng);
+    grower.fill_gaps(spec);
 
     // Health: a sick tree has lost some of its twigs.
     let keep_twigs = (0.35 + 0.65 * spec.health.clamp(0.0, 1.0)).clamp(0.0, 1.0);
