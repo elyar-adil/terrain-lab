@@ -124,7 +124,7 @@ pub(crate) fn house_volume(building: &ModernBuilding, ring: &[Vec2], builder: &m
     let r = Rect { o: ring[0], eu: e * (1.0 / w), ev: f * (1.0 / d), w, d };
     let inside = r.p(w * 0.5, d * 0.5, top - 1.0);
 
-    door(&r, building, builder);
+    door(&r, building, design(tile).bay_m, builder);
 
     match building.roof {
         RoofStyle::Gable | RoofStyle::Hip | RoofStyle::Terracotta | RoofStyle::Mansard => {
@@ -135,11 +135,14 @@ pub(crate) fn house_volume(building: &ModernBuilding, ring: &[Vec2], builder: &m
 }
 
 /// A door on the front wall (the first edge) and a canopy over it.
-fn door(r: &Rect, building: &ModernBuilding, builder: &mut MeshBuilder) {
+fn door(r: &Rect, building: &ModernBuilding, bay_m: f32, builder: &mut MeshBuilder) {
     if r.w < 4.0 {
         return;
     }
-    let u = r.w * (0.30 + 0.40 * roll(building, 5));
+    // In the middle of a bay, so the door stands where a window of the grid would.
+    let bays = (r.w / bay_m).round().max(1.0);
+    let k = ((roll(building, 5) * bays).floor()).min(bays - 1.0);
+    let u = (k + 0.5) * r.w / bays;
     let y = level::GROUND;
     // The front is the edge `v = 0`; its outward direction is `-ev`.
     let out = r.ev * -1.0;

@@ -118,18 +118,17 @@ pub(crate) fn bay_clearance(design: &FacadeDesign, bays: i32, bay: i32, bay_w: f
     (left, right, clear)
 }
 
-fn opening_for(design: &FacadeDesign, key: u32, bay: i32, storey: i32, left: f32, clear: f32) -> Opening {
+fn opening_for(design: &FacadeDesign, key: u32, bay: i32, storey: i32, left: f32, right: f32, bay_w: f32, clear: f32) -> Opening {
     let a = hash(key.wrapping_add(11), bay, storey);
     let b = hash(key.wrapping_add(29), bay, storey);
     let c = hash(key.wrapping_add(47), bay, storey);
     let d = hash(key.wrapping_add(71), bay, storey);
     let e = hash(key.wrapping_add(97), bay, storey);
     let w = design.open_w.min(clear);
-    // Centred in the clear wall, with a small per-opening shift.  The shift is
-    // the *only* thing that varies horizontally, and it is kept well inside the
-    // clear zone so a window never touches a pier.
-    let slack = (clear - 0.12 - w).max(0.0);
-    let cx = left + 0.06 + w * 0.5 + (a - 0.5) * slack * 0.6;
+    // Exactly centred between the two piers that bound the bay: a window that sits
+    // off-centre in its cell is the first thing the eye catches on a facade.
+    let _ = (a, clear);
+    let cx = left + (bay_w - left - right) * 0.5;
     // ±50 mm around the code sill: construction tolerance, not design intent.
     let y0 = design.sill_m + (b - 0.5) * 0.10;
     Opening {
@@ -238,7 +237,7 @@ fn masonry_sample(
     px_per_m: f32,
     hairline: f32,
 ) -> [f32; 3] {
-    let opening = opening_for(design, key, bay, storey, left, clear);
+    let opening = opening_for(design, key, bay, storey, left, right, bay_w, clear);
     let frame_w = 0.055_f32.min((clear - opening.w) * 0.35).max(0.02);
     let x0 = opening.cx - opening.w * 0.5;
     let x1 = opening.cx + opening.w * 0.5;
