@@ -320,11 +320,15 @@ impl Grower {
     fn fit(&self, start: V3, dir: V3, len: f32, margin: f32, floor: f32) -> f32 {
         const STEPS: usize = 14;
         let top = self.crown.height * 1.0;
+        // A limb that has bent a little past the envelope still carries side branches: from a
+        // point already out there, the allowance is measured from where it stands.
+        let r0 = (start.x * start.x + start.z * start.z).sqrt();
         for i in 1..=STEPS {
             let s = len * i as f32 / STEPS as f32;
             let p = start + dir * s;
             let radial = (p.x * p.x + p.z * p.z).sqrt();
-            if p.y > top || radial > self.crown.reach(p.y, p.z.atan2(p.x)) * margin {
+            let allowed = (self.crown.reach(p.y, p.z.atan2(p.x)) * margin).max(r0 + 0.35 + 0.15 * len);
+            if p.y > top || radial > allowed {
                 return (len * (i as f32 - 1.0) / STEPS as f32).max(floor.min(len));
             }
         }
