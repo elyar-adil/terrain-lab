@@ -19,7 +19,7 @@ use super::geom::{V, centroid, point_in, point_seg_dist, ring_polyline_dist, sig
 use super::graph::modern_hash;
 use super::parcels::right_of_way;
 use crate::{
-    BuildingFacade, ModernBuilding, ModernRoadClass, Parcel, ParcelUse, RoofStyle,
+    BuildingFacade, CropKind, Field, ModernBuilding, ModernRoadClass, Parcel, ParcelUse, RoofStyle,
 };
 
 /// Built-up level (the settlement field's `urbanness`) at and above which a lot is
@@ -120,6 +120,8 @@ pub(super) struct Sink<'a> {
     pub buildings: &'a mut Vec<ModernBuilding>,
     pub next_parcel: &'a mut u32,
     pub next_building: &'a mut u32,
+    pub fields: &'a mut Vec<Field>,
+    pub next_field: &'a mut u32,
 }
 
 /// Lay out the houses along the streets of one face.
@@ -228,6 +230,7 @@ pub(super) fn place_frontage(f: &Frontage<'_>, sink: &mut Sink<'_>) {
             s += advance;
         }
     }
+    place_fields(f, &placed, sink);
     if debug {
         eprintln!(
             "frontage face {}: edges {} short {}, open {}, thinned {}, outside {}, river {}, spur {}, placed {} (villa {})",
@@ -386,4 +389,124 @@ fn push_building(frame: &CityFrame, sink: &mut Sink<'_>, parcel_id: u32, use_typ
         entrance_count: 1,
     });
     let _ = centroid;
+}
+
+/// The crops a place grows, by how far out it is. At the edge of town: market
+/// gardens, orchards, a little rape and wheat; further out the plain's own mix.
+fn crop_choices(zone: Zone) -> &'static [CropKind] {
+    match zone {
+        Zone::Villa | Zone::Town => &[
+            CropKind::Vegetables,
+            CropKind::Orchard,
+            CropKind::Fallow,
+            CropKind::Vegetables,
+            CropKind::Wheat,
+            CropKind::Rapeseed,
+        ],
+        _ => &[
+            CropKind::Wheat,
+            CropKind::Rice,
+            CropKind::Corn,
+            CropKind::Rapeseed,
+            CropKind::Wheat,
+            CropKind::Vegetables,
+            CropKind::Rice,
+            CropKind::Fallow,
+        ],
+    }
+}
+
+/// Farmland on what the houses leave of a face: long strips laid parallel to its
+/// longest street, as the field systems of the plain are, each a few tens of metres
+/// wide and up to a hundred and fifty long, a ditch-width apart. A neighbourhood
+/// tends to grow one crop (a face has its own preference), with plots of something
+/// else among them.
+pub(super) fn place_fields(f: &Frontage<'_>, lots: &[Vec<V>], sink: &mut Sink<'_>) {
+    let ring = &f.face.ring;
+    let face_key = f.face_index;
+    let face = |salt: i32| modern_hash(f.seed, face_key, 7, salt);
+    // The strips run along the longest street.
+    let (mut best, mut dir) = (0.0_f32, (1.0_f32, 0.0_f32));
+    for i in 0..ring.len() {
+        if !f.face.open[i] && f.face.edge_len[i] > best {
+            best = f.face.edge_len[i];
+            let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+            dir = ((b.0 - a.0) / best, (b.1 - a.1) / best);
+        }
+    }
+    if face(1201) < 0.3 {
+        dir = (-dir.1, dir.0);
+    }
+    let u = dir;
+    let v = (-dir.1, dir.0);
+    let angle = u.1.atan2(u.0);
+    let width = 20.0 + 26.0 * face(1203);
+    let long = 80.0 + 80.0 * face(1205);
+    let preferred = face(1207);
+    let mut made = 0;
+    for env in f.envelopes {
+        let (mut u0, mut u1, mut v0, mut v1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for p in env {
+            let (pu, pv) = (p.0 * u.0 + p.1 * u.1, p.0 * v.0 + p.1 * v.1);
+            u0 = u0.min(pu);
+            u1 = u1.max(pu);
+            v0 = v0.min(pv);
+            v1 = v1.max(pv);
+        }
+        let world = |pu: f32, pv: f32| -> V { (u.0 * pu + v.0 * pv, u.1 * pu + v.1 * pv) };
+        let mut row = 0;
+        let mut pv = v0 + 2.0;
+        while pv + width * 0.5 <= v1 && made < 90 {
+            row += 1;
+            let mut pu = u0 + 2.0 + long * 0.7 * modern_hash(f.seed, face_key, row, 1209);
+            let mut col = 0;
+            while pu + 24.0 < u1 && made < 90 {
+                col += 1;
+                let key = face_key * 8192 + row * 64 + col;
+                let noise = |salt: i32| modern_hash(f.seed, key, 9, salt);
+                let mut placed = false;
+                for frac in [1.0_f32, 0.62, 0.38] {
+                    let len = (long * frac * (0.75 + 0.5 * noise(1211))).min(u1 - pu - 1.0);
+                    if len < 22.0 {
+                        continue;
+                    }
+                    let w = width * (0.8 + 0.4 * noise(1213));
+                    let corners = vec![world(pu, pv), world(pu + len, pv), world(pu + len, pv + w), world(pu, pv + w)];
+                    if !f.envelopes.iter().any(|e| corners.iter().all(|c| point_in(e, *c))) {
+                        continue;
+                    }
+                    if lots.iter().any(|l| overlap(&corners, l, 4.0)) {
+                        continue;
+                    }
+                    if !f.river.is_empty() && ring_polyline_dist(&corners, f.river) < f.river_half + 8.0 {
+                        continue;
+                    }
+                    let c = centroid(&corners);
+                    let built = f.frame.urbanness(c.0, c.1);
+                    if built >= TOWN_BUILT {
+                        continue;
+                    }
+                    let choices = crop_choices(zone(built));
+                    let pick = if noise(1215) < 0.66 { preferred } else { noise(1217) };
+                    let crop = choices[((pick * choices.len() as f32) as usize).min(choices.len() - 1)];
+                    sink.fields.push(Field {
+                        id: *sink.next_field,
+                        ring: corners.iter().map(|p| f.frame.to_world(p.0, p.1)).collect(),
+                        crop,
+                        row_angle: angle,
+                        variant: (noise(1219) * 3.0) as u8,
+                    });
+                    *sink.next_field += 1;
+                    made += 1;
+                    pu += len + 1.6;
+                    placed = true;
+                    break;
+                }
+                if !placed {
+                    pu += 18.0;
+                }
+            }
+            pv += width + 1.6;
+        }
+    }
 }

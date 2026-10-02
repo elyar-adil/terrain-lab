@@ -283,6 +283,7 @@ pub fn generate_modern_chinese_city_with_options(
         blocks,
         parcels,
         buildings,
+        fields,
     } = build_parcels(&frame, &nodes, &sd_roads);
     let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
     ModernCity {
@@ -302,6 +303,7 @@ pub fn generate_modern_chinese_city_with_options(
         buildings,
         compounds,
         trees,
+        fields,
         river: Some(river),
         river_width_metres: frame.river_half * 2.0,
         tributaries: Vec::new(),
@@ -421,7 +423,7 @@ pub fn generate_modern_chinese_city_from_streets(
         sd_roads: &sd_roads,
         hd_roads: &hd_roads,
     });
-    let ParcelOutput { blocks, parcels, buildings } = build_parcels(&frame, &nodes, &sd_roads);
+    let ParcelOutput { blocks, parcels, buildings, fields } = build_parcels(&frame, &nodes, &sd_roads);
     let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
     ModernCity {
         version: 3,
@@ -437,6 +439,7 @@ pub fn generate_modern_chinese_city_from_streets(
         buildings,
         compounds,
         trees,
+        fields,
         river: (!streets.river.is_empty()).then_some(streets.river),
         river_width_metres: frame.river_half * 2.0,
         tributaries: streets

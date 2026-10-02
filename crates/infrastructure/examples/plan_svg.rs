@@ -87,6 +87,33 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    // A camera in front of a few villas and farmsteads, for the city viewer's `cam=`.
+    for (name, kind) in [("villa", urban::ParcelUse::Villa), ("farmstead", urban::ParcelUse::Farmstead)] {
+        let knot: Option<Vec<f32>> = env::var("KNOT").ok().map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect());
+        for p in city
+            .parcels
+            .iter()
+            .filter(|p| p.use_type == kind)
+            .filter(|p| {
+                knot.as_ref().is_none_or(|k| {
+                    let q = city.frame.to_local(p.ring[0]);
+                    k.len() == 2 && (q[0] - k[0]).hypot(q[1] - k[1]) < 260.0
+                })
+            })
+            .step_by(3)
+            .take(6)
+        {
+            let l: Vec<[f32; 2]> = p.ring.iter().map(|q| city.frame.to_local(*q)).collect();
+            let n = l.len() as f32;
+            let c = [l.iter().map(|q| q[0]).sum::<f32>() / n, l.iter().map(|q| q[1]).sum::<f32>() / n];
+            let m = [(l[0][0] + l[1][0]) / 2.0, (l[0][1] + l[1][1]) / 2.0];
+            let d = [m[0] - c[0], m[1] - c[1]];
+            let len = d[0].hypot(d[1]).max(1.0);
+            let at = [c[0] + d[0] / len * 34.0, c[1] + d[1] / len * 34.0];
+            eprintln!("  {name} cam={:.0},2.6,{:.0},{:.0},3.5,{:.0},50", at[0], at[1], c[0], c[1]);
+        }
+    }
+
     // Bounds from the roads.
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     for n in &city.nodes {

@@ -569,6 +569,7 @@ mod tests {
             &city.parcels,
             &city.buildings,
             &city.compounds,
+            &city.fields,
             city.frame,
             &mut builder,
         );
@@ -692,6 +693,7 @@ mod tests {
             &city.parcels,
             &city.buildings,
             &city.compounds,
+            &city.fields,
             city.frame,
             &mut builder,
         );

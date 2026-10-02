@@ -355,6 +355,12 @@ fn declare(builder: &mut MeshBuilder) {
     builder.style("metal.ac", wall);
     builder.style("awning", wall);
     builder.style("wall.render", wall);
+    for crop in crate::crops::ALL_CROPS {
+        for variant in 0..3 {
+            builder.style(&crate::crops::crop_key(crop, variant), ground);
+        }
+    }
+    builder.style("field.ridge", wall);
     builder.style("block.ground", ground);
     builder.style("parcel.paving", ground);
     builder.style("parcel.green", ground);
@@ -377,6 +383,7 @@ pub fn build(
     parcels: &[Parcel],
     buildings: &[ModernBuilding],
     compounds: &[Compound],
+    fields: &[urban::Field],
     frame: CityFrameInfo,
     builder: &mut MeshBuilder,
 ) {
@@ -407,6 +414,13 @@ pub fn build(
             "parcel.paving"
         };
         builder.ground_uv(material, &ring, level::GROUND - 0.004, None);
+    }
+    for field in fields {
+        let ring = ring_of(&field.ring, frame);
+        if ring.len() < 3 {
+            continue;
+        }
+        draw_field(field, &ring, builder);
     }
     for building in buildings {
         let ring = ring_of(&building.footprint, frame);
@@ -681,6 +695,7 @@ mod tests {
             &city.parcels,
             &city.buildings,
             &city.compounds,
+            &city.fields,
             city.frame,
             &mut builder,
         );
@@ -958,7 +973,7 @@ mod tests {
             ..ModernChinaSpec::default()
         });
         let mut builder = MeshBuilder::new();
-        build(&city.blocks, &city.parcels, &city.buildings, &city.compounds, city.frame, &mut builder);
+        build(&city.blocks, &city.parcels, &city.buildings, &city.compounds, &city.fields, city.frame, &mut builder);
         let groups = builder.build().meshes;
         let mut glazed = 0;
         let mut masonry = 0;
@@ -1025,5 +1040,43 @@ mod tests {
         assert!(slabs > 0, "no 板楼 in a Chinese city");
         assert!(low > 0, "no 多层 in a Chinese city");
         assert!(tall + slabs + low == city.buildings.len());
+    }
+}
+
+/// One plot of farmland: the crop's texture laid on the ground with its rows along the
+/// plot, and a low bund (田埂) round the edge.
+fn draw_field(field: &urban::Field, ring: &[Vec2], builder: &mut MeshBuilder) {
+    let mut plot = ring.to_vec();
+    if signed_area(&plot) < 0.0 {
+        plot.reverse();
+    }
+    let material = crate::crops::crop_key(field.crop, field.variant);
+    // UVs in metres along and across the rows.
+    let (sin, cos) = field.row_angle.sin_cos();
+    let uv = |p: Vec2| (p.x * cos + p.y * sin, -p.x * sin + p.y * cos);
+    let y = level::GROUND - 0.012;
+    for [a, b, c] in crate::math::triangulate(&plot) {
+        let (pa, pb, pc) = (plot[a], plot[b], plot[c]);
+        // `triangulate` returns counter-clockwise indices, which face down: flip.
+        builder.tri_uv(
+            &material,
+            Vec3::from_plan(pa, y),
+            Vec3::from_plan(pc, y),
+            Vec3::from_plan(pb, y),
+            [uv(pa), uv(pc), uv(pb)],
+            None,
+        );
+    }
+    // The bund: a low earth ridge, 0.3 m wide and 0.15 m high.
+    for index in 0..plot.len() {
+        let a = plot[index];
+        let b = plot[(index + 1) % plot.len()];
+        if a.distance(b) < 1.0 {
+            continue;
+        }
+        let along = (b - a).normalize();
+        let out = Vec2::new(along.y, -along.x);
+        let (a_out, b_out) = (a + out * 0.30, b + out * 0.30);
+        builder.quad("field.ridge", Vec3::from_plan(a, y + 0.14), Vec3::from_plan(b, y + 0.14), Vec3::from_plan(b_out, y), Vec3::from_plan(a_out, y), None);
     }
 }

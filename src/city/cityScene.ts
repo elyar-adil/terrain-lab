@@ -580,6 +580,19 @@ export function createMaterials(
     { map: roofMap ?? undefined, normalMap: normalFor("roof", 1.4) ?? undefined, roughness: 0.94 },
     roofMap ? 0xffffff : 0x6a6862,
   );
+  // Farmland: every crop in its three looks, and the earth bund round a plot.
+  for (const crop of ["wheat", "rice", "rapeseed", "corn", "vegetables", "fallow", "orchard"]) {
+    for (let variant = 0; variant < 3; variant += 1) {
+      const key = `field/${crop}.${variant}`;
+      const map = textureFor(key);
+      standard(
+        key,
+        { map: map ?? undefined, normalMap: normalFor(key, 1.6) ?? undefined, roughness: 0.96 },
+        map ? 0xffffff : 0x6b6a3a,
+      );
+    }
+  }
+  standard("field.ridge", { roughness: 1 }, 0x6b5a3f);
   // Pitched roofs: clay tile, terracotta and painted steel sheet.
   for (const [key, roughness, metalness] of [
     ["roof.tile", 0.82, 0],

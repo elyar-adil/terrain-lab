@@ -7,7 +7,7 @@ pub mod modern;
 pub use legacy::{BarcelonaGenerator, ManhattanGenerator, ParisianGenerator, UrbanGenerator};
 pub use model::{
     ActionCandidate, ActionKind, ApproachSpec, ArrowStyle, BuildingFacade, BuildingMass, CityFrameInfo,
-    CityGraph, CityJunction, CitySpec, CityStyle, Compound, DrivingSide, GrowthState, HdLane, HdRoad,
+    CityGraph, CityJunction, CitySpec, CityStyle, Compound, CropKind, DrivingSide, Field, GrowthState, HdLane, HdRoad,
     JunctionKind, JunctionPhase, JurisdictionId, LaneMarking, LaneUse, MarkingKind,
     ModelWeights, ModernBuilding, ModernChinaSpec, ModernCity, ModernRoadClass, MorphologyPrior,
     MorphologyStats, Movement, Parcel, ParcelUse, Point, RoadConnector, RoadCrossSection, RoofStyle,

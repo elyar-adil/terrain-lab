@@ -94,3 +94,32 @@ pub struct TreeInstance {
     pub crown_radius_metres: f32,
     pub trunk_radius_metres: f32,
 }
+
+/// What a field is sown with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CropKind {
+    Wheat,
+    Rice,
+    Rapeseed,
+    Corn,
+    Vegetables,
+    /// Ploughed and bare, or going over to weeds.
+    Fallow,
+    /// Fruit trees in rows; the trees are planted by the scene.
+    Orchard,
+}
+
+/// A plot of farmland: one strip of a field system, long and narrow, its crop
+/// running along it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Field {
+    pub id: u32,
+    pub ring: Vec<Point>,
+    pub crop: CropKind,
+    /// Direction the rows run, radians in the city's local frame.
+    pub row_angle: f32,
+    /// Which of the crop's looks (stage of growth, variety) this plot has, 0..3.
+    pub variant: u8,
+}

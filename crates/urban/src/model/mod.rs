@@ -8,7 +8,7 @@ pub mod scene;
 pub(crate) mod traffic;
 
 pub use buildings::{
-    BuildingFacade, Compound, ModernBuilding, Parcel, ParcelUse, TreeInstance, TreeSpecies,
+    BuildingFacade, Compound, CropKind, Field, ModernBuilding, Parcel, ParcelUse, TreeInstance, TreeSpecies,
 };
 pub use core::{
     BuildingMass, CitySpec, CityStyle, ModernChinaSpec, ModernRoadClass, Point, RoofStyle,

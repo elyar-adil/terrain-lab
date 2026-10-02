@@ -25,6 +25,7 @@ pub(super) struct ParcelOutput {
     pub blocks: Vec<UrbanBlock>,
     pub parcels: Vec<Parcel>,
     pub buildings: Vec<ModernBuilding>,
+    pub fields: Vec<crate::Field>,
 }
 
 /// Design floor-to-floor heights, metres.  Residential runs 2.95-3.0 m, offices
@@ -78,6 +79,8 @@ pub(super) fn build_parcels(
     let mut buildings: Vec<ModernBuilding> = Vec::new();
     let mut next_parcel = 0_u32;
     let mut next_building = 0_u32;
+    let mut fields: Vec<crate::Field> = Vec::new();
+    let mut next_field = 0_u32;
     let to_world =
         |ring: &[V]| -> Vec<Point> { ring.iter().map(|p| frame.to_world(p.0, p.1)).collect() };
 
@@ -96,9 +99,8 @@ pub(super) fn build_parcels(
         } else {
             built
         };
-        if frame.organic_footprint
-            && face_built < if frame.external.is_some() { suburb::OPEN_BUILT } else { 0.06 }
-        {
+        // (Open country is not skipped when the streets come from outside: it is farmland.)
+        if frame.organic_footprint && frame.external.is_none() && face_built < 0.06 {
             continue;
         }
         if signed_area(&face.ring) < 900.0 {
@@ -201,6 +203,8 @@ pub(super) fn build_parcels(
                     buildings: &mut buildings,
                     next_parcel: &mut next_parcel,
                     next_building: &mut next_building,
+                    fields: &mut fields,
+                    next_field: &mut next_field,
                 },
             );
             continue;
@@ -594,7 +598,7 @@ pub(super) fn build_parcels(
             }
         }
     }
-    ParcelOutput { blocks, parcels, buildings }
+    ParcelOutput { blocks, parcels, buildings, fields }
 }
 
 /// Recursive oriented-box bisection into lots no larger than `target` m².

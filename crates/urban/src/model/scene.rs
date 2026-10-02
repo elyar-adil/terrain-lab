@@ -64,6 +64,9 @@ pub struct ModernCity {
     pub buildings: Vec<ModernBuilding>,
     pub compounds: Vec<Compound>,
     pub trees: Vec<TreeInstance>,
+    /// Farmland around the town.
+    #[serde(default)]
+    pub fields: Vec<super::buildings::Field>,
     pub river: Option<Vec<Point>>,
     pub river_width_metres: f32,
     /// Other waterways through the town, each with its own width: a plan made on a
@@ -107,6 +110,7 @@ impl ModernCity {
         out.buildings.retain(|b| parcels.contains(&b.parcel_id));
         out.compounds.retain(|c| parcels.contains(&c.parcel_id));
         out.trees.retain(|t| near(&t.point, 0.0));
+        out.fields.retain(|f| middle(&f.ring).is_some_and(|c| near(&c, 0.0)));
         // Waterways are cut to the neighbourhood too, or the water alone would be the
         // whole size of the plan.
         let cut = |line: &[Point]| -> Vec<Point> { line.iter().copied().filter(|p| near(p, 250.0)).collect() };
