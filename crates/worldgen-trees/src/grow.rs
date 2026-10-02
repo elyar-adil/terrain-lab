@@ -105,7 +105,7 @@ pub struct Tree {
 /// How many leaves each level of detail draws, at most.
 pub const LEAF_BUDGET: [usize; 4] = [30_000, 6_500, 1_100, 170];
 /// The deepest level of wood each level of detail draws.
-pub const WOOD_LEVEL: [u8; 4] = [3, 3, 2, 1];
+pub const WOOD_LEVEL: [u8; 4] = [3, 2, 2, 1];
 
 struct R(Rng);
 
@@ -149,6 +149,41 @@ impl Path {
         let f = if c1 > c0 { (s - c0) / (c1 - c0) } else { 0.0 };
         let dir = (self.pts[k] - self.pts[k - 1]).norm();
         (self.pts[k - 1].lerp(self.pts[k], f), dir, self.rad[k - 1] + (self.rad[k] - self.rad[k - 1]) * f)
+    }
+}
+
+/// Points bucketed in cubic cells, for "is any point within `r` of here".
+struct EndGrid {
+    cell: f32,
+    cells: std::collections::HashMap<(i32, i32, i32), Vec<V3>>,
+}
+
+impl EndGrid {
+    fn new(cell: f32) -> Self {
+        Self { cell: cell.max(0.05), cells: std::collections::HashMap::new() }
+    }
+    fn key(&self, p: V3) -> (i32, i32, i32) {
+        ((p.x / self.cell).floor() as i32, (p.y / self.cell).floor() as i32, (p.z / self.cell).floor() as i32)
+    }
+    fn add(&mut self, p: V3) {
+        let k = self.key(p);
+        self.cells.entry(k).or_default().push(p);
+    }
+    /// Whether any point lies within `r` (which must not exceed the cell size) of `p`.
+    fn near(&self, p: V3, r: f32) -> bool {
+        let (cx, cy, cz) = self.key(p);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    if let Some(v) = self.cells.get(&(cx + dx, cy + dy, cz + dz)) {
+                        if v.iter().any(|q| q.dist(p) < r) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
     }
 }
 
@@ -457,6 +492,15 @@ impl Grower {
         let mut rng = R::of(self.seed.derive("fill"));
         let want = (((self.crown.radius * stem).sqrt() * 22.0) as usize).clamp(60, 360);
         let gap = (self.crown.radius * 0.20).max(0.35);
+        // Twig ends bucketed in cells of the gap's size: "is anything within `gap`" looks at
+        // 27 cells and not at every twig.
+        let mut grid = EndGrid::new(gap);
+        let mut indexed = 0;
+        for t in &self.twigs {
+            grid.add(t.0);
+            grid.add(t.1);
+        }
+        indexed = self.twigs.len().max(indexed);
         let mut wood: Vec<(V3, V3, f32)> =
             self.segments.iter().filter(|s| s.level == 1 || s.level == 2).map(|s| (s.a, s.b, s.ra)).collect();
         for i in 0..want {
@@ -464,8 +508,7 @@ impl Grower {
             let az = std::f32::consts::TAU * rng.u();
             let rr = self.crown.reach(y, az) * (0.40 + 0.55 * rng.u());
             let p = v3(rr * az.cos(), y, rr * az.sin());
-            let near = self.twigs.iter().map(|t| t.1.dist(p).min(t.0.dist(p))).fold(f32::INFINITY, f32::min);
-            if near < gap {
+            if grid.near(p, gap) {
                 continue;
             }
             let Some(&(wa, wb, wr)) = wood
@@ -488,6 +531,11 @@ impl Grower {
             let before = self.segments.len();
             let path = self.trace(start, dir, blen, r0, 0.006, 0.9, 0.22, 0.12, a.branch_sag * 0.7, a.branch_up, a.tip_droop * 0.4, 2, &mut br, true);
             self.twigs_on(&path, bseed, spec, &mut br);
+            for t in &self.twigs[indexed..] {
+                grid.add(t.0);
+                grid.add(t.1);
+            }
+            indexed = self.twigs.len();
             for seg in &self.segments[before..] {
                 if seg.level == 2 {
                     wood.push((seg.a, seg.b, seg.ra));

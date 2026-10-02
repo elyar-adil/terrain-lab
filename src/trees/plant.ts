@@ -94,11 +94,22 @@ export function plantFromInstances(sets: TreeInstanceSet[], grower: TreeGrower, 
 export function installUniqueTrees(handles: CityHandles, scene: CityScene): UniqueForest | null {
   const grower = treeGrowerIfReady();
   if (!grower) return null;
-  const planting = plantFromInstances(handles.lodSets, grower, scene.seed);
+  // A viewer that builds the city without LOD lists still has its instanced meshes.
+  const sets: TreeInstanceSet[] = handles.lodSets.length > 0
+    ? handles.lodSets
+    : [...handles.instanced.entries()].map(([key, mesh]) => ({
+      mesh,
+      key,
+      count: mesh.count,
+      matrices: (mesh.instanceMatrix.array as Float32Array).slice(0, mesh.count * 16),
+      far: null,
+    }));
+  const planting = plantFromInstances(sets, grower, scene.seed);
   if (planting.trees.length === 0) return null;
   const forest = new UniqueForest(grower, planting.trees);
   for (const mesh of planting.replaced) mesh.removeFromParent();
   const gone = new Set(planting.sets);
   handles.lodSets = handles.lodSets.filter((set) => !gone.has(set));
+  for (const key of [...handles.instanced.keys()]) if (key.startsWith("tree/")) handles.instanced.delete(key);
   return forest;
 }

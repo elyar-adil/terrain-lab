@@ -486,6 +486,7 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
             // material is the difference between "a wall looks wrong somewhere"
             // and a one-line fix in the scene layer.
             uvMismatch: [...materials.uvMismatch],
+            forest: forest ? { ...forest.stats, trees: forest.treeCount } : null,
             vehicles: agentCount,
             signals: scene.signals.length,
             lamps: lampsByAspect.map((mesh) => mesh.count),

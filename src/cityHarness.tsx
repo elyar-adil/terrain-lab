@@ -83,6 +83,8 @@ function Harness() {
         // has not been composed yet.
         window.__RENDER_READY__ = true;
         document.documentElement.dataset.renderReady = "true";
+        // For audits: the numbers, readable from the DOM.
+        document.documentElement.dataset.diagnostics = JSON.stringify(window.__CITY_DIAGNOSTICS__ ?? {});
       }}
     />
   );

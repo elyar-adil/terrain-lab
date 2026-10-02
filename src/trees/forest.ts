@@ -56,6 +56,8 @@ interface Chunk {
   wanted: number;
   distance: number;
   wood: THREE.Mesh | null;
+  /** Twigs: thinner than 2 cm, drawn as 3-sided prisms. */
+  thin: THREE.Mesh | null;
   leaf: THREE.Mesh | null;
   /** Soft dark patches on the ground under the trunks. */
   decal: THREE.Mesh | null;
@@ -101,7 +103,7 @@ function contactMaterial(): THREE.MeshBasicMaterial {
   return contact;
 }
 
-const SIDES = [24, 16, 10, 6];
+const SIDES = [16, 10, 7, 5];
 
 function woodBase(sides: number): THREE.InstancedBufferGeometry {
   const columns = sides + 1;
@@ -137,22 +139,26 @@ function woodBase(sides: number): THREE.InstancedBufferGeometry {
   return geometry;
 }
 
-function leafBase(): THREE.InstancedBufferGeometry {
+/** A leaf blade: 8 triangles close up (it curls), 4 at middle range, 2 beyond. */
+function leafBase(lod: number): THREE.InstancedBufferGeometry {
+  const rows = lod === 0 ? 2 : lod === 1 ? 1 : 1;
+  const cols = lod === 0 ? 2 : lod === 1 ? 2 : 1;
   const position: number[] = [];
   const normal: number[] = [];
   const kind: number[] = [];
-  for (let row = 0; row < 3; row += 1) {
-    for (let column = 0; column < 3; column += 1) {
-      position.push(column - 1, row * 0.5, 0);
+  for (let row = 0; row <= rows; row += 1) {
+    for (let column = 0; column <= cols; column += 1) {
+      position.push((column / cols) * 2 - 1, row / rows, 0);
       normal.push(0, 0, 1);
       kind.push(2);
     }
   }
   const index: number[] = [];
-  for (let row = 0; row < 2; row += 1) {
-    for (let column = 0; column < 2; column += 1) {
-      const a = row * 3 + column;
-      index.push(a, a + 1, a + 3, a + 1, a + 4, a + 3);
+  const stride = cols + 1;
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < cols; column += 1) {
+      const a = row * stride + column;
+      index.push(a, a + 1, a + stride, a + 1, a + stride + 1, a + stride);
     }
   }
   const geometry = new THREE.InstancedBufferGeometry();
@@ -185,7 +191,7 @@ export class UniqueForest {
     options: ForestOptions = {},
   ) {
     this.trees = trees;
-    this.lodDistances = options.lodDistancesM ?? [45, 110, 260];
+    this.lodDistances = options.lodDistancesM ?? [22, 60, 160];
     this.farM = options.farM ?? 1500;
     this.season = options.season ?? 0.5;
     this.rowBase = treeTable.allocate(trees.length);
@@ -211,6 +217,7 @@ export class UniqueForest {
           wanted: -1,
           distance: Infinity,
           wood: null,
+          thin: null,
           leaf: null,
           decal: null,
           job: null,
@@ -263,6 +270,8 @@ export class UniqueForest {
   private applyCasting(chunk: Chunk): void {
     const cast = this.casting && chunk.lod >= 0 && chunk.lod <= 2;
     if (chunk.wood) chunk.wood.castShadow = cast;
+    // Twigs are too fine to throw a shadow worth its cost; the leaves cover for them.
+    if (chunk.thin) chunk.thin.castShadow = false;
     if (chunk.leaf) chunk.leaf.castShadow = cast;
   }
 
@@ -305,6 +314,7 @@ export class UniqueForest {
         queue.push(chunk);
       } else if (chunk.wood && !chunk.wood.visible) {
         chunk.wood.visible = true;
+        if (chunk.thin) chunk.thin.visible = true;
         if (chunk.leaf) chunk.leaf.visible = true;
         changed = true;
       }
@@ -321,6 +331,7 @@ export class UniqueForest {
 
   private hide(chunk: Chunk): void {
     if (chunk.wood) chunk.wood.visible = false;
+    if (chunk.thin) chunk.thin.visible = false;
     if (chunk.leaf) chunk.leaf.visible = false;
   }
 
@@ -435,14 +446,35 @@ export class UniqueForest {
     new THREE.Box3(chunk.min, chunk.max).getBoundingSphere(sphere);
     sphere.radius += 2;
 
-    const wood = woodBase(SIDES[lod]);
-    wood.setAttribute("aSegA", new THREE.InstancedBufferAttribute(woodA, 4));
-    wood.setAttribute("aSegB", new THREE.InstancedBufferAttribute(woodB, 4));
-    wood.setAttribute("aTreeId", new THREE.InstancedBufferAttribute(woodId, 1));
-    wood.instanceCount = segments;
-    wood.boundingSphere = sphere.clone();
+    // Thick wood and twigs are separate draws: a twig under 2 cm across is a three-sided
+    // prism, which is all its few pixels can show, and a tube of 24 sides would cost eight
+    // times as much for nothing.
+    const thickIdx: number[] = [];
+    const thinIdx: number[] = [];
+    for (let i = 0; i < segments; i += 1) {
+      (Math.max(woodA[i * 4 + 3], woodB[i * 4 + 3]) < 0.02 ? thinIdx : thickIdx).push(i);
+    }
+    const part = (idx: number[], sides: number) => {
+      const a = new Float32Array(idx.length * 4);
+      const b = new Float32Array(idx.length * 4);
+      const ids = new Uint16Array(idx.length);
+      idx.forEach((from, to) => {
+        a.set(woodA.subarray(from * 4, from * 4 + 4), to * 4);
+        b.set(woodB.subarray(from * 4, from * 4 + 4), to * 4);
+        ids[to] = woodId[from];
+      });
+      const g = woodBase(sides);
+      g.setAttribute("aSegA", new THREE.InstancedBufferAttribute(a, 4));
+      g.setAttribute("aSegB", new THREE.InstancedBufferAttribute(b, 4));
+      g.setAttribute("aTreeId", new THREE.InstancedBufferAttribute(ids, 1));
+      g.instanceCount = idx.length;
+      g.boundingSphere = sphere.clone();
+      return g;
+    };
+    const wood = part(thickIdx, SIDES[lod]);
+    const thin = part(thinIdx, 3);
 
-    const leaf = leafBase();
+    const leaf = leafBase(lod);
     leaf.setAttribute("aLeafPos", new THREE.InstancedBufferAttribute(leafPos, 4));
     leaf.setAttribute("aLeafDir", new THREE.InstancedBufferAttribute(leafDir, 4, true));
     leaf.setAttribute("aLeafNor", new THREE.InstancedBufferAttribute(leafNor, 4, true));
@@ -456,6 +488,9 @@ export class UniqueForest {
     woodMesh.customDepthMaterial = this.materials.woodDepth;
     woodMesh.receiveShadow = true;
     woodMesh.name = `forest/${chunk.key}/wood`;
+    const thinMesh = new THREE.Mesh(thin, this.materials.wood);
+    thinMesh.receiveShadow = false;
+    thinMesh.name = `forest/${chunk.key}/twigs`;
     const leafMesh = new THREE.Mesh(leaf, this.materials.leaf);
     leafMesh.customDepthMaterial = this.materials.leafDepth;
     leafMesh.receiveShadow = true;
@@ -487,6 +522,8 @@ export class UniqueForest {
     chunk.decal = decal;
     this.group.add(decal);
     chunk.wood = woodMesh;
+    chunk.thin = thinMesh;
+    this.group.add(thinMesh);
     chunk.leaf = leafMesh;
     chunk.lod = lod;
     chunk.job = null;
@@ -496,12 +533,13 @@ export class UniqueForest {
   }
 
   private release(chunk: Chunk): void {
-    for (const mesh of [chunk.wood, chunk.leaf]) {
+    for (const mesh of [chunk.wood, chunk.thin, chunk.leaf]) {
       if (!mesh) continue;
       mesh.removeFromParent();
       mesh.geometry.dispose();
     }
     chunk.wood = null;
+    chunk.thin = null;
     chunk.leaf = null;
     if (chunk.decal) {
       chunk.decal.removeFromParent();
@@ -519,7 +557,8 @@ export class UniqueForest {
       if (!chunk.wood || !chunk.leaf) continue;
       built += 1;
       trees += chunk.trees.length;
-      segments += (chunk.wood.geometry as THREE.InstancedBufferGeometry).instanceCount;
+      segments += (chunk.wood.geometry as THREE.InstancedBufferGeometry).instanceCount
+        + (chunk.thin ? (chunk.thin.geometry as THREE.InstancedBufferGeometry).instanceCount : 0);
       leaves += (chunk.leaf.geometry as THREE.InstancedBufferGeometry).instanceCount;
     }
     Object.assign(this.stats, { built, trees, segments, leaves });
