@@ -206,7 +206,8 @@ fn a_whole_species_of_trees_is_a_population_not_a_stamp() {
 /// outer shell of the crown, and the shaded interior framework is nearly bare.
 #[test]
 fn broadleaf_leaf_area_sits_on_the_outer_shell() {
-    for key in ["xiang-zhang", "yu-shu", "huai-shu", "yin-xing", "liu-shu"] {
+    // (Not the willow: a weeping crown hangs its leaves in curtains through the whole volume.)
+    for key in ["xiang-zhang", "yu-shu", "huai-shu", "yin-xing"] {
         let species = SPECIES.iter().position(|s| s.key == key).unwrap();
         let mut outer = 0.0_f32;
         let mut inner = 0.0_f32;
