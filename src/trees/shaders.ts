@@ -17,7 +17,7 @@
 import * as THREE from "three";
 
 /** Texels per tree in the table, and trees per table row. */
-export const TABLE_TEXELS = 6;
+export const TABLE_TEXELS = 7;
 export const TABLE_PER_ROW = 256;
 
 const NOBUMP = typeof location !== "undefined" && new URLSearchParams(location.search).get("treedebug") === "nobump" ? "true" : "false";
@@ -39,6 +39,7 @@ varying vec4 vTreeColour;
 varying vec4 vTreeA;
 varying vec4 vTreeB;
 varying vec2 vBarkAR;
+varying float vAbove;
 
 vec4 treeRow(float id, int k) {
   int i = int(id + 0.5);
@@ -84,6 +85,7 @@ void treeShape(out vec3 pos, out vec3 nor) {
     vTreeA = vec4(w, bark.w);
     vTreeB = vec4(pos, 0.0);
     vBarkAR = vec2(ang, r);
+    vAbove = pos.y - treeRow(aTreeId, 6).y;
   } else {
     float form = treeRow(aTreeId, 0).w;
     vec4 foliage = treeRow(aTreeId, 0);
@@ -152,6 +154,7 @@ void treeShape(out vec3 pos, out vec3 nor) {
     vTreeA = sh;
     vTreeB = vec4(x * hw, y, f, hw);
     vBarkAR = vec2(0.0);
+    vAbove = 99.0;
   }
 }
 `;
@@ -205,6 +208,7 @@ varying vec4 vTreeColour;
 varying vec4 vTreeA;
 varying vec4 vTreeB;
 varying vec2 vBarkAR;
+varying float vAbove;
 
 float tHash(vec3 p) {
   // Wrapped, then a Hoskins-style hash: stable far from the origin and not degenerate at it.
@@ -413,8 +417,8 @@ if (vTreeKind > 0.5) {
     // Colour by age of the wood: thin young twigs are warm tan-brown, old thick limbs
     // dark brown. Only smooth-barked species (plane, ginkgo) stay pale, and mottled.
     float thick = smoothstep(0.015, 0.14, R);
-    vec3 youngC = vec3(0.36, 0.225, 0.14);
-    vec3 oldC = vec3(0.19, 0.125, 0.082);
+    vec3 youngC = vec3(0.42, 0.27, 0.165);
+    vec3 oldC = vec3(0.30, 0.200, 0.130);
     vec3 woody = mix(youngC, oldC, thick);
     float smoothBark = 1.0 - smoothstep(0.18, 0.40, fissure);
     vec3 paleC = mix(vTreeColour.rgb, vec3(0.30, 0.22, 0.15), 0.35) * vec3(1.25, 1.0, 0.72);
@@ -425,7 +429,24 @@ if (vTreeKind > 0.5) {
     float mott = tNoise(q * 6.0 + 21.0);
     plateCol = mix(plateCol, plateCol * vec3(0.92, 0.95, 0.88), smoothBark * smoothstep(0.5, 0.75, mott) * 0.25);
     vec3 creviceCol = vec3(0.045, 0.030, 0.021);
-    vec3 col = mix(plateCol, creviceCol, clamp(furrow * 0.96 + crack * 0.65, 0.0, 1.0));
+    // Real bark is matte and low in saturation, and varies a great deal in value over a
+    // metre: weathering, damp, where rain runs down it. Plastic is uniform and clean.
+    float lum0 = dot(plateCol, vec3(0.30, 0.59, 0.11));
+    plateCol = mix(vec3(lum0), plateCol, 1.28);
+    float weather = tNoise(q * vec3(1.6, 0.35, 1.6) + 5.0);
+    float streak = tNoise(vec3(q.x * 9.0 + q.z * 9.0, q.y * 0.8, 3.0));
+    plateCol *= 0.95 + 0.55 * weather;
+    plateCol *= 0.88 + 0.24 * streak;
+    // Fine pitting and a dusting of grit, so no surface is perfectly clean.
+    plateCol *= 0.92 + 0.16 * tNoise(q * 320.0);
+    vec3 col = mix(plateCol, creviceCol, clamp(furrow * 0.90 + crack * 0.30, 0.0, 1.0));
+    // Planted in the ground: soil splashed up the foot, damp and dark where the wood meets
+    // the earth, and less light reaching a surface so close to it.
+    float foot = 1.0 - smoothstep(-0.2, 0.9, vAbove);
+    float splash = (1.0 - smoothstep(0.0, 0.9, vAbove)) * (0.55 + 0.45 * tNoise(q * 14.0));
+    vec3 soil = vec3(0.060, 0.043, 0.030);
+    col = mix(col, col * 0.45 + soil * 0.9, clamp(splash * 0.9 + foot * 0.7, 0.0, 0.95));
+    col *= mix(0.40, 1.0, smoothstep(0.0, 1.8, vAbove));
     col = mix(col, woodCol, wornMask);
     // Lichen and damp in patches, on the shaded faces.
     float lichen = smoothstep(0.66, 0.84, tNoise(q * 4.5 + 9.0));
@@ -623,7 +644,7 @@ export interface TreeMaterials {
 }
 
 export function createTreeMaterials(): TreeMaterials {
-  const wood = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0, envMapIntensity: 0.35 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1.0, metalness: 0, envMapIntensity: 0.10 });
   patchTreeMaterial(wood, "lit");
   const leaf = new THREE.MeshStandardMaterial({
     color: 0xffffff,

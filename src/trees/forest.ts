@@ -57,6 +57,8 @@ interface Chunk {
   distance: number;
   wood: THREE.Mesh | null;
   leaf: THREE.Mesh | null;
+  /** Soft dark patches on the ground under the trunks. */
+  decal: THREE.Mesh | null;
   job: Job | null;
 }
 
@@ -65,6 +67,38 @@ interface Job {
   lod: number;
   next: number;
   grown: TreeData[];
+}
+
+let contact: THREE.MeshBasicMaterial | null = null;
+
+/** One shared soft round shadow, drawn flat on the ground. */
+function contactMaterial(): THREE.MeshBasicMaterial {
+  if (contact) return contact;
+  const n = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = n;
+  canvas.height = n;
+  const g = canvas.getContext("2d");
+  if (g) {
+    const grad = g.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
+    grad.addColorStop(0, "rgba(255,255,255,0.95)");
+    grad.addColorStop(0.35, "rgba(255,255,255,0.55)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, n, n);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  contact = new THREE.MeshBasicMaterial({
+    map: texture,
+    color: 0x0b0905,
+    transparent: true,
+    opacity: 0.6,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  });
+  return contact;
 }
 
 const SIDES = [24, 16, 10, 6];
@@ -178,6 +212,7 @@ export class UniqueForest {
           distance: Infinity,
           wood: null,
           leaf: null,
+          decal: null,
           job: null,
         };
         byKey.set(key, chunk);
@@ -337,6 +372,8 @@ export class UniqueForest {
         this.trees[id].z,
         0.5 * (d.height - d.crownBase),
       ],
+      // Where the foot of the tree stands (so the shader knows where the ground is).
+      [this.trees[id].x, this.trees[id].y, this.trees[id].z, d.crownBase],
     ]);
     this.rowDone[id] = 1;
   }
@@ -424,7 +461,31 @@ export class UniqueForest {
     leafMesh.receiveShadow = true;
     leafMesh.name = `forest/${chunk.key}/leaf`;
 
+    // Contact shadow: a soft dark pool where each trunk meets the ground, which is most of
+    // what makes a trunk look planted and not stood on a surface.
+    const pos: number[] = [];
+    const uv: number[] = [];
+    chunk.trees.forEach((id, k) => {
+      const t = this.trees[id];
+      const size = Math.max(1.6, grown[k].trunkRadius * 7 + 0.8);
+      const y = t.y + 0.03;
+      pos.push(t.x - size, y, t.z - size, t.x + size, y, t.z - size, t.x + size, y, t.z + size, t.x - size, y, t.z + size);
+      uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+    });
+    const base = new THREE.BufferGeometry();
+    base.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    base.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    const idx: number[] = [];
+    for (let q = 0; q < chunk.trees.length; q += 1) idx.push(q * 4, q * 4 + 2, q * 4 + 1, q * 4, q * 4 + 3, q * 4 + 2);
+    base.setIndex(idx);
+    const decal = new THREE.Mesh(base, contactMaterial());
+    decal.renderOrder = 1;
+    decal.frustumCulled = false;
+    decal.name = `forest/${chunk.key}/contact`;
+
     this.release(chunk);
+    chunk.decal = decal;
+    this.group.add(decal);
     chunk.wood = woodMesh;
     chunk.leaf = leafMesh;
     chunk.lod = lod;
@@ -442,6 +503,11 @@ export class UniqueForest {
     }
     chunk.wood = null;
     chunk.leaf = null;
+    if (chunk.decal) {
+      chunk.decal.removeFromParent();
+      chunk.decal.geometry.dispose();
+      chunk.decal = null;
+    }
   }
 
   private recount(): void {

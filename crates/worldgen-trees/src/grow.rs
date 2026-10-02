@@ -152,6 +152,17 @@ impl Path {
     }
 }
 
+/// Where the trunk's axis passes at height `y`.
+fn trunk_axis_at(pts: &[V3], y: f32) -> V3 {
+    for w in pts.windows(2) {
+        if w[1].y >= y {
+            let t = ((y - w[0].y) / (w[1].y - w[0].y).max(1e-4)).clamp(0.0, 1.0);
+            return w[0].lerp(w[1], t);
+        }
+    }
+    *pts.last().unwrap()
+}
+
 struct Crown {
     z0: f32,
     height: f32,
@@ -309,8 +320,43 @@ impl Grower {
             }
             rad[k] = r;
         }
+        // The trunk goes on below the ground: it is planted, not stood on.
+        self.segments.push(Segment { a: v3(0.0, -0.45, 0.0), b: pts[0], ra: rad[0], rb: rad[0], level: 0 });
         for i in 1..pts.len() {
             self.segments.push(Segment { a: pts[i - 1], b: pts[i], ra: rad[i - 1], rb: rad[i], level: 0 });
+        }
+        // Buttress roots: ridges of wood that leave the trunk a little above the ground and
+        // run out and down into it, thick where they join and thinning to nothing, so the
+        // trunk widens into the soil in lobes and does not just flare in a circle.
+        let mut rr = R::of(self.seed.derive("roots"));
+        let foot_r = rad[0];
+        let n_roots = 7 + (rr.u() * 3.0) as usize;
+        let phi0 = rr.range(0.0, std::f32::consts::TAU);
+        for i in 0..n_roots {
+            let phi = phi0 + i as f32 * std::f32::consts::TAU / n_roots as f32 + rr.range(-0.25, 0.25);
+            let out = v3(phi.cos(), 0.0, phi.sin());
+            let y0 = rr.range(0.18, 0.55) * (0.7 + 0.6 * foot_r.min(0.6) / 0.3).min(1.5);
+            let at = trunk_axis_at(&pts, y0);
+            let start = v3(at.x, y0, at.z) + out * (foot_r * 0.55);
+            let reach = foot_r * rr.range(1.1, 2.6) + 0.25;
+            let r_top = foot_r * rr.range(0.20, 0.36);
+            let steps = 6;
+            let mut prev = start;
+            let mut prev_r = r_top;
+            for k in 1..=steps {
+                let t = k as f32 / steps as f32;
+                // Out along the ground, sinking: the root is at the surface near the trunk and
+                // below it further out, wandering sideways a little.
+                let wander = (t * 6.0 + phi * 3.0).sin() * 0.16 * reach * t;
+                let side = v3(-out.z, 0.0, out.x);
+                let p = v3(at.x, 0.0, at.z) + out * (foot_r * 0.55 + reach * t) + side * wander;
+                let y = y0 * (1.0 - t).powf(2.2) - 0.30 * t.powf(1.3);
+                let pos = v3(p.x, y, p.z);
+                let r = (r_top * (1.0 - t * 0.85).powf(1.4)).max(0.015);
+                self.segments.push(Segment { a: prev, b: pos, ra: prev_r, rb: r, level: 1 });
+                prev = pos;
+                prev_r = r;
+            }
         }
         Path { pts, rad, cum }
     }
