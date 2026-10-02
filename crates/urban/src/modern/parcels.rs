@@ -598,6 +598,15 @@ pub(super) fn build_parcels(
             }
         }
     }
+    // Farmland along the country streets, around what is already there.
+    let mut occupied: Vec<Vec<V>> = parcels
+        .iter()
+        .map(|p| p.ring.iter().map(|q| frame.to_local(*q)).collect())
+        .chain(fields.iter().map(|f| f.ring.iter().map(|q| frame.to_local(*q)).collect()))
+        .collect();
+    if frame.external.is_some() {
+        suburb::roadside_fields(frame, &pts, &edges, &river_local, river_half, seed, &mut occupied, &mut fields, &mut next_field);
+    }
     ParcelOutput { blocks, parcels, buildings, fields }
 }
 

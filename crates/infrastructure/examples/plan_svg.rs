@@ -54,6 +54,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         city.nodes.len(), city.sd_roads.len(), city.blocks.len(), city.parcels.len(), city.buildings.len()
     );
 
+    eprintln!("  fields: {}", city.fields.len());
     let count = |u: urban::ParcelUse| city.parcels.iter().filter(|p| p.use_type == u).count();
     eprintln!(
         "  parcels: villa {}, farmstead {}, residential {}, commercial {}, mixed {}, civic {}, park {}",
@@ -136,6 +137,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     for b in &city.blocks {
         let pts: Vec<String> = b.boundary.iter().map(|p| { let (x, y) = tx(p); format!("{x:.1},{y:.1}") }).collect();
         writeln!(svg, r##"<polygon points="{}" fill="#cfd8b8" stroke="none"/>"##, pts.join(" "))?;
+    }
+    for fl in &city.fields {
+        let pts: Vec<String> = fl.ring.iter().map(|p| { let (x, y) = tx(p); format!("{x:.1},{y:.1}") }).collect();
+        let fill = match fl.crop {
+            urban::CropKind::Wheat => "#c9c46a",
+            urban::CropKind::Rice => "#7fb36a",
+            urban::CropKind::Rapeseed => "#f0d83a",
+            urban::CropKind::Corn => "#8fa84a",
+            urban::CropKind::Vegetables => "#5f9a4a",
+            urban::CropKind::Fallow => "#a58a68",
+            urban::CropKind::Orchard => "#3f7a4a",
+        };
+        writeln!(svg, r##"<polygon points="{}" fill="{fill}" stroke="#777" stroke-width="0.3"/>"##, pts.join(" "))?;
     }
     for b in &city.buildings {
         let pts: Vec<String> = b.footprint.iter().map(|p| { let (x, y) = tx(p); format!("{x:.1},{y:.1}") }).collect();

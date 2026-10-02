@@ -510,3 +510,90 @@ pub(super) fn place_fields(f: &Frontage<'_>, lots: &[Vec<V>], sink: &mut Sink<'_
         }
     }
 }
+
+/// Farmland along every country street, on both sides, up to three strips deep. Open
+/// country has no closed blocks to cut up (the streets thin out and stop), but it has
+/// its lanes, and farmland is exactly what lies along them. Every strip is checked
+/// against the houses and fields already placed and against all other streets.
+pub(super) fn roadside_fields(
+    frame: &CityFrame,
+    pts: &[V],
+    edges: &[(usize, usize, ModernRoadClass)],
+    river: &[V],
+    river_half: f32,
+    seed: u32,
+    occupied: &mut Vec<Vec<V>>,
+    fields: &mut Vec<Field>,
+    next_field: &mut u32,
+) {
+    let mut count = 0;
+    for (ei, &(ia, ib, class)) in edges.iter().enumerate() {
+        let (a, b) = (pts[ia], pts[ib]);
+        let len = (b.0 - a.0).hypot(b.1 - a.1);
+        if len < 60.0 {
+            continue;
+        }
+        let mid = ((a.0 + b.0) * 0.5, (a.1 + b.1) * 0.5);
+        if frame.urbanness(mid.0, mid.1) >= TOWN_BUILT {
+            continue;
+        }
+        let t = ((b.0 - a.0) / len, (b.1 - a.1) / len);
+        let angle = t.1.atan2(t.0);
+        let row = right_of_way(class);
+        for side in [-1.0_f32, 1.0] {
+            let n = (-t.1 * side, t.0 * side);
+            let key = ei as i32 * 2 + (side > 0.0) as i32;
+            let preferred = modern_hash(seed, key, 11, 1301);
+            let width = 20.0 + 24.0 * modern_hash(seed, key, 11, 1303);
+            let mut off = row + 7.0;
+            for depth in 0..3 {
+                let at = |s: f32, d: f32| -> V { (a.0 + t.0 * s + n.0 * d, a.1 + t.1 * s + n.1 * d) };
+                let mut s = 8.0 + 20.0 * modern_hash(seed, key, depth, 1305);
+                let mut col = 0;
+                while s + 24.0 < len - 8.0 && count < 700 {
+                    col += 1;
+                    let k2 = key * 1024 + depth * 64 + col;
+                    let noise = |salt: i32| modern_hash(seed, k2, 13, salt);
+                    let l = (55.0 + 70.0 * noise(1307)).min(len - 8.0 - s);
+                    let w = width * (0.8 + 0.4 * noise(1309));
+                    let corners = vec![at(s, off), at(s + l, off), at(s + l, off + w), at(s, off + w)];
+                    s += l + 1.6;
+                    let c = centroid(&corners);
+                    if frame.urbanness(c.0, c.1) >= TOWN_BUILT {
+                        continue;
+                    }
+                    // Clear of every street (this one included, since the road bends).
+                    let clear = edges.iter().all(|&(ja, jb, cl)| {
+                        let ro = right_of_way(cl) + 2.0;
+                        corners.iter().all(|p| point_seg_dist(*p, pts[ja], pts[jb]) >= ro)
+                            && super::geom::seg_seg_dist(corners[0], corners[2], pts[ja], pts[jb]) >= ro
+                            && super::geom::seg_seg_dist(corners[1], corners[3], pts[ja], pts[jb]) >= ro
+                    });
+                    if !clear {
+                        continue;
+                    }
+                    if !river.is_empty() && ring_polyline_dist(&corners, river) < river_half + 8.0 {
+                        continue;
+                    }
+                    if occupied.iter().any(|o| overlap(&corners, o, 2.0)) {
+                        continue;
+                    }
+                    let choices = crop_choices(zone(frame.urbanness(c.0, c.1)));
+                    let pick = if noise(1311) < 0.66 { preferred } else { noise(1313) };
+                    let crop = choices[((pick * choices.len() as f32) as usize).min(choices.len() - 1)];
+                    fields.push(Field {
+                        id: *next_field,
+                        ring: corners.iter().map(|p| frame.to_world(p.0, p.1)).collect(),
+                        crop,
+                        row_angle: angle,
+                        variant: (noise(1315) * 3.0) as u8,
+                    });
+                    *next_field += 1;
+                    occupied.push(corners);
+                    count += 1;
+                }
+                off += width + 1.6;
+            }
+        }
+    }
+}
