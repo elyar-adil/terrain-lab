@@ -139,7 +139,7 @@ void treeShape(out vec3 pos, out vec3 nor) {
     float nrm = length(rel);
     float depthIn = clamp(1.0 - nrm, 0.0, 1.0);
     float under = smoothstep(-0.2, -0.9, rel.y);
-    float ao = mix(1.0, 0.16, smoothstep(0.0, 0.55, depthIn));
+    float ao = mix(1.0, 0.30, smoothstep(0.0, 0.55, depthIn));
     ao *= 1.0 - 0.45 * under;
     // The same noise that breaks a crown into clumps: lobes of light and dark.
     float lobe = treeHash(floor(aLeafPos.xyz * 0.9)) * 0.5 + 0.5;
@@ -468,10 +468,22 @@ ${DEBUG === "sun" ? "if (vTreeKind > 0.5) { totalEmissiveRadiance = vec3(max(dot
 ${DEBUG === "front" ? "if (vTreeKind > 0.5) { totalEmissiveRadiance = gl_FrontFacing ? vec3(0.0,1.0,0.0) : vec3(1.0,0.0,0.0); diffuseColor.rgb = vec3(0.0); }" : ""}
 #if NUM_DIR_LIGHTS > 0
 if (vTreeKind > 1.5) {
-  vec3 toLight = directionalLights[0].direction;
-  float through = max(0.0, dot(-normal, toLight));
-  float seen = max(0.0, dot(normalize(vViewPosition), toLight));
-  totalEmissiveRadiance += diffuseColor.rgb * directionalLights[0].color * through * (0.35 + 0.35 * seen) * (1.0 - 0.7 * vTreeColour.a);
+  // Light through a leaf. Chlorophyll absorbs red and blue and passes yellow-green, so
+  // what comes out the far side is brighter than the leaf's own reflected colour, and
+  // yellower. It needs the sun behind the leaf (seen from the front), and it is strongest
+  // when we look toward the sun through the foliage. Scaled by the leaf's exposure to
+  // the sun, so leaves deep in the crown do not glow.
+  vec3 L = directionalLights[0].direction;
+  vec3 V = normalize(vViewPosition);
+  float back = max(dot(-normal, L), 0.0);
+  float toSun = pow(max(dot(-V, L), 0.0), 3.0);
+  float t = 0.26 * pow(back, 0.7) + 0.50 * toSun * (0.35 + 0.65 * back);
+  float seen = smoothstep(0.08, 0.60, vTreeColour.a);
+  vec3 a = max(diffuseColor.rgb, vec3(1e-3));
+  float m = max(max(a.r, a.g), a.b);
+  vec3 hue = a / m;
+  vec3 through = pow(hue, vec3(0.80, 0.42, 3.0)) * vec3(0.85, 1.0, 0.28);
+  totalEmissiveRadiance += through * (m * 1.9 + 0.012) * directionalLights[0].color * t * seen;
 }
 #endif
 `;
