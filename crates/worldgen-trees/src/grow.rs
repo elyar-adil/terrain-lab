@@ -544,6 +544,18 @@ impl Grower {
     }
 }
 
+/// Where around the twig leaf number `j` comes out (before jitter), radians. Alternate,
+/// spiral leaf arrangement puts each leaf the golden angle (137.5°) from the last, which
+/// spreads the leaves so they shade one another least; opposite-decussate leaves come in
+/// pairs 180° apart, each pair a quarter turn from the pair before.
+pub fn leaf_azimuth(opposite: bool, j: usize, twig: usize, phi0: f32) -> f32 {
+    if opposite {
+        phi0 + (j / 2) as f32 * std::f32::consts::FRAC_PI_2 + (j % 2) as f32 * std::f32::consts::PI
+    } else {
+        phi0 + (j + twig) as f32 * GOLDEN_ANGLE
+    }
+}
+
 /// The state of the foliage on a given day: how much of the crown is in leaf, how
 /// far the leaves have turned, how fresh they still are, and how much is in bloom.
 pub fn leaf_state(sp: &Species, season: f32) -> (f32, f32, f32, f32) {
@@ -626,11 +638,32 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
     let budget = (LEAF_BUDGET[lod as usize] as f32 * (0.35 + 0.65 * sp.leaf_cover.min(5.0) / 5.0)).max(40.0);
     let n_target = budget * cover * keep_twigs;
     if n_target >= 1.0 {
-        let per_m = n_target / total_twig;
+        // Light decides where leaves are worth growing: the outer shell of the crown is lit,
+        // the interior is shaded, and a tree does not feed leaves that earn less than they
+        // cost. So leaf area sits on the periphery and the inner framework stays bare, as it
+        // does on any broadleaf tree. (A conifer, whose needles hold on for years, is clothed
+        // through.)
+        let shell = !matches!(grower.crown.habit, Habit::Layered | Habit::Conical);
+        let light = |p: V3| -> f32 {
+            if !shell {
+                return 1.0;
+            }
+            let radial = (p.x * p.x + p.z * p.z).sqrt();
+            let reach = grower.crown.reach(p.y, p.z.atan2(p.x)).max(0.3);
+            // How deep below the crown's lit surface this twig is, metres, by the shortest way
+            // out: sideways or up.
+            let side = (reach - radial).max(0.0);
+            let top = (h - p.y).max(0.0);
+            let depth = side.min(top);
+            0.02 + 0.98 * (-depth / 0.9).exp()
+        };
+        let weight_total: f32 = grower.twigs.iter().map(|t| t.0.dist(t.1) * light(t.1)).sum::<f32>().max(0.05);
+        let per_m = n_target / weight_total;
         // Leaf size: the crown's leaf area, shared out among the leaves drawn.
         let crown_area = std::f32::consts::PI * grower.crown.radius * grower.crown.radius;
         let area_total = 1.9 * sp.leaf_cover * cover * keep_twigs * (0.55 + 0.45 * spec.openness) * crown_area;
         let k = 0.70 * sp.leaf_aspect.min(1.1);
+        let opposite = matches!(sp.key, "feng-shu" | "gui-hua");
         // A farther level draws fewer, bigger leaves; the ceiling on their size rises with
         // how many fewer, so the crown keeps its mass.
         let stretch = (LEAF_BUDGET[0] as f32 / LEAF_BUDGET[lod as usize] as f32).sqrt();
@@ -642,15 +675,23 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
                 continue;
             }
             let len = a.dist(b);
-            let expected = len * per_m;
+            let expected = len * per_m * light(b);
             let count = (expected + lr.u() - 0.5 + 0.5).floor().max(0.0) as usize;
             let axis = (b - a).norm();
             let phi0 = lr.range(0.0, std::f32::consts::TAU);
             for j in 0..count {
                 let mut kr = R::of(Seed::new(tseed).derive_u64(0x1EAF + j as u64));
-                let s = if count == 1 { 0.5 + 0.45 * kr.u() } else { (j as f32 + kr.range(0.2, 0.9)) / count as f32 };
+                // An opposite pair leaves from one node, so both share its place along the twig.
+                let s = if opposite {
+                    let mut nr = R::of(Seed::new(tseed).derive_u64(0x2EAF + (j / 2) as u64));
+                    ((j / 2) as f32 + nr.range(0.2, 0.9)) / count.div_ceil(2).max(1) as f32
+                } else if count == 1 {
+                    0.5 + 0.45 * kr.u()
+                } else {
+                    (j as f32 + kr.range(0.2, 0.9)) / count as f32
+                };
                 let base = a.lerp(b, s.clamp(0.0, 1.0));
-                let phi = phi0 + (j + ti) as f32 * GOLDEN_ANGLE + kr.range(-0.3, 0.3);
+                let phi = leaf_azimuth(opposite, j, ti, phi0) + if opposite { kr.range(-0.08, 0.08) } else { kr.range(-0.3, 0.3) };
                 let petiole = Grower::spawn_dir(axis, kr.range(0.55, 1.2), phi);
                 let outward = {
                     let o = base - crown_centre;

@@ -201,3 +201,51 @@ fn a_whole_species_of_trees_is_a_population_not_a_stamp() {
     let sd = (widths.iter().map(|w| (w - mean).powi(2)).sum::<f32>() / widths.len() as f32).sqrt();
     assert!(sd / mean > 0.06, "crown widths vary by only {:.1}%", 100.0 * sd / mean);
 }
+
+/// Light decides where a broadleaf tree keeps leaves: most of the leaf area is on the lit
+/// outer shell of the crown, and the shaded interior framework is nearly bare.
+#[test]
+fn broadleaf_leaf_area_sits_on_the_outer_shell() {
+    for key in ["xiang-zhang", "yu-shu", "huai-shu", "yin-xing", "liu-shu"] {
+        let species = SPECIES.iter().position(|s| s.key == key).unwrap();
+        let mut outer = 0.0_f32;
+        let mut inner = 0.0_f32;
+        for seed in 1..=6u64 {
+            let t = grow(&TreeSpec::typical(species, seed), 0);
+            for l in &t.leaves {
+                // Position inside the crown taken as an ellipsoid: 1 at its surface, 0 on its axis.
+                let half = 0.5 * (t.height - t.crown_base);
+                let (x, y, z) = (l.pos.x / t.crown_radius, (l.pos.y - t.crown_base - half) / half, l.pos.z / t.crown_radius);
+                let norm = (x * x + y * y + z * z).sqrt();
+                let a = 0.7 * l.length * l.length;
+                if norm > 0.72 {
+                    outer += a;
+                } else {
+                    inner += a;
+                }
+            }
+        }
+        assert!(outer > 1.4 * inner, "{key}: outer shell {outer:.1} vs interior {inner:.1}");
+    }
+}
+
+/// Leaf arrangement follows the species: alternate leaves are the golden angle apart;
+/// opposite leaves come in pairs 180 degrees apart, each pair a quarter turn on.
+#[test]
+fn leaf_arrangement_follows_the_species() {
+    use std::f32::consts::{FRAC_PI_2, PI, TAU};
+    let wrap = |a: f32| a.rem_euclid(TAU);
+    for j in 0..8 {
+        let (a, b) = (worldgen_trees::leaf_azimuth(false, j, 3, 0.4), worldgen_trees::leaf_azimuth(false, j + 1, 3, 0.4));
+        let step = wrap(b - a);
+        assert!((step - 137.5_f32.to_radians()).abs() < 0.01, "alternate step {step}");
+        let (c, d) = (worldgen_trees::leaf_azimuth(true, 2 * j, 3, 0.4), worldgen_trees::leaf_azimuth(true, 2 * j + 1, 3, 0.4));
+        assert!((wrap(d - c) - PI).abs() < 0.01, "pair not opposite");
+        let e = worldgen_trees::leaf_azimuth(true, 2 * j + 2, 3, 0.4);
+        assert!((wrap(e - c) - FRAC_PI_2).abs() < 0.01, "pairs not decussate");
+    }
+    // And the table says which species is which.
+    for key in ["feng-shu", "gui-hua"] {
+        assert!(by_key(key).is_some(), "{key}");
+    }
+}
