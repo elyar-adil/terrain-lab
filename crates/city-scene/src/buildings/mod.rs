@@ -47,11 +47,11 @@ pub(crate) mod house;
 mod shell;
 
 use urban::{
-    CityFrameInfo, Compound, ModernBuilding, Parcel, ParcelUse, Point, RoofStyle, UrbanBlock, modern,
+    CityFrameInfo, Compound, ModernBuilding, Parcel, ParcelUse, Point, UrbanBlock,
 };
 
 use crate::facades::{GROUND_STOREY_M, design};
-use crate::math::{Vec2, Vec3, inset_ring, point_in_ring, ring_centroid, signed_area};
+use crate::math::{Vec2, Vec3, signed_area};
 use crate::mesh::{GroupStyle, MeshBuilder};
 use crate::spec::FACADE_TILES;
 
@@ -506,33 +506,6 @@ pub(crate) fn facade_wall(
     );
 }
 
-/// A vertical wall UV'd the same way as a facade, but anchored at its own base
-/// so a single-storey band — a shopfront fascia, a podium deck fascia — is drawn
-/// once rather than tiled.
-pub(crate) fn band_uv(
-    builder: &mut MeshBuilder,
-    material: &str,
-    a: Vec2,
-    b: Vec2,
-    y0: f32,
-    y1: f32,
-    tint: Option<[f32; 3]>,
-) {
-    let length = a.distance(b);
-    if length <= 1.0e-3 || y1 - y0 <= 1.0e-3 {
-        return;
-    }
-    builder.quad_uv(
-        material,
-        Vec3::from_plan(a, y0),
-        Vec3::from_plan(b, y0),
-        Vec3::from_plan(b, y1),
-        Vec3::from_plan(a, y1),
-        [(0.0, y0), (length, y0), (length, y1), (0.0, y1)],
-        tint,
-    );
-}
-
 // ---------------------------------------------------------------------------
 // compounds (小区)
 // ---------------------------------------------------------------------------
@@ -627,6 +600,7 @@ fn gate_point(point: Point, frame: CityFrameInfo) -> Vec2 {
 mod tests {
     use super::*;
     use crate::facades::{FACADE_TILE_H, FACADE_TILE_W};
+    use crate::math::{point_in_ring, ring_centroid};
     use urban::{ModernChinaSpec, generate_modern_chinese_city};
 
     fn city() -> urban::ModernCity {
@@ -666,7 +640,6 @@ mod tests {
                     if n.y.abs() > 0.5 * n.length() || n.length() < 1.0e-6 {
                         continue; // not a wall
                     }
-                    let mid = Vec2::new((a.x + b.x + c.x) / 3.0, (a.z + b.z + c.z) / 3.0);
                     let mid = Vec2::new((a.x + b.x + c.x) / 3.0, (a.z + b.z + c.z) / 3.0);
                     let out = Vec2::new(mid.x - centre.x, mid.y - centre.y);
                     // A concave footprint (courtyard, carved slab) and a stepped

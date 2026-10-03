@@ -240,7 +240,7 @@ pub const SPECIES: &[Species] = &[
         autumn: Some([0.320, 0.225, 0.030]),
         bloom: Bloom::NONE,
         height_m: (12.0, 20.0),
-        crown_m: (4.5, 6.5),
+        crown_m: (5.0, 7.5),
         trunk_m: (0.24, 0.38),
         // Branches start at mid-height and spread elegantly, which is what
         // gives the crown its fan shape on a clean leg.
@@ -307,7 +307,7 @@ pub const SPECIES: &[Species] = &[
         // the scholar tree's olive.
         foliage: [0.105, 0.160, 0.088],
         // Butter yellow, the classic elm fall.
-        autumn: Some([0.285, 0.205, 0.058]),
+        autumn: Some([0.288, 0.200, 0.056]),
         bloom: Bloom::NONE,
         height_m: (12.0, 20.0),
         crown_m: (6.0, 8.5),
@@ -439,7 +439,7 @@ pub const SPECIES: &[Species] = &[
         bark: bark([0.175, 0.165, 0.150], 0.80, 1.0),
         // A grey, matte green — the locust's pinnate foliage never reads as
         // glossy, and the crown is open enough to see the sky through.
-        foliage: [0.118, 0.172, 0.098],
+        foliage: [0.116, 0.172, 0.120],
         autumn: Some([0.270, 0.210, 0.062]),
         // Locusts in white flower in late May are a real event and a visible
         // one, but a scatter, not a cloud.
@@ -555,7 +555,7 @@ pub const SPECIES: &[Species] = &[
         autumn: Some([0.300, 0.225, 0.055]),
         bloom: Bloom::NONE,
         height_m: (16.0, 26.0),
-        crown_m: (2.6, 4.0),
+        crown_m: (2.4, 3.6),
         trunk_m: (0.24, 0.38),
         // Fastigiate: the sweep of upward branches starts low, so there is no
         // clear stem to speak of — the column is the tree.

@@ -45,8 +45,7 @@
 //! low roughness plus the sky IBL, so a bright "glass" albedo double-counts the
 //! sky and turns a tower into a white slab.
 
-use crate::facades::{GROUND_FLOOR_TILE_H, GROUND_STOREY_M, STOREY_M, STOREYS_PER_TILE, FACADE_TILE_H};
-use crate::facades::tile::bay_clearance;
+use crate::facades::STOREYS_PER_TILE;
 
 /// What a wall is *made of*.  This, not the colour, is what makes two tiles
 /// different buildings.
@@ -180,9 +179,9 @@ const MASONRY: FacadeDesign = FacadeDesign {
     cap: [0.560, 0.552, 0.530],
     cap_h: 0.20,
     glass: [0.055, 0.062, 0.072],
-    /// White-painted aluminium.  A window frame is the *brightest* thing on a
-    /// rendered wall, and getting that wrong is why so many procedural facades
-    /// read as a grid of holes.
+    // White-painted aluminium.  A window frame is the *brightest* thing on a
+    // rendered wall, and getting that wrong is why so many procedural facades
+    // read as a grid of holes.
     frame: [0.680, 0.672, 0.650],
     open_w: 1.50,
     open_h: 1.40,
@@ -434,7 +433,7 @@ pub static DESIGNS: [FacadeDesign; 24] = [
         // why a dark glass tower is given one.
         wall: [0.400, 0.415, 0.420],
         spandrel: [0.370, 0.386, 0.392],
-        spandrel_h: 0.56,
+        spandrel_h: 0.64,
         cap: [0.440, 0.452, 0.458],
         cap_h: 0.16,
         band: [0.024, 0.030, 0.034],
@@ -525,12 +524,12 @@ pub static DESIGNS: [FacadeDesign; 24] = [
         // lands on stone rather than on glass — otherwise this tile and
         // `curtain-dark-grid` are the same colour with the same glass, and no
         // amount of hue tuning will separate them.
-        wall: [0.390, 0.378, 0.352],
-        pier: [0.430, 0.420, 0.402],
+        wall: [0.382, 0.380, 0.370],
+        pier: [0.425, 0.422, 0.412],
         pier_w: 0.30,
-        spandrel: [0.372, 0.362, 0.340],
+        spandrel: [0.362, 0.360, 0.350],
         spandrel_h: 1.20,
-        cap: [0.450, 0.442, 0.424],
+        cap: [0.445, 0.442, 0.432],
         cap_h: 0.22,
         band: [0.024, 0.024, 0.023],
         band_h: 0.28,
@@ -779,6 +778,8 @@ pub fn tile_height_m(design: &FacadeDesign) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::facades::tile::bay_clearance;
+    use crate::facades::{FACADE_TILE_H, GROUND_FLOOR_TILE_H, GROUND_STOREY_M, STOREY_M};
     use crate::spec::FACADE_TILES;
 
     fn luma(linear: [f32; 3]) -> f32 {

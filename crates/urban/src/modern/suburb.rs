@@ -109,8 +109,6 @@ pub(super) struct Frontage<'a> {
     /// The buildable ground of the face (after street setbacks), one polygon per bank.
     pub envelopes: &'a [Vec<V>],
     pub spurs: &'a [(V, V, ModernRoadClass)],
-    pub river: &'a [V],
-    pub river_half: f32,
     pub seed: u32,
     pub block_base: u32,
 }

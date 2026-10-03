@@ -28,9 +28,6 @@ pub(super) struct ParcelOutput {
     pub fields: Vec<crate::Field>,
 }
 
-/// Design floor-to-floor heights, metres.  Residential runs 2.95-3.0 m, offices
-/// 3.9-4.2 m and retail podiums 4.5-5.1 m in Chinese practice.
-const RESIDENTIAL_FLOOR_M: f32 = 3.0;
 const PODIUM_FLOOR_M: f32 = 4.5;
 /// Gap left between two lots that share a bisection line.
 const LOT_GAP_M: f32 = 1.5;
@@ -193,8 +190,6 @@ pub(super) fn build_parcels(
                     face_index: fi,
                     envelopes: &envelopes,
                     spurs: &spurs,
-                    river: &river_local,
-                    river_half,
                     seed,
                     block_base,
                 },

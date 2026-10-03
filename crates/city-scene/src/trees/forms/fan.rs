@@ -13,8 +13,8 @@ use super::Architecture;
 /// near the top and only then draws in, and the two are then unmistakably
 /// different shapes at a glance.
 pub(super) fn profile(t: f32) -> f32 {
-    let x = (t - 0.58) / 0.66;
-    (1.0 - x * x).max(0.0).powf(0.30)
+    let x = (t - 0.95) / 0.95;
+    (1.0 - x * x).max(0.0).powf(0.55)
 }
 
 pub(super) fn architecture() -> Architecture {

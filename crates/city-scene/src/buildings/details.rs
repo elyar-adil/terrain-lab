@@ -10,7 +10,7 @@
 use urban::ModernBuilding;
 
 use super::rule;
-use crate::facades::{FacadeDesign, design};
+use crate::facades::FacadeDesign;
 use crate::math::{Vec2, Vec3, ring_centroid};
 use crate::mesh::MeshBuilder;
 
@@ -885,7 +885,7 @@ pub(crate) fn entrance_canopy(ring: &[Vec2], building: &ModernBuilding, builder:
 mod tests {
     use super::*;
     use crate::buildings::{level, ring_of};
-    use crate::facades::{GROUND_STOREY_M, STOREY_M};
+    use crate::facades::{GROUND_STOREY_M, STOREY_M, design};
     use crate::math::{point_in_ring, signed_area};
     use crate::mesh::MeshBuilder;
     use urban::{ModernChinaSpec, generate_modern_chinese_city};
@@ -924,7 +924,6 @@ mod tests {
             let top = base + (building.floors as f32 - 1.0).max(1.0) * STOREY_M;
             let mut builder = MeshBuilder::new();
             balconies(&outward, &fronts, building, base, top, STOREY_M, &mut builder);
-            let centroid = ring_centroid(&outward);
             for group in builder.build().meshes {
                 for chunk in group.positions.chunks_exact(3) {
                     let point = Vec2::new(chunk[0], chunk[2]);
@@ -981,8 +980,11 @@ mod tests {
                     continue;
                 }
                 for chunk in group.positions.chunks_exact(3) {
-                    // Railing tops sit within a hair of the code height.
-                    if (chunk[1] - expected).abs() < 0.02 {
+                    // Railing tops sit within a hair of the code height above
+                    // some storey's slab (the first balcony is on storey 1).
+                    let above = chunk[1] - expected;
+                    let off = (above / STOREY_M - (above / STOREY_M).round()).abs() * STOREY_M;
+                    if above > STOREY_M - 0.02 && off < 0.02 {
                         if building.floors >= 7 {
                             tall += 1;
                         } else {
@@ -1055,11 +1057,16 @@ mod tests {
         let mut builder = MeshBuilder::new();
         sill_courses(&mut builder, &ring, 4.65, 22.0, mosaic);
         let depth = super::rule::BAY_WINDOW_PROJECTION_M + 0.01;
-        // Every trim.light vertex in front of the wall is within the 飘窗
-        // projection of it.
+        // Every vertex in front of the wall is within the 飘窗 projection of it.
+        // The distance is measured outside the footprint rectangle, not as a
+        // raw coordinate: the wall itself is 30 m long.
         for group in builder.build().meshes {
             for chunk in group.positions.chunks_exact(3) {
-                let out = chunk[0];
+                let out = (-chunk[0])
+                    .max(chunk[0] - 30.0)
+                    .max(-chunk[2])
+                    .max(chunk[2] - 12.0)
+                    .max(0.0);
                 assert!(
                     out < depth + 1.0e-3,
                     "a bay course projects {out:.2} m, outside the 飘窗 band"

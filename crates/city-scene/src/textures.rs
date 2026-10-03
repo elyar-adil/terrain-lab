@@ -101,12 +101,6 @@ pub(crate) fn signed_noise(seed: u32, x: f32, y: f32, period: f32) -> f32 {
     noise(seed, x, y, period) * 2.0 - 1.0
 }
 
-/// Fractional luma of an RGBA8 pixel, used by the physical-albedo tests.
-#[cfg(test)]
-fn luma(pixel: &[u8]) -> f32 {
-    0.2126 * pixel[0] as f32 + 0.7152 * pixel[1] as f32 + 0.0722 * pixel[2] as f32
-}
-
 /// sRGB byte → linear reflectance, the number a physical-albedo assertion has
 /// to be made in.  A road surface is 4-12% *linear*; judging it by its 8-bit
 /// value is what let a mid-grey "asphalt" through, which is a concrete colour.

@@ -469,7 +469,7 @@ impl MeshBuilder {
                 .normals
                 .extend_from_slice(&[normal.x, normal.y, normal.z]);
         }
-        /**
+        /*
          * **A group's UV array is always complete, whether or not the caller
          * supplied coordinates.**
          *

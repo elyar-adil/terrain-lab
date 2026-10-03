@@ -16,7 +16,7 @@
 //!   a textured group desyncs the optional UV layer from the vertex count and
 //!   the payload fails to load.
 
-use urban::{ModernBuilding, RoofStyle, modern};
+use urban::{ModernBuilding, RoofStyle};
 
 use super::details;
 use super::roofscape::{self, ring_extent};

@@ -8,7 +8,9 @@
 //! and white sign boards is the single most recognisable feature of a Chinese
 //! retail street.
 
-use crate::facades::{GROUND_FLOOR_TILE_H, GROUND_FLOOR_TILE_W, GROUND_STOREY_M};
+use crate::facades::{
+    GROUND_FLOOR_BAY_W, GROUND_FLOOR_BAYS, GROUND_FLOOR_TILE_H, GROUND_FLOOR_TILE_W, GROUND_STOREY_M,
+};
 use crate::facades::tile::{shade, srgb8, value_noise};
 use crate::textures::{BakedTexture, hash};
 
@@ -35,6 +37,31 @@ const SIGN_BOARDS: [[f32; 3]; 6] = [
     [0.185, 0.132, 0.048], // bakery gold on brown
 ];
 
+/// A per-bay decision in `0..1`.  The shared `hash` is a half-finalised mix whose
+/// outputs are correlated for consecutive small integers, which is exactly what a
+/// bay index is, so bays get the full 32-bit avalanche.
+fn bay_hash(seed: u32, bay: i32) -> f32 {
+    let mut v = seed ^ (bay as u32).wrapping_mul(0x9e37_79b9);
+    v ^= v >> 16;
+    v = v.wrapping_mul(0x85eb_ca6b);
+    v ^= v >> 13;
+    v = v.wrapping_mul(0xc2b2_ae35);
+    v ^= v >> 16;
+    v as f32 / u32::MAX as f32
+}
+
+/// The sign board of one bay.  Neighbouring shops never share a board: each bay
+/// steps a random 1..N-1 places on from the one before it.
+fn sign_board(key: u32, bay: i32) -> usize {
+    let n = SIGN_BOARDS.len();
+    let mut index = (bay_hash(key.wrapping_add(701), 0) * n as f32) as usize % n;
+    for b in 1..=bay.max(0) {
+        let step = 1 + (bay_hash(key.wrapping_add(701), b) * (n - 1) as f32) as usize % (n - 1);
+        index = (index + step) % n;
+    }
+    index
+}
+
 /// Chinese ground floors are a *continuous* band, not a row of doors: a stall
 /// riser, a run of piers, glazed shopfronts, a roller shutter somewhere in
 /// every four bays, a fascia, and the projecting sign boxes the geometry adds in
@@ -42,13 +69,16 @@ const SIGN_BOARDS: [[f32; 3]; 6] = [
 /// retail.
 fn ground_floor(kind: &str, size: usize) -> BakedTexture {
     let n = size.max(16);
-    let mut rgba = vec![0_u8; n * n * 4];
+    // One storey tall, `GROUND_FLOOR_BAYS` bays wide, at the same texel density
+    // horizontally as the one-bay tile had.
+    let w = n * GROUND_FLOOR_BAYS;
+    let mut rgba = vec![0_u8; w * n * 4];
     let key = match kind {
         "shop" => 977_u32,
         "lobby" => 1481,
         _ => 2003,
     };
-    let px_per_m = n as f32 / GROUND_FLOOR_TILE_W;
+    let px_per_m = n as f32 / GROUND_FLOOR_BAY_W;
     let hairline = 1.0 / px_per_m;
 
     // Reflectances, not screen colours.  A shopfront is the darkest thing on a
@@ -67,8 +97,12 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
     const DOOR: [f32; 3] = [0.115, 0.090, 0.070];
 
     for y in 0..n {
-        for x in 0..n {
-            let u = (x as f32 + 0.5) / px_per_m;
+        for x in 0..w {
+            // `run_u` is metres along the whole tile; `u` is metres within this
+            // pixel's own bay, which is what every layout rule below is written in.
+            let run_u = (x as f32 + 0.5) / px_per_m;
+            let bay = (run_u / GROUND_FLOOR_BAY_W).floor() as i32;
+            let u = run_u - bay as f32 * GROUND_FLOOR_BAY_W;
             // `h` is metres above the shop floor; the tile is one storey tall.
             let h = (1.0 - (y as f32 + 0.5) / n as f32) * GROUND_FLOOR_TILE_H;
             // Per-pixel grain only.  Anything that *decides* something — whether
@@ -76,7 +110,7 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
             // is keyed on a 1.05 m block, because a decision that changes every
             // pixel is not a decision, it is noise, and noise at this contrast
             // reads as dirt on the lens.
-            let block = (u / 1.05).floor() as i32;
+            let block = (run_u / 1.05).floor() as i32;
             let decide = |salt: u32| hash(key.wrapping_add(salt), block, 0);
             let g = |salt: u32| hash(key.wrapping_add(salt), x as i32, y as i32);
             // Grime rises from the pavement and rain runs down from every
@@ -96,16 +130,15 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
             let (pier_a, glazed, mullion, door, flank) = (0.50_f32, 2.30, 2.60, 3.70, 4.20);
             // One sign board per bay: every 4.2 m unit picked its own colour the
             // day it opened, and the run of colours down a street is the look.
-            let bay = (u / GROUND_FLOOR_TILE_W).floor() as i32;
-            let sign_pick = hash(key.wrapping_add(701), bay, 0);
-            let plain_pick = hash(key.wrapping_add(733), bay, 0);
+            let board = sign_board(key, bay);
+            let plain_pick = bay_hash(key.wrapping_add(733), bay);
             let fascia = if plain_pick < 0.30 {
                 // Some units never re-clad: bare render fascia.
-                shade(FASCIA, 0.85 + 0.3 * hash(key.wrapping_add(751), bay, 0))
+                shade(FASCIA, 0.85 + 0.3 * bay_hash(key.wrapping_add(751), bay))
             } else {
                 shade(
-                    SIGN_BOARDS[(sign_pick * SIGN_BOARDS.len() as f32) as usize % SIGN_BOARDS.len()],
-                    0.92 + 0.16 * hash(key.wrapping_add(769), bay, 0),
+                    SIGN_BOARDS[board],
+                    0.92 + 0.16 * bay_hash(key.wrapping_add(769), bay),
                 )
             };
 
@@ -332,7 +365,7 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
                     colour = shade(colour, 0.86);
                 }
             }
-            let offset = (y * n + x) * 4;
+            let offset = (y * w + x) * 4;
             for channel in 0..3 {
                 let value = colour[channel] - grime * (1.0 - h / GROUND_FLOOR_TILE_H).min(1.0);
                 rgba[offset + channel] = srgb8(value);
@@ -342,7 +375,7 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
     }
     BakedTexture {
         name: format!("ground/{kind}"),
-        width: n,
+        width: w,
         height: n,
         tile_width_m: GROUND_FLOOR_TILE_W,
         tile_height_m: GROUND_STOREY_M,
@@ -361,8 +394,7 @@ mod tests {
     }
 
     fn median_albedo(texture: &BakedTexture) -> [f32; 3] {
-        let n = texture.width;
-        let mut values: Vec<[f32; 3]> = (0..n * n)
+        let mut values: Vec<[f32; 3]> = (0..texture.width * texture.height)
             .map(|index| {
                 let offset = index * 4;
                 [
@@ -385,15 +417,16 @@ mod tests {
     }
 
     /// The three ground floors are a retail band, a portal and an entrance, and
-    /// they are authored at true size: one 4.2 m bay by one 4.5 m storey, with
-    /// no vertical repeat, so a 2.1 m door is 2.1 m on the wall.
+    /// they are authored at true size: a run of 4.2 m bays by one 4.5 m storey,
+    /// with no vertical repeat, so a 2.1 m door is 2.1 m on the wall.
     #[test]
     fn the_ground_floor_is_authored_at_true_scale() {
         let textures = ground_floor_textures(128);
         let names: Vec<&str> = textures.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(names, vec!["ground/shop", "ground/lobby", "ground/home"]);
         for texture in &textures {
-            assert_eq!(texture.rgba.len(), 128 * 128 * 4);
+            assert_eq!(texture.rgba.len(), texture.width * texture.height * 4);
+            assert_eq!(texture.width, 128 * GROUND_FLOOR_BAYS);
             assert_eq!(texture.tile_width_m, GROUND_FLOOR_TILE_W);
             assert_eq!(texture.tile_height_m, GROUND_STOREY_M);
             assert!(
@@ -418,14 +451,15 @@ mod tests {
     #[test]
     fn the_shop_signage_varies_per_bay_within_physical_reflectance() {
         let texture = ground_floor("shop", 256);
-        let n = texture.width;
-        let px_per_m = n as f32 / GROUND_FLOOR_TILE_W;
+        let n = texture.height;
+        let px_per_m = texture.width as f32 / GROUND_FLOOR_TILE_W;
         // Sample the middle of the fascia band (h ≈ 3.9 m) per bay.
         let row = (((GROUND_FLOOR_TILE_H - 3.9) / GROUND_FLOOR_TILE_H) * n as f32) as usize;
         let mut bay_colours: Vec<[f32; 3]> = Vec::new();
         for bay in 0..8 {
-            let x = (((bay as f32 + 0.5) * GROUND_FLOOR_TILE_W * px_per_m) as usize).min(n - 1);
-            let offset = (row * n + x) * 4;
+            let x = (((bay as f32 + 0.5) * GROUND_FLOOR_BAY_W * px_per_m) as usize)
+                .min(texture.width - 1);
+            let offset = (row * texture.width + x) * 4;
             bay_colours.push([
                 srgb_to_linear(texture.rgba[offset] as f32 / 255.0),
                 srgb_to_linear(texture.rgba[offset + 1] as f32 / 255.0),
@@ -446,7 +480,16 @@ mod tests {
         for colour in &bay_colours {
             if !distinct
                 .iter()
-                .any(|other| (luma(*other) - luma(*colour)).abs() < 0.02)
+                // Boards differ in hue as much as in value: a blue and a green
+                // sign at the same luma are still two shops.
+                .any(|other| {
+                    other
+                        .iter()
+                        .zip(colour)
+                        .map(|(a, b)| (a - b).abs())
+                        .fold(0.0_f32, f32::max)
+                        < 0.02
+                })
             {
                 distinct.push(*colour);
             }

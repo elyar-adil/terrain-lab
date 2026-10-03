@@ -9,7 +9,7 @@ use super::Architecture;
 /// — measured, not asserted: the two profiles differ by more than a quarter
 /// of the crown's reach in every height band.
 pub(super) fn profile(t: f32) -> f32 {
-    (1.0 - 0.94 * t * t).max(0.05).powf(0.62)
+    (1.0 - 0.97 * t * t).max(0.05).powf(0.72)
 }
 
 pub(super) fn architecture() -> Architecture {

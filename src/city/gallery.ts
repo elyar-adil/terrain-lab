@@ -64,13 +64,13 @@ export function buildGallery(materials: MaterialCatalogue, city: CityHandles): G
   }
 
   // --- row 2: ground floors, roof, and the ground family --------------------
-  // Ground-floor bays at true scale (4.2 × 4.5 m), then roof and the asphalt /
+  // Ground-floor tiles at true scale (a run of eight 4.2 m bays × 4.5 m), then roof and the asphalt /
   // paving / grass / paint textures as 8 m pads.
   const groundRow = new THREE.Group();
   x = 0;
   for (const kind of ["shop", "lobby", "home"]) {
-    groundRow.add(wall(4.2, 4.5, x, materials.get(`ground/${kind}`)));
-    x += 6.5;
+    groundRow.add(wall(33.6, 4.5, x, materials.get(`ground/${kind}`)));
+    x += 36;
   }
   for (const key of ["roof", "asphalt", "sidewalk", "block.ground", "marking.crosswalk"]) {
     groundRow.add(wall(8, 4.5, x, materials.get(key)));

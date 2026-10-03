@@ -733,7 +733,6 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
     // --- leaves -------------------------------------------------------------------
     let (cover, autumn, flush, bloom) = leaf_state(sp, spec.season);
     let mut leaves = Vec::new();
-    let total_twig: f32 = grower.twigs.iter().map(|t| t.0.dist(t.1)).sum::<f32>().max(0.1);
     let budget = (LEAF_BUDGET[lod as usize] as f32 * (0.35 + 0.65 * sp.leaf_cover.min(5.0) / 5.0)).max(40.0);
     let n_target = budget * cover * keep_twigs;
     if n_target >= 1.0 {

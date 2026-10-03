@@ -362,14 +362,6 @@ fn add_edge(pts: &mut Vec<V>, segs: &mut Vec<Seg>, a: V, b: V, class: ModernRoad
     segs.push(Seg { a: base, b: base + 1, class, origin });
 }
 
-fn add_ring(pts: &mut Vec<V>, segs: &mut Vec<Seg>, poly: &[V], class: ModernRoadClass, origin: u8) {
-    let base = pts.len();
-    pts.extend_from_slice(poly);
-    for i in 0..poly.len() {
-        segs.push(Seg { a: base + i, b: base + (i + 1) % poly.len(), class, origin });
-    }
-}
-
 /// Distance from the river centreline to a quay (riverside road) centreline,
 /// beyond the water's half width.  The quay's outer kerb then sits about a dozen
 /// metres from the water (a narrow promenade), while a junction box on it, up to

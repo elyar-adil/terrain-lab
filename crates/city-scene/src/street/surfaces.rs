@@ -547,7 +547,7 @@ pub(super) fn junction_details(junction: &Junction, builder: &mut MeshBuilder, s
 /// line count is capped for the same reason: a 5 m grid across a 60 m box is 200
 /// quads a junction, and past a handful of junctions that is a triangle budget
 /// spent on paint nobody sees from a car.
-fn yellow_grid_box(junction: &Junction, builder: &mut MeshBuilder, spec: &JunctionSpec) {
+fn yellow_grid_box(junction: &Junction, builder: &mut MeshBuilder, _spec: &JunctionSpec) {
     if junction.roundabout || junction.ports.len() < 4 || junction.radius < 22.0 {
         return;
     }
@@ -630,63 +630,6 @@ fn yellow_bar(builder: &mut MeshBuilder, a: Vec2, b: Vec2, half: f32) {
         Vec3::new(a.x - nx, y, a.y - nz),
         None,
     );
-}
-
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
-}
-
-fn grid_line(
-    builder: &mut MeshBuilder,
-    inset: &[Vec2],
-    at: f32,
-    vertical: bool,
-    width: f32,
-) {
-    // Walk the line in 6 m steps and keep the runs that fall inside the box.
-    let mut lo = f32::MAX;
-    let mut hi = f32::MIN;
-    for point in inset {
-        let value = if vertical { point.x } else { point.y };
-        let across = if vertical { point.y } else { point.x };
-        if (at - value).abs() > width {
-            continue;
-        }
-        lo = lo.min(across);
-        hi = hi.max(across);
-    }
-    if hi - lo < 6.0 {
-        return;
-    }
-    let mut station = lo;
-    while station < hi {
-        let end = (station + 6.0).min(hi);
-        let mid = (station + end) * 0.5;
-        let probe = if vertical {
-            Vec2::new(at, mid)
-        } else {
-            Vec2::new(mid, at)
-        };
-        if crate::math::point_in_ring(probe, inset) {
-            let quad = if vertical {
-                [
-                    Vec3::new(at - width, super::level::PAINT, station),
-                    Vec3::new(at + width, super::level::PAINT, station),
-                    Vec3::new(at + width, super::level::PAINT, end),
-                    Vec3::new(at - width, super::level::PAINT, end),
-                ]
-            } else {
-                [
-                    Vec3::new(station, super::level::PAINT, at - width),
-                    Vec3::new(end, super::level::PAINT, at - width),
-                    Vec3::new(end, super::level::PAINT, at + width),
-                    Vec3::new(station, super::level::PAINT, at + width),
-                ]
-            };
-            builder.quad("marking.yellow", quad[0], quad[1], quad[2], quad[3], None);
-        }
-        station = end;
-    }
 }
 
 /// The give-way line (让行线) across an unsignalised approach: a row of inverted

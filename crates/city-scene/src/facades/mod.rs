@@ -75,7 +75,12 @@ pub const GROUND_STOREY_M: f32 = 4.5;
 /// Ground-floor tiles are authored at true scale — one shop bay by one ground
 /// storey, and no vertical repeat, so a shopfront's door and stall riser are the
 /// right size in metres.
-pub const GROUND_FLOOR_TILE_W: f32 = 4.2;
+pub const GROUND_FLOOR_BAY_W: f32 = 4.2;
+/// A ground-floor tile is a run of shop bays, so the per-bay decisions (sign
+/// colour, shutter, lit hatch) differ along a street instead of repeating every
+/// 4.2 m.
+pub const GROUND_FLOOR_BAYS: usize = 8;
+pub const GROUND_FLOOR_TILE_W: f32 = GROUND_FLOOR_BAY_W * GROUND_FLOOR_BAYS as f32;
 pub const GROUND_FLOOR_TILE_H: f32 = GROUND_STOREY_M;
 /// The physical size of one roof-tile texture, in metres.  A roof tile covers a
 /// 3 m square of the actual tile field, so the texture's resolution is its real

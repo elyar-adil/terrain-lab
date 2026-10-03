@@ -40,20 +40,6 @@ fn crop_name(crop: CropKind) -> &'static str {
     }
 }
 
-fn value_noise(seed: u32, x: f32, y: f32) -> f32 {
-    let (x0, y0) = (x.floor(), y.floor());
-    let (fx, fy) = (x - x0, y - y0);
-    let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
-    let (ix, iy) = (x0 as i32, y0 as i32);
-    let n00 = hash(seed, ix, iy);
-    let n10 = hash(seed, ix + 1, iy);
-    let n01 = hash(seed, ix, iy + 1);
-    let n11 = hash(seed, ix + 1, iy + 1);
-    let a = n00 + (n10 - n00) * sx;
-    let b = n01 + (n11 - n01) * sx;
-    a + (b - a) * sy
-}
-
 /// A value noise that tiles over `period` cells, so the texture repeats without a seam.
 fn tiled_noise(seed: u32, x: f32, y: f32, period: i32) -> f32 {
     let (x0, y0) = (x.floor(), y.floor());
