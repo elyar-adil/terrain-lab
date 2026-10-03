@@ -895,7 +895,7 @@ mod tests {
         // sheet has six: camphor, osmanthus, deodar, pine, banyan, fir.
         let evergreen = SPECIES.iter().filter(|s| s.evergreen).count();
         assert!(
-            evergreen >= 4 && evergreen <= 7,
+            (4..=7).contains(&evergreen),
             "{evergreen} evergreens out of {} is not a plausible urban mix",
             SPECIES.len()
         );

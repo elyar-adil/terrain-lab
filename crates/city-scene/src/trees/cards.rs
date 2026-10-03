@@ -1294,7 +1294,7 @@ mod tests {
                 species.key
             );
         }
-        assert!(CARD_WINDOW > 0.0 && CARD_WINDOW < 1.0);
+        const { assert!(CARD_WINDOW > 0.0 && CARD_WINDOW < 1.0) };
     }
 
     /// The tuft used to ship as a fully transparent image, which meant the tuft

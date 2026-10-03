@@ -6,3 +6,15 @@ members = ["crates/terrain-core", "crates/world-core", "crates/worldgen-core", "
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# One lint policy for every crate (each crate opts in with `[lints] workspace = true`).
+[workspace.lints.rust]
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+# Geometry emitters (mesh quads, tubes, facade bands) take one scalar per physical
+# dimension; bundling them into one-off structs would only move the list.
+too_many_arguments = "allow"
+# Grid and texture code indexes several parallel arrays by one coordinate; the
+# index form is the clearer one there.
+needless_range_loop = "allow"

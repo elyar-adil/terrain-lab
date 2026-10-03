@@ -145,7 +145,7 @@ pub fn prototype_set() -> Vec<TreePrototype> {
             result.push(TreePrototype {
                 key: format!("tree/{}/{}", species.key, variant),
                 species,
-                variant: variant as u16,
+                variant,
                 height,
                 crown,
                 trunk,

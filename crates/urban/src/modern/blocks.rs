@@ -67,14 +67,14 @@ pub(super) fn extract_faces(pts: &[V], edges: &[(usize, usize, ModernRoadClass)]
     let half_count = unique.len() * 2;
     // half-edge h: even = a->b, odd = b->a
     let origin = |h: usize| {
-        if h % 2 == 0 {
+        if h.is_multiple_of(2) {
             unique[h / 2].0
         } else {
             unique[h / 2].1
         }
     };
     let target = |h: usize| {
-        if h % 2 == 0 {
+        if h.is_multiple_of(2) {
             unique[h / 2].1
         } else {
             unique[h / 2].0

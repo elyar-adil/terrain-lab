@@ -217,7 +217,7 @@ fn facade_residential(u: f32, v: f32, profile: &WeatheringProfile) -> Rgb {
     let in_window_y = wy > 0.22 && wy < 0.78;
     let mut colour = if in_window_x && in_window_y {
         let reflect = hash01(profile.seed, cell.tile_x, floor, 31);
-        let sill_band = wy < 0.30 || wy > 0.70;
+        let sill_band = !(0.30..=0.70).contains(&wy);
         if sill_band {
             frame
         } else {

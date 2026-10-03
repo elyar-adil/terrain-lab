@@ -374,7 +374,7 @@ fn declare(builder: &mut MeshBuilder) {
 /// Build the whole street layer into `builder`.
 pub fn build(network: &Network, builder: &mut MeshBuilder, seed: u32) -> StreetOutput {
     declare(builder);
-    let spec = network.spec.clone();
+    let spec = network.spec;
     for road in &network.roads {
         surfaces::road_surface(road, builder, &spec);
         markings::road_markings(network, road, builder, &spec);

@@ -112,6 +112,9 @@ fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     ]
 }
 
+/// A saved turtle: heading, side and up axes, then step length and radius.
+type TurtleState = ([f32; 3], [f32; 3], [f32; 3], f32, f32);
+
 /// Interpret an expanded symbol string with the 3D turtle.  `jitter` is the
 /// per-step angular noise in degrees so two trees of the same species grown
 /// from different seeds never read as clones.
@@ -133,7 +136,7 @@ pub fn interpret(
     let mut side = [1.0_f32, 0.0, 0.0];
     let mut step = params.step;
     let mut radius = params.base_radius;
-    let mut stack: Vec<([f32; 3], [f32; 3], [f32; 3], f32, f32)> = Vec::new();
+    let mut stack: Vec<TurtleState> = Vec::new();
 
     let turn = |axis_kind: u8, sign: f32, heading: &mut [f32; 3], side: &mut [f32; 3]| {
         let axis = match axis_kind {
@@ -257,8 +260,10 @@ mod tests {
 
     #[test]
     fn tropism_can_droop_willow_shoots() {
-        let mut droop = TurtleParams::default();
-        droop.tropism = Tropism { up: -0.9 };
+        let droop = TurtleParams {
+            tropism: Tropism { up: -0.9 },
+            ..TurtleParams::default()
+        };
         let mut rng = SplitMix64::new(11);
         // A pitched branch accumulates droop step by step and ends lower than
         // it started; a perfectly vertical trunk stays straight.

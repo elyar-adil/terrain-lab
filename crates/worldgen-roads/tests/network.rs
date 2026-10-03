@@ -84,7 +84,7 @@ fn a_big_tile_is_exactly_the_sum_of_the_tiles_inside_it() {
         .iter()
         .map(|c| e.get::<RoadTile>(ROADS, *c).unwrap())
         .collect();
-    let whole = network(&[big.clone()]);
+    let whole = network(std::slice::from_ref(&big));
     let merged = network(&parts);
     assert!(!whole.edges.is_empty());
     assert_eq!(

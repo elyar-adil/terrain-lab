@@ -258,7 +258,7 @@ fn facade_tile_for(building: &ModernBuilding, massing: Massing) -> usize {
         Massing::CurtainTower | Massing::Tower => {
             // 8..12 is the first half of the curtain-wall block; the second half
             // (12..16) is reserved for crowns and for large districts.
-            if id % 2 == 0 {
+            if id.is_multiple_of(2) {
                 8 + (id * 5 + 2) % 4
             } else {
                 [6usize, 17, 20, 20][id % 4]
@@ -290,7 +290,7 @@ pub(crate) fn crown_tile_for(shaft: usize, id: u32) -> usize {
         // A glass tower's crown is a pale stone cap — or, on every other block,
         // the mint-green glazing of the 2010s, which is the single most
         // recognisable residential-tower crown in the country.
-        if id % 2 == 0 { 13 } else { 14 }
+        if id.is_multiple_of(2) { 13 } else { 14 }
     } else {
         16
     }
@@ -302,7 +302,7 @@ fn ground_floor_material(building: &ModernBuilding, tile_index: usize) -> &'stat
         ParcelUse::MixedUse | ParcelUse::Commercial => "ground/shop",
         // A glass tower gets a stone portal, not a shopfront, unless it has a
         // retail podium — which it does, which is the point of a 裙房.
-        _ if tile_index >= 8 && tile_index <= 15 => "ground/lobby",
+        _ if (8..=15).contains(&tile_index) => "ground/lobby",
         // A civic building gets a portal too.
         _ if building.use_type == ParcelUse::Civic => "ground/lobby",
         _ => "ground/home",
@@ -320,7 +320,6 @@ fn ground_floor_material(building: &ModernBuilding, tile_index: usize) -> &'stat
 /// a renderer that later turns `vertexColors` on would read a truncated buffer.
 /// Colour variation in this layer therefore comes from the twenty-four baked
 /// tiles and the fourteen materials, which is where it can actually be seen.
-
 fn declare(builder: &mut MeshBuilder) {
     let wall = GroupStyle {
         cast_shadow: true,
@@ -638,6 +637,51 @@ fn compound_shell(
 fn gate_point(point: Point, frame: CityFrameInfo) -> Vec2 {
     let [x, z] = frame.to_local(point);
     Vec2::new(x, z)
+}
+
+/// One plot of farmland: the crop's texture laid on the ground with its rows along the
+/// plot, and a low bund (田埂) round the edge.
+fn draw_field(field: &urban::Field, ring: &[Vec2], builder: &mut MeshBuilder) {
+    let mut plot = ring.to_vec();
+    if signed_area(&plot) < 0.0 {
+        plot.reverse();
+    }
+    let material = crate::crops::crop_key(field.crop, field.variant);
+    // UVs in metres along and across the rows.
+    let (sin, cos) = field.row_angle.sin_cos();
+    let uv = |p: Vec2| (p.x * cos + p.y * sin, -p.x * sin + p.y * cos);
+    let y = level::GROUND - 0.012;
+    for [a, b, c] in crate::math::triangulate(&plot) {
+        let (pa, pb, pc) = (plot[a], plot[b], plot[c]);
+        // `triangulate` returns counter-clockwise indices, which face down: flip.
+        builder.tri_uv(
+            &material,
+            Vec3::from_plan(pa, y),
+            Vec3::from_plan(pc, y),
+            Vec3::from_plan(pb, y),
+            [uv(pa), uv(pc), uv(pb)],
+            None,
+        );
+    }
+    // The bund: a low earth ridge, 0.3 m wide and 0.15 m high.
+    for index in 0..plot.len() {
+        let a = plot[index];
+        let b = plot[(index + 1) % plot.len()];
+        if a.distance(b) < 1.0 {
+            continue;
+        }
+        let along = (b - a).normalize();
+        let out = Vec2::new(along.y, -along.x);
+        let (a_out, b_out) = (a + out * 0.30, b + out * 0.30);
+        builder.quad(
+            "field.ridge",
+            Vec3::from_plan(a, y + 0.14),
+            Vec3::from_plan(b, y + 0.14),
+            Vec3::from_plan(b_out, y),
+            Vec3::from_plan(a_out, y),
+            None,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1112,50 +1156,5 @@ mod tests {
         assert!(slabs > 0, "no 板楼 in a Chinese city");
         assert!(low > 0, "no 多层 in a Chinese city");
         assert!(tall + slabs + low == city.buildings.len());
-    }
-}
-
-/// One plot of farmland: the crop's texture laid on the ground with its rows along the
-/// plot, and a low bund (田埂) round the edge.
-fn draw_field(field: &urban::Field, ring: &[Vec2], builder: &mut MeshBuilder) {
-    let mut plot = ring.to_vec();
-    if signed_area(&plot) < 0.0 {
-        plot.reverse();
-    }
-    let material = crate::crops::crop_key(field.crop, field.variant);
-    // UVs in metres along and across the rows.
-    let (sin, cos) = field.row_angle.sin_cos();
-    let uv = |p: Vec2| (p.x * cos + p.y * sin, -p.x * sin + p.y * cos);
-    let y = level::GROUND - 0.012;
-    for [a, b, c] in crate::math::triangulate(&plot) {
-        let (pa, pb, pc) = (plot[a], plot[b], plot[c]);
-        // `triangulate` returns counter-clockwise indices, which face down: flip.
-        builder.tri_uv(
-            &material,
-            Vec3::from_plan(pa, y),
-            Vec3::from_plan(pc, y),
-            Vec3::from_plan(pb, y),
-            [uv(pa), uv(pc), uv(pb)],
-            None,
-        );
-    }
-    // The bund: a low earth ridge, 0.3 m wide and 0.15 m high.
-    for index in 0..plot.len() {
-        let a = plot[index];
-        let b = plot[(index + 1) % plot.len()];
-        if a.distance(b) < 1.0 {
-            continue;
-        }
-        let along = (b - a).normalize();
-        let out = Vec2::new(along.y, -along.x);
-        let (a_out, b_out) = (a + out * 0.30, b + out * 0.30);
-        builder.quad(
-            "field.ridge",
-            Vec3::from_plan(a, y + 0.14),
-            Vec3::from_plan(b, y + 0.14),
-            Vec3::from_plan(b_out, y),
-            Vec3::from_plan(a_out, y),
-            None,
-        );
     }
 }

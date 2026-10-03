@@ -331,12 +331,11 @@ impl Layer for OverlayLayer {
                             if !rect.contains(c.point.to_array()) {
                                 continue;
                             }
-                            if let Some((d, arc)) = run_line.closest(c.point) {
-                                if d < 1e-6 {
-                                    let id =
-                                        NodeId(hash_words(&[road.id, e.id.0, k as u64, 0xC805]));
-                                    stops.push((arc, c.point, id));
-                                }
+                            if let Some((d, arc)) = run_line.closest(c.point)
+                                && d < 1e-6
+                            {
+                                let id = NodeId(hash_words(&[road.id, e.id.0, k as u64, 0xC805]));
+                                stops.push((arc, c.point, id));
                             }
                         }
                     }

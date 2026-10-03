@@ -16,6 +16,9 @@ custom-protocol = ["tauri/custom-protocol"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[lints]
+workspace = true
+
 [dependencies]
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }

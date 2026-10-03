@@ -203,7 +203,7 @@ fn encode_geometry(geometry: SceneGeometry) -> (Vec<EncodedMesh>, Vec<EncodedIns
             positions: encode_f32(&group.positions),
             normals: encode_f32(&group.normals),
             colors: group.colors.as_deref().map(encode_bytes),
-            uvs: group.uvs.as_deref().map(|values| encode_f32(values)),
+            uvs: group.uvs.as_deref().map(encode_f32),
             indices: encode_u32(&group.indices),
             instance_of: group.instance_of.clone(),
             vertex_count,
@@ -474,7 +474,7 @@ struct BlobWriter {
 
 impl BlobWriter {
     fn push(&mut self, bytes: &[u8]) -> [usize; 2] {
-        while self.data.len() % 4 != 0 {
+        while !self.data.len().is_multiple_of(4) {
             self.data.push(0);
         }
         let offset = self.data.len();
@@ -755,8 +755,10 @@ mod tests {
 
     #[test]
     fn the_building_budget_drops_detail_not_shells() {
-        let mut budget = SceneBudget::default();
-        budget.max_buildings = 40;
+        let budget = SceneBudget {
+            max_buildings: 40,
+            ..SceneBudget::default()
+        };
         let scene = build_city_scene(&city(), budget);
         assert_eq!(scene.stats.buildings, 40);
         assert!(

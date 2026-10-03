@@ -77,10 +77,11 @@ impl Rivers {
         };
         let mut upstream = vec![0_u8; n * n];
         for i in 0..n * n {
-            if is_river(i) && terrain.height[i] >= SEA_LEVEL_M {
-                if let Some(r) = receiver(i).filter(|r| is_river(*r)) {
-                    upstream[r] = upstream[r].saturating_add(1);
-                }
+            if is_river(i)
+                && terrain.height[i] >= SEA_LEVEL_M
+                && let Some(r) = receiver(i).filter(|r| is_river(*r))
+            {
+                upstream[r] = upstream[r].saturating_add(1);
             }
         }
         // Follow each source downstream until the sea, the edge, or a cell already followed.

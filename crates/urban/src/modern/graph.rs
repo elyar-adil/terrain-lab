@@ -127,7 +127,7 @@ fn clip_line(poly: &[V], p: V, d: V) -> Option<(V, V)> {
             }
         }
     }
-    (t1 - t0 > MIN_EDGE_M).then(|| {
+    (t1 - t0 > MIN_EDGE_M).then_some({
         (
             (p.0 + d.0 * t0, p.1 + d.1 * t0),
             (p.0 + d.0 * t1, p.1 + d.1 * t1),
@@ -276,10 +276,10 @@ fn reach_nearest_street(
         .filter(|p| dry(*p))
         .map(|p| ((p.0 - end.0).hypot(p.1 - end.1), p))
         .min_by(|x, y| x.0.total_cmp(&y.0));
-    if let Some((d, p)) = nearest {
-        if d > 1.0 {
-            run.push(p);
-        }
+    if let Some((d, p)) = nearest
+        && d > 1.0
+    {
+        run.push(p);
     }
 }
 
@@ -552,8 +552,11 @@ fn seg_intersect(a: V, b: V, c: V, d: V) -> Option<(f32, f32, V)> {
     let q = (c.0 - a.0, c.1 - a.1);
     let t = (q.0 * s.1 - q.1 * s.0) / den;
     let u = (q.0 * r.1 - q.1 * r.0) / den;
-    ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u))
-        .then(|| (t, u, (a.0 + r.0 * t, a.1 + r.1 * t)))
+    ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then_some((
+        t,
+        u,
+        (a.0 + r.0 * t, a.1 + r.1 * t),
+    ))
 }
 
 fn find(parent: &mut [usize], mut x: usize) -> usize {
@@ -1024,9 +1027,7 @@ pub(super) fn build_graph(
             if seg_intersect(pts[si.a], pts[si.b], pts[sj.a], pts[sj.b]).is_some() {
                 let loser = if importance(si.class) < importance(sj.class) {
                     j
-                } else if importance(sj.class) < importance(si.class) {
-                    i
-                } else if si.origin == ORIGIN_INNER {
+                } else if importance(sj.class) < importance(si.class) || si.origin == ORIGIN_INNER {
                     i
                 } else {
                     j

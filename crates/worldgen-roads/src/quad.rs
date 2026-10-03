@@ -424,30 +424,30 @@ impl Build<'_> {
                 .map(|(ti, &(st, _))| (ti, (st - sf).abs() * mean_len))
                 .filter(|(_, miss)| *miss <= tolerance)
                 .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            if let Some((ti, _)) = best {
-                if monotone(&pairs, sf, t[ti].0, 0.0) {
-                    pairs.push((fk, sf, t[ti].1, t[ti].0));
-                    from_taken[fi] = true;
-                    to_taken[ti] = true;
-                }
+            if let Some((ti, _)) = best
+                && monotone(&pairs, sf, t[ti].0, 0.0)
+            {
+                pairs.push((fk, sf, t[ti].1, t[ti].0));
+                from_taken[fi] = true;
+                to_taken[ti] = true;
             }
         }
         // Whatever found no partner reaches across to a new one.
         for (fi, &(sf, fk)) in f.iter().enumerate().filter(|(i, _)| !from_taken[*i]) {
             let spacing = self.chords[from.chord].chord.divisions[fk].spacing_m;
-            if let Some((tk, st)) = self.mirror(to, sf, rung, spacing) {
-                if monotone(&pairs, sf, st, spacing) {
-                    pairs.push((fk, sf, tk, st));
-                }
+            if let Some((tk, st)) = self.mirror(to, sf, rung, spacing)
+                && monotone(&pairs, sf, st, spacing)
+            {
+                pairs.push((fk, sf, tk, st));
             }
             let _ = fi;
         }
         for (ti, &(st, tk)) in t.iter().enumerate().filter(|(i, _)| !to_taken[*i]) {
             let spacing = self.chords[to.chord].chord.divisions[tk].spacing_m;
-            if let Some((fk, sf)) = self.mirror(from, st, rung, spacing) {
-                if monotone(&pairs, sf, st, spacing) {
-                    pairs.push((fk, sf, tk, st));
-                }
+            if let Some((fk, sf)) = self.mirror(from, st, rung, spacing)
+                && monotone(&pairs, sf, st, spacing)
+            {
+                pairs.push((fk, sf, tk, st));
             }
             let _ = ti;
         }

@@ -491,7 +491,7 @@ pub(super) fn junction_geometry(
     // corner in the city was a flat slab at footway height with a hole in the
     // ground beside it.
     let count = junction.ring.len();
-    if count % 9 != 0 || junction.walk_ring.len() != count {
+    if !count.is_multiple_of(9) || junction.walk_ring.len() != count {
         return;
     }
     let centre = junction.centre;
@@ -618,19 +618,18 @@ fn yellow_grid_box(junction: &Junction, builder: &mut MeshBuilder, _spec: &Junct
                 if inside && run_start.is_none() {
                     run_start = Some(point);
                 }
-                if !inside {
-                    if let Some(start) = run_start.take() {
-                        if start.distance(last) > 1.5 {
-                            yellow_bar(builder, start, last, width);
-                        }
-                    }
+                if !inside
+                    && let Some(start) = run_start.take()
+                    && start.distance(last) > 1.5
+                {
+                    yellow_bar(builder, start, last, width);
                 }
                 last = point;
             }
-            if let Some(start) = run_start {
-                if start.distance(last) > 1.5 {
-                    yellow_bar(builder, start, last, width);
-                }
+            if let Some(start) = run_start
+                && start.distance(last) > 1.5
+            {
+                yellow_bar(builder, start, last, width);
             }
             c += spacing;
         }

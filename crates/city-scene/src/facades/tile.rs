@@ -491,7 +491,7 @@ fn wall_field(
             // 10 mm of joint on a 65 mm course is 15% of the face, not 25%:
             // a brick wall whose mortar is a quarter of its area reads as a
             // grid of pale lines, not as brick.
-            let joint = face < 0.045 || face > 0.975 || up < 0.13 || up > 0.93;
+            let joint = !(0.045..=0.975).contains(&face) || !(0.13..=0.93).contains(&up);
             if joint {
                 let mortar =
                     0.330 + 0.045 * hash(key.wrapping_add(401), along.floor() as i32, course);
@@ -536,7 +536,7 @@ fn wall_field(
                 // The accent tile: a 280 mm square of blue-green printed tile,
                 // one per bay per storey, set in the pier beside the window.  It
                 // is the detail that dates a Chinese apartment block to a decade.
-                let module_centre = (um / 0.56).floor() as f32 * 0.56 + 0.28;
+                let module_centre = (um / 0.56).floor() * 0.56 + 0.28;
                 let dx = (um - module_centre).abs();
                 let dy = (ml - 1.55).abs();
                 if dx < 0.14 && dy < 0.14 {

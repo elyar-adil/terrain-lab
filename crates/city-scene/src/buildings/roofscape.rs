@@ -726,7 +726,7 @@ mod tests {
             .iter()
             .find(|g| g.material == "roof")
             .expect("no roof");
-        assert!(roof.positions.len() > 0);
+        assert!(!roof.positions.is_empty());
         assert!(
             groups.iter().any(|g| g.material == "metal.ac"),
             "no rooftop plant on a city of towers"

@@ -189,10 +189,10 @@ impl EndGrid {
         for dx in -1..=1 {
             for dy in -1..=1 {
                 for dz in -1..=1 {
-                    if let Some(v) = self.cells.get(&(cx + dx, cy + dy, cz + dz)) {
-                        if v.iter().any(|q| q.dist(p) < r) {
-                            return true;
-                        }
+                    if let Some(v) = self.cells.get(&(cx + dx, cy + dy, cz + dz))
+                        && v.iter().any(|q| q.dist(p) < r)
+                    {
+                        return true;
                     }
                 }
             }
@@ -286,10 +286,10 @@ impl Grower {
             // Now and then the leader dies back and a side shoot takes over: a sudden bend.
             if rng.u() < 0.035 * level as f32 {
                 kink = 0.5 + rng.u();
-                curv = curv + rng.unit_vec() * (amp * 2.2);
+                curv += rng.unit_vec() * (amp * 2.2);
             }
             kink *= 0.8;
-            d = d + curv * (step * (1.0 + kink));
+            d += curv * (step * (1.0 + kink));
             // Reaching for the light: a branch that has dipped below level turns back up.
             if level >= 1 {
                 let k = if self.decurrent() { 1.0 } else { 0.10 };
@@ -304,9 +304,9 @@ impl Grower {
             let reach = self.crown.reach(p.y, p.z.atan2(p.x));
             if radial > reach * 1.02 {
                 let inward = v3(-p.x, 0.0, -p.z).norm();
-                d = d + inward * (0.5 * step);
+                d += inward * (0.5 * step);
             }
-            d = d + wobble * (bend * step);
+            d += wobble * (bend * step);
             d.y -= 0.45 * sag * len * (0.4 + t) * step;
             d.y += up * 0.5 * step * (1.0 - t);
             d.y -= 0.5 * droop * t * t * step * 2.5;
@@ -355,7 +355,7 @@ impl Grower {
         let mut p = pts[0];
         for i in 0..n {
             let wobble = rng.unit_vec();
-            d = d + v3(wobble.x, 0.0, wobble.z) * (self.arch.trunk_wobble * step * 6.0);
+            d += v3(wobble.x, 0.0, wobble.z) * (self.arch.trunk_wobble * step * 6.0);
             // A trunk rights itself: it grows toward the light.
             d = (d + V3::UP * (0.10 * step)).norm();
             p += d * step;
@@ -756,11 +756,10 @@ impl Grower {
             let tlen = tr.range(a.twig_len.0, a.twig_len.1) * (1.0 - 0.45 * t);
             // A twig outside the crown is cut back to it.
             let tlen = self.fit(pos, dir, tlen, 1.12, 0.05).max(0.05);
-            let mid = (pos
+            let mid = pos
                 + dir * (tlen * 0.5)
                 + tr.unit_vec() * (tlen * 0.07)
-                + v3(0.0, -a.tip_droop * 0.05 * tlen, 0.0))
-            .clone();
+                + v3(0.0, -a.tip_droop * 0.05 * tlen, 0.0);
             let mut end = pos + dir * tlen + v3(0.0, -a.tip_droop * 0.12 * tlen, 0.0);
             let ymax = self.crown.height * 1.01;
             let (mut mid, end_y) = (mid, end.y.min(ymax));
@@ -858,9 +857,9 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
         habit: sp.habit,
         lobes: [
             rng.range(0.4, 1.0),
-            rng.range(0.0, 6.28),
+            rng.range(0.0, std::f32::consts::TAU),
             rng.range(0.2, 0.8),
-            rng.range(0.0, 6.28),
+            rng.range(0.0, std::f32::consts::TAU),
         ],
         lobing: arch.lobing * (0.6 + 0.8 * rng.u()),
     };

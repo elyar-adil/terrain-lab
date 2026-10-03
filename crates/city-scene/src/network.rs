@@ -386,7 +386,7 @@ pub fn derive(
         let mut rise_end = full_length * 0.4;
         let mut fall_start = full_length * 0.6;
         if elevated {
-            let crossings = crossing_stations(&sd_roads, &sections, &local, hd.id);
+            let crossings = crossing_stations(sd_roads, &sections, &local, hd.id);
             if crossings.is_empty() {
                 // A pure river crossing has nothing to attach to.  Putting the
                 // plateau at mid-span leaves the approaches long enough that the
@@ -492,7 +492,7 @@ pub fn derive(
                 // is what keeps `index == 0` meaning "the median lane" for the
                 // arrow stencils, the waiting box, the guide lanes and the
                 // exported payload alike.
-                let offset = section.lane_offset(direction, (count - 1 - index) as u8);
+                let offset = section.lane_offset(direction, count - 1 - index);
                 // A lane path starts and ends exactly at the kerb face of the
                 // junction box, so its arc length is the distance a vehicle
                 // really travels between two decision points.

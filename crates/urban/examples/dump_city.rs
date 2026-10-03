@@ -21,7 +21,6 @@ fn main() {
             block_size_metres: 100.0,
             organic: 0.68,
             river_width_metres: 64.0,
-            ..ModernChinaSpec::default()
         },
     };
     let city = generate_modern_chinese_city(spec);

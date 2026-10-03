@@ -12,7 +12,7 @@ use crate::{
 /// junction geometry, kerbs, sidewalks and markings from the same numbers.  Two
 /// copies would let the drawn road and the simulated road disagree about where
 /// the median ends.
-
+///
 /// Expand a hierarchical road class into physically plausible two-way lanes.
 /// This is deliberately kept in the city data layer: a renderer must not
 /// infer lane counts from a road ribbon and then lose turning arrows at close

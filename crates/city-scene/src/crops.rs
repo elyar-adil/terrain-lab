@@ -224,7 +224,7 @@ fn crop_texel(
                 ((lu * pu).powi(2) + (lv * pv).powi(2)).sqrt() / (0.5 * pu.min(pv)) / size.max(0.2);
             // Lobed edge so a tuft is not a disc.
             let ang = (lv * pv).atan2(lu * pu);
-            let lobes = 1.0 + 0.22 * (ang * 5.0 + hash(47, cu, cv) * 6.28).sin();
+            let lobes = 1.0 + 0.22 * (ang * 5.0 + hash(47, cu, cv) * std::f32::consts::TAU).sin();
             let blob = smooth01((1.0 - d / lobes) / 0.35);
             let bed_look = match variant {
                 0 => {

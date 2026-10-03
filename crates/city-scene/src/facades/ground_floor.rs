@@ -88,6 +88,8 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
     // previous bake put a 0.68 stone pier over half the tile, which is why a
     // ground floor read as a bright door instead of as a shop.
     const RISER: [f32; 3] = [0.098, 0.100, 0.104];
+    // A reflectance triple; the 0.318 is not 1/pi.
+    #[allow(clippy::approx_constant)]
     const PIER: [f32; 3] = [0.330, 0.318, 0.296];
     const PIER_LIGHT: [f32; 3] = [0.405, 0.398, 0.380];
     const FRAME: [f32; 3] = [0.062, 0.065, 0.068];
@@ -265,7 +267,7 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
                         } else {
                             [0.320, 0.312, 0.296]
                         }
-                    } else if u < 0.70 || u > 3.50 {
+                    } else if !(0.70..=3.50).contains(&u) {
                         // A stone portal: two piers and a deep head, which is
                         // what throws the shadow across the doors.
                         let flute = ((u / 0.35) - (u / 0.35).floor() - 0.5).abs();
@@ -320,7 +322,7 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
                         // step.  Dark, because a steel security door is.
                         if h > 3.05 {
                             shade(RENDER, 1.08)
-                        } else if u < 1.86 || u > 2.54 || h < 0.62 {
+                        } else if !(1.86..=2.54).contains(&u) || h < 0.62 {
                             [0.068, 0.070, 0.072]
                         } else if (u - 2.40).abs() < 0.030 && h > 1.05 && h < 1.95 {
                             [0.320, 0.280, 0.180]
@@ -356,7 +358,7 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
                     } else {
                         // Render, with a downpipe in the corner and the stain
                         // that runs from it.
-                        if (u < 0.30 || u > 3.90) && h < 3.30 {
+                        if !(0.30..=3.90).contains(&u) && h < 3.30 {
                             [0.205, 0.200, 0.192]
                         } else if u > 3.90 {
                             shade(RENDER, 0.70)

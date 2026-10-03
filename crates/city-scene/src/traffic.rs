@@ -739,9 +739,7 @@ impl TrafficSim {
         let mut cursor = target;
         let mut guard = 0;
         while cursor != origin_lane && guard < 256 {
-            let Some((from, connector)) = previous[cursor] else {
-                return None;
-            };
+            let (from, connector) = previous[cursor]?;
             chain.push((from, connector));
             cursor = from;
             guard += 1;
@@ -757,12 +755,9 @@ impl TrafficSim {
         let mut lanes: Vec<usize> = vec![origin_lane];
         let mut connectors: Vec<usize> = Vec::with_capacity(chain.len());
         for &(from, connector) in &chain {
-            let Some((_, to)) = self.successors[from]
+            let (_, to) = self.successors[from]
                 .iter()
-                .find(|(index, _)| *index == connector)
-            else {
-                return None;
-            };
+                .find(|(index, _)| *index == connector)?;
             connectors.push(connector);
             lanes.push(*to);
         }

@@ -254,18 +254,18 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
     let mut shaft_ring = podium_ring.clone();
     // Chamfered plan: a glass tower with its corners cut is a different
     // silhouette from a box and catches a second face of light.
-    if tower && glass && hash_u32(building.id, 71, 5) < 0.35 {
-        if let Some(cut) = chamfer_ring(&shaft_ring, 1.8 + hash_u32(building.id, 73, 5) * 1.6) {
-            shaft_ring = cut;
-        }
+    if tower
+        && glass
+        && hash_u32(building.id, 71, 5) < 0.35
+        && let Some(cut) = chamfer_ring(&shaft_ring, 1.8 + hash_u32(building.id, 73, 5) * 1.6)
+    {
+        shaft_ring = cut;
     }
     // Crown family, seeded per building: stepped ziggurat, tapered spire,
     // wide mechanical penthouse, or a blunt flat top with a heavy parapet.
     let crown_kind = {
         let roll = hash_u32(building.id, 61, 7);
-        if !tower {
-            0
-        } else if roll < 0.32 {
+        if !tower || roll < 0.32 {
             0
         } else if roll < 0.55 {
             1
@@ -1029,7 +1029,7 @@ fn core_bump(
             continue;
         }
         let len = ring[i].distance(ring[(i + 1) % n]);
-        if len > 12.0 && best.map_or(true, |(_, l)| len > l) {
+        if len > 12.0 && best.is_none_or(|(_, l)| len > l) {
             best = Some((i, len));
         }
     }

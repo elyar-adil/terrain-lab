@@ -227,7 +227,7 @@ pub fn standard_prototype_set(variants: usize) -> Vec<TreePrototype> {
     let mut prototypes = Vec::with_capacity(STANDARD_SPECIES.len() * variants * 2);
     for (species_index, species) in STANDARD_SPECIES.iter().enumerate() {
         for variant in 0..variants {
-            let seed = 0x51_7c_c1b7
+            let seed = 0x517c_c1b7
                 ^ (species_index as u64).wrapping_mul(0x9e37_79b9)
                 ^ (variant as u64).wrapping_mul(0x85eb_ca6b);
             prototypes.push(build_prototype(*species, Lod::Near, seed));

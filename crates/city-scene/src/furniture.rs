@@ -233,7 +233,7 @@ fn rubbish_bin(builder: &mut MeshBuilder, key: &str) {
         None,
     );
     // The lid, tilted back on its hinge — the pose every street bin is in.
-    let lid = box_at(
+    box_at(
         builder,
         key,
         Vec2::new(0.0, -0.10),
@@ -243,7 +243,6 @@ fn rubbish_bin(builder: &mut MeshBuilder, key: &str) {
         0.34,
         0.0,
     );
-    let _ = lid;
     // A liner bag collar showing above the rim.
     builder.tube(
         key,
@@ -1294,6 +1293,30 @@ impl Vec3 {
     }
 }
 
+/// Car body colour as an instance tint.  Chinese roads are mostly white, black,
+/// silver and grey, with a minority of red, blue and dark green — never a
+/// uniform white fleet, which reads as a row of paper cut-outs.
+fn car_paint(rng: &mut Rng) -> [f32; 3] {
+    let pick = rng.unit();
+    let shade = 0.9 + rng.unit() * 0.2;
+    let base = if pick < 0.28 {
+        [0.95, 0.95, 0.94]
+    } else if pick < 0.52 {
+        [0.10, 0.10, 0.11]
+    } else if pick < 0.72 {
+        [0.55, 0.57, 0.60]
+    } else if pick < 0.84 {
+        [0.28, 0.29, 0.31]
+    } else if pick < 0.90 {
+        [0.62, 0.10, 0.10]
+    } else if pick < 0.96 {
+        [0.14, 0.24, 0.48]
+    } else {
+        [0.42, 0.34, 0.24]
+    };
+    [base[0] * shade, base[1] * shade, base[2] * shade]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1361,7 +1384,7 @@ mod tests {
             "one transform list per prototype. Present: {present:?}. Missing: {:?}",
             prototypes
                 .iter()
-                .filter(|key| !present.contains(&key.as_ref()))
+                .filter(|key| !present.contains(key))
                 .collect::<Vec<_>>()
         );
         for key in prototypes {
@@ -1609,7 +1632,7 @@ mod tests {
             })
             .collect();
         assert!(
-            quads.len() % QUADS_PER_CONDUCTOR == 0,
+            quads.len().is_multiple_of(QUADS_PER_CONDUCTOR),
             "{} wire quads is not a whole number of conductors; the span layout \
              changed and this test is no longer looking at what it thinks",
             quads.len()
@@ -1765,28 +1788,4 @@ mod tests {
             }
         }
     }
-}
-
-/// Car body colour as an instance tint.  Chinese roads are mostly white, black,
-/// silver and grey, with a minority of red, blue and dark green — never a
-/// uniform white fleet, which reads as a row of paper cut-outs.
-fn car_paint(rng: &mut Rng) -> [f32; 3] {
-    let pick = rng.unit();
-    let shade = 0.9 + rng.unit() * 0.2;
-    let base = if pick < 0.28 {
-        [0.95, 0.95, 0.94]
-    } else if pick < 0.52 {
-        [0.10, 0.10, 0.11]
-    } else if pick < 0.72 {
-        [0.55, 0.57, 0.60]
-    } else if pick < 0.84 {
-        [0.28, 0.29, 0.31]
-    } else if pick < 0.90 {
-        [0.62, 0.10, 0.10]
-    } else if pick < 0.96 {
-        [0.14, 0.24, 0.48]
-    } else {
-        [0.42, 0.34, 0.24]
-    };
-    [base[0] * shade, base[1] * shade, base[2] * shade]
 }

@@ -859,31 +859,31 @@ impl MeshBuilder {
             // mixed material renders its untextured members with a flat
             // texel instead of failing to load at all.
             let vertices = buffers.positions.len() / 3;
-            if let Some(uvs) = &mut buffers.uvs {
-                if uvs.len() < vertices * 2 {
-                    let (u, v) = if uvs.len() >= 2 {
-                        (uvs[0], uvs[1])
-                    } else {
-                        (0.0, 0.0)
-                    };
-                    uvs.resize(vertices * 2, 0.0);
-                    for chunk in uvs.chunks_exact_mut(2) {
-                        chunk[0] = u;
-                        chunk[1] = v;
-                    }
+            if let Some(uvs) = &mut buffers.uvs
+                && uvs.len() < vertices * 2
+            {
+                let (u, v) = if uvs.len() >= 2 {
+                    (uvs[0], uvs[1])
+                } else {
+                    (0.0, 0.0)
+                };
+                uvs.resize(vertices * 2, 0.0);
+                for chunk in uvs.chunks_exact_mut(2) {
+                    chunk[0] = u;
+                    chunk[1] = v;
                 }
             }
-            if let Some(colors) = &mut buffers.colors {
-                if colors.len() < vertices * 4 {
-                    let first = if colors.len() >= 4 {
-                        [colors[0], colors[1], colors[2], colors[3]]
-                    } else {
-                        [255, 255, 255, 255]
-                    };
-                    colors.resize(vertices * 4, 0);
-                    for chunk in colors.chunks_exact_mut(4) {
-                        chunk.copy_from_slice(&first);
-                    }
+            if let Some(colors) = &mut buffers.colors
+                && colors.len() < vertices * 4
+            {
+                let first = if colors.len() >= 4 {
+                    [colors[0], colors[1], colors[2], colors[3]]
+                } else {
+                    [255, 255, 255, 255]
+                };
+                colors.resize(vertices * 4, 0);
+                for chunk in colors.chunks_exact_mut(4) {
+                    chunk.copy_from_slice(&first);
                 }
             }
             let meta = self.meta.get(&material).copied().unwrap_or_default();
@@ -1045,7 +1045,7 @@ mod tests {
         let groups = builder.build().meshes;
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].indices, vec![0, 1, 2, 0, 2, 3]);
-        assert_eq!(groups[0].normals, vec![0.0, 1.0, 0.0].repeat(4));
+        assert_eq!(groups[0].normals, [0.0, 1.0, 0.0].repeat(4));
     }
 
     /// Every face of a box must face away from its centre, whatever the box is
@@ -1139,7 +1139,7 @@ mod tests {
             None,
         );
         let groups = builder.build().meshes;
-        assert_eq!(groups[0].normals, vec![0.0, 1.0, 0.0].repeat(6));
+        assert_eq!(groups[0].normals, [0.0, 1.0, 0.0].repeat(6));
     }
 
     #[test]

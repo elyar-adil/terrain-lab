@@ -75,7 +75,7 @@ pub(super) fn derive_compounds_and_trees(
             let edge = (i as usize) % parcel.ring.len();
             let a = parcel.ring[edge];
             let b = parcel.ring[(edge + 1) % parcel.ring.len()];
-            let t = 0.22 + modern_hash(seed, parcel.id as i32, i as i32, 917) * 0.56;
+            let t = 0.22 + modern_hash(seed, parcel.id as i32, i, 917) * 0.56;
             let point = Point {
                 x_km: a.x_km + (b.x_km - a.x_km) * t,
                 y_km: a.y_km + (b.y_km - a.y_km) * t,
@@ -97,7 +97,7 @@ pub(super) fn derive_compounds_and_trees(
                 }
                 _ => TreeSpecies::ChinesePlane,
             };
-            let variation = 0.86 + modern_hash(seed, parcel.id as i32, i as i32, 923) * 0.30;
+            let variation = 0.86 + modern_hash(seed, parcel.id as i32, i, 923) * 0.30;
             let (height, crown, trunk) = match species {
                 TreeSpecies::ChinesePlane => (18.0, 6.0, 0.38),
                 TreeSpecies::Ginkgo => (15.0, 4.8, 0.30),
@@ -107,7 +107,7 @@ pub(super) fn derive_compounds_and_trees(
             };
             // Two L-System variants exist per species; the hash keeps a tree
             // stable in its variant while the avenue alternates naturally.
-            let variant = (modern_hash(seed, parcel.id as i32, i as i32, 929) * 2.0).floor() as u16;
+            let variant = (modern_hash(seed, parcel.id as i32, i, 929) * 2.0).floor() as u16;
             trees.push(TreeInstance {
                 id: tree_id,
                 point,

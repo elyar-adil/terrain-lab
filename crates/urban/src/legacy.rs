@@ -221,7 +221,7 @@ impl UrbanGenerator for ParisianGenerator {
             let inner = ring as f32 * ring_spacing + 0.018;
             let outer = ((ring + 1) as f32 * ring_spacing - 0.018).min(spec.radius_km);
             for sector in 0..ray_count {
-                let jitter = (hash01(spec.seed, ring as i32, sector as i32) - 0.5) * 0.012;
+                let jitter = (hash01(spec.seed, ring as i32, sector) - 0.5) * 0.012;
                 // Angular setbacks correspond to a physical 7 m gap at the
                 // block midpoint, rather than expanding with distance.
                 let mean_radius = ((inner + outer) * 0.5).max(0.04);
@@ -242,7 +242,7 @@ impl UrbanGenerator for ParisianGenerator {
                 buildings.push(BuildingMass {
                     footprint: boundary,
                     courtyard: Some(courtyard),
-                    height_metres: 17.0 + hash01(spec.seed, ring as i32, sector as i32) * 10.0,
+                    height_metres: 17.0 + hash01(spec.seed, ring as i32, sector) * 10.0,
                     roof: RoofStyle::Mansard,
                 });
             }

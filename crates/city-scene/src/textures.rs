@@ -242,7 +242,7 @@ pub fn paving_texture(size: usize) -> BakedTexture {
         for x in 0..size {
             // One tile is 4 m, so a 0.5 m paver is an eighth of the texture.
             let row = y / paver_h;
-            let stagger = if row % 2 == 0 { 0 } else { paver_w };
+            let stagger = if row.is_multiple_of(2) { 0 } else { paver_w };
             let column = (x + stagger) / paver_w;
             let local_x = (x + stagger) % paver_w;
             let local_y = y % paver_h;
@@ -453,9 +453,7 @@ pub fn signage_texture(size: usize) -> BakedTexture {
                 }
                 let _ = row;
             }
-            for channel in 0..3 {
-                rgba[index + channel] = rgb[channel];
-            }
+            rgba[index..index + 3].copy_from_slice(&rgb);
             rgba[index + 3] = 255;
         }
     }

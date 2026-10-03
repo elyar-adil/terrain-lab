@@ -68,15 +68,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut peak_x = (0_u32, f64::NEG_INFINITY);
     let mut peak_y = (0_u32, f64::NEG_INFINITY);
     for lag in 20..=128 {
-        if let Some(value) = correlation(&a, lag, 0, mean_water) {
-            if value > peak_x.1 {
-                peak_x = (lag, value);
-            }
+        if let Some(value) = correlation(&a, lag, 0, mean_water)
+            && value > peak_x.1
+        {
+            peak_x = (lag, value);
         }
-        if let Some(value) = correlation(&a, 0, lag, mean_water) {
-            if value > peak_y.1 {
-                peak_y = (lag, value);
-            }
+        if let Some(value) = correlation(&a, 0, lag, mean_water)
+            && value > peak_y.1
+        {
+            peak_y = (lag, value);
         }
     }
     println!("mean_frame_difference={mean_difference:.4}");

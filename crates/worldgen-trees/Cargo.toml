@@ -7,5 +7,8 @@ description = "Stateless, per-tree and per-leaf unique trees: a species catalogu
 [lib]
 crate-type = ["rlib", "cdylib"]
 
+[lints]
+workspace = true
+
 [dependencies]
 worldgen-core = { path = "../worldgen-core" }
