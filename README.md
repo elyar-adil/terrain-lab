@@ -25,6 +25,10 @@
 
 该结构允许未来为 `terrain-core` 增加 WASM 适配器，但当前版本只开发桌面客户端。
 
+## 工程约定
+
+共用代码放哪里、如何检查、哪些重复是有意保留的，见 [`docs/conventions.md`](docs/conventions.md)。
+
 ## 开发
 
 需要 Node.js、npm、Rust stable、Windows WebView2 和 Visual Studio C++ Build Tools。
