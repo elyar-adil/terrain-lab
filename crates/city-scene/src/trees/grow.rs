@@ -52,11 +52,11 @@ const CARD_SHRINK: f32 = 0.66;
 /// card budget.  Derived from the same constants the build uses, so it cannot
 /// disagree with them.
 fn limb_foliage_weight(fork: usize) -> f32 {
-    TIP_FOLIAGE + MID_FOLIAGE + LOW_FOLIAGE
+    TIP_FOLIAGE
+        + MID_FOLIAGE
+        + LOW_FOLIAGE
         + fork as f32
-            * (SECONDARY_TIP
-                + SECONDARY_BACK
-                + TWIGS_PER_SECONDARY as f32 * (TWIG_TIP + TWIG_BACK))
+            * (SECONDARY_TIP + SECONDARY_BACK + TWIGS_PER_SECONDARY as f32 * (TWIG_TIP + TWIG_BACK))
 }
 
 /// Everything one prototype needs, derived from the species table alone.
@@ -109,12 +109,8 @@ impl Plan {
         // 0.54 is built to be see-through and a `榕树` at 0.86 is built to be a
         // solid glossy dome.
         let silhouette = std::f32::consts::PI * radius * radius;
-        let presented = PRESENTED_FRACTION
-            * card
-            * card
-            * CARD_WINDOW
-            * CARD_WINDOW
-            * target_coverage(species);
+        let presented =
+            PRESENTED_FRACTION * card * card * CARD_WINDOW * CARD_WINDOW * target_coverage(species);
         let target_layer = 0.6 + 3.3 * species.density;
         let cards = (target_layer * silhouette / presented.max(1.0e-9))
             .round()
@@ -265,7 +261,9 @@ impl<'a, 'b> Grower<'a, 'b> {
             for j in 0..cols {
                 let ids = [at(i, j), at(i, j + 1), at(i + 1, j + 1), at(i + 1, j)];
                 let n = (shade[ids[0]] + shade[ids[2]]) * 0.5;
-                let speckle = (((i * 73 + j * 151 + (phase * 100.0) as usize) % 17) as f32 / 17.0 - 0.5) * 0.22;
+                let speckle = (((i * 73 + j * 151 + (phase * 100.0) as usize) % 17) as f32 / 17.0
+                    - 0.5)
+                    * 0.22;
                 let lift = 0.72 + 0.30 * (i as f32 / rows as f32) + 0.16 * n + speckle;
                 let colour = Some([f[0] * lift, f[1] * lift, f[2] * lift]);
                 let v = |k: usize| (grid[ids[k]], normals[ids[k]]);
@@ -335,8 +333,7 @@ impl<'a, 'b> Grower<'a, 'b> {
                     let d = previous[next];
                     // Per-facet value from the bark's weathering, so a trunk is
                     // not one flat grey cylinder.
-                    let facet = 0.90
-                        + 0.10 * ((side * 7 + ring * 13) as f32 * 0.618).sin();
+                    let facet = 0.90 + 0.10 * ((side * 7 + ring * 13) as f32 * 0.618).sin();
                     let colour = self.bark_colour(facet);
                     self.builder.quad_shaded(
                         self.bark,
@@ -422,15 +419,14 @@ impl<'a, 'b> Grower<'a, 'b> {
                 let mut child = (dir * (1.0 - 0.5 * splay)
                     + (a1 * angle.cos() + a2 * angle.sin()) * splay)
                     .normalized_or_up();
-                let reach = length * self.rng.range(0.38, 0.58)
-                    * (1.0 + 0.30 * self.arch.hang);
+                let reach = length * self.rng.range(0.38, 0.58) * (1.0 + 0.30 * self.arch.hang);
                 if self.arch.hang > 0.0 {
                     // The willow's curtain: every second-order shoot turns hard
                     // downward from its parent's axis, and the fine lanceolate
                     // cards hang along the fall.
                     child = (child * (1.0 - 0.55 * self.arch.hang)
                         + Vec3::new(0.0, -0.85 * self.arch.hang, 0.0))
-                        .normalized_or_up();
+                    .normalized_or_up();
                 }
                 self.branch(origin, origin + child * reach, radius * 0.5, 1);
             }
@@ -460,8 +456,8 @@ impl<'a, 'b> Grower<'a, 'b> {
             let origin = self.point_on(from, axis, bow, 0.42);
             self.foliage(origin, dir, SECONDARY_BACK, length);
             for index in 0..TWIGS_PER_SECONDARY {
-                let t = 0.55 + 0.40 * (index as f32 + self.rng.range(0.0, 1.0))
-                    / TWIGS_PER_SECONDARY as f32;
+                let t = 0.55
+                    + 0.40 * (index as f32 + self.rng.range(0.0, 1.0)) / TWIGS_PER_SECONDARY as f32;
                 let origin = self.point_on(from, axis, bow, t.min(0.97));
                 let side = self.rng.sphere();
                 let mut twig = (dir * 0.75 + side * 0.65).normalized_or_up();
@@ -510,8 +506,8 @@ impl<'a, 'b> Grower<'a, 'b> {
             // short of the top leaves the leader's last few decimetres bare, and
             // a tree whose canopy stops below its leader reads as two objects
             // rather than one.
-            let height =
-                self.plan.base + share.powf(self.arch.attach_bias) * (self.plan.top - self.plan.base);
+            let height = self.plan.base
+                + share.powf(self.arch.attach_bias) * (self.plan.top - self.plan.base);
             let attach = self.spine(lean, height);
             self.limb_from(lean, attach, height, share, self.plan.trunk_r, index);
         }
@@ -544,17 +540,16 @@ impl<'a, 'b> Grower<'a, 'b> {
             // compass rose.
             let phase = self.plan.phase + tier as f32 * 2.399_963;
             for branch in 0..per_tier {
-                let angle = phase
-                    + branch as f32 / per_tier as f32 * TAU
-                    + self.rng.range(-0.16, 0.16);
+                let angle =
+                    phase + branch as f32 / per_tier as f32 * TAU + self.rng.range(-0.16, 0.16);
                 let attach = self.spine(lean, height);
-                let reach = self.plan.radius_at(&self.arch, height) * self.arch.reach
+                let reach = self.plan.radius_at(&self.arch, height)
+                    * self.arch.reach
                     * self.rng.range(0.82, 1.0);
                 // A metasequoia's branch leaves the trunk nearly horizontally and
                 // lifts a little; a deodar's runs out flat and drops at the tip.
                 let lift = self.arch.climb * reach * self.rng.range(0.35, 1.0);
-                let tip = attach
-                    + Vec3::new(angle.cos() * reach, lift, angle.sin() * reach);
+                let tip = attach + Vec3::new(angle.cos() * reach, lift, angle.sin() * reach);
                 self.branch(attach, tip, self.plan.trunk_r * 0.30, 0);
             }
         }
@@ -616,10 +611,9 @@ impl<'a, 'b> Grower<'a, 'b> {
             + self.rng.range(-0.26, 0.26);
         let climb = self.arch.climb * (CLIMB_FLOOR + (1.0 - CLIMB_FLOOR) * share);
         let tip_y = height + climb * (self.plan.top - height) * self.rng.range(0.70, 1.0);
-        let reach = self.plan.radius_at(&self.arch, tip_y) * self.arch.reach
-            * self.rng.range(0.84, 1.0);
-        let tip = attach
-            + Vec3::new(angle.cos() * reach, tip_y - height, angle.sin() * reach);
+        let reach =
+            self.plan.radius_at(&self.arch, tip_y) * self.arch.reach * self.rng.range(0.84, 1.0);
+        let tip = attach + Vec3::new(angle.cos() * reach, tip_y - height, angle.sin() * reach);
         let thickness = radius * self.rng.range(0.72, 1.0);
         self.branch(attach, tip, thickness, 0);
     }
@@ -698,9 +692,8 @@ impl<'a, 'b> Grower<'a, 'b> {
                 // pine's shoot tips actually are.
                 out.y *= 1.0 - self.arch.tuft;
             }
-            let mut centre = tip
-                + shoot * (along * spread)
-                + out * (spread * self.rng.range(0.10, 1.05));
+            let mut centre =
+                tip + shoot * (along * spread) + out * (spread * self.rng.range(0.10, 1.05));
             self.clamp_into_crown(&mut centre);
             self.card(centre, shoot, tip, spread);
         }
@@ -789,12 +782,7 @@ impl<'a, 'b> Grower<'a, 'b> {
                 (corners[2], round(corners[2])),
                 (corners[3], round(corners[3])),
             ],
-            [
-                uv(0.0, 0.0),
-                uv(1.0, 0.0),
-                uv(1.0, 1.0),
-                uv(0.0, 1.0),
-            ],
+            [uv(0.0, 0.0), uv(1.0, 0.0), uv(1.0, 1.0), uv(0.0, 1.0)],
             Some(tint),
         );
     }

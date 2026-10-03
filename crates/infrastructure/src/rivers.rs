@@ -12,9 +12,9 @@ use std::collections::HashMap;
 use terrain_core::TerrainData;
 use world_core::WorldGrid;
 use worldgen_contracts::{Polyline, V2, WaterField, WaterHit, closest_on_segment, v2};
+use worldgen_core::Seed;
 use worldgen_core::hash::hash_words;
 use worldgen_core::noise::fbm;
-use worldgen_core::Seed;
 use worldgen_roads::shape::round_corners;
 
 /// Height below which the ground is sea, metres.
@@ -56,12 +56,24 @@ impl Rivers {
         let is_river = |i: usize| terrain.river_order[i] >= 2 || terrain.flow[i] / max_flow > 0.002;
         let receiver = |i: usize| -> Option<usize> {
             let (dx, dy) = (terrain.flow_direction_x[i], terrain.flow_direction_y[i]);
-            let (ox, oy) = (if dx.abs() > 0.5 { dx.signum() as isize } else { 0 }, if dy.abs() > 0.5 { dy.signum() as isize } else { 0 });
+            let (ox, oy) = (
+                if dx.abs() > 0.5 {
+                    dx.signum() as isize
+                } else {
+                    0
+                },
+                if dy.abs() > 0.5 {
+                    dy.signum() as isize
+                } else {
+                    0
+                },
+            );
             if ox == 0 && oy == 0 {
                 return None;
             }
             let (x, y) = ((i % n) as isize + ox, (i / n) as isize + oy);
-            ((0..n as isize).contains(&x) && (0..n as isize).contains(&y)).then(|| y as usize * n + x as usize)
+            ((0..n as isize).contains(&x) && (0..n as isize).contains(&y))
+                .then(|| y as usize * n + x as usize)
         };
         let mut upstream = vec![0_u8; n * n];
         for i in 0..n * n {
@@ -72,8 +84,9 @@ impl Rivers {
             }
         }
         // Follow each source downstream until the sea, the edge, or a cell already followed.
-        let mut sources: Vec<usize> =
-            (0..n * n).filter(|&i| is_river(i) && terrain.height[i] >= SEA_LEVEL_M && upstream[i] == 0).collect();
+        let mut sources: Vec<usize> = (0..n * n)
+            .filter(|&i| is_river(i) && terrain.height[i] >= SEA_LEVEL_M && upstream[i] == 0)
+            .collect();
         // The biggest rivers first, so a trunk is traced from its own headwater.
         sources.sort_by(|a, b| terrain.flow[*b].total_cmp(&terrain.flow[*a]));
         let mut seen = vec![false; n * n];
@@ -94,18 +107,29 @@ impl Rivers {
             }
             let at = |i: usize| v2((i % n) as f64 * cell_m, (i / n) as f64 * cell_m);
             let raw: Vec<V2> = cells.iter().map(|&i| at(i)).collect();
-            let width_raw: Vec<f64> = cells.iter().map(|&i| width_for_flow(f64::from(terrain.flow[i] / max_flow))).collect();
+            let width_raw: Vec<f64> = cells
+                .iter()
+                .map(|&i| width_for_flow(f64::from(terrain.flow[i] / max_flow)))
+                .collect();
             // A grid path in 45-degree steps becomes a river: average, then round.
             let averaged: Vec<V2> = (0..raw.len())
                 .map(|k| {
                     let (lo, hi) = (k.saturating_sub(1), (k + 1).min(raw.len() - 1));
-                    if k == 0 || k == raw.len() - 1 { raw[k] } else { (raw[lo] + raw[k] * 2.0 + raw[hi]) * 0.25 }
+                    if k == 0 || k == raw.len() - 1 {
+                        raw[k]
+                    } else {
+                        (raw[lo] + raw[k] * 2.0 + raw[hi]) * 0.25
+                    }
                 })
                 .collect();
             let line = round_corners(&Polyline(averaged), 2.2 * cell_m, (cell_m * 0.5).max(10.0));
             // Width along the smoothed line: carry the raw widths over by arc length.
             let total = line.length().max(1e-9);
-            let raw_total: f64 = raw.windows(2).map(|w| w[0].dist(w[1])).sum::<f64>().max(1e-9);
+            let raw_total: f64 = raw
+                .windows(2)
+                .map(|w| w[0].dist(w[1]))
+                .sum::<f64>()
+                .max(1e-9);
             let width: Vec<f64> = {
                 let mut run = 0.0;
                 let mut out = Vec::with_capacity(line.0.len());
@@ -113,8 +137,12 @@ impl Rivers {
                     if k > 0 {
                         run += line.0[k - 1].dist(*p);
                     }
-                    let f = (run / total * (width_raw.len() - 1) as f64).clamp(0.0, (width_raw.len() - 1) as f64);
-                    let (lo, hi) = (f.floor() as usize, (f.ceil() as usize).min(width_raw.len() - 1));
+                    let f = (run / total * (width_raw.len() - 1) as f64)
+                        .clamp(0.0, (width_raw.len() - 1) as f64);
+                    let (lo, hi) = (
+                        f.floor() as usize,
+                        (f.ceil() as usize).min(width_raw.len() - 1),
+                    );
                     out.push(width_raw[lo] + (width_raw[hi] - width_raw[lo]) * (f - lo as f64));
                 }
                 let _ = raw_total;
@@ -131,20 +159,32 @@ impl Rivers {
                 let steps = (w[0].dist(w[1]) / (bucket * 0.5)).ceil().max(1.0) as usize;
                 for k in 0..=steps {
                     let p = w[0].lerp(w[1], k as f64 / steps as f64);
-                    let slot = index.entry(((p.x / bucket).floor() as i64, (p.y / bucket).floor() as i64)).or_default();
+                    let slot = index
+                        .entry(((p.x / bucket).floor() as i64, (p.y / bucket).floor() as i64))
+                        .or_default();
                     if slot.last() != Some(&(r, s)) {
                         slot.push((r, s));
                     }
                 }
             }
         }
-        Rivers { rivers, index, cell_m: bucket }
+        Rivers {
+            rivers,
+            index,
+            cell_m: bucket,
+        }
     }
 
     /// The segments of rivers within `reach` of `p`: (river, segment index).
     fn near(&self, p: V2, reach: f64) -> Vec<(usize, usize)> {
-        let (x0, x1) = (((p.x - reach) / self.cell_m).floor() as i64, ((p.x + reach) / self.cell_m).floor() as i64);
-        let (y0, y1) = (((p.y - reach) / self.cell_m).floor() as i64, ((p.y + reach) / self.cell_m).floor() as i64);
+        let (x0, x1) = (
+            ((p.x - reach) / self.cell_m).floor() as i64,
+            ((p.x + reach) / self.cell_m).floor() as i64,
+        );
+        let (y0, y1) = (
+            ((p.y - reach) / self.cell_m).floor() as i64,
+            ((p.y + reach) / self.cell_m).floor() as i64,
+        );
         let mut out = Vec::new();
         for y in y0..=y1 {
             for x in x0..=x1 {
@@ -171,7 +211,12 @@ impl Rivers {
                 best = Some((edge, width, river.id));
             }
         }
-        best.filter(|(edge, _, _)| *edge <= reach).map(|(distance_m, width_m, id)| WaterHit { distance_m, width_m, id })
+        best.filter(|(edge, _, _)| *edge <= reach)
+            .map(|(distance_m, width_m, id)| WaterHit {
+                distance_m,
+                width_m,
+                id,
+            })
     }
 
     /// The pieces of rivers inside the circle `centre`, `radius`, with their mean width.
@@ -218,7 +263,9 @@ fn meander(line: &Polyline, width: &[f64], seed: Seed) -> (Polyline, Vec<f64>) {
     let mut widths = Vec::with_capacity(n + 1);
     for k in 0..=n {
         let s = total * k as f64 / n as f64;
-        let Some((p, tangent)) = line.at(s) else { continue };
+        let Some((p, tangent)) = line.at(s) else {
+            continue;
+        };
         // Width here, by arc fraction through the original vertices.
         let f = (s / total * (width.len() - 1) as f64).clamp(0.0, (width.len() - 1) as f64);
         let (lo, hi) = (f.floor() as usize, (f.ceil() as usize).min(width.len() - 1));
@@ -240,18 +287,35 @@ pub struct WorldWater {
 }
 
 impl WorldWater {
-    pub fn new(terrain: &TerrainData, grid: WorldGrid, rivers: std::sync::Arc<Rivers>) -> WorldWater {
+    pub fn new(
+        terrain: &TerrainData,
+        grid: WorldGrid,
+        rivers: std::sync::Arc<Rivers>,
+    ) -> WorldWater {
         // 1 where the ground is under still water: the sea, or a lake.
         let still = (0..grid.len())
-            .map(|i| if terrain.height[i] < SEA_LEVEL_M || terrain.lake[i] > 0.45 { 1.0 } else { 0.0 })
+            .map(|i| {
+                if terrain.height[i] < SEA_LEVEL_M || terrain.lake[i] > 0.45 {
+                    1.0
+                } else {
+                    0.0
+                }
+            })
             .collect();
-        WorldWater { rivers, grid, still }
+        WorldWater {
+            rivers,
+            grid,
+            still,
+        }
     }
 
     fn still_at(&self, p: V2) -> f64 {
         let n = self.grid.size;
         let cell = f64::from(self.grid.cell_metres());
-        let (fx, fy) = ((p.x / cell).clamp(0.0, (n - 1) as f64), (p.y / cell).clamp(0.0, (n - 1) as f64));
+        let (fx, fy) = (
+            (p.x / cell).clamp(0.0, (n - 1) as f64),
+            (p.y / cell).clamp(0.0, (n - 1) as f64),
+        );
         let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
         let (x1, y1) = ((x0 + 1).min(n - 1), (y0 + 1).min(n - 1));
         let (tx, ty) = (fx - x0 as f64, fy - y0 as f64);
@@ -265,7 +329,11 @@ impl WorldWater {
 impl WaterField for WorldWater {
     fn nearest(&self, p: V2, within_m: f64) -> Option<WaterHit> {
         if self.still_at(p) > 0.5 {
-            return Some(WaterHit { distance_m: 0.0, width_m: 1000.0, id: 0x5EA });
+            return Some(WaterHit {
+                distance_m: 0.0,
+                width_m: 1000.0,
+                id: 0x5EA,
+            });
         }
         self.rivers.nearest(p, within_m)
     }

@@ -112,8 +112,16 @@ pub fn tuft_texture(size: usize) -> BakedTexture {
             // Value falls toward the base: a blade's lower half is shaded by
             // every blade above it.
             let value = 0.62 + 0.44 * t;
-            card.plot(px, py, [blade[0] * value, blade[1] * value, blade[2] * value]);
-            card.plot(px + 1, py, [blade[0] * value, blade[1] * value, blade[2] * value]);
+            card.plot(
+                px,
+                py,
+                [blade[0] * value, blade[1] * value, blade[2] * value],
+            );
+            card.plot(
+                px + 1,
+                py,
+                [blade[0] * value, blade[1] * value, blade[2] * value],
+            );
         }
     }
     // A few dead blades in among the green, which is what a city park's grass
@@ -294,7 +302,11 @@ fn leaf_colour(species: &Species, roll: f32) -> [f32; 3] {
     let value = 0.84 + 0.16 * roll;
     if roll > 0.86 {
         // Old leaf: chlorophyll partly gone.  Toward yellow, not toward white.
-        [base[0] * value * 1.14, base[1] * value * 1.02, base[2] * value * 0.68]
+        [
+            base[0] * value * 1.14,
+            base[1] * value * 1.02,
+            base[2] * value * 0.68,
+        ]
     } else {
         scaled(base, value)
     }
@@ -316,7 +328,12 @@ fn profile(form: LeafForm, t: f32) -> f32 {
     match form {
         // Ovate: widest above the middle, tapering to a drip tip, rounded at the
         // foot.
-        LeafForm::Ovate => 0.30 * (std::f32::consts::PI * t.powf(0.85)).sin().max(0.0).powf(0.75),
+        LeafForm::Ovate => {
+            0.30 * (std::f32::consts::PI * t.powf(0.85))
+                .sin()
+                .max(0.0)
+                .powf(0.75)
+        }
         // Elliptic: symmetric, widest at the middle, and finely serrate — the
         // teeth are a twentieth of the half-width, which is all it takes for the
         // margin to stop reading as a stencil.
@@ -328,7 +345,11 @@ fn profile(form: LeafForm, t: f32) -> f32 {
         // times as long as it is wide, and the exponents keep the taper even so
         // the blade never reads as a slimmed ovate.
         LeafForm::Lanceolate => {
-            0.125 * (std::f32::consts::PI * t.powf(0.9)).sin().max(0.0).powf(0.42)
+            0.125
+                * (std::f32::consts::PI * t.powf(0.9))
+                    .sin()
+                    .max(0.0)
+                    .powf(0.42)
         }
         // Fan: a thin petiole that opens in the outer half into a broad, rounded
         // blade.  The `0.035` foot keeps a petiole on the card; the dome term
@@ -520,9 +541,7 @@ fn draw_needle_spray(
     let needle_width = (size as f32 / 170.0).max(0.85);
     let shoots = 3 + card.rng.int(3);
     for shoot in 0..shoots {
-        let a = angle
-            + (shoot as f32 - shoots as f32 * 0.5) * 0.30
-            + card.rng.range(-0.30, 0.30);
+        let a = angle + (shoot as f32 - shoots as f32 * 0.5) * 0.30 + card.rng.range(-0.30, 0.30);
         let shoot_length = length * card.rng.range(0.52, 1.0);
         draw_line(
             card,
@@ -676,7 +695,11 @@ impl Card {
     }
 
     fn coverage(&self) -> f32 {
-        let opaque = self.rgba.chunks_exact(4).filter(|pixel| pixel[3] > 0).count();
+        let opaque = self
+            .rgba
+            .chunks_exact(4)
+            .filter(|pixel| pixel[3] > 0)
+            .count();
         opaque as f32 / (self.size * self.size) as f32
     }
 
@@ -819,7 +842,11 @@ mod tests {
                 texture.name
             );
             assert_eq!(texture.rgba.len(), texture.width * texture.height * 4);
-            assert!(!texture.has_normal_source, "{} has no height field", texture.name);
+            assert!(
+                !texture.has_normal_source,
+                "{} has no height field",
+                texture.name
+            );
             let mut digest = 0_u64;
             for (index, byte) in texture.rgba.iter().enumerate() {
                 digest = digest
@@ -1001,10 +1028,7 @@ mod tests {
             "the ginkgo fan is widest at row {widest_at} of {size}; a fan opens toward \
              its rim"
         );
-        assert!(
-            widths.iter().any(|w| *w > 0),
-            "the fan card drew nothing"
-        );
+        assert!(widths.iter().any(|w| *w > 0), "the fan card drew nothing");
     }
 
     /// Opaque pixels in each row of a card.
@@ -1089,11 +1113,13 @@ mod tests {
         let mut forms = Vec::new();
         for form in [LeafForm::Ovate, LeafForm::Elliptic] {
             let (_, rows, _, _) = blade(form, size, length);
-            let width = |t: f32| {
-                rows[((1.0 - t) * (rows.len() - 1) as f32).round() as usize] as f32
-            };
+            let width =
+                |t: f32| rows[((1.0 - t) * (rows.len() - 1) as f32).round() as usize] as f32;
             let widest = rows.iter().copied().max().unwrap_or(0) as f32;
-            assert!(widest > 20.0, "{form:?} is {widest:.0} px wide, which is nothing");
+            assert!(
+                widest > 20.0,
+                "{form:?} is {widest:.0} px wide, which is nothing"
+            );
             // A leaf comes to a point.  The rows are trimmed to the blade, so the
             // tip is the *narrowing* of the last few rows rather than a zero.
             assert!(
@@ -1107,7 +1133,8 @@ mod tests {
         // Widest above the middle for an ovate blade, at the middle for an
         // elliptic one.  That is the difference between the two curves.
         for (form, rows) in &forms {
-            let width = |t: f32| rows[((1.0 - t) * (rows.len() - 1) as f32).round() as usize] as f32;
+            let width =
+                |t: f32| rows[((1.0 - t) * (rows.len() - 1) as f32).round() as usize] as f32;
             let ratio = width(0.30) / width(0.70).max(1.0);
             let expected = if *form == LeafForm::Elliptic {
                 0.88..=1.14
@@ -1135,7 +1162,11 @@ mod tests {
 
         // A blade is one continuous run of tissue.
         let (card, _, first, last) = blade(LeafForm::Ovate, size, length);
-        assert_eq!(runs_along_row(&card, (first + last) / 2), 1, "a blade is one run");
+        assert_eq!(
+            runs_along_row(&card, (first + last) / 2),
+            1,
+            "a blade is one run"
+        );
 
         // A palmate leaf's sinuses go in far enough to leave separate lobes.
         let mut card = Card::new(size, 0x77aa);
@@ -1162,15 +1193,7 @@ mod tests {
         // continuous tissue.  This is the assertion that a `Needle` species cannot
         // quietly get a broadleaf card.
         let mut card = Card::new(size, 0x77ac);
-        draw_needle_spray(
-            &mut card,
-            centre,
-            centre,
-            length,
-            0.0,
-            tint,
-            size,
-        );
+        draw_needle_spray(&mut card, centre, centre, length, 0.0, tint, size);
         let (blade_card, _, _, _) = blade(LeafForm::Ovate, size, length);
         let spray_fine = mean_run_length(&card);
         let blade_fine = mean_run_length(&blade_card);
@@ -1179,11 +1202,14 @@ mod tests {
             "a conifer spray's opaque runs average {spray_fine:.1} px against a blade's \
              {blade_fine:.1} px; a spray of needles has to actually be needles"
         );
-        let spray = card.rgba.chunks_exact(4).filter(|p| p[3] > 0).count() as f32
-            / (size * size) as f32;
+        let spray =
+            card.rgba.chunks_exact(4).filter(|p| p[3] > 0).count() as f32 / (size * size) as f32;
         let blade_fill = blade_card.rgba.chunks_exact(4).filter(|p| p[3] > 0).count() as f32
             / (size * size) as f32;
-        assert!(blade_fill > 0.04, "an ovate blade only fills {blade_fill:.3} of the card");
+        assert!(
+            blade_fill > 0.04,
+            "an ovate blade only fills {blade_fill:.3} of the card"
+        );
         assert!(
             spray < blade_fill * 0.60,
             "a needle spray fills {spray:.4} of the card against a blade's {blade_fill:.3}; \
@@ -1282,7 +1308,10 @@ mod tests {
             "the tuft card covers {value:.2}; it was transparent once, which drew a green box"
         );
         let (mean, peak) = opaque_albedo(&texture);
-        assert!(mean < 0.20 && peak < 0.30, "grass is not a {mean:.2} material");
+        assert!(
+            mean < 0.20 && peak < 0.30,
+            "grass is not a {mean:.2} material"
+        );
     }
 
     /// Bake cost.  Sixteen cards at the payload's real resolution, in debug,
@@ -1299,6 +1328,9 @@ mod tests {
             "baking sixteen 256-pixel leaf cards took {elapsed:?}"
         );
         let bytes: usize = set.iter().map(|t| t.rgba.len()).sum();
-        assert!(bytes < 8 * 1024 * 1024, "the leaf cards are {bytes} bytes of payload");
+        assert!(
+            bytes < 8 * 1024 * 1024,
+            "the leaf cards are {bytes} bytes of payload"
+        );
     }
 }

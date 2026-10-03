@@ -127,7 +127,16 @@ fn street_lamp(builder: &mut MeshBuilder, key: &str) {
     );
     // A maintenance hatch at two metres, which is the detail that makes a pole
     // read as a pole rather than as a line.
-    box_at(builder, key, Vec2::new(0.0, 0.0), 2.0, 0.26, 0.42, 0.22, 0.0);
+    box_at(
+        builder,
+        key,
+        Vec2::new(0.0, 0.0),
+        2.0,
+        0.26,
+        0.42,
+        0.22,
+        0.0,
+    );
 }
 
 /// A utility pole with two cross-arms and a transformer, at unit height.
@@ -224,7 +233,16 @@ fn rubbish_bin(builder: &mut MeshBuilder, key: &str) {
         None,
     );
     // The lid, tilted back on its hinge — the pose every street bin is in.
-    let lid = box_at(builder, key, Vec2::new(0.0, -0.10), 0.95, 0.76, 0.05, 0.34, 0.0);
+    let lid = box_at(
+        builder,
+        key,
+        Vec2::new(0.0, -0.10),
+        0.95,
+        0.76,
+        0.05,
+        0.34,
+        0.0,
+    );
     let _ = lid;
     // A liner bag collar showing above the rim.
     builder.tube(
@@ -248,12 +266,39 @@ fn rubbish_bin(builder: &mut MeshBuilder, key: &str) {
 fn phone_kiosk(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
     // A 1.1 x 0.9 m cabin, closed on three sides, with a glazed front.
-    box_at(builder, key, Vec2::new(0.0, 0.0), 1.10, 1.10, 2.20, 0.90, 0.0);
+    box_at(
+        builder,
+        key,
+        Vec2::new(0.0, 0.0),
+        1.10,
+        1.10,
+        2.20,
+        0.90,
+        0.0,
+    );
     // The canopy: a slab that oversails on all four sides, which is the whole
     // silhouette.
-    box_at(builder, key, Vec2::new(0.0, 0.0), 2.28, 1.44, 0.10, 1.24, 0.0);
+    box_at(
+        builder,
+        key,
+        Vec2::new(0.0, 0.0),
+        2.28,
+        1.44,
+        0.10,
+        1.24,
+        0.0,
+    );
     // A fascia under the canopy, and the light box the sign would be on.
-    box_at(builder, key, Vec2::new(0.0, 0.60), 2.16, 1.20, 0.16, 0.06, 0.0);
+    box_at(
+        builder,
+        key,
+        Vec2::new(0.0, 0.60),
+        2.16,
+        1.20,
+        0.16,
+        0.06,
+        0.0,
+    );
     // Four feet, so it stands on the footway rather than being let into it.
     for (x, z) in [(0.44, 0.34), (-0.44, 0.34), (0.44, -0.34), (-0.44, -0.34)] {
         builder.tube(
@@ -425,7 +470,16 @@ fn gantry_boards(builder: &mut MeshBuilder, key: &str) {
 fn bus_shelter(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
     box_at(builder, key, Vec2::new(0.0, 0.0), 0.07, 6.2, 0.14, 2.4, 0.0);
-    box_at(builder, key, Vec2::new(0.0, -0.3), 2.35, 4.6, 0.12, 1.7, 0.0);
+    box_at(
+        builder,
+        key,
+        Vec2::new(0.0, -0.3),
+        2.35,
+        4.6,
+        0.12,
+        1.7,
+        0.0,
+    );
     for post in [-2.2_f32, 2.2] {
         builder.tube(
             key,
@@ -437,7 +491,16 @@ fn bus_shelter(builder: &mut MeshBuilder, key: &str) {
             None,
         );
     }
-    box_at(builder, key, Vec2::new(-2.9, -1.0), 1.2, 0.12, 1.9, 1.1, 0.0);
+    box_at(
+        builder,
+        key,
+        Vec2::new(-2.9, -1.0),
+        1.2,
+        0.12,
+        1.9,
+        1.1,
+        0.0,
+    );
 }
 
 /// A parked car, authored facing `+X` at unit length, used for both the parked
@@ -446,19 +509,60 @@ fn car_body(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
     // Skirt, body and cabin as three stacked boxes: three draw-call-cheap shapes
     // that read as a car at street distance and cost 18 quads between them.
-    box_at(builder, key, Vec2::new(0.0, 0.0), 0.18, 1.86, 0.36, 4.36, 0.0);
-    box_at(builder, key, Vec2::new(0.0, 0.0), 0.52, 1.78, 0.44, 4.10, 0.0);
-    box_at(builder, key, Vec2::new(-0.10, 0.0), 0.86, 1.58, 0.34, 2.10, 0.0);
+    box_at(
+        builder,
+        key,
+        Vec2::new(0.0, 0.0),
+        0.18,
+        1.86,
+        0.36,
+        4.36,
+        0.0,
+    );
+    box_at(
+        builder,
+        key,
+        Vec2::new(0.0, 0.0),
+        0.52,
+        1.78,
+        0.44,
+        4.10,
+        0.0,
+    );
+    box_at(
+        builder,
+        key,
+        Vec2::new(-0.10, 0.0),
+        0.86,
+        1.58,
+        0.34,
+        2.10,
+        0.0,
+    );
 }
 
 fn car_glass(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
-    box_at(builder, key, Vec2::new(-0.10, 0.0), 0.88, 1.60, 0.30, 2.00, 0.0);
+    box_at(
+        builder,
+        key,
+        Vec2::new(-0.10, 0.0),
+        0.88,
+        1.60,
+        0.30,
+        2.00,
+        0.0,
+    );
 }
 
 fn car_wheel(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
-    for (x, y) in [(1.36_f32, 0.82_f32), (1.36, -0.82), (-1.36, 0.82), (-1.36, -0.82)] {
+    for (x, y) in [
+        (1.36_f32, 0.82_f32),
+        (1.36, -0.82),
+        (-1.36, 0.82),
+        (-1.36, -0.82),
+    ] {
         builder.tube(
             key,
             Vec3::new(x - 0.06, y, 0.16),
@@ -531,11 +635,7 @@ pub struct FurnitureOutput {
 }
 
 /// Place every piece of furniture a city should have.
-pub fn place(
-    network: &Network,
-    builder: &mut MeshBuilder,
-    seed: u32,
-) -> FurnitureOutput {
+pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> FurnitureOutput {
     declare(builder);
     let mut rng = Rng::new(seed ^ 0xfa12);
     let mut output = FurnitureOutput::default();
@@ -743,14 +843,7 @@ pub fn place(
                     for key in ["furniture/gantry.steel", "furniture/gantry.board"] {
                         builder.add_instance(
                             key,
-                            Instance::new(
-                                point.x,
-                                level::KERB,
-                                point.z,
-                                yaw,
-                                1.0,
-                                [1.0, 1.0, 1.0],
-                            ),
+                            Instance::new(point.x, level::KERB, point.z, yaw, 1.0, [1.0, 1.0, 1.0]),
                         );
                     }
                     output.signs += 2;
@@ -1145,7 +1238,11 @@ pub fn park_cars(network: &Network, builder: &mut MeshBuilder, seed: u32) -> usi
                     let point = path.offset_at(station, side * (kerb + 0.45), 0.0);
                     let heading = path.tangent_at(station) * if side > 0.0 { 1.0 } else { -1.0 };
                     let yaw = yaw_along_x(heading)
-                        + if rng.chance(0.5) { 0.0 } else { std::f32::consts::FRAC_PI_2 };
+                        + if rng.chance(0.5) {
+                            0.0
+                        } else {
+                            std::f32::consts::FRAC_PI_2
+                        };
                     let colour = car_paint(&mut rng);
                     builder.add_instance(
                         "car/body",
@@ -1230,7 +1327,7 @@ mod tests {
             builder.add_instance(
                 "furniture/lamp",
                 Instance::new(1.0, 0.0, 2.0, 0.3, 1.0, [1.0, 1.0, 1.0]),
-        );
+            );
         }
         let scene = builder.build();
         // Every prototype gets a list, so a renderer can look one up without a
@@ -1346,7 +1443,7 @@ mod tests {
             // Outside the segment's span, this point is past the end of the road,
             // not beside it. A hair of tolerance keeps a pole standing exactly on
             // the last node from being discarded.
-            if !( -1.0e-3..=1.0 + 1.0e-3).contains(&raw) {
+            if !(-1.0e-3..=1.0 + 1.0e-3).contains(&raw) {
                 continue;
             }
             let t = raw.clamp(0.0, 1.0);
@@ -1430,7 +1527,10 @@ mod tests {
                 crossings += 1;
             }
         }
-        assert!(checked > 20, "only {checked} spans could be attributed to a road");
+        assert!(
+            checked > 20,
+            "only {checked} spans could be attributed to a road"
+        );
         assert_eq!(
             crossings, 0,
             "{crossings} of {checked} wire spans cross the carriageway they belong to \
@@ -1656,8 +1756,7 @@ mod tests {
                     .iter()
                     .map(|v| Vec2::new(v.x, v.z))
                     .collect();
-                let clearance =
-                    crate::math::distance_to_polyline(point, &plan) - road.half_width();
+                let clearance = crate::math::distance_to_polyline(point, &plan) - road.half_width();
                 assert!(
                     clearance > 0.0,
                     "a bollard sits {clearance:.2} m inside road {}",
@@ -1667,7 +1766,6 @@ mod tests {
         }
     }
 }
-
 
 /// Car body colour as an instance tint.  Chinese roads are mostly white, black,
 /// silver and grey, with a minority of red, blue and dark green — never a

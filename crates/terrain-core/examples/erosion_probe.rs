@@ -50,7 +50,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut img = GrayImage::new(n as u32, n as u32);
     for y in 1..n - 1 {
         for x in 1..n - 1 {
-            let h = |dx: isize, dy: isize| terrain.height[(y as isize + dy) as usize * n + (x as isize + dx) as usize];
+            let h = |dx: isize, dy: isize| {
+                terrain.height[(y as isize + dy) as usize * n + (x as isize + dx) as usize]
+            };
             let gx = (h(1, 0) - h(-1, 0)) / (2.0 * cell);
             let gy = (h(0, 1) - h(0, -1)) / (2.0 * cell);
             let (nx, ny, nz) = (-gx, -gy, 1.0);

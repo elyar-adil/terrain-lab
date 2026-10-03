@@ -165,7 +165,12 @@ pub(super) fn place_frontage(f: &Frontage<'_>, sink: &mut Sink<'_>) {
             }
             // A little inside the buildable ground, so the lot is not on its very edge.
             let front = row + 0.5;
-            let lot: Vec<V> = vec![at(s, front), at(s + w, front), at(s + w, front + depth), at(s, front + depth)];
+            let lot: Vec<V> = vec![
+                at(s, front),
+                at(s + w, front),
+                at(s + w, front + depth),
+                at(s, front + depth),
+            ];
             let advance = w + 1.5 + 3.0 * noise(1109);
             // Whether this lot has a house on it at all: certain beside the town,
             // rare in the country.
@@ -179,13 +184,20 @@ pub(super) fn place_frontage(f: &Frontage<'_>, sink: &mut Sink<'_>) {
                 s += advance;
                 continue;
             }
-            let inside = f.envelopes.iter().any(|env| lot.iter().all(|p| point_in(env, *p)));
+            let inside = f
+                .envelopes
+                .iter()
+                .any(|env| lot.iter().all(|p| point_in(env, *p)));
             let near_river = f.frame.near_water(&lot, 8.0);
             let clear_of_spurs = f.spurs.iter().all(|(p, q, class)| {
                 let clear = right_of_way(*class);
                 lot.iter().all(|c| point_seg_dist(*c, *p, *q) >= clear)
             });
-            if !inside || near_river || !clear_of_spurs || placed.iter().any(|o| overlap(&lot, o, 1.0)) {
+            if !inside
+                || near_river
+                || !clear_of_spurs
+                || placed.iter().any(|o| overlap(&lot, o, 1.0))
+            {
                 stats[3] += (!inside) as u32;
                 stats[4] += near_river as u32;
                 stats[5] += (!clear_of_spurs) as u32;
@@ -209,7 +221,10 @@ pub(super) fn place_frontage(f: &Frontage<'_>, sink: &mut Sink<'_>) {
             sink.parcels.push(Parcel {
                 id: parcel_id,
                 block_id: f.block_base,
-                ring: ring_out.iter().map(|p| f.frame.to_world(p.0, p.1)).collect(),
+                ring: ring_out
+                    .iter()
+                    .map(|p| f.frame.to_world(p.0, p.1))
+                    .collect(),
                 use_type,
                 compound: false,
                 gate_edge: 0,
@@ -231,7 +246,16 @@ pub(super) fn place_frontage(f: &Frontage<'_>, sink: &mut Sink<'_>) {
     if debug {
         eprintln!(
             "frontage face {}: edges {} short {}, open {}, thinned {}, outside {}, river {}, spur {}, placed {} (villa {})",
-            f.face_index, ring.len(), stats[0], stats[1], stats[2], stats[3], stats[4], stats[5], stats[6], stats[7]
+            f.face_index,
+            ring.len(),
+            stats[0],
+            stats[1],
+            stats[2],
+            stats[3],
+            stats[4],
+            stats[5],
+            stats[6],
+            stats[7]
         );
     }
 }
@@ -243,7 +267,9 @@ fn plan_lot(zone: Zone, built: f32, centrality: f32, noise: &dyn Fn(i32) -> f32)
             // A low-rise street front: one block, flush with the lot.
             let width = 22.0 + 12.0 * noise(1111);
             let depth = 20.0 + 6.0 * noise(1113);
-            let floors = (3.0 + 3.0 * noise(1115) + 3.0 * centrality).round().clamp(3.0, 7.0) as u16;
+            let floors = (3.0 + 3.0 * noise(1115) + 3.0 * centrality)
+                .round()
+                .clamp(3.0, 7.0) as u16;
             Plan {
                 width,
                 depth,
@@ -253,7 +279,11 @@ fn plan_lot(zone: Zone, built: f32, centrality: f32, noise: &dyn Fn(i32) -> f32)
                     d0: 1.0,
                     d1: depth - 1.0,
                     floors,
-                    roof: if noise(1117) < 0.4 { RoofStyle::Hip } else { RoofStyle::Flat },
+                    roof: if noise(1117) < 0.4 {
+                        RoofStyle::Hip
+                    } else {
+                        RoofStyle::Flat
+                    },
                 }],
             }
         }
@@ -293,7 +323,11 @@ fn villa(built: f32, noise: &dyn Fn(i32) -> f32) -> Plan {
         // A wing on one side takes up that side's slack.
         let ww = (4.5 + 3.5 * noise(1139)).min(slack - 2.0).max(0.0);
         if ww >= 4.0 {
-            let s0 = if wing_side_right { 1.0 + 0.2 * (slack - ww) } else { width - 1.0 - mw - 0.2 * (slack - ww) };
+            let s0 = if wing_side_right {
+                1.0 + 0.2 * (slack - ww)
+            } else {
+                width - 1.0 - mw - 0.2 * (slack - ww)
+            };
             let _ = room_right;
             (s0.clamp(1.0, width - mw - 1.0), Some((wing_side_right, ww)))
         } else {
@@ -302,29 +336,59 @@ fn villa(built: f32, noise: &dyn Fn(i32) -> f32) -> Plan {
     } else {
         (0.5 * slack + (noise(1141) - 0.5) * 0.4 * slack, None)
     };
-    let main = Part { s0, s1: s0 + mw, d0: front, d1: front + md, floors, roof };
+    let main = Part {
+        s0,
+        s1: s0 + mw,
+        d0: front,
+        d1: front + md,
+        floors,
+        roof,
+    };
     let mut parts = vec![main];
     if let Some((right, ww)) = wing {
         let wd = (md - 1.0 - 2.0 * noise(1143)).max(5.0);
-        let (ws0, ws1) = if right { (main.s1, (main.s1 + ww).min(width - 0.8)) } else { ((main.s0 - ww).max(0.8), main.s0) };
+        let (ws0, ws1) = if right {
+            (main.s1, (main.s1 + ww).min(width - 0.8))
+        } else {
+            ((main.s0 - ww).max(0.8), main.s0)
+        };
         parts.push(Part {
             s0: ws0,
             s1: ws1,
             d0: front + 0.5 + 1.5 * noise(1145),
             d1: front + 0.5 + 1.5 * noise(1145) + wd,
             floors: floors.saturating_sub(1).max(1),
-            roof: if roof == RoofStyle::Flat { RoofStyle::Flat } else { RoofStyle::Gable },
+            roof: if roof == RoofStyle::Flat {
+                RoofStyle::Flat
+            } else {
+                RoofStyle::Gable
+            },
         });
     } else if noise(1147) < 0.4 {
         // A garage beside the house, flat-roofed and forward of it.
         let gw = 3.4;
         let on_right = main.s1 + gw + 0.8 < width;
-        let (gs0, gs1) = if on_right { (main.s1 + 0.2, main.s1 + 0.2 + gw) } else { (main.s0 - 0.2 - gw, main.s0 - 0.2) };
+        let (gs0, gs1) = if on_right {
+            (main.s1 + 0.2, main.s1 + 0.2 + gw)
+        } else {
+            (main.s0 - 0.2 - gw, main.s0 - 0.2)
+        };
         if gs0 > 0.6 && gs1 < width - 0.6 {
-            parts.push(Part { s0: gs0, s1: gs1, d0: front - 0.5, d1: front + 6.0, floors: 1, roof: RoofStyle::Flat });
+            parts.push(Part {
+                s0: gs0,
+                s1: gs1,
+                d0: front - 0.5,
+                d1: front + 6.0,
+                floors: 1,
+                roof: RoofStyle::Flat,
+            });
         }
     }
-    Plan { width, depth, parts }
+    Plan {
+        width,
+        depth,
+        parts,
+    }
 }
 
 /// A farmhouse and a shed or two, in a big yard.
@@ -336,8 +400,19 @@ fn farmhouse(noise: &dyn Fn(i32) -> f32) -> Plan {
     let floors = if noise(1159) < 0.55 { 1 } else { 2 };
     let front = 7.0 + 8.0 * noise(1161);
     let s0 = 4.0 + (width - mw - 8.0).max(0.0) * noise(1163) * 0.5;
-    let roof = if noise(1165) < 0.8 { RoofStyle::Gable } else { RoofStyle::Hip };
-    let main = Part { s0, s1: s0 + mw, d0: front, d1: front + md, floors, roof };
+    let roof = if noise(1165) < 0.8 {
+        RoofStyle::Gable
+    } else {
+        RoofStyle::Hip
+    };
+    let main = Part {
+        s0,
+        s1: s0 + mw,
+        d0: front,
+        d1: front + md,
+        floors,
+        roof,
+    };
     let mut parts = vec![main];
     // Sheds: a store house to the side and, sometimes, a pen behind.
     let sw = 6.0 + 4.0 * noise(1167);
@@ -350,18 +425,40 @@ fn farmhouse(noise: &dyn Fn(i32) -> f32) -> Plan {
             d0: front + 1.0 + 3.0 * noise(1173),
             d1: front + 1.0 + 3.0 * noise(1173) + sd,
             floors: 1,
-            roof: if noise(1175) < 0.7 { RoofStyle::Gable } else { RoofStyle::Flat },
+            roof: if noise(1175) < 0.7 {
+                RoofStyle::Gable
+            } else {
+                RoofStyle::Flat
+            },
         });
     }
     if noise(1177) < 0.45 && front + md + 8.0 + 5.0 < depth {
         let bs0 = main.s0 + 2.0 * noise(1179);
-        parts.push(Part { s0: bs0, s1: bs0 + 7.0, d0: front + md + 6.0, d1: front + md + 6.0 + 4.5, floors: 1, roof: RoofStyle::Gable });
+        parts.push(Part {
+            s0: bs0,
+            s1: bs0 + 7.0,
+            d0: front + md + 6.0,
+            d1: front + md + 6.0 + 4.5,
+            floors: 1,
+            roof: RoofStyle::Gable,
+        });
     }
-    Plan { width, depth, parts }
+    Plan {
+        width,
+        depth,
+        parts,
+    }
 }
 
 /// Add one volume as a building.
-fn push_building(frame: &CityFrame, sink: &mut Sink<'_>, parcel_id: u32, use_type: ParcelUse, rect: &[V], part: &Part) {
+fn push_building(
+    frame: &CityFrame,
+    sink: &mut Sink<'_>,
+    parcel_id: u32,
+    use_type: ParcelUse,
+    rect: &[V],
+    part: &Part,
+) {
     let (w, d) = (
         ((rect[1].0 - rect[0].0).hypot(rect[1].1 - rect[0].1)),
         ((rect[3].0 - rect[0].0).hypot(rect[3].1 - rect[0].1)),
@@ -382,7 +479,11 @@ fn push_building(frame: &CityFrame, sink: &mut Sink<'_>, parcel_id: u32, use_typ
         facade: BuildingFacade::BrickResidential,
         podium_height_metres: 0.0,
         window_bays: ((long / 3.4).round() as u16).clamp(2, 12),
-        balcony_bays: if floors >= 2 && use_type == ParcelUse::Villa { 1 } else { 0 },
+        balcony_bays: if floors >= 2 && use_type == ParcelUse::Villa {
+            1
+        } else {
+            0
+        },
         entrance_count: 1,
     });
     let _ = centroid;
@@ -468,8 +569,17 @@ pub(super) fn place_fields(f: &Frontage<'_>, lots: &[Vec<V>], sink: &mut Sink<'_
                         continue;
                     }
                     let w = width * (0.8 + 0.4 * noise(1213));
-                    let corners = vec![world(pu, pv), world(pu + len, pv), world(pu + len, pv + w), world(pu, pv + w)];
-                    if !f.envelopes.iter().any(|e| corners.iter().all(|c| point_in(e, *c))) {
+                    let corners = vec![
+                        world(pu, pv),
+                        world(pu + len, pv),
+                        world(pu + len, pv + w),
+                        world(pu, pv + w),
+                    ];
+                    if !f
+                        .envelopes
+                        .iter()
+                        .any(|e| corners.iter().all(|c| point_in(e, *c)))
+                    {
                         continue;
                     }
                     if lots.iter().any(|l| overlap(&corners, l, 4.0)) {
@@ -484,8 +594,13 @@ pub(super) fn place_fields(f: &Frontage<'_>, lots: &[Vec<V>], sink: &mut Sink<'_
                         continue;
                     }
                     let choices = crop_choices(zone(built));
-                    let pick = if noise(1215) < 0.66 { preferred } else { noise(1217) };
-                    let crop = choices[((pick * choices.len() as f32) as usize).min(choices.len() - 1)];
+                    let pick = if noise(1215) < 0.66 {
+                        preferred
+                    } else {
+                        noise(1217)
+                    };
+                    let crop =
+                        choices[((pick * choices.len() as f32) as usize).min(choices.len() - 1)];
                     sink.fields.push(Field {
                         id: *sink.next_field,
                         ring: corners.iter().map(|p| f.frame.to_world(p.0, p.1)).collect(),
@@ -544,7 +659,8 @@ pub(super) fn roadside_fields(
             let width = 20.0 + 24.0 * modern_hash(seed, key, 11, 1303);
             let mut off = row + 7.0;
             for depth in 0..3 {
-                let at = |s: f32, d: f32| -> V { (a.0 + t.0 * s + n.0 * d, a.1 + t.1 * s + n.1 * d) };
+                let at =
+                    |s: f32, d: f32| -> V { (a.0 + t.0 * s + n.0 * d, a.1 + t.1 * s + n.1 * d) };
                 let mut s = 8.0 + 20.0 * modern_hash(seed, key, depth, 1305);
                 let mut col = 0;
                 while s + 24.0 < len - 8.0 && count < 700 {
@@ -553,7 +669,12 @@ pub(super) fn roadside_fields(
                     let noise = |salt: i32| modern_hash(seed, k2, 13, salt);
                     let l = (55.0 + 70.0 * noise(1307)).min(len - 8.0 - s);
                     let w = width * (0.8 + 0.4 * noise(1309));
-                    let corners = vec![at(s, off), at(s + l, off), at(s + l, off + w), at(s, off + w)];
+                    let corners = vec![
+                        at(s, off),
+                        at(s + l, off),
+                        at(s + l, off + w),
+                        at(s, off + w),
+                    ];
                     s += l + 1.6;
                     let c = centroid(&corners);
                     if frame.urbanness(c.0, c.1) >= TOWN_BUILT {
@@ -562,9 +683,13 @@ pub(super) fn roadside_fields(
                     // Clear of every street (this one included, since the road bends).
                     let clear = edges.iter().all(|&(ja, jb, cl)| {
                         let ro = right_of_way(cl) + 2.0;
-                        corners.iter().all(|p| point_seg_dist(*p, pts[ja], pts[jb]) >= ro)
-                            && super::geom::seg_seg_dist(corners[0], corners[2], pts[ja], pts[jb]) >= ro
-                            && super::geom::seg_seg_dist(corners[1], corners[3], pts[ja], pts[jb]) >= ro
+                        corners
+                            .iter()
+                            .all(|p| point_seg_dist(*p, pts[ja], pts[jb]) >= ro)
+                            && super::geom::seg_seg_dist(corners[0], corners[2], pts[ja], pts[jb])
+                                >= ro
+                            && super::geom::seg_seg_dist(corners[1], corners[3], pts[ja], pts[jb])
+                                >= ro
                     });
                     if !clear {
                         continue;
@@ -576,8 +701,13 @@ pub(super) fn roadside_fields(
                         continue;
                     }
                     let choices = crop_choices(zone(frame.urbanness(c.0, c.1)));
-                    let pick = if noise(1311) < 0.66 { preferred } else { noise(1313) };
-                    let crop = choices[((pick * choices.len() as f32) as usize).min(choices.len() - 1)];
+                    let pick = if noise(1311) < 0.66 {
+                        preferred
+                    } else {
+                        noise(1313)
+                    };
+                    let crop =
+                        choices[((pick * choices.len() as f32) as usize).min(choices.len() - 1)];
                     fields.push(Field {
                         id: *next_field,
                         ring: corners.iter().map(|p| frame.to_world(p.0, p.1)).collect(),

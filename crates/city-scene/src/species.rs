@@ -621,7 +621,10 @@ mod tests {
 
     fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
         let (pa, pb) = (separable(a), separable(b));
-        (0..4).map(|axis| (pa[axis] - pb[axis]).powi(2)).sum::<f32>().sqrt()
+        (0..4)
+            .map(|axis| (pa[axis] - pb[axis]).powi(2))
+            .sum::<f32>()
+            .sqrt()
     }
 
     /// Hue in degrees, 0..360. Used to assert that a colour is the *kind* of
@@ -684,8 +687,16 @@ mod tests {
     #[test]
     fn every_species_has_a_name_in_both_scripts() {
         for species in SPECIES {
-            assert!(!species.name_zh.is_empty(), "{} has no Chinese name", species.key);
-            assert!(!species.name_en.is_empty(), "{} has no English name", species.key);
+            assert!(
+                !species.name_zh.is_empty(),
+                "{} has no Chinese name",
+                species.key
+            );
+            assert!(
+                !species.name_en.is_empty(),
+                "{} has no English name",
+                species.key
+            );
         }
     }
 
@@ -920,7 +931,10 @@ mod tests {
         );
         // Locust: white June bloom, a minor event.
         let locust = bloom_of("ci-huai");
-        assert!(locust.density < 0.50, "a locust's bloom is a dress, not a cloud");
+        assert!(
+            locust.density < 0.50,
+            "a locust's bloom is a dress, not a cloud"
+        );
         // And nobody else is showy: thirteen of the sixteen are foliage trees.
         let blossoming = SPECIES
             .iter()
@@ -992,9 +1006,16 @@ mod tests {
             "only {} species can survive a kerb",
             street.len()
         );
-        assert!(street.len() < SPECIES.len(), "everything is street tolerant");
+        assert!(
+            street.len() < SPECIES.len(),
+            "everything is street tolerant"
+        );
         for species in &street {
-            assert!(species.street_tolerant, "{} leaked into the street list", species.key);
+            assert!(
+                species.street_tolerant,
+                "{} leaked into the street list",
+                species.key
+            );
         }
     }
 

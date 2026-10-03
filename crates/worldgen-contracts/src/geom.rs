@@ -31,7 +31,11 @@ impl V2 {
     /// Unit vector; the zero vector stays zero rather than becoming NaN.
     pub fn norm(self) -> V2 {
         let l = self.len();
-        if l < 1e-12 { V2::ZERO } else { self * (1.0 / l) }
+        if l < 1e-12 {
+            V2::ZERO
+        } else {
+            self * (1.0 / l)
+        }
     }
     /// Anticlockwise quarter turn.
     pub fn perp(self) -> V2 {
@@ -93,7 +97,11 @@ impl Neg for V2 {
 pub fn closest_on_segment(a: V2, b: V2, p: V2) -> (V2, f64, f64) {
     let d = b - a;
     let l2 = d.dot(d);
-    let t = if l2 < 1e-18 { 0.0 } else { ((p - a).dot(d) / l2).clamp(0.0, 1.0) };
+    let t = if l2 < 1e-18 {
+        0.0
+    } else {
+        ((p - a).dot(d) / l2).clamp(0.0, 1.0)
+    };
     let q = a + d * t;
     (q, t, q.dist(p))
 }
@@ -189,7 +197,10 @@ impl Polyline {
     pub fn bounds(&self) -> Option<(V2, V2)> {
         let first = *self.0.first()?;
         Some(self.0.iter().fold((first, first), |(lo, hi), p| {
-            (v2(lo.x.min(p.x), lo.y.min(p.y)), v2(hi.x.max(p.x), hi.y.max(p.y)))
+            (
+                v2(lo.x.min(p.x), lo.y.min(p.y)),
+                v2(hi.x.max(p.x), hi.y.max(p.y)),
+            )
         }))
     }
     /// The largest turn between consecutive segments, in radians (0 for straight).
@@ -221,10 +232,15 @@ mod tests {
 
     #[test]
     fn segments_intersect_where_they_cross_and_not_when_parallel() {
-        let hit = segment_intersection(v2(0.0, 0.0), v2(10.0, 10.0), v2(0.0, 10.0), v2(10.0, 0.0)).unwrap();
+        let hit = segment_intersection(v2(0.0, 0.0), v2(10.0, 10.0), v2(0.0, 10.0), v2(10.0, 0.0))
+            .unwrap();
         assert!((hit.0 - v2(5.0, 5.0)).len() < 1e-12);
-        assert!(segment_intersection(v2(0.0, 0.0), v2(1.0, 0.0), v2(0.0, 1.0), v2(1.0, 1.0)).is_none());
-        assert!(segment_intersection(v2(0.0, 0.0), v2(1.0, 0.0), v2(2.0, -1.0), v2(2.0, 1.0)).is_none());
+        assert!(
+            segment_intersection(v2(0.0, 0.0), v2(1.0, 0.0), v2(0.0, 1.0), v2(1.0, 1.0)).is_none()
+        );
+        assert!(
+            segment_intersection(v2(0.0, 0.0), v2(1.0, 0.0), v2(2.0, -1.0), v2(2.0, 1.0)).is_none()
+        );
     }
 
     #[test]

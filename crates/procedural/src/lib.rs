@@ -15,11 +15,11 @@ pub use architecture::{FacadeKind, FacadeMetrics, facade_metrics};
 pub use lsystem::{LSystem, TurtleParams, interpret};
 pub use materials::{BakedTexture, MaterialName, bake, standard_texture_set};
 pub use noise::{fbm, hash01, value_noise};
+use serde::{Deserialize, Serialize};
 pub use vegetation::{
     STANDARD_SPECIES, build_prototype, build_prototype_pair, species_from_name,
     standard_prototype_set,
 };
-use serde::{Deserialize, Serialize};
 
 /// Small deterministic RNG (SplitMix64).  Every stochastic procedural system
 /// in the project draws from this stream so results stay reproducible on any

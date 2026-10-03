@@ -8,8 +8,8 @@
 use std::collections::BTreeMap;
 
 use worldgen_contracts::{
-    EdgeId, EdgeSource, HeightField, NodeId, NodeKind, Polyline, RoadClass, RoadEdge, RoadNode, Setting, Span, SpanKind, V2,
-    WaterField,
+    EdgeId, EdgeSource, HeightField, NodeId, NodeKind, Polyline, RoadClass, RoadEdge, RoadNode,
+    Setting, Span, SpanKind, V2, WaterField,
 };
 use worldgen_core::{Cell, Context, Dependency, Error, Layer, LayerId, Seed};
 
@@ -75,7 +75,11 @@ struct Builder<'a> {
 impl Builder<'_> {
     fn node(&mut self, v: Vertex) {
         let position = warp(self.fabric, self.cfg, v.pos);
-        self.nodes.entry(v.id).or_insert(RoadNode { id: v.id, position, kind: NodeKind::Junction });
+        self.nodes.entry(v.id).or_insert(RoadNode {
+            id: v.id,
+            position,
+            kind: NodeKind::Junction,
+        });
     }
 
     /// One road between two vertices, if it can exist (it cannot, if it would
@@ -93,13 +97,26 @@ impl Builder<'_> {
         // arterials: how intense the development is steps the class down.
         let (class, setting) = if urbanness >= self.cfg.urban_threshold {
             let intensity = self.fields.urban.intensity(mid);
-            let steps = if intensity >= 0.4 { 0 } else if intensity >= 0.12 { 1 } else { 2 };
+            let steps = if intensity >= 0.4 {
+                0
+            } else if intensity >= 0.12 {
+                1
+            } else {
+                2
+            };
             (demote(level_class(level), steps), Setting::Urban)
         } else {
             (level_class(level).demoted(), Setting::Rural)
         };
         let id = EdgeId::between(a.id, b.id, slot);
-        let line = bend(self.fabric, self.cfg, a.pos, b.pos, id.0, self.cfg.wiggle_amp_m * wiggle_factor(class));
+        let line = bend(
+            self.fabric,
+            self.cfg,
+            a.pos,
+            b.pos,
+            id.0,
+            self.cfg.wiggle_amp_m * wiggle_factor(class),
+        );
         if steepest_grade(&*self.fields.height, &line) > grade_limit(class) {
             return;
         }
@@ -152,9 +169,17 @@ fn steepest_grade(height: &dyn HeightField, line: &Polyline) -> f64 {
         return 0.0;
     }
     let n = (total / STRETCH_M).ceil().max(1.0) as usize;
-    let heights: Vec<f64> = (0..=n).map(|k| line.at(total * k as f64 / n as f64).map_or(0.0, |(p, _)| height.height_m(p))).collect();
+    let heights: Vec<f64> = (0..=n)
+        .map(|k| {
+            line.at(total * k as f64 / n as f64)
+                .map_or(0.0, |(p, _)| height.height_m(p))
+        })
+        .collect();
     let run = total / n as f64;
-    heights.windows(2).map(|w| (w[1] - w[0]).abs() / run).fold(0.0, f64::max)
+    heights
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs() / run)
+        .fold(0.0, f64::max)
 }
 
 /// Where a road meets water. `None` means it must not exist (a small road with no
@@ -184,7 +209,11 @@ fn water_spans(water: &dyn WaterField, line: &Polyline, class: RoadClass) -> Opt
     }
     let from = line.at((first - APPROACH_M).max(0.0))?.0;
     let to = line.at((last + APPROACH_M).min(total))?.0;
-    Some(vec![Span { kind: SpanKind::Bridge, from, to }])
+    Some(vec![Span {
+        kind: SpanKind::Bridge,
+        from,
+        to,
+    }])
 }
 
 impl Layer for CellLayer {
@@ -218,29 +247,76 @@ impl Layer for CellLayer {
         interior(&mut b, &quad);
 
         // The two chords this cell owns. A division is a junction if either side uses it.
-        let c00 = Vertex { id: corner_id(fabric, i, j), pos: corner(fabric, &self.config, frame, i, j) };
-        let c10 = Vertex { id: corner_id(fabric, i + 1, j), pos: corner(fabric, &self.config, frame, i + 1, j) };
-        let c01 = Vertex { id: corner_id(fabric, i, j + 1), pos: corner(fabric, &self.config, frame, i, j + 1) };
-        chord_edges(&mut b, &own.bottom, c00, c10, &quad.used_bottom, &below.used_top);
-        chord_edges(&mut b, &own.left, c00, c01, &quad.used_left, &left.used_right);
+        let c00 = Vertex {
+            id: corner_id(fabric, i, j),
+            pos: corner(fabric, &self.config, frame, i, j),
+        };
+        let c10 = Vertex {
+            id: corner_id(fabric, i + 1, j),
+            pos: corner(fabric, &self.config, frame, i + 1, j),
+        };
+        let c01 = Vertex {
+            id: corner_id(fabric, i, j + 1),
+            pos: corner(fabric, &self.config, frame, i, j + 1),
+        };
+        chord_edges(
+            &mut b,
+            &own.bottom,
+            c00,
+            c10,
+            &quad.used_bottom,
+            &below.used_top,
+        );
+        chord_edges(
+            &mut b,
+            &own.left,
+            c00,
+            c01,
+            &quad.used_left,
+            &left.used_right,
+        );
 
-        Ok(CellNetwork { nodes: b.nodes.into_values().collect(), edges: b.edges })
+        Ok(CellNetwork {
+            nodes: b.nodes.into_values().collect(),
+            edges: b.edges,
+        })
     }
 }
 
-fn chord_edges(b: &mut Builder<'_>, chord: &Chord, from: Vertex, to: Vertex, side_a: &[UsedNode], side_b: &[UsedNode]) {
+fn chord_edges(
+    b: &mut Builder<'_>,
+    chord: &Chord,
+    from: Vertex,
+    to: Vertex,
+    side_a: &[UsedNode],
+    side_b: &[UsedNode],
+) {
     // A node is a junction if a street of either neighbouring quadrilateral uses it.
     let mut used: Vec<&UsedNode> = side_a.iter().chain(side_b).collect();
     used.sort_by(|x, y| x.t.partial_cmp(&y.t).unwrap().then(x.id.cmp(&y.id)));
     used.dedup_by(|y, x| x.id == y.id);
     let mut chain = vec![from];
-    chain.extend(used.into_iter().map(|u| Vertex { id: u.id, pos: u.pos }));
+    chain.extend(used.into_iter().map(|u| Vertex {
+        id: u.id,
+        pos: u.pos,
+    }));
     chain.push(to);
     b.chain(&chain, chord.id, TOP_RUNG);
 }
 
 fn interior(b: &mut Builder<'_>, quad: &Quad) {
     for e in &quad.edges {
-        b.edge(Vertex { id: e.a, pos: e.a_pos }, Vertex { id: e.b, pos: e.b_pos }, e.slot, e.level);
+        b.edge(
+            Vertex {
+                id: e.a,
+                pos: e.a_pos,
+            },
+            Vertex {
+                id: e.b,
+                pos: e.b_pos,
+            },
+            e.slot,
+            e.level,
+        );
     }
 }

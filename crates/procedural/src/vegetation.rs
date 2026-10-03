@@ -77,11 +77,15 @@ impl SpeciesModel {
         let mut crown = 0.0_f32;
         for segment in &segments {
             height = height.max(segment.end[1]);
-            crown = crown.max((segment.end[0] * segment.end[0] + segment.end[2] * segment.end[2]).sqrt());
+            crown = crown
+                .max((segment.end[0] * segment.end[0] + segment.end[2] * segment.end[2]).sqrt());
         }
         for blob in &foliage {
             height = height.max(blob.centre[1] + blob.radius * 0.5);
-            crown = crown.max((blob.centre[0] * blob.centre[0] + blob.centre[2] * blob.centre[2]).sqrt() + blob.radius);
+            crown = crown.max(
+                (blob.centre[0] * blob.centre[0] + blob.centre[2] * blob.centre[2]).sqrt()
+                    + blob.radius,
+            );
         }
         if segments.is_empty() {
             // Degenerate grammar guard: one bare culm keeps instances sane.
@@ -119,28 +123,21 @@ impl SpeciesModel {
 }
 
 fn model(species: Species) -> SpeciesModel {
-    let params = |step: f32,
-                  angle: f32,
-                  radius: f32,
-                  decay: f32,
-                  tropism: f32,
-                  foliage: f32| TurtleParams {
-        step,
-        angle_deg: angle,
-        base_radius: radius,
-        radius_decay: decay,
-        step_decay: 0.96,
-        tropism: crate::Tropism { up: tropism },
-        foliage_radius: foliage,
-    };
+    let params =
+        |step: f32, angle: f32, radius: f32, decay: f32, tropism: f32, foliage: f32| TurtleParams {
+            step,
+            angle_deg: angle,
+            base_radius: radius,
+            radius_decay: decay,
+            step_decay: 0.96,
+            tropism: crate::Tropism { up: tropism },
+            foliage_radius: foliage,
+        };
     match species {
         // 樟树: strong central leader through 2/3 of the height, then a wide,
         // dense evergreen crown.  12-20 m street specimens.
         Species::Camphor => SpeciesModel {
-            grammar: LSystem::new("A").with_rule(
-                'A',
-                "F[&FLA]////[&FLA]////[&FLA]F",
-            ),
+            grammar: LSystem::new("A").with_rule('A', "F[&FLA]////[&FLA]////[&FLA]F"),
             iterations_near: 5,
             iterations_far: 3,
             params: params(1.65, 42.0, 0.26, 0.82, 0.30, 1.9),
@@ -148,10 +145,7 @@ fn model(species: Species) -> SpeciesModel {
         },
         // 银杏: narrow crown, steep branches, sparse distinctive foliage.
         Species::Ginkgo => SpeciesModel {
-            grammar: LSystem::new("A").with_rule(
-                'A',
-                "F[^^FLA]//[^^FLA]//[^^FLA]FA",
-            ),
+            grammar: LSystem::new("A").with_rule('A', "F[^^FLA]//[^^FLA]//[^^FLA]FA"),
             iterations_near: 5,
             iterations_far: 3,
             params: params(1.25, 34.0, 0.22, 0.80, 0.5, 1.35),
@@ -159,10 +153,7 @@ fn model(species: Species) -> SpeciesModel {
         },
         // 垂柳: short trunk, shoots arch outward then droop under gravity.
         Species::Willow => SpeciesModel {
-            grammar: LSystem::new("A").with_rule(
-                'A',
-                "FF[&&FLA]////[&&FLA]////[&&FLA]FA",
-            ),
+            grammar: LSystem::new("A").with_rule('A', "FF[&&FLA]////[&&FLA]////[&&FLA]FA"),
             iterations_near: 5,
             iterations_far: 3,
             params: params(1.95, 48.0, 0.24, 0.82, -0.45, 1.5),
@@ -170,10 +161,7 @@ fn model(species: Species) -> SpeciesModel {
         },
         // 雪松: whorled conifer, branches sweep down then flatten out.
         Species::Cedar => SpeciesModel {
-            grammar: LSystem::new("A").with_rule(
-                'A',
-                "F[&&&FLA]////[&&&FLA]////[&&&FLA]FA",
-            ),
+            grammar: LSystem::new("A").with_rule('A', "F[&&&FLA]////[&&&FLA]////[&&&FLA]FA"),
             iterations_near: 6,
             iterations_far: 3,
             params: params(1.35, 55.0, 0.30, 0.86, 0.62, 1.1),
@@ -181,10 +169,7 @@ fn model(species: Species) -> SpeciesModel {
         },
         // 竹: thin culms, tiny foliage high up.
         Species::Bamboo => SpeciesModel {
-            grammar: LSystem::new("A").with_rule(
-                'A',
-                "FFFFFFFF[&FLA]F[&FLA]F",
-            ),
+            grammar: LSystem::new("A").with_rule('A', "FFFFFFFF[&FLA]F[&FLA]F"),
             iterations_near: 2,
             iterations_far: 1,
             params: params(0.72, 26.0, 0.045, 0.98, 0.02, 0.5),
@@ -192,10 +177,7 @@ fn model(species: Species) -> SpeciesModel {
         },
         // 法国梧桐: mottled bark, chunky branches, huge plane-like crown.
         Species::LondonPlane => SpeciesModel {
-            grammar: LSystem::new("A").with_rule(
-                'A',
-                "F[&FLA]///[&FLA]///[&FLA]///[&FLA]FA",
-            ),
+            grammar: LSystem::new("A").with_rule('A', "F[&FLA]///[&FLA]///[&FLA]///[&FLA]FA"),
             iterations_near: 5,
             iterations_far: 3,
             params: params(1.2, 46.0, 0.3, 0.75, 0.3, 2.2),
@@ -301,10 +283,7 @@ mod tests {
 
     #[test]
     fn species_names_resolve() {
-        assert_eq!(
-            species_from_name("camphor"),
-            Some(Species::Camphor)
-        );
+        assert_eq!(species_from_name("camphor"), Some(Species::Camphor));
         assert_eq!(species_from_name("ginkgo"), Some(Species::Ginkgo));
         assert_eq!(species_from_name("nope"), None);
     }

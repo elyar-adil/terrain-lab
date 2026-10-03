@@ -44,7 +44,9 @@ pub trait WaterField: Send + Sync {
     fn crossing(&self, a: V2, b: V2, probe_step_m: f64) -> Option<f64> {
         let l = a.dist(b);
         let n = (l / probe_step_m).ceil().max(1.0) as usize;
-        let wet = (0..=n).filter(|i| self.is_water(a.lerp(b, *i as f64 / n as f64))).count();
+        let wet = (0..=n)
+            .filter(|i| self.is_water(a.lerp(b, *i as f64 / n as f64)))
+            .count();
         (wet > 0).then(|| wet as f64 * l / n as f64)
     }
 }
@@ -114,7 +116,11 @@ impl WaterField for PolylineRiver {
             .map(|s| closest_on_segment(s[0], s[1], p).2)
             .fold(f64::INFINITY, f64::min);
         let edge = centre - self.width_m * 0.5;
-        (edge <= within_m).then_some(WaterHit { distance_m: edge, width_m: self.width_m, id: self.id })
+        (edge <= within_m).then_some(WaterHit {
+            distance_m: edge,
+            width_m: self.width_m,
+            id: self.id,
+        })
     }
 }
 
@@ -138,7 +144,11 @@ mod tests {
 
     #[test]
     fn a_river_is_water_inside_its_banks_and_a_line_across_it_crosses_it() {
-        let river = PolylineRiver { id: 7, line: vec![v2(0.0, -100.0), v2(0.0, 100.0)], width_m: 20.0 };
+        let river = PolylineRiver {
+            id: 7,
+            line: vec![v2(0.0, -100.0), v2(0.0, 100.0)],
+            width_m: 20.0,
+        };
         assert!(river.is_water(v2(5.0, 0.0)));
         assert!(!river.is_water(v2(15.0, 0.0)));
         let hit = river.nearest(v2(30.0, 0.0), 50.0).unwrap();
@@ -147,6 +157,10 @@ mod tests {
         let span = river.crossing(v2(-50.0, 0.0), v2(50.0, 0.0), 1.0).unwrap();
         assert!((span - 20.0).abs() < 2.0, "{span}");
         assert!(river.crossing(v2(30.0, 0.0), v2(80.0, 0.0), 1.0).is_none());
-        assert!(DryLand.crossing(v2(0.0, 0.0), v2(100.0, 0.0), 1.0).is_none());
+        assert!(
+            DryLand
+                .crossing(v2(0.0, 0.0), v2(100.0, 0.0), 1.0)
+                .is_none()
+        );
     }
 }

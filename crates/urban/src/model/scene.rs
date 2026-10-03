@@ -101,20 +101,31 @@ impl ModernCity {
             })
         };
         let mut out = self.clone();
-        out.hd_roads.retain(|road| road.centreline.iter().any(|p| near(p, 60.0)));
-        let kept: std::collections::HashSet<u32> = out.hd_roads.iter().map(|road| road.sd_road).collect();
+        out.hd_roads
+            .retain(|road| road.centreline.iter().any(|p| near(p, 60.0)));
+        let kept: std::collections::HashSet<u32> =
+            out.hd_roads.iter().map(|road| road.sd_road).collect();
         out.sd_roads.retain(|road| kept.contains(&road.id));
-        out.blocks.retain(|b| middle(&b.boundary).is_some_and(|c| near(&c, 0.0)));
-        out.parcels.retain(|b| middle(&b.ring).is_some_and(|c| near(&c, 0.0)));
+        out.blocks
+            .retain(|b| middle(&b.boundary).is_some_and(|c| near(&c, 0.0)));
+        out.parcels
+            .retain(|b| middle(&b.ring).is_some_and(|c| near(&c, 0.0)));
         let parcels: std::collections::HashSet<u32> = out.parcels.iter().map(|p| p.id).collect();
         out.buildings.retain(|b| parcels.contains(&b.parcel_id));
         out.compounds.retain(|c| parcels.contains(&c.parcel_id));
         out.trees.retain(|t| near(&t.point, 0.0));
-        out.fields.retain(|f| middle(&f.ring).is_some_and(|c| near(&c, 0.0)));
+        out.fields
+            .retain(|f| middle(&f.ring).is_some_and(|c| near(&c, 0.0)));
         // Waterways are cut to the neighbourhood too, or the water alone would be the
         // whole size of the plan.
-        let cut = |line: &[Point]| -> Vec<Point> { line.iter().copied().filter(|p| near(p, 250.0)).collect() };
-        out.river = out.river.as_ref().map(|line| cut(line)).filter(|line| line.len() >= 2);
+        let cut = |line: &[Point]| -> Vec<Point> {
+            line.iter().copied().filter(|p| near(p, 250.0)).collect()
+        };
+        out.river = out
+            .river
+            .as_ref()
+            .map(|line| cut(line))
+            .filter(|line| line.len() >= 2);
         for tributary in &mut out.tributaries {
             tributary.line = cut(&tributary.line);
         }

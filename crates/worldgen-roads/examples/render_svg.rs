@@ -5,9 +5,11 @@
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use worldgen_contracts::{PinnedRoad, PinnedSet, Polyline, PolylineRiver, RoadClass, Setting, V2, v2};
+use worldgen_contracts::{
+    PinnedRoad, PinnedSet, Polyline, PolylineRiver, RoadClass, Setting, V2, v2,
+};
 use worldgen_core::{Cell, Frame, Seed};
-use worldgen_roads::{Fields, HashedTowns, RoadsConfig, engine, ROADS};
+use worldgen_roads::{Fields, HashedTowns, ROADS, RoadsConfig, engine};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -41,11 +43,21 @@ fn main() {
         Some("service") => RoadClass::Service,
         _ => RoadClass::Track,
     };
-    let config = RoadsConfig { min_class, ..RoadsConfig::default() };
+    let config = RoadsConfig {
+        min_class,
+        ..RoadsConfig::default()
+    };
     let frame = Frame::new([0.0, 0.0], 1_048_576.0);
     let river = PolylineRiver {
         id: 1,
-        line: (0..60).map(|k| v2(cx - size * 0.7 + k as f64 * size * 0.025, cy + (k as f64 * 0.35).sin() * size * 0.08 - size * 0.1)).collect(),
+        line: (0..60)
+            .map(|k| {
+                v2(
+                    cx - size * 0.7 + k as f64 * size * 0.025,
+                    cy + (k as f64 * 0.35).sin() * size * 0.08 - size * 0.1,
+                )
+            })
+            .collect(),
         width_m: 38.0,
     };
     // A long arterial a router might have laid, bending across the window.
@@ -64,7 +76,8 @@ fn main() {
             20.0,
         ),
     };
-    let mut fields = Fields::new(HashedTowns::shared(Seed::new(seed))).with_water(Arc::new(river.clone()));
+    let mut fields =
+        Fields::new(HashedTowns::shared(Seed::new(seed))).with_water(Arc::new(river.clone()));
     if std::env::var("GIVEN").is_ok() {
         fields = fields.with_pinned(Arc::new(PinnedSet::new(vec![given])));
     }
@@ -72,25 +85,49 @@ fn main() {
 
     // The window, as tiles at a level that fits a few of them.
     let level = ((frame.root_size_m / (size / 2.0)).log2().floor() as u8).clamp(1, 20);
-    let (x0, y0, x1, y1) = (cx - size / 2.0, cy - size / 2.0, cx + size / 2.0, cy + size / 2.0);
-    let (lo, hi) = (Cell::containing(&frame, [x0, y0], level), Cell::containing(&frame, [x1, y1], level));
+    let (x0, y0, x1, y1) = (
+        cx - size / 2.0,
+        cy - size / 2.0,
+        cx + size / 2.0,
+        cy + size / 2.0,
+    );
+    let (lo, hi) = (
+        Cell::containing(&frame, [x0, y0], level),
+        Cell::containing(&frame, [x1, y1], level),
+    );
     let mut svg = String::new();
     let px = 1600.0;
     let k = px / size;
     let tx = |p: V2| ((p.x - x0) * k, (y1 - p.y) * k);
     writeln!(svg, r##"<svg xmlns="http://www.w3.org/2000/svg" width="{px}" height="{px}" viewBox="0 0 {px} {px}"><rect width="{px}" height="{px}" fill="#e9e4d6"/>"##).unwrap();
     // River.
-    let pts: Vec<String> = river.line.iter().map(|p| { let (x, y) = tx(*p); format!("{x:.1},{y:.1}") }).collect();
+    let pts: Vec<String> = river
+        .line
+        .iter()
+        .map(|p| {
+            let (x, y) = tx(*p);
+            format!("{x:.1},{y:.1}")
+        })
+        .collect();
     writeln!(svg, r##"<polyline points="{}" fill="none" stroke="#9ec3dd" stroke-width="{:.1}" stroke-linecap="round"/>"##, pts.join(" "), river.width_m * k).unwrap();
     let mut count = 0;
     let mut layers: Vec<(RoadClass, String)> = Vec::new();
     for j in lo.y..=hi.y {
         for i in lo.x..=hi.x {
-            let tile = e.get::<worldgen_contracts::RoadTile>(ROADS, Cell::new(level, i, j)).unwrap();
+            let tile = e
+                .get::<worldgen_contracts::RoadTile>(ROADS, Cell::new(level, i, j))
+                .unwrap();
             for edge in &tile.edges {
                 count += 1;
                 for piece in &edge.pieces {
-                    let pts: Vec<String> = piece.0.iter().map(|p| { let (x, y) = tx(*p); format!("{x:.1},{y:.1}") }).collect();
+                    let pts: Vec<String> = piece
+                        .0
+                        .iter()
+                        .map(|p| {
+                            let (x, y) = tx(*p);
+                            format!("{x:.1},{y:.1}")
+                        })
+                        .collect();
                     let w = edge.class.cross_section(edge.setting).width() * k;
                     let colour = match (edge.class, edge.setting) {
                         (RoadClass::Arterial | RoadClass::Motorway, _) => "#c9573b",
@@ -110,8 +147,14 @@ fn main() {
         }
     }
     layers.sort_by_key(|(c, _)| *c);
-    for (_, s) in layers { svg.push_str(&s); svg.push('\n'); }
+    for (_, s) in layers {
+        svg.push_str(&s);
+        svg.push('\n');
+    }
     svg.push_str("</svg>\n");
     std::fs::write(&out, svg).unwrap();
-    eprintln!("{out}: {count} edges, tile level {level}, computed {} products", e.computed());
+    eprintln!(
+        "{out}: {count} edges, tile level {level}, computed {} products",
+        e.computed()
+    );
 }

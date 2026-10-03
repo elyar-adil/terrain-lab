@@ -254,7 +254,6 @@ const GLAZED: FacadeDesign = FacadeDesign {
 /// dark tinted glasses are indistinguishable from one another by albedo alone,
 /// and the non-glass elements are what a viewer actually reads.
 pub static DESIGNS: [FacadeDesign; 24] = [
-
     // -- masonry, warm: the sound of a residential district -----------------
     FacadeDesign {
         name: "ban-plaster-tan",
@@ -982,7 +981,11 @@ mod tests {
                 design.open_w,
                 clear
             );
-            let (lo, hi) = if bays == 1 { (0.42, 0.80) } else { (0.45, 0.95) };
+            let (lo, hi) = if bays == 1 {
+                (0.42, 0.80)
+            } else {
+                (0.45, 0.95)
+            };
             let pane = design.open_w / clear;
             assert!(
                 (lo..=hi).contains(&pane),
@@ -1112,9 +1115,15 @@ mod tests {
     /// name the families and count them.
     #[test]
     fn the_palette_spans_the_families_a_chinese_skyline_is_made_of() {
-        let masonry: Vec<_> = DESIGNS.iter().filter(|d| d.cladding != Cladding::CurtainWall).collect();
+        let masonry: Vec<_> = DESIGNS
+            .iter()
+            .filter(|d| d.cladding != Cladding::CurtainWall)
+            .collect();
         let glazed = DESIGNS.len() - masonry.len();
-        assert_eq!(glazed, 8, "eight curtain-wall tiles is the mix a skyline needs");
+        assert_eq!(
+            glazed, 8,
+            "eight curtain-wall tiles is the mix a skyline needs"
+        );
         // Warm beige leads, the way it does in every photograph of a Chinese
         // residential district.  The point of this assertion is that a future
         // edit cannot quietly rebalance the city towards grey.
@@ -1136,7 +1145,13 @@ mod tests {
         // white is the most recognisable signature of a fake render.
         let mut values: Vec<f32> = DESIGNS
             .iter()
-            .map(|d| luma(if d.cladding == Cladding::CurtainWall { d.glass } else { d.wall }))
+            .map(|d| {
+                luma(if d.cladding == Cladding::CurtainWall {
+                    d.glass
+                } else {
+                    d.wall
+                })
+            })
             .collect();
         values.sort_by(|a, b| a.total_cmp(b));
         assert!(

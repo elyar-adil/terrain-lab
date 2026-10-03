@@ -103,7 +103,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // The validation harness exercises shaders and scene evolution with a
         // representative mesh. Product generation still uses the 512-cell LOD;
         // software WebGL does not need four full-resolution renders per check.
-        grid_size: env::var("FIXTURE_GRID").ok().and_then(|v| v.parse().ok()).unwrap_or(128),
+        grid_size: env::var("FIXTURE_GRID")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(128),
         world_size_km: 80.0,
         rainfall: 1275.0,
         evaporation: 600.0,
@@ -116,7 +119,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cloud_speed: 24.0,
     };
     let terrain = generate(&config, |_, _| {})?;
-    let mesh_size = env::var("FIXTURE_GRID").ok().and_then(|v| v.parse().ok()).unwrap_or(128_usize).min(terrain.size);
+    let mesh_size = env::var("FIXTURE_GRID")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(128_usize)
+        .min(terrain.size);
     // `FIXTURE_CITY_RADIUS_M=900` declares one city site at the world centre (where
     // the harness's `?city=1` mounts a scene) and levels/clears the ground under
     // it exactly as the desktop payload does.
@@ -137,7 +144,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .map(|site| {
             urban::generate_modern_chinese_city(urban::ModernChinaSpec {
-                centre: urban::Point { x_km: site.x_km, y_km: site.y_km },
+                centre: urban::Point {
+                    x_km: site.x_km,
+                    y_km: site.y_km,
+                },
                 radius_km: site.radius_m / 1000.0,
                 seed: 4242,
                 ..urban::ModernChinaSpec::default()
@@ -145,7 +155,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
     let mut mesh_heights = downsample_height(&terrain, mesh_size);
-    flatten_heights(&mut mesh_heights, mesh_size, config.world_size_km, &city_sites);
+    flatten_heights(
+        &mut mesh_heights,
+        mesh_size,
+        config.world_size_km,
+        &city_sites,
+    );
     let mut exclusion = vec![0_u8; mesh_size * mesh_size];
     exclude_vegetation(&mut exclusion, mesh_size, config.world_size_km, &city_sites);
     let height_bytes: Vec<u8> = mesh_heights

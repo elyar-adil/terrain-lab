@@ -41,8 +41,7 @@ pub(super) fn point_in(ring: &[V], q: V) -> bool {
     let mut j = n - 1;
     for i in 0..n {
         let (pi, pj) = (ring[i], ring[j]);
-        if (pi.1 > q.1) != (pj.1 > q.1)
-            && q.0 < (pj.0 - pi.0) * (q.1 - pi.1) / (pj.1 - pi.1) + pi.0
+        if (pi.1 > q.1) != (pj.1 > q.1) && q.0 < (pj.0 - pi.0) * (q.1 - pi.1) / (pj.1 - pi.1) + pi.0
         {
             inside = !inside;
         }
@@ -170,7 +169,17 @@ pub(super) fn obb(ring: &[V]) -> Obb {
         }
         let area = (u1 - u0) * (v1 - v0);
         if best.as_ref().map(|(a, _)| area < *a).unwrap_or(true) {
-            best = Some((area, Obb { u, v, min_u: u0, max_u: u1, min_v: v0, max_v: v1 }));
+            best = Some((
+                area,
+                Obb {
+                    u,
+                    v,
+                    min_u: u0,
+                    max_u: u1,
+                    min_v: v0,
+                    max_v: v1,
+                },
+            ));
         }
     }
     best.map(|(_, o)| o).unwrap_or(Obb {

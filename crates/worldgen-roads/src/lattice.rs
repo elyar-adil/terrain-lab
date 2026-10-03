@@ -34,7 +34,9 @@ pub(crate) fn cell_size(frame: &Frame, level: u8) -> f64 {
 /// Position of lattice corner `(i, j)`, before the grid is bent.
 pub(crate) fn corner(fabric: Seed, cfg: &RoadsConfig, frame: &Frame, i: i64, j: i64) -> V2 {
     let s = cell_size(frame, cfg.lattice_level);
-    let h = fabric.derive("corner").derive_cell(Cell::new(cfg.lattice_level, i, j));
+    let h = fabric
+        .derive("corner")
+        .derive_cell(Cell::new(cfg.lattice_level, i, j));
     v2(
         frame.origin[0] + i as f64 * s + (h.derive("x").unit() - 0.5) * 2.0 * cfg.corner_jitter * s,
         frame.origin[1] + j as f64 * s + (h.derive("y").unit() - 0.5) * 2.0 * cfg.corner_jitter * s,
@@ -91,7 +93,10 @@ impl Layer for ChordLayer {
 
     fn collapse(&self, ctx: &Context<'_>, cell: Cell) -> Result<CellChords, Error> {
         if cell.level != self.config.lattice_level {
-            return Err(Error::Layer(format!("chords live at level {}, not {}", self.config.lattice_level, cell.level)));
+            return Err(Error::Layer(format!(
+                "chords live at level {}, not {}",
+                self.config.lattice_level, cell.level
+            )));
         }
         let fabric = fabric_seed(ctx);
         let (i, j) = (cell.x, cell.y);
@@ -99,8 +104,20 @@ impl Layer for ChordLayer {
         let c10 = corner(fabric, &self.config, ctx.frame(), i + 1, j);
         let c01 = corner(fabric, &self.config, ctx.frame(), i, j + 1);
         Ok(CellChords {
-            bottom: make_chord(fabric, &*self.urban, hash_words(&[fabric.0, i as u64, j as u64, 0xB0]), c00, c10),
-            left: make_chord(fabric, &*self.urban, hash_words(&[fabric.0, i as u64, j as u64, 0x1E]), c00, c01),
+            bottom: make_chord(
+                fabric,
+                &*self.urban,
+                hash_words(&[fabric.0, i as u64, j as u64, 0xB0]),
+                c00,
+                c10,
+            ),
+            left: make_chord(
+                fabric,
+                &*self.urban,
+                hash_words(&[fabric.0, i as u64, j as u64, 0x1E]),
+                c00,
+                c01,
+            ),
         })
     }
 }
@@ -133,17 +150,28 @@ pub(crate) fn make_chord_reaching(
     let len = a.dist(b);
     let n = ((len / 14.0).ceil() as usize).max(4);
     let step = len / n as f64;
-    let raw: Vec<f64> = (0..=n).map(|k| urban.urbanness(a.lerp(b, k as f64 / n as f64))).collect();
+    let raw: Vec<f64> = (0..=n)
+        .map(|k| urban.urbanness(a.lerp(b, k as f64 / n as f64)))
+        .collect();
     // How built up it is for a given rung: the most built-up point within the
     // rung's reach. Evaluated every few steps and interpolated between, since the
     // reach-wide maximum varies slowly.
     let reached = |spec: &crate::config::LevelSpec| -> Vec<f64> {
-        let reach_m = if reach_override > 0.0 && spec.level < TOP_RUNG { reach_override } else { spec.reach_m };
+        let reach_m = if reach_override > 0.0 && spec.level < TOP_RUNG {
+            reach_override
+        } else {
+            spec.reach_m
+        };
         if reach_m <= 0.0 {
             return raw.clone();
         }
         let stride = ((reach_m / 28.0).ceil() as usize).max(1);
-        let anchors: Vec<usize> = (0..=n).step_by(stride).chain(std::iter::once(n)).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+        let anchors: Vec<usize> = (0..=n)
+            .step_by(stride)
+            .chain(std::iter::once(n))
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
         let values: Vec<f64> = anchors
             .iter()
             .map(|&k| {
@@ -151,7 +179,10 @@ pub(crate) fn make_chord_reaching(
                 // Rings of samples at three distances: a small town between two of them is still seen.
                 [0.4, 0.75, 1.0].iter().fold(raw[k], |best, &ring| {
                     (0..12).fold(best, |best, d| {
-                        best.max(urban.urbanness(p + V2::from_angle(d as f64 * std::f64::consts::TAU / 12.0) * (reach_m * ring)))
+                        best.max(urban.urbanness(
+                            p + V2::from_angle(d as f64 * std::f64::consts::TAU / 12.0)
+                                * (reach_m * ring),
+                        ))
                     })
                 })
             })
@@ -170,7 +201,11 @@ pub(crate) fn make_chord_reaching(
     };
 
     let mut kept: Vec<Division> = Vec::new();
-    for spec in LEVELS.iter().rev().filter(|s| i8::try_from(s.level).unwrap() <= top_rung) {
+    for spec in LEVELS
+        .iter()
+        .rev()
+        .filter(|s| i8::try_from(s.level).unwrap() <= top_rung)
+    {
         // Cumulative count of this rung's streets along the chord.
         let built = reached(spec);
         let at = |t: f64| {
@@ -193,7 +228,10 @@ pub(crate) fn make_chord_reaching(
                 break;
             }
             m += 1;
-            let k = cumulative.partition_point(|&w| w < target).saturating_sub(1).min(n - 1);
+            let k = cumulative
+                .partition_point(|&w| w < target)
+                .saturating_sub(1)
+                .min(n - 1);
             let span = cumulative[k + 1] - cumulative[k];
             if span <= 0.0 {
                 continue;
@@ -206,7 +244,9 @@ pub(crate) fn make_chord_reaching(
                 continue;
             }
             // A finer street too close to a coarser one is absorbed by it.
-            let crowded = kept.iter().any(|d| d.level > spec.level && (d.t - t).abs() * len < 0.25 * local);
+            let crowded = kept
+                .iter()
+                .any(|d| d.level > spec.level && (d.t - t).abs() * len < 0.25 * local);
             if crowded {
                 continue;
             }
@@ -220,7 +260,13 @@ pub(crate) fn make_chord_reaching(
         }
     }
     kept.sort_by(|x, y| x.t.partial_cmp(&y.t).unwrap());
-    Chord { id, a, b, len, divisions: kept }
+    Chord {
+        id,
+        a,
+        b,
+        len,
+        divisions: kept,
+    }
 }
 
 #[cfg(test)]
@@ -229,19 +275,33 @@ mod tests {
     use worldgen_contracts::ConstantUrban;
 
     fn chord(urban: f64, len: f64) -> Chord {
-        make_chord(Seed::new(1), &ConstantUrban(urban), 42, v2(0.0, 0.0), v2(len, 0.0))
+        make_chord(
+            Seed::new(1),
+            &ConstantUrban(urban),
+            42,
+            v2(0.0, 0.0),
+            v2(len, 0.0),
+        )
     }
 
     #[test]
     fn a_denser_place_has_more_divisions_and_every_rung_adds_to_the_coarser_ones() {
         let town = chord(1.0, 2048.0);
         let country = chord(0.0, 2048.0);
-        assert!(town.divisions.len() > 8 * country.divisions.len().max(1), "{} vs {}", town.divisions.len(), country.divisions.len());
+        assert!(
+            town.divisions.len() > 8 * country.divisions.len().max(1),
+            "{} vs {}",
+            town.divisions.len(),
+            country.divisions.len()
+        );
         // The countryside only has the coarsest rung.
         assert!(country.divisions.iter().all(|d| d.level == TOP_RUNG));
         // A town has all four.
         for level in 0..=TOP_RUNG {
-            assert!(town.divisions.iter().any(|d| d.level == level), "no level {level}");
+            assert!(
+                town.divisions.iter().any(|d| d.level == level),
+                "no level {level}"
+            );
         }
         // Dropping the finer rungs leaves exactly the coarser divisions, unmoved.
         let coarse: Vec<_> = town.divisions.iter().filter(|d| d.level >= 3).collect();
@@ -256,8 +316,17 @@ mod tests {
         for d in &a.divisions {
             assert!(d.t * a.len >= 16.0 && (1.0 - d.t) * a.len >= 16.0);
         }
-        let other = make_chord(Seed::new(1), &ConstantUrban(0.8), 43, v2(0.0, 0.0), v2(2048.0, 0.0));
-        assert_ne!(a.divisions.iter().map(|d| d.id).collect::<Vec<_>>(), other.divisions.iter().map(|d| d.id).collect::<Vec<_>>());
+        let other = make_chord(
+            Seed::new(1),
+            &ConstantUrban(0.8),
+            43,
+            v2(0.0, 0.0),
+            v2(2048.0, 0.0),
+        );
+        assert_ne!(
+            a.divisions.iter().map(|d| d.id).collect::<Vec<_>>(),
+            other.divisions.iter().map(|d| d.id).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -266,7 +335,11 @@ mod tests {
         let lanes: Vec<_> = town.divisions.iter().filter(|d| d.level == 2).collect();
         let mean = 4096.0 / lanes.len() as f64;
         assert!((180.0..820.0).contains(&mean), "rung-2 mean spacing {mean}");
-        let min_gap = town.divisions.windows(2).map(|w| (w[1].t - w[0].t) * town.len).fold(f64::INFINITY, f64::min);
+        let min_gap = town
+            .divisions
+            .windows(2)
+            .map(|w| (w[1].t - w[0].t) * town.len)
+            .fold(f64::INFINITY, f64::min);
         assert!(min_gap > 14.0, "two divisions {min_gap} m apart");
     }
 }

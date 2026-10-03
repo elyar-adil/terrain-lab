@@ -1041,7 +1041,11 @@ where
 /// natural the ground is (255 = paint it procedurally, 0 = keep the baked image,
 /// which is where water, roads, fields and towns are painted). `keep` is an
 /// optional 0..255 mask of such built or open-water surfaces to preserve.
-pub fn material_control_map(terrain: &TerrainData, mesh_size: usize, keep: Option<&[u8]>) -> Vec<u8> {
+pub fn material_control_map(
+    terrain: &TerrainData,
+    mesh_size: usize,
+    keep: Option<&[u8]>,
+) -> Vec<u8> {
     let source = terrain.size;
     let scale = (source - 1) as f32 / (mesh_size - 1) as f32;
     let mut out = vec![0_u8; mesh_size * mesh_size * 4];
@@ -2046,7 +2050,10 @@ mod tests {
         assert_eq!(free.len(), mesh * mesh * 4);
         // Cover follows the terrain: some forest and some natural ground exist.
         assert!(free.chunks(4).any(|p| p[0] > 100), "no forest channel");
-        assert!(free.chunks(4).any(|p| p[3] == 255), "no fully natural ground");
+        assert!(
+            free.chunks(4).any(|p| p[3] == 255),
+            "no fully natural ground"
+        );
         // Open water is not painted procedurally.
         let wet = free.chunks(4).zip(0..).filter(|(p, _)| p[3] < 128).count();
         let any_water = terrain.water.iter().any(|w| *w > 0.7);

@@ -239,7 +239,11 @@ pub fn profile(habit: Habit, h: f32) -> f32 {
     let h = h.clamp(0.0, 1.0);
     let dome = |peak: f32, round: f32| {
         // A smooth bump with its widest point at `peak`, falling to a rounded top and foot.
-        let x = if h < peak { h / peak } else { (1.0 - h) / (1.0 - peak) };
+        let x = if h < peak {
+            h / peak
+        } else {
+            (1.0 - h) / (1.0 - peak)
+        };
         (1.0 - (1.0 - x).powf(round)).max(0.0).powf(0.55)
     };
     match habit {
@@ -257,7 +261,11 @@ pub fn profile(habit: Habit, h: f32) -> f32 {
         Habit::Weeping => 0.25 + 0.75 * dome(0.42, 1.6),
         Habit::Fastigiate => 0.40 + 0.60 * dome(0.50, 1.4),
         Habit::Irregular => 0.20 + 0.80 * dome(0.50, 1.5),
-        Habit::Umbrella => 0.18 + 0.82 * (h.powf(0.75)).min(1.0) * (1.0 - 0.6 * (h - 0.88).max(0.0).powi(2) * 20.0).max(0.4),
+        Habit::Umbrella => {
+            0.18 + 0.82
+                * (h.powf(0.75)).min(1.0)
+                * (1.0 - 0.6 * (h - 0.88).max(0.0).powi(2) * 20.0).max(0.4)
+        }
         Habit::Banyan => 0.22 + 0.78 * dome(0.50, 1.35),
     }
 }
@@ -267,17 +275,35 @@ mod tests {
     use super::*;
 
     const ALL: [Habit; 12] = [
-        Habit::Rounded, Habit::Open, Habit::Oval, Habit::Fan, Habit::Vase, Habit::Conical, Habit::Layered,
-        Habit::Weeping, Habit::Fastigiate, Habit::Irregular, Habit::Umbrella, Habit::Banyan,
+        Habit::Rounded,
+        Habit::Open,
+        Habit::Oval,
+        Habit::Fan,
+        Habit::Vase,
+        Habit::Conical,
+        Habit::Layered,
+        Habit::Weeping,
+        Habit::Fastigiate,
+        Habit::Irregular,
+        Habit::Umbrella,
+        Habit::Banyan,
     ];
 
     #[test]
     fn every_profile_is_a_sensible_crown_outline() {
         for habit in ALL {
             let values: Vec<f32> = (0..=20).map(|k| profile(habit, k as f32 / 20.0)).collect();
-            assert!(values.iter().all(|v| v.is_finite() && (0.0..=1.05).contains(v)), "{habit:?}: {values:?}");
+            assert!(
+                values
+                    .iter()
+                    .all(|v| v.is_finite() && (0.0..=1.05).contains(v)),
+                "{habit:?}: {values:?}"
+            );
             let widest = values.iter().copied().fold(0.0, f32::max);
-            assert!(widest > 0.85, "{habit:?} never reaches its crown radius ({widest})");
+            assert!(
+                widest > 0.85,
+                "{habit:?} never reaches its crown radius ({widest})"
+            );
         }
         // A cone is widest at the bottom and narrows to a point; a dome is widest in the middle.
         assert!(profile(Habit::Conical, 0.0) > 0.9 && profile(Habit::Conical, 1.0) < 0.1);
@@ -293,7 +319,12 @@ mod tests {
         for habit in ALL {
             let a = architecture(habit);
             assert!((0.0..=1.0).contains(&a.leader));
-            assert!(a.limb_down.0 > 0.2 && a.limb_down.0 < 1.7 && a.limb_down.1 > 0.1 && a.limb_down.1 < 1.7);
+            assert!(
+                a.limb_down.0 > 0.2
+                    && a.limb_down.0 < 1.7
+                    && a.limb_down.1 > 0.1
+                    && a.limb_down.1 < 1.7
+            );
             assert!(a.limb_per_m > 0.3 && a.branch_per_m > 1.0 && a.twig_per_m > 2.0);
             assert!(a.twig_len.0 < a.twig_len.1);
         }

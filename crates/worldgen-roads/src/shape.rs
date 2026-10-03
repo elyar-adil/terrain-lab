@@ -27,7 +27,14 @@ pub fn warp(fabric: Seed, cfg: &RoadsConfig, p: V2) -> V2 {
 /// The road from `a` to `b` (chord space), bent. The first and last points are
 /// exactly `warp(a)` and `warp(b)`; in between a lateral wiggle that vanishes at
 /// both ends adds the irregularity of a street that was not ruled with a straight edge.
-pub fn bend(fabric: Seed, cfg: &RoadsConfig, a: V2, b: V2, edge_key: u64, wiggle_scale: f64) -> Polyline {
+pub fn bend(
+    fabric: Seed,
+    cfg: &RoadsConfig,
+    a: V2,
+    b: V2,
+    edge_key: u64,
+    wiggle_scale: f64,
+) -> Polyline {
     let len = a.dist(b);
     let n = ((len / cfg.sample_step_m).ceil() as usize).max(2);
     let side = (b - a).norm().perp();
@@ -39,7 +46,16 @@ pub fn bend(fabric: Seed, cfg: &RoadsConfig, a: V2, b: V2, edge_key: u64, wiggle
     for k in 1..n {
         let s = k as f64 / n as f64;
         let envelope = (std::f64::consts::PI * s).sin();
-        let lateral = (fbm(noise_seed, s * len / (cfg.wiggle_scale_m * 1.7), 0.5, 2, 0.5) - 0.5) * 2.0 * wiggle_scale * envelope;
+        let lateral = (fbm(
+            noise_seed,
+            s * len / (cfg.wiggle_scale_m * 1.7),
+            0.5,
+            2,
+            0.5,
+        ) - 0.5)
+            * 2.0
+            * wiggle_scale
+            * envelope;
         points.push(warp(fabric, cfg, a.lerp(b, s)) + side * lateral);
     }
     points.push(warp(fabric, cfg, b));
@@ -122,7 +138,11 @@ pub fn clip(line: &Polyline, rect: Rect) -> Vec<Polyline> {
     if !current.is_empty() {
         pieces.push(current);
     }
-    pieces.into_iter().filter(|p| p.len() >= 2).map(Polyline).collect()
+    pieces
+        .into_iter()
+        .filter(|p| p.len() >= 2)
+        .map(Polyline)
+        .collect()
 }
 
 /// A side of a rectangle: the axis (0 for x, 1 for y) and whether it is the
@@ -140,11 +160,21 @@ pub(crate) fn clip_segment(p: V2, q: V2, r: Rect) -> Option<(V2, V2)> {
     clip_segment_at(p, q, r).map(|(a, b, _, _)| (a, b))
 }
 
-pub(crate) fn clip_segment_at(p: V2, q: V2, r: Rect) -> Option<(V2, V2, Option<Border>, Option<Border>)> {
+pub(crate) fn clip_segment_at(
+    p: V2,
+    q: V2,
+    r: Rect,
+) -> Option<(V2, V2, Option<Border>, Option<Border>)> {
     let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
     let (mut entry, mut exit): (Option<Border>, Option<Border>) = (None, None);
     let d = q - p;
-    for (axis, (lo, hi, p0, dd)) in [(r.min[0], r.max[0], p.x, d.x), (r.min[1], r.max[1], p.y, d.y)].into_iter().enumerate() {
+    for (axis, (lo, hi, p0, dd)) in [
+        (r.min[0], r.max[0], p.x, d.x),
+        (r.min[1], r.max[1], p.y, d.y),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         if dd == 0.0 {
             if p0 < lo || p0 >= hi {
                 return None;
@@ -159,11 +189,17 @@ pub(crate) fn clip_segment_at(p: V2, q: V2, r: Rect) -> Option<(V2, V2, Option<B
             }
             if ta > t0 {
                 t0 = ta;
-                entry = Some(Border { axis: axis as u8, max: enter_max });
+                entry = Some(Border {
+                    axis: axis as u8,
+                    max: enter_max,
+                });
             }
             if tb < t1 {
                 t1 = tb;
-                exit = Some(Border { axis: axis as u8, max: leave_max });
+                exit = Some(Border {
+                    axis: axis as u8,
+                    max: leave_max,
+                });
             }
             if t0 > t1 {
                 return None;
@@ -228,7 +264,13 @@ pub fn clip_runs(line: &Polyline, rect: Rect) -> Vec<Run> {
                     if let Some(r) = open.take() {
                         runs.push(r);
                     }
-                    open = Some(Run { points: vec![p], first_segment: i, last_segment: i, entered: entry, left: None });
+                    open = Some(Run {
+                        points: vec![p],
+                        first_segment: i,
+                        last_segment: i,
+                        entered: entry,
+                        left: None,
+                    });
                 }
                 let run = open.as_mut().unwrap();
                 run.points.push(q);
@@ -254,7 +296,10 @@ mod tests {
     use super::*;
 
     fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Rect {
-        Rect { min: [x0, y0], max: [x1, y1] }
+        Rect {
+            min: [x0, y0],
+            max: [x1, y1],
+        }
     }
 
     #[test]
@@ -280,26 +325,47 @@ mod tests {
 
     #[test]
     fn rounding_replaces_a_kink_with_an_arc_that_stays_close_to_the_route() {
-        let route = Polyline(vec![v2(0.0, 0.0), v2(500.0, 0.0), v2(500.0, 400.0), v2(1200.0, 450.0)]);
+        let route = Polyline(vec![
+            v2(0.0, 0.0),
+            v2(500.0, 0.0),
+            v2(500.0, 400.0),
+            v2(1200.0, 450.0),
+        ]);
         let round = round_corners(&route, 120.0, 15.0);
         assert!(route.max_turn() > 1.4, "the route has a right angle");
-        assert!(round.max_turn() < 0.2, "no kink is left: {}", round.max_turn());
+        assert!(
+            round.max_turn() < 0.2,
+            "no kink is left: {}",
+            round.max_turn()
+        );
         assert_eq!(round.first(), route.first());
         assert_eq!(round.last(), route.last());
         // It cuts the corner by about the fillet, not by hundreds of metres.
         assert!(round.length() < route.length() && round.length() > route.length() - 150.0);
         for p in &round.0 {
-            assert!(route.closest(*p).unwrap().0 < 60.0, "{p:?} is far from the route");
+            assert!(
+                route.closest(*p).unwrap().0 < 60.0,
+                "{p:?} is far from the route"
+            );
         }
         // Straight routes and short ones pass through.
         let straight = Polyline(vec![v2(0.0, 0.0), v2(10.0, 0.0), v2(20.0, 0.0)]);
         assert_eq!(round_corners(&straight, 100.0, 10.0).0.len(), 3);
-        assert_eq!(round_corners(&Polyline(vec![v2(0.0, 0.0), v2(1.0, 1.0)]), 100.0, 10.0).0.len(), 2);
+        assert_eq!(
+            round_corners(&Polyline(vec![v2(0.0, 0.0), v2(1.0, 1.0)]), 100.0, 10.0)
+                .0
+                .len(),
+            2
+        );
     }
 
     #[test]
     fn rounding_a_route_in_halves_matches_rounding_it_whole() {
-        let route = Polyline((0..9).map(|k| v2(k as f64 * 300.0, if k % 2 == 0 { 0.0 } else { 220.0 })).collect());
+        let route = Polyline(
+            (0..9)
+                .map(|k| v2(k as f64 * 300.0, if k % 2 == 0 { 0.0 } else { 220.0 }))
+                .collect(),
+        );
         let whole = round_corners(&route, 90.0, 12.0);
         // Rounding keeps every vertex of the interior corners' neighbourhoods local.
         let left = round_corners(&Polyline(route.0[..6].to_vec()), 90.0, 12.0);
@@ -317,7 +383,12 @@ mod tests {
         assert_eq!(pieces[0].last(), Some(v2(10.0, 20.0)));
         assert!(clip(&line, rect(100.0, 100.0, 120.0, 120.0)).is_empty());
         // A line that leaves and comes back is two pieces.
-        let loop_line = Polyline(vec![v2(5.0, 5.0), v2(25.0, 5.0), v2(25.0, 15.0), v2(5.0, 15.0)]);
+        let loop_line = Polyline(vec![
+            v2(5.0, 5.0),
+            v2(25.0, 5.0),
+            v2(25.0, 15.0),
+            v2(5.0, 15.0),
+        ]);
         assert_eq!(clip(&loop_line, rect(0.0, 0.0, 20.0, 20.0)).len(), 2);
     }
 
@@ -328,7 +399,11 @@ mod tests {
         let right = clip(&line, rect(100.0, 0.0, 200.0, 100.0));
         assert_eq!(left.len(), 1);
         assert_eq!(right.len(), 1);
-        assert_eq!(left[0].last(), right[0].first(), "the cut point is shared exactly");
+        assert_eq!(
+            left[0].last(),
+            right[0].first(),
+            "the cut point is shared exactly"
+        );
         assert_eq!(left[0].last().unwrap().x, 100.0);
         // Rejoined, the pieces are the whole road.
         let joined = worldgen_contracts::network::stitch(vec![left[0].clone(), right[0].clone()]);
@@ -339,7 +414,10 @@ mod tests {
     #[test]
     fn a_road_along_a_border_belongs_to_one_side() {
         let line = Polyline(vec![v2(100.0, 10.0), v2(100.0, 90.0)]);
-        let n = [clip(&line, rect(0.0, 0.0, 100.0, 100.0)).len(), clip(&line, rect(100.0, 0.0, 200.0, 100.0)).len()];
+        let n = [
+            clip(&line, rect(0.0, 0.0, 100.0, 100.0)).len(),
+            clip(&line, rect(100.0, 0.0, 200.0, 100.0)).len(),
+        ];
         assert_eq!(n[0] + n[1], 1);
     }
 }

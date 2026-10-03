@@ -85,9 +85,12 @@ pub(super) fn build_signals(network: &Network, builder: &mut MeshBuilder) -> Vec
             continue;
         }
         let has_arterial = junction.ports.iter().any(|port| {
-            network
-                .road(port.road)
-                .is_some_and(|road| matches!(road.class, ModernRoadClass::Arterial | ModernRoadClass::Expressway))
+            network.road(port.road).is_some_and(|road| {
+                matches!(
+                    road.class,
+                    ModernRoadClass::Arterial | ModernRoadClass::Expressway
+                )
+            })
         });
         if !has_arterial {
             continue;
@@ -191,10 +194,7 @@ pub(super) fn build_signals(network: &Network, builder: &mut MeshBuilder) -> Vec
                     builder.wall(
                         "signal.body",
                         Vec2::new(lens.x, lens.y),
-                        Vec2::new(
-                            lens.x - facing.x * 0.26,
-                            lens.y - facing.y * 0.26,
-                        ),
+                        Vec2::new(lens.x - facing.x * 0.26, lens.y - facing.y * 0.26),
                         centre.y + 0.13,
                         centre.y + 0.18,
                         None,

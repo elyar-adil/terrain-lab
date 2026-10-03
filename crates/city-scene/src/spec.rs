@@ -297,40 +297,232 @@ pub struct FacadeTile {
 }
 
 pub const FACADE_TILES: [FacadeTile; 24] = [
-    FacadeTile { base: [198, 188, 168], window: [96, 104, 112], cols: 2, sill: 0.34, brick: false, band: false, glass: false },
-    FacadeTile { base: [176, 179, 176], window: [88, 97, 106], cols: 2, sill: 0.32, brick: false, band: false, glass: false },
-    FacadeTile { base: [216, 211, 197], window: [112, 142, 154], cols: 3, sill: 0.28, brick: false, band: false, glass: false },
-    FacadeTile { base: [156, 100, 80], window: [64, 56, 54], cols: 2, sill: 0.36, brick: true, band: false, glass: false },
-    FacadeTile { base: [208, 196, 168], window: [98, 118, 128], cols: 3, sill: 0.30, brick: false, band: false, glass: false },
-    FacadeTile { base: [150, 151, 149], window: [80, 92, 100], cols: 4, sill: 0.24, brick: false, band: true, glass: false },
-    FacadeTile { base: [190, 148, 120], window: [84, 90, 96], cols: 2, sill: 0.32, brick: false, band: false, glass: false },
-    FacadeTile { base: [132, 136, 142], window: [98, 130, 142], cols: 3, sill: 0.30, brick: false, band: false, glass: false },
-    FacadeTile { base: [76, 90, 100], window: [134, 170, 186], cols: 4, sill: 0.30, brick: false, band: false, glass: true },
-    FacadeTile { base: [66, 80, 88], window: [120, 160, 152], cols: 5, sill: 0.30, brick: false, band: false, glass: true },
-    FacadeTile { base: [90, 94, 106], window: [150, 152, 160], cols: 4, sill: 0.30, brick: false, band: false, glass: true },
-    FacadeTile { base: [112, 98, 90], window: [128, 150, 158], cols: 3, sill: 0.30, brick: false, band: false, glass: true },
-    FacadeTile { base: [58, 62, 70], window: [110, 150, 168], cols: 6, sill: 0.30, brick: false, band: false, glass: true },
-    FacadeTile { base: [168, 170, 172], window: [96, 118, 130], cols: 5, sill: 0.30, brick: false, band: false, glass: true },
-    FacadeTile { base: [122, 96, 72], window: [150, 138, 116], cols: 4, sill: 0.30, brick: false, band: false, glass: true },
-    FacadeTile { base: [70, 92, 96], window: [128, 164, 170], cols: 5, sill: 0.30, brick: false, band: false, glass: true },
-    FacadeTile { base: [214, 212, 206], window: [104, 116, 126], cols: 4, sill: 0.26, brick: false, band: false, glass: false },
-    FacadeTile { base: [142, 138, 130], window: [88, 96, 104], cols: 4, sill: 0.26, brick: false, band: true, glass: false },
-    FacadeTile { base: [186, 172, 148], window: [96, 110, 118], cols: 3, sill: 0.30, brick: false, band: false, glass: false },
-    FacadeTile { base: [84, 86, 90], window: [118, 128, 136], cols: 5, sill: 0.22, brick: false, band: false, glass: false },
-    FacadeTile { base: [226, 222, 212], window: [100, 110, 118], cols: 2, sill: 0.40, brick: false, band: false, glass: false },
-    FacadeTile { base: [164, 132, 96], window: [76, 64, 54], cols: 2, sill: 0.36, brick: false, band: false, glass: false },
-    FacadeTile { base: [142, 74, 60], window: [70, 58, 52], cols: 2, sill: 0.36, brick: true, band: false, glass: false },
-    FacadeTile { base: [172, 178, 164], window: [92, 104, 110], cols: 3, sill: 0.34, brick: false, band: false, glass: false },
+    FacadeTile {
+        base: [198, 188, 168],
+        window: [96, 104, 112],
+        cols: 2,
+        sill: 0.34,
+        brick: false,
+        band: false,
+        glass: false,
+    },
+    FacadeTile {
+        base: [176, 179, 176],
+        window: [88, 97, 106],
+        cols: 2,
+        sill: 0.32,
+        brick: false,
+        band: false,
+        glass: false,
+    },
+    FacadeTile {
+        base: [216, 211, 197],
+        window: [112, 142, 154],
+        cols: 3,
+        sill: 0.28,
+        brick: false,
+        band: false,
+        glass: false,
+    },
+    FacadeTile {
+        base: [156, 100, 80],
+        window: [64, 56, 54],
+        cols: 2,
+        sill: 0.36,
+        brick: true,
+        band: false,
+        glass: false,
+    },
+    FacadeTile {
+        base: [208, 196, 168],
+        window: [98, 118, 128],
+        cols: 3,
+        sill: 0.30,
+        brick: false,
+        band: false,
+        glass: false,
+    },
+    FacadeTile {
+        base: [150, 151, 149],
+        window: [80, 92, 100],
+        cols: 4,
+        sill: 0.24,
+        brick: false,
+        band: true,
+        glass: false,
+    },
+    FacadeTile {
+        base: [190, 148, 120],
+        window: [84, 90, 96],
+        cols: 2,
+        sill: 0.32,
+        brick: false,
+        band: false,
+        glass: false,
+    },
+    FacadeTile {
+        base: [132, 136, 142],
+        window: [98, 130, 142],
+        cols: 3,
+        sill: 0.30,
+        brick: false,
+        band: false,
+        glass: false,
+    },
+    FacadeTile {
+        base: [76, 90, 100],
+        window: [134, 170, 186],
+        cols: 4,
+        sill: 0.30,
+        brick: false,
+        band: false,
+        glass: true,
+    },
+    FacadeTile {
+        base: [66, 80, 88],
+        window: [120, 160, 152],
+        cols: 5,
+        sill: 0.30,
+        brick: false,
+        band: false,
+        glass: true,
+    },
+    FacadeTile {
+        base: [90, 94, 106],
+        window: [150, 152, 160],
+        cols: 4,
+        sill: 0.30,
+        brick: false,
+        band: false,
+        glass: true,
+    },
+    FacadeTile {
+        base: [112, 98, 90],
+        window: [128, 150, 158],
+        cols: 3,
+        sill: 0.30,
+        brick: false,
+        band: false,
+        glass: true,
+    },
+    FacadeTile {
+        base: [58, 62, 70],
+        window: [110, 150, 168],
+        cols: 6,
+        sill: 0.30,
+        brick: false,
+        band: false,
+        glass: true,
+    },
+    FacadeTile {
+        base: [168, 170, 172],
+        window: [96, 118, 130],
+        cols: 5,
+        sill: 0.30,
+        brick: false,
+        band: false,
+        glass: true,
+    },
+    FacadeTile {
+        base: [122, 96, 72],
+        window: [150, 138, 116],
+        cols: 4,
+        sill: 0.30,
+        brick: false,
+        band: false,
+        glass: true,
+    },
+    FacadeTile {
+        base: [70, 92, 96],
+        window: [128, 164, 170],
+        cols: 5,
+        sill: 0.30,
+        brick: false,
+        band: false,
+        glass: true,
+    },
+    FacadeTile {
+        base: [214, 212, 206],
+        window: [104, 116, 126],
+        cols: 4,
+        sill: 0.26,
+        brick: false,
+        band: false,
+        glass: false,
+    },
+    FacadeTile {
+        base: [142, 138, 130],
+        window: [88, 96, 104],
+        cols: 4,
+        sill: 0.26,
+        brick: false,
+        band: true,
+        glass: false,
+    },
+    FacadeTile {
+        base: [186, 172, 148],
+        window: [96, 110, 118],
+        cols: 3,
+        sill: 0.30,
+        brick: false,
+        band: false,
+        glass: false,
+    },
+    FacadeTile {
+        base: [84, 86, 90],
+        window: [118, 128, 136],
+        cols: 5,
+        sill: 0.22,
+        brick: false,
+        band: false,
+        glass: false,
+    },
+    FacadeTile {
+        base: [226, 222, 212],
+        window: [100, 110, 118],
+        cols: 2,
+        sill: 0.40,
+        brick: false,
+        band: false,
+        glass: false,
+    },
+    FacadeTile {
+        base: [164, 132, 96],
+        window: [76, 64, 54],
+        cols: 2,
+        sill: 0.36,
+        brick: false,
+        band: false,
+        glass: false,
+    },
+    FacadeTile {
+        base: [142, 74, 60],
+        window: [70, 58, 52],
+        cols: 2,
+        sill: 0.36,
+        brick: true,
+        band: false,
+        glass: false,
+    },
+    FacadeTile {
+        base: [172, 178, 164],
+        window: [92, 104, 110],
+        cols: 3,
+        sill: 0.34,
+        brick: false,
+        band: false,
+        glass: false,
+    },
 ];
 
 /// Tile index range per land use, matching the source generator's mapping:
 /// `tower → [8,20)`, `mixed → [4,8)`, `waterfront → [2,6)`, `residential → [0,4)`.
 pub fn facade_tile_range(style: u8) -> std::ops::Range<usize> {
     match style {
-        0 => 8..20,  // tower
-        1 => 4..8,   // mixed-use
-        2 => 2..6,   // waterfront
-        _ => 0..4,   // residential
+        0 => 8..20, // tower
+        1 => 4..8,  // mixed-use
+        2 => 2..6,  // waterfront
+        _ => 0..4,  // residential
     }
 }
 
@@ -548,7 +740,10 @@ mod tests {
         // So a driver heading north turns **west** — negative `X` — to go right.
         let (movement, degrees) = classify_movement(north, Vec2::new(-1.0, 0.0));
         assert_eq!(movement, Movement::Right, "north then west is a right turn");
-        assert!((degrees.abs() - 90.0).abs() < 0.01, "turn was {degrees} degrees");
+        assert!(
+            (degrees.abs() - 90.0).abs() < 0.01,
+            "turn was {degrees} degrees"
+        );
         // The returned angle is signed: negative to the right, positive to the
         // left, so a fillet radius can be sized from it without a second test.
         assert!(degrees < 0.0);
@@ -557,7 +752,10 @@ mod tests {
         let (movement, _) = classify_movement(north, Vec2::new(0.0, -1.0));
         assert_eq!(movement, Movement::UTurn);
         // And the sign convention the whole crate is built on.
-        assert!(north.cross(Vec2::new(-1.0, 0.0)) > 0.0, "right is a positive cross");
+        assert!(
+            north.cross(Vec2::new(-1.0, 0.0)) > 0.0,
+            "right is a positive cross"
+        );
     }
 
     #[test]
@@ -694,12 +892,16 @@ mod tests {
         // the kernel's mirrored `left+straight` is this crate's `left+straight`,
         // because the kernel's own `lateral` axis is this crate's *left* while
         // the crate's is its *right*.
-        let js_left_straight: Vec<(f32, f32)> = JS_STRAIGHT_LEFT
-            .iter()
-            .map(|(x, y)| (-x, *y))
-            .collect();
-        assert_eq!(arrow_polygons(&[Movement::Straight, Movement::Left])[0], JS_STRAIGHT_LEFT.to_vec());
-        assert_eq!(arrow_polygons(&[Movement::Straight, Movement::Right])[0], js_left_straight);
+        let js_left_straight: Vec<(f32, f32)> =
+            JS_STRAIGHT_LEFT.iter().map(|(x, y)| (-x, *y)).collect();
+        assert_eq!(
+            arrow_polygons(&[Movement::Straight, Movement::Left])[0],
+            JS_STRAIGHT_LEFT.to_vec()
+        );
+        assert_eq!(
+            arrow_polygons(&[Movement::Straight, Movement::Right])[0],
+            js_left_straight
+        );
         let js_left: Vec<(f32, f32)> = JS_LEFT.iter().map(|(x, y)| (-x, *y)).collect();
         assert_eq!(arrow_polygons(&[Movement::Right])[0], js_left);
         assert_eq!(arrow_polygons(&[Movement::Left])[0], JS_LEFT.to_vec());
@@ -753,12 +955,12 @@ mod tests {
     fn the_stencils_carry_the_gb_proportions() {
         let straight = &arrow_polygons(&[Movement::Straight])[0];
         let length = straight.iter().map(|p| p.1).fold(f32::MIN, f32::max);
-        let span = straight
-            .iter()
-            .map(|p| p.0)
-            .fold(f32::MIN, f32::max)
+        let span = straight.iter().map(|p| p.0).fold(f32::MIN, f32::max)
             - straight.iter().map(|p| p.0).fold(f32::MAX, f32::min);
-        assert!((length - 3000.0).abs() < 1.0, "straight arrow is {length} mm");
+        assert!(
+            (length - 3000.0).abs() < 1.0,
+            "straight arrow is {length} mm"
+        );
         assert!(
             (span - 2.0 * ARROW_HEAD_HALF_WIDTH_MM).abs() < 1.0,
             "head is {span} mm across, expected {}",
@@ -769,7 +971,11 @@ mod tests {
         // millimetre table read as centimetres gives a thirty-metre arrow, so
         // the conversion is asserted rather than assumed.
         assert!(((length + ARROW_LENGTH_MM - 3000.0) * MM - 3.05).abs() < 0.01);
-        assert!((span * MM - 0.45).abs() < 0.005, "head is {} m across", span * MM);
+        assert!(
+            (span * MM - 0.45).abs() < 0.005,
+            "head is {} m across",
+            span * MM
+        );
         // The turning arrow is the longest thing the design calls for.
         let turn = &arrow_polygons(&[Movement::Right])[0];
         let turn_length = turn.iter().map(|p| p.1).fold(f32::MIN, f32::max);
@@ -808,7 +1014,11 @@ mod tests {
         let mixed = arrow_polygons(&[Movement::Straight, Movement::UTurn]);
         let (_a_lo, a_hi) = span(&mixed[0]);
         let (b_lo, _b_hi) = span(&mixed[1]);
-        assert!((b_lo - a_hi - 50.0).abs() < 1.0, "pair gap is {} mm", b_lo - a_hi);
+        assert!(
+            (b_lo - a_hi - 50.0).abs() < 1.0,
+            "pair gap is {} mm",
+            b_lo - a_hi
+        );
     }
 
     /// Mirroring a stencil reverses its winding, and the draw code does not care
@@ -948,8 +1158,7 @@ mod tests {
                 );
                 for a in 0..polygon.len() {
                     for b in a + 1..polygon.len() {
-                        if a == b || (a + 1) % polygon.len() == b || (b + 1) % polygon.len() == a
-                        {
+                        if a == b || (a + 1) % polygon.len() == b || (b + 1) % polygon.len() == a {
                             continue;
                         }
                         assert!(

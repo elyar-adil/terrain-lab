@@ -5,9 +5,9 @@
 //! Usage: cargo run --release -p wind-water-terrain-lab --example city_fixture
 //!        [--cities N] [--radius-km R]
 
+use city_scene::CityScene;
 use std::env;
 use std::path::PathBuf;
-use city_scene::CityScene;
 use terrain_core::{Landform, SimulationConfig, TerrainPreset};
 
 fn flag(name: &str) -> Option<String> {
@@ -123,13 +123,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             wind_water_terrain_lab_lib::build_payload(config.clone(), &|_, _| {})?;
         // `--only I` builds just settlement I (a village is a few megabytes, a town
         // hundreds), which is what a quick look at a plan needs.
-        let indices: Vec<usize> = match flag("--only").and_then(|value| value.parse::<usize>().ok()) {
+        let indices: Vec<usize> = match flag("--only").and_then(|value| value.parse::<usize>().ok())
+        {
             Some(only) => vec![only],
             None => (0..keep.min(infrastructure.modern_cities.len())).collect(),
         };
         // `--clip X,Z,R` keeps only the plan within R metres of local point (X, Z).
         let clip: Option<[f32; 3]> = flag("--clip").and_then(|value| {
-            let parts: Vec<f32> = value.split(',').filter_map(|part| part.parse().ok()).collect();
+            let parts: Vec<f32> = value
+                .split(',')
+                .filter_map(|part| part.parse().ok())
+                .collect();
             (parts.len() == 3).then(|| [parts[0], parts[1], parts[2]])
         });
         let scenes: Vec<_> = indices
@@ -160,10 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // scene list the renderer actually reads.  `GenerationResult` is camelCase.
     let mut payload = serde_json::to_value(&result)?;
     for key in ["modernCities", "cities"] {
-        if let Some(list) = payload
-            .get_mut(key)
-            .and_then(|value| value.as_array_mut())
-        {
+        if let Some(list) = payload.get_mut(key).and_then(|value| value.as_array_mut()) {
             list.truncate(keep);
         }
     }
@@ -180,7 +181,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(object) = payload.as_object() {
         let mut report: Vec<(String, usize)> = object
             .iter()
-            .map(|(key, value)| (key.clone(), serde_json::to_vec(value).map(|v| v.len()).unwrap_or(0)))
+            .map(|(key, value)| {
+                (
+                    key.clone(),
+                    serde_json::to_vec(value).map(|v| v.len()).unwrap_or(0),
+                )
+            })
             .collect();
         report.sort_by_key(|(_, size)| std::cmp::Reverse(*size));
         for (key, size) in report.iter().take(12) {

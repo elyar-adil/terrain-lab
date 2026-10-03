@@ -147,7 +147,10 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         .map(|(index, point)| point.distance(ring[(index + 1) % ring.len()]))
         .sum();
     let mut massing = massing_of(building, ring, area);
-    let Jitter { mirror, value: jitter_value } = jitter_for(building.id);
+    let Jitter {
+        mirror,
+        value: jitter_value,
+    } = jitter_for(building.id);
     // Colour variation comes from the baked tiles and the material table; see
     // the note on vertex tints in `super` for why this layer writes no colours.
     let tint: Option<[f32; 3]> = None;
@@ -292,7 +295,11 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         2 => &[2.6, 2.4],
         _ => &[0.5],
     };
-    let crown_index = if tower { crown_tile_for(shaft_index, building.id) } else { shaft_index };
+    let crown_index = if tower {
+        crown_tile_for(shaft_index, building.id)
+    } else {
+        shaft_index
+    };
     let crown_storey = design(crown_index).storey_m;
 
     // The podium: a 裙房 of two to four retail storeys, in its own material, with
@@ -340,7 +347,9 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         // The shaft starts on the deck and ends a whole number of storeys below
         // the plan top, leaving the crown stages out of the shaft's count.
         shaft_base_local = podium_top;
-        let total = ((top - podium_top) / storey).round().max(crown_stages + 3.0);
+        let total = ((top - podium_top) / storey)
+            .round()
+            .max(crown_stages + 3.0);
         shaft_top = podium_top + (total - crown_stages) * storey;
         top = podium_top + total * storey;
     }
@@ -367,7 +376,12 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         }
     }
     if !stepped_shaft {
-        sections.push((shaft_ring.clone(), shaft_base_local, shaft_top, shaft_storeys));
+        sections.push((
+            shaft_ring.clone(),
+            shaft_base_local,
+            shaft_top,
+            shaft_storeys,
+        ));
     }
     let base_tint = builder.ambient_tint;
     if glass {
@@ -382,9 +396,27 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         // Real relief on the shaft walls: projecting pier strips on masonry, a
         // cluster of full-height fins on curtain wall.
         if glass {
-            details::curtain_fins(builder, &shaft_material, ring_s, *y0, *y1, *n, mirror, shaft_design);
+            details::curtain_fins(
+                builder,
+                &shaft_material,
+                ring_s,
+                *y0,
+                *y1,
+                *n,
+                mirror,
+                shaft_design,
+            );
         } else {
-            details::wall_relief(builder, &shaft_material, ring_s, *y0, *y1, *n, mirror, shaft_design);
+            details::wall_relief(
+                builder,
+                &shaft_material,
+                ring_s,
+                *y0,
+                *y1,
+                *n,
+                mirror,
+                shaft_design,
+            );
             details::sill_courses(builder, ring_s, *y0, *y1, shaft_design);
         }
         if massing != Massing::LowRise && *n >= 8.0 {
@@ -392,7 +424,10 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         }
     }
     builder.ambient_tint = base_tint;
-    let top_ring: Vec<Vec2> = sections.last().map(|s| s.0.clone()).unwrap_or_else(|| shaft_ring.clone());
+    let top_ring: Vec<Vec2> = sections
+        .last()
+        .map(|s| s.0.clone())
+        .unwrap_or_else(|| shaft_ring.clone());
 
     // Cornice and plinth course on masonry: the two horizontals that make a
     // wall a composed elevation instead of an extrusion.
@@ -407,7 +442,16 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         && !pitched
         && hash_u32(building.id, 97, 5) < 0.65
     {
-        core_bump(building.id, &outward, shaft_base, shaft_top, shaft_storeys, &shaft_material, mirror, builder);
+        core_bump(
+            building.id,
+            &outward,
+            shaft_base,
+            shaft_top,
+            shaft_storeys,
+            &shaft_material,
+            mirror,
+            builder,
+        );
     }
 
     // --- the roof ----------------------------------------------------------
@@ -426,21 +470,39 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         let mut stage = top_ring.clone();
         let mut stage_deck = shaft_top;
         for stage_number in 0..crown_stages as usize {
-            let next = inset_ring(&stage, crown_insets[stage_number.min(crown_insets.len() - 1)]);
+            let next = inset_ring(
+                &stage,
+                crown_insets[stage_number.min(crown_insets.len() - 1)],
+            );
             if !ring_shrinks_sanely(&stage, &next) {
                 break;
             }
             for index in 0..stage.len() {
                 let a = stage[index];
                 let b = stage[(index + 1) % stage.len()];
-                facade_wall(builder, &crown_material, a, b, stage_deck, stage_deck + crown_storey, 1.0, mirror, tint);
+                facade_wall(
+                    builder,
+                    &crown_material,
+                    a,
+                    b,
+                    stage_deck,
+                    stage_deck + crown_storey,
+                    1.0,
+                    mirror,
+                    tint,
+                );
             }
             stage_deck += crown_storey;
             // The step's own deck and its shadowed fascia, so the setback reads
             // as a step rather than as a hole.
             podium_deck(&stage, &next, stage_deck, builder);
             builder.ground_uv("roof", &next, stage_deck, None);
-            parapet(&next, stage_deck, if crown_kind == 3 { 1.1 } else { 0.62 }, builder);
+            parapet(
+                &next,
+                stage_deck,
+                if crown_kind == 3 { 1.1 } else { 0.62 },
+                builder,
+            );
             stage = next;
         }
         if crown_kind == 1 || (crown_kind == 0 && crown_stages >= 3.0) {
@@ -454,11 +516,23 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
 
     // --- the stepped slab end ----------------------------------------------
     if massing == Massing::Slab && slab_variant(building.id) == SlabVariant::Stepped {
-        stepped_end(building, &outward, shaft_base, shaft_top, storey, &shaft_material, builder);
+        stepped_end(
+            building,
+            &outward,
+            shaft_base,
+            shaft_top,
+            storey,
+            &shaft_material,
+            builder,
+        );
     }
 
     // --- the balconies, the condensers and the rainwater --------------------
-    let balcony_ring = if tower { shaft_ring.clone() } else { outward.clone() };
+    let balcony_ring = if tower {
+        shaft_ring.clone()
+    } else {
+        outward.clone()
+    };
     let balcony_base = shaft_base_local;
     let has_balconies = rule::has_balconies(massing, glass) && !pitched;
     if has_balconies && perimeter < 150.0 {
@@ -480,7 +554,15 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         // and the faces without balconies carry wall-mounted units on a sparser
         // rhythm.  They are what stops a slab from reading as a stack of
         // stripes, and from a distance they are most of the texture of the wall.
-        details::condensers(&balcony_ring, &fronts, building, balcony_base, shaft_top, storey, builder);
+        details::condensers(
+            &balcony_ring,
+            &fronts,
+            building,
+            balcony_base,
+            shaft_top,
+            storey,
+            builder,
+        );
         details::wall_ac_units(
             &balcony_ring,
             &fronts,
@@ -492,10 +574,26 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         );
         // 晾衣杆 and the odd drying cage on the balcony line: half the year the
         // balcony is a laundry.
-        details::drying_cages(&balcony_ring, &fronts, building, balcony_base, shaft_top, storey, builder);
+        details::drying_cages(
+            &balcony_ring,
+            &fronts,
+            building,
+            balcony_base,
+            shaft_top,
+            storey,
+            builder,
+        );
     } else if !glass && !pitched && perimeter < 150.0 {
         // Masonry without balconies still grows condensers on a wall rhythm.
-        details::wall_ac_units(&balcony_ring, &[], building, balcony_base, shaft_top, storey, builder);
+        details::wall_ac_units(
+            &balcony_ring,
+            &[],
+            building,
+            balcony_base,
+            shaft_top,
+            storey,
+            builder,
+        );
     }
     // A drainpipe down one corner.  It is a single tube, and it is on every
     // building in China.
@@ -559,7 +657,14 @@ fn podium_deck(outer: &[Vec2], inner: &[Vec2], y: f32, builder: &mut MeshBuilder
 /// A projecting band at every `every`-th storey: a string course, a drip edge and
 /// the shadow under it.  Cheap, and it is the one detail that gives a tall slab
 /// a horizontal scale.
-fn string_courses(ring: &[Vec2], base: f32, top: f32, every: f32, storey: f32, builder: &mut MeshBuilder) {
+fn string_courses(
+    ring: &[Vec2],
+    base: f32,
+    top: f32,
+    every: f32,
+    storey: f32,
+    builder: &mut MeshBuilder,
+) {
     let centre = ring_centroid(ring);
     let mut count = every;
     while base + count * storey < top - 1.0 {
@@ -614,7 +719,14 @@ pub(crate) fn parapet(ring: &[Vec2], deck: f32, height: f32, builder: &mut MeshB
             Vec3::from_plan(a_out, deck + height),
             None,
         );
-        builder.wall("trim.light", b_out, a_out, deck + height, deck + height + 0.09, None);
+        builder.wall(
+            "trim.light",
+            b_out,
+            a_out,
+            deck + height,
+            deck + height + 0.09,
+            None,
+        );
         builder.wall("trim.dark", a, b, deck, deck + 0.05, None);
     }
 }
@@ -624,7 +736,10 @@ fn pitched_roof(ring: &[Vec2], top: f32, builder: &mut MeshBuilder) {
     let eaves = 0.55_f32;
     // An eave overhang first: a tiled roof that stops flush with the wall has no
     // shadow line under it and reads as a paper cone.
-    let eave_ring: Vec<Vec2> = ring.iter().map(|p| centre + (*p - centre) * (1.0 + eaves / 40.0)).collect();
+    let eave_ring: Vec<Vec2> = ring
+        .iter()
+        .map(|p| centre + (*p - centre) * (1.0 + eaves / 40.0))
+        .collect();
     for index in 0..ring.len() {
         let a = eave_ring[index];
         let b = eave_ring[(index + 1) % ring.len()];
@@ -706,14 +821,24 @@ fn stepped_end(
         } else {
             (max_x - w * frac, max_x)
         };
-        vec![Vec2::new(x0, min_y), Vec2::new(x1, min_y), Vec2::new(x1, max_y), Vec2::new(x0, max_y)]
+        vec![
+            Vec2::new(x0, min_y),
+            Vec2::new(x1, min_y),
+            Vec2::new(x1, max_y),
+            Vec2::new(x0, max_y),
+        ]
     } else {
         let (y0, y1) = if building.id % 4 < 2 {
             (min_y, min_y + d * frac)
         } else {
             (max_y - d * frac, max_y)
         };
-        vec![Vec2::new(min_x, y0), Vec2::new(max_x, y0), Vec2::new(max_x, y1), Vec2::new(min_x, y1)]
+        vec![
+            Vec2::new(min_x, y0),
+            Vec2::new(max_x, y0),
+            Vec2::new(max_x, y1),
+            Vec2::new(min_x, y1),
+        ]
     };
     let block = inset_ring(&block, 0.07);
     let storeys = (top - base) / storey;
@@ -748,7 +873,16 @@ fn entrance_portal(ring: &[Vec2], builder: &mut MeshBuilder) {
     // Two piers 0.7 m square, 4.5 m apart, and the head beam over them.
     for side in [-2.25_f32, 2.25] {
         let pier = mid + along * side + outward * 0.18;
-        crate::mesh::box_at(builder, "trim.light", pier, level::GROUND + height * 0.5, 0.7, height, 0.55, yaw);
+        crate::mesh::box_at(
+            builder,
+            "trim.light",
+            pier,
+            level::GROUND + height * 0.5,
+            0.7,
+            height,
+            0.55,
+            yaw,
+        );
     }
     let head_centre = mid + outward * 0.18;
     crate::mesh::box_at(
@@ -775,7 +909,12 @@ fn entrance_portal(ring: &[Vec2], builder: &mut MeshBuilder) {
         Vec3::from_plan(s1, sign_y),
         Vec3::from_plan(s1, sign_y + 0.75),
         Vec3::from_plan(s0, sign_y + 0.75),
-        [(0.0, 0.0), (2.0 * half, 0.0), (2.0 * half, 0.75), (0.0, 0.75)],
+        [
+            (0.0, 0.0),
+            (2.0 * half, 0.0),
+            (2.0 * half, 0.75),
+            (0.0, 0.75),
+        ],
         None,
     );
     builder.quad(

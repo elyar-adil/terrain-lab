@@ -292,27 +292,56 @@ mod tests {
         keys.dedup();
         assert_eq!(keys.len(), SPECIES.len(), "keys are unique");
         for s in SPECIES {
-            assert!(s.height_m.0 > 0.5 && s.height_m.0 < s.height_m.1, "{}", s.key);
+            assert!(
+                s.height_m.0 > 0.5 && s.height_m.0 < s.height_m.1,
+                "{}",
+                s.key
+            );
             assert!(s.crown_m.0 > 0.5 && s.crown_m.0 < s.crown_m.1, "{}", s.key);
             assert!(s.trunk_m.0 > 0.02 && s.trunk_m.0 < s.trunk_m.1, "{}", s.key);
             // A trunk is not thicker than the crown is wide, nor a crown wider than three times the height.
-            assert!(s.trunk_m.1 < s.crown_m.1 && s.crown_m.1 < s.height_m.1, "{}", s.key);
+            assert!(
+                s.trunk_m.1 < s.crown_m.1 && s.crown_m.1 < s.height_m.1,
+                "{}",
+                s.key
+            );
             assert!((0.05..0.7).contains(&s.clear_stem));
             assert!((1.0..7.0).contains(&s.leaf_cover));
             assert!(s.leaf_len_m > 0.02 && s.leaf_aspect > 0.08);
             assert!(s.leaf_out < s.leaf_fall);
         }
         for habit in [
-            Habit::Rounded, Habit::Open, Habit::Oval, Habit::Fan, Habit::Vase, Habit::Conical, Habit::Layered,
-            Habit::Weeping, Habit::Fastigiate, Habit::Irregular, Habit::Umbrella, Habit::Banyan,
+            Habit::Rounded,
+            Habit::Open,
+            Habit::Oval,
+            Habit::Fan,
+            Habit::Vase,
+            Habit::Conical,
+            Habit::Layered,
+            Habit::Weeping,
+            Habit::Fastigiate,
+            Habit::Irregular,
+            Habit::Umbrella,
+            Habit::Banyan,
         ] {
-            assert!(SPECIES.iter().any(|s| s.habit == habit), "{habit:?} is never grown");
+            assert!(
+                SPECIES.iter().any(|s| s.habit == habit),
+                "{habit:?} is never grown"
+            );
         }
         for form in [
-            LeafForm::Ovate, LeafForm::Palmate, LeafForm::Elliptic, LeafForm::Needle, LeafForm::Pinnate,
-            LeafForm::Lanceolate, LeafForm::Fan,
+            LeafForm::Ovate,
+            LeafForm::Palmate,
+            LeafForm::Elliptic,
+            LeafForm::Needle,
+            LeafForm::Pinnate,
+            LeafForm::Lanceolate,
+            LeafForm::Fan,
         ] {
-            assert!(SPECIES.iter().any(|s| s.leaf == form), "{form:?} is on no tree");
+            assert!(
+                SPECIES.iter().any(|s| s.leaf == form),
+                "{form:?} is on no tree"
+            );
         }
     }
 }

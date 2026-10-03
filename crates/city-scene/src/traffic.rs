@@ -312,12 +312,7 @@ impl TrafficSim {
     /// Where an agent is in its route, for tests and debugging tools.
     pub fn agent_state(&self, index: usize) -> (usize, f32, usize, f32) {
         match self.agents.get(index) {
-            Some(agent) => (
-                agent.piece,
-                agent.s,
-                agent.route.len(),
-                agent.speed,
-            ),
+            Some(agent) => (agent.piece, agent.s, agent.route.len(), agent.speed),
             None => (0, 0.0, 0, 0.0),
         }
     }
@@ -568,7 +563,9 @@ impl TrafficSim {
                 let opposite = origin_lane.and_then(|lane| {
                     let here = &self.network.lanes[lane];
                     self.network.lanes.iter().position(|other| {
-                        other.road == here.road && other.direction == -here.direction && other.index == here.index
+                        other.road == here.road
+                            && other.direction == -here.direction
+                            && other.index == here.index
                     })
                 });
                 replacement = opposite.and_then(|lane| self.plan(lane, rng));
@@ -631,9 +628,8 @@ impl TrafficSim {
                 continue;
             };
             let other_path = self.path_of(other_entry.element);
-            let (other_position, other_tangent) = other_path.sample(
-                (other.s - other_entry.start_s).clamp(0.0, other_entry.length),
-            );
+            let (other_position, other_tangent) =
+                other_path.sample((other.s - other_entry.start_s).clamp(0.0, other_entry.length));
             let delta = Vec2::new(other_position.x - here.x, other_position.z - here.y);
             let forward = delta.dot(tangent);
             if !(0.05..=34.0).contains(&forward) {
@@ -726,9 +722,8 @@ impl TrafficSim {
                     Movement::Left => 1.35,
                     Movement::UTurn => 3.00,
                 };
-                let cost = cost
-                    + path.length() / 7.0 * bias
-                    + self.network.lanes[to].path.length() / 11.0;
+                let cost =
+                    cost + path.length() / 7.0 * bias + self.network.lanes[to].path.length() / 11.0;
                 if cost < best[to] {
                     best[to] = cost;
                     previous[to] = Some((lane, connector));
@@ -1013,8 +1008,7 @@ mod tests {
             let (sin, cos) = heading.sin_cos();
             let mapped = Vec2::new(cos, -sin);
             assert!(
-                (mapped.x - expected_x).abs() < 1.0e-4
-                    && (mapped.y - expected_z).abs() < 1.0e-4,
+                (mapped.x - expected_x).abs() < 1.0e-4 && (mapped.y - expected_z).abs() < 1.0e-4,
                 "heading {heading} maps +X to {mapped:?}, expected ({expected_x}, {expected_z})"
             );
         }

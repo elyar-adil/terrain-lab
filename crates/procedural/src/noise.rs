@@ -50,11 +50,7 @@ pub fn fbm(seed: u32, x: f32, y: f32, octaves: u32, salt: i32) -> f32 {
         amplitude *= 0.5;
         frequency *= 2.0;
     }
-    if norm <= 0.0 {
-        0.0
-    } else {
-        sum / norm
-    }
+    if norm <= 0.0 { 0.0 } else { sum / norm }
 }
 
 #[cfg(test)]

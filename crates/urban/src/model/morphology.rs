@@ -108,10 +108,7 @@ pub fn measure(city: &impl CityGraph) -> MorphologyStats {
     let mut circuity_sum = 0.0;
     let mut circuity_count = 0.0;
     for road in city.sd_roads() {
-        let (Some(a), Some(b)) = (
-            nodes.get(&road.from),
-            nodes.get(&road.to),
-        ) else {
+        let (Some(a), Some(b)) = (nodes.get(&road.from), nodes.get(&road.to)) else {
             continue;
         };
         let dx = (b.x_km - a.x_km) as f64 * 1000.0;
@@ -126,9 +123,8 @@ pub fn measure(city: &impl CityGraph) -> MorphologyStats {
                 points
                     .windows(2)
                     .map(|pair| {
-                        ((pair[1].x_km - pair[0].x_km) as f64 * 1000.0).hypot(
-                            (pair[1].y_km - pair[0].y_km) as f64 * 1000.0,
-                        )
+                        ((pair[1].x_km - pair[0].x_km) as f64 * 1000.0)
+                            .hypot((pair[1].y_km - pair[0].y_km) as f64 * 1000.0)
                     })
                     .sum()
             })
@@ -142,11 +138,8 @@ pub fn measure(city: &impl CityGraph) -> MorphologyStats {
         *degree.entry(road.to).or_default() += 1;
     }
     let mean = lengths.iter().sum::<f64>() / lengths.len().max(1) as f64;
-    let variance = lengths
-        .iter()
-        .map(|x| (x - mean).powi(2))
-        .sum::<f64>()
-        / lengths.len().max(1) as f64;
+    let variance =
+        lengths.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / lengths.len().max(1) as f64;
     let bins = 12;
     let mut histogram = vec![0.0_f64; bins];
     for bearing in bearings {
@@ -181,13 +174,7 @@ pub fn measure(city: &impl CityGraph) -> MorphologyStats {
     }
 }
 
-fn share(
-    roads: &[crate::SdRoad],
-    predicate: impl Fn(ModernRoadClass) -> bool,
-) -> f64 {
-    let big = roads
-        .iter()
-        .filter(|road| predicate(road.class))
-        .count() as f64;
+fn share(roads: &[crate::SdRoad], predicate: impl Fn(ModernRoadClass) -> bool) -> f64 {
+    let big = roads.iter().filter(|road| predicate(road.class)).count() as f64;
     big / roads.len().max(1) as f64
 }

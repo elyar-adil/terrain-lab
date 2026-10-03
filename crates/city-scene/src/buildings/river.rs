@@ -18,7 +18,11 @@ const WATER_Y: f32 = 0.03;
 
 fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     let t = t.clamp(0.0, 1.0);
-    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
 }
 
 fn smooth(t: f32) -> f32 {
@@ -38,15 +42,30 @@ pub fn build_water(
 ) {
     builder.style(
         "water",
-        GroupStyle { cast_shadow: false, receive_shadow: true, alpha_cutout: false, dynamic: false },
+        GroupStyle {
+            cast_shadow: false,
+            receive_shadow: true,
+            alpha_cutout: false,
+            dynamic: false,
+        },
     );
     builder.style(
         FOAM,
-        GroupStyle { cast_shadow: false, receive_shadow: false, alpha_cutout: false, dynamic: false },
+        GroupStyle {
+            cast_shadow: false,
+            receive_shadow: false,
+            alpha_cutout: false,
+            dynamic: false,
+        },
     );
     builder.style(
         QUAY,
-        GroupStyle { cast_shadow: false, receive_shadow: true, alpha_cutout: false, dynamic: false },
+        GroupStyle {
+            cast_shadow: false,
+            receive_shadow: true,
+            alpha_cutout: false,
+            dynamic: false,
+        },
     );
     let mut line = ring_of(river, frame);
     if line.len() < 2 {
@@ -82,7 +101,9 @@ pub fn build_water(
         let len = dx.hypot(dz).max(1.0e-4);
         normal[i] = Vec2::new(-dz / len, dx / len);
     }
-    let at = |i: usize, off: f32| Vec2::new(line[i].x + normal[i].x * off, line[i].y + normal[i].y * off);
+    let at = |i: usize, off: f32| {
+        Vec2::new(line[i].x + normal[i].x * off, line[i].y + normal[i].y * off)
+    };
 
     // ---- water surface ------------------------------------------------------
     // Lateral bands, tight near the bank and wide in the middle, each with its
@@ -91,7 +112,10 @@ pub fn build_water(
     let mid = [0.13, 0.26, 0.30];
     let deep = [0.08, 0.19, 0.27];
     let murk = [0.24, 0.30, 0.22];
-    let dists = [0.0_f32, 0.3, 0.6, 1.0, 1.5, 2.1, 2.8, 3.6, 4.6, 5.8, 7.2, 9.0, 11.0, 13.5, 16.0, 19.0, 23.0, 28.0];
+    let dists = [
+        0.0_f32, 0.3, 0.6, 1.0, 1.5, 2.1, 2.8, 3.6, 4.6, 5.8, 7.2, 9.0, 11.0, 13.5, 16.0, 19.0,
+        23.0, 28.0,
+    ];
     let mut offsets: Vec<f32> = Vec::new();
     for d in dists.iter().filter(|d| **d < half - 0.5) {
         offsets.push(half - d);
@@ -106,12 +130,20 @@ pub fn build_water(
         // 0 at the bank, 1 in the centre.
         let from_bank = (half - off.abs()).max(0.0);
         let t = smooth(from_bank / (half * 0.85).max(4.0));
-        let base = mix(shallow, mix(mid, deep, smooth((t - 0.45) / 0.55)), smooth(t * 1.6));
+        let base = mix(
+            shallow,
+            mix(mid, deep, smooth((t - 0.45) / 0.55)),
+            smooth(t * 1.6),
+        );
         // Slowly varying turbidity along the reach: sediment-brown-green patches.
         let turb = 0.5 + 0.5 * (s * 0.013 + 1.3).sin() * (s * 0.037).sin();
         mix(base, murk, turb * 0.32 * (1.0 - t * 0.5))
     };
-    let put = |builder: &mut MeshBuilder, mut quad: Vec<Vec2>, y: f32, mat: &str, colour: Option<[f32; 3]>| {
+    let put = |builder: &mut MeshBuilder,
+               mut quad: Vec<Vec2>,
+               y: f32,
+               mat: &str,
+               colour: Option<[f32; 3]>| {
         if signed_area(&quad) < 0.0 {
             quad.reverse();
         }
@@ -133,19 +165,32 @@ pub fn build_water(
 
     // ---- bank foam ----------------------------------------------------------
     // Three translucent strips of growing width stack to a soft, fading edge.
-    for (k, (w, y)) in [(0.3_f32, 0.05_f32), (0.8, 0.055), (1.6, 0.06)].into_iter().enumerate() {
+    for (k, (w, y)) in [(0.3_f32, 0.05_f32), (0.8, 0.055), (1.6, 0.06)]
+        .into_iter()
+        .enumerate()
+    {
         let _ = k;
         for sg in [-1.0_f32, 1.0] {
             let edge = sg * half;
             let inner = sg * (half - w);
             for i in 0..n - 1 {
-                put(builder, vec![at(i, edge), at(i + 1, edge), at(i + 1, inner), at(i, inner)], y, FOAM, None);
+                put(
+                    builder,
+                    vec![at(i, edge), at(i + 1, edge), at(i + 1, inner), at(i, inner)],
+                    y,
+                    FOAM,
+                    None,
+                );
             }
         }
     }
 
     // ---- quay walls ---------------------------------------------------------
-    let near_crossing = |p: Vec2| crossings.iter().any(|(c, r)| (p.x - c.x).hypot(p.y - c.y) < *r);
+    let near_crossing = |p: Vec2| {
+        crossings
+            .iter()
+            .any(|(c, r)| (p.x - c.x).hypot(p.y - c.y) < *r)
+    };
     let stone = [0.56, 0.54, 0.50];
     let wet = [0.16, 0.19, 0.18];
     let coping_col = [0.70, 0.68, 0.63];
@@ -199,12 +244,24 @@ pub fn build_water(
             let top_col = [paving[0] * tone, paving[1] * tone, paving[2] * tone];
             if stairs {
                 // Landing flush with the walkway, then steps down into the water.
-                put(builder, vec![out(i, 0.0), out(i + 1, 0.0), out(i + 1, 3.4), out(i, 3.4)], TOP, QUAY, Some(top_col));
+                put(
+                    builder,
+                    vec![out(i, 0.0), out(i + 1, 0.0), out(i + 1, 3.4), out(i, 3.4)],
+                    TOP,
+                    QUAY,
+                    Some(top_col),
+                );
                 for k in 0..5 {
                     let d0 = 0.42 * k as f32;
                     let d1 = 0.42 * (k + 1) as f32;
                     let y = TOP - 0.19 * (k + 1) as f32;
-                    put(builder, vec![out(i, -d0), out(i + 1, -d0), out(i + 1, -d1), out(i, -d1)], y, QUAY, Some(coping_col));
+                    put(
+                        builder,
+                        vec![out(i, -d0), out(i + 1, -d0), out(i + 1, -d1), out(i, -d1)],
+                        y,
+                        QUAY,
+                        Some(coping_col),
+                    );
                     let (p, q) = (out(i, -d1), out(i + 1, -d1));
                     builder.wall(QUAY, p, q, y - 0.19, y, Some(stone));
                     builder.wall(QUAY, q, p, y - 0.19, y, Some(stone));
@@ -212,12 +269,57 @@ pub fn build_water(
                 }
             } else {
                 // Coping: a proud, lighter stone edge.
-                builder.wall(QUAY, out(i, -0.06), out(i + 1, -0.06), TOP, COPING, Some(coping_col));
-                builder.wall(QUAY, out(i + 1, -0.06), out(i, -0.06), TOP, COPING, Some(coping_col));
-                put(builder, vec![out(i, -0.06), out(i + 1, -0.06), out(i + 1, 0.42), out(i, 0.42)], COPING, QUAY, Some(coping_col));
-                builder.wall(QUAY, out(i, 0.42), out(i + 1, 0.42), TOP, COPING, Some(coping_col));
-                builder.wall(QUAY, out(i + 1, 0.42), out(i, 0.42), TOP, COPING, Some(coping_col));
-                put(builder, vec![out(i, 0.42), out(i + 1, 0.42), out(i + 1, 3.4), out(i, 3.4)], TOP, QUAY, Some(top_col));
+                builder.wall(
+                    QUAY,
+                    out(i, -0.06),
+                    out(i + 1, -0.06),
+                    TOP,
+                    COPING,
+                    Some(coping_col),
+                );
+                builder.wall(
+                    QUAY,
+                    out(i + 1, -0.06),
+                    out(i, -0.06),
+                    TOP,
+                    COPING,
+                    Some(coping_col),
+                );
+                put(
+                    builder,
+                    vec![
+                        out(i, -0.06),
+                        out(i + 1, -0.06),
+                        out(i + 1, 0.42),
+                        out(i, 0.42),
+                    ],
+                    COPING,
+                    QUAY,
+                    Some(coping_col),
+                );
+                builder.wall(
+                    QUAY,
+                    out(i, 0.42),
+                    out(i + 1, 0.42),
+                    TOP,
+                    COPING,
+                    Some(coping_col),
+                );
+                builder.wall(
+                    QUAY,
+                    out(i + 1, 0.42),
+                    out(i, 0.42),
+                    TOP,
+                    COPING,
+                    Some(coping_col),
+                );
+                put(
+                    builder,
+                    vec![out(i, 0.42), out(i + 1, 0.42), out(i + 1, 3.4), out(i, 3.4)],
+                    TOP,
+                    QUAY,
+                    Some(top_col),
+                );
             }
             // Landward edge: two risers step down to the ground.
             for (o0, y0, y1) in [(3.4_f32, 0.42_f32, TOP), (4.0, 0.0, 0.42)] {
@@ -225,18 +327,40 @@ pub fn build_water(
                 builder.wall(QUAY, p, q, y0, y1, Some(stone));
                 builder.wall(QUAY, q, p, y0, y1, Some(stone));
             }
-            put(builder, vec![out(i, 3.4), out(i + 1, 3.4), out(i + 1, 4.0), out(i, 4.0)], 0.42, QUAY, Some(top_col));
+            put(
+                builder,
+                vec![out(i, 3.4), out(i + 1, 3.4), out(i + 1, 4.0), out(i, 4.0)],
+                0.42,
+                QUAY,
+                Some(top_col),
+            );
 
             if !stairs {
                 // Railing: posts every ~3 m, a top rail and a mid rail.
                 let (p, q) = (out(i, 0.9), out(i + 1, 0.9));
                 let rail = [0.55, 0.57, 0.60];
                 for (h, r) in [(TOP + 1.02, 0.035_f32), (TOP + 0.55, 0.025)] {
-                    builder.tube("rail.steel", Vec3::from_plan(p, h), Vec3::from_plan(q, h), r, r, 5, Some(rail));
+                    builder.tube(
+                        "rail.steel",
+                        Vec3::from_plan(p, h),
+                        Vec3::from_plan(q, h),
+                        r,
+                        r,
+                        5,
+                        Some(rail),
+                    );
                 }
                 rail_acc -= seg_len;
                 if rail_acc <= 0.0 {
-                    builder.tube("rail.steel", Vec3::from_plan(p, TOP), Vec3::from_plan(p, TOP + 1.05), 0.045, 0.04, 5, Some(rail));
+                    builder.tube(
+                        "rail.steel",
+                        Vec3::from_plan(p, TOP),
+                        Vec3::from_plan(p, TOP + 1.05),
+                        0.045,
+                        0.04,
+                        5,
+                        Some(rail),
+                    );
                     rail_acc += 3.0;
                 }
             }
@@ -245,8 +369,24 @@ pub fn build_water(
             if bollard_acc <= 0.0 && !stairs {
                 let p = out(i, 1.5);
                 let dark = [0.08, 0.09, 0.10];
-                builder.tube("rail.steel", Vec3::from_plan(p, TOP), Vec3::from_plan(p, TOP + 0.52), 0.13, 0.10, 8, Some(dark));
-                builder.tube("rail.steel", Vec3::from_plan(p, TOP + 0.52), Vec3::from_plan(p, TOP + 0.6), 0.15, 0.15, 8, Some(dark));
+                builder.tube(
+                    "rail.steel",
+                    Vec3::from_plan(p, TOP),
+                    Vec3::from_plan(p, TOP + 0.52),
+                    0.13,
+                    0.10,
+                    8,
+                    Some(dark),
+                );
+                builder.tube(
+                    "rail.steel",
+                    Vec3::from_plan(p, TOP + 0.52),
+                    Vec3::from_plan(p, TOP + 0.6),
+                    0.15,
+                    0.15,
+                    8,
+                    Some(dark),
+                );
                 bollard_acc += 26.0;
             }
         }

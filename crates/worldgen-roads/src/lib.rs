@@ -22,12 +22,29 @@ pub use tile::ROADS;
 pub use towns::HashedTowns;
 
 /// An engine with the whole roads stack registered: ask it for [`ROADS`] tiles.
-pub fn engine(seed: Seed, frame: Frame, config: RoadsConfig, fields: Fields) -> Result<Engine, Error> {
+pub fn engine(
+    seed: Seed,
+    frame: Frame,
+    config: RoadsConfig,
+    fields: Fields,
+) -> Result<Engine, Error> {
     EngineBuilder::new(seed, frame)
-        .with(lattice::ChordLayer { config: config.clone(), urban: fields.urban.clone() })
-        .with(quad::QuadLayer { config: config.clone(), urban: fields.urban.clone() })
-        .with(network::CellLayer { config: config.clone(), fields: fields.clone() })
-        .with(overlay::OverlayLayer { config: config.clone(), fields })
+        .with(lattice::ChordLayer {
+            config: config.clone(),
+            urban: fields.urban.clone(),
+        })
+        .with(quad::QuadLayer {
+            config: config.clone(),
+            urban: fields.urban.clone(),
+        })
+        .with(network::CellLayer {
+            config: config.clone(),
+            fields: fields.clone(),
+        })
+        .with(overlay::OverlayLayer {
+            config: config.clone(),
+            fields,
+        })
         .with(tile::RoadsLayer { config })
         .build()
 }

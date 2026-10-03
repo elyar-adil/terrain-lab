@@ -1,8 +1,6 @@
 use crate::{
-    HdLane, LaneMarking, LaneUse, MarkingKind, ModernRoadClass, Movement,
-    TurnArrow,
+    HdLane, LaneMarking, LaneUse, MarkingKind, ModernRoadClass, Movement, TurnArrow, cross_section,
     model::jurisdiction::{JurisdictionId, TrafficRules},
-    cross_section,
 };
 
 /// Physical cross-section of a modern Chinese street, per CJJ 37.  Widths are the
@@ -47,10 +45,9 @@ pub(super) fn lanes_for_modern_road(
             // index_from_curb 0 is the curb-side lane; the innermost lane sits
             // nearest the median/centreline.  The offset sign follows the
             // driving direction so both carriageways fill the real width.
-            let distance = median_half
-                + section.inner_shoulder
-                + (count - index) as f32 * motor_lane_width
-                - motor_lane_width * 0.5;
+            let distance =
+                median_half + section.inner_shoulder + (count - index) as f32 * motor_lane_width
+                    - motor_lane_width * 0.5;
             let offset_metres = direction as f32 * distance;
             lanes.push(HdLane {
                 id: format!("road/{road_id}/lane/{direction}/{index}"),
@@ -87,9 +84,10 @@ pub(super) fn lanes_for_modern_road(
             });
         }
         if section.bike_lane_width > 0.0 {
-            let distance =
-                median_half + section.inner_shoulder + count as f32 * motor_lane_width
-                    + section.bike_lane_width * 0.5;
+            let distance = median_half
+                + section.inner_shoulder
+                + count as f32 * motor_lane_width
+                + section.bike_lane_width * 0.5;
             lanes.push(HdLane {
                 id: format!("road/{road_id}/lane/{direction}/bike"),
                 direction,

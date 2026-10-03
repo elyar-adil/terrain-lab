@@ -16,9 +16,15 @@ fn flag(name: &str) -> Option<String> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let radius_km = flag("--radius-km").and_then(|v| v.parse().ok()).unwrap_or(0.5_f32);
-    let block = flag("--block-m").and_then(|v| v.parse().ok()).unwrap_or(110.0_f32);
-    let seed = flag("--seed").and_then(|v| v.parse().ok()).unwrap_or(42_u32);
+    let radius_km = flag("--radius-km")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.5_f32);
+    let block = flag("--block-m")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(110.0_f32);
+    let seed = flag("--seed")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(42_u32);
     let out = flag("--out").unwrap_or_else(|| "public/city-scenes.json".into());
     let city = generate_modern_chinese_city(ModernChinaSpec {
         seed,

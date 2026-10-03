@@ -336,15 +336,30 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
             let mut station = 0.0;
             while station <= length {
                 let point = road.carriageway.sample(station).0;
-                crossings.push((crate::math::Vec2::new(point.x, point.z), road.half_width() + 9.0));
+                crossings.push((
+                    crate::math::Vec2::new(point.x, point.z),
+                    road.half_width() + 9.0,
+                ));
                 station += 6.0;
             }
         }
         if let Some(river) = city.river.as_deref() {
-            buildings::build_water(river, city.river_width_metres, city.frame, &crossings, &mut builder);
+            buildings::build_water(
+                river,
+                city.river_width_metres,
+                city.frame,
+                &crossings,
+                &mut builder,
+            );
         }
         for tributary in &city.tributaries {
-            buildings::build_water(&tributary.line, tributary.width_metres, city.frame, &crossings, &mut builder);
+            buildings::build_water(
+                &tributary.line,
+                tributary.width_metres,
+                city.frame,
+                &crossings,
+                &mut builder,
+            );
         }
     }
 
@@ -469,7 +484,9 @@ impl BlobWriter {
 }
 
 fn decode_b64(text: &str) -> Result<Vec<u8>, String> {
-    STANDARD.decode(text).map_err(|error| format!("scene buffer is not base64: {error}"))
+    STANDARD
+        .decode(text)
+        .map_err(|error| format!("scene buffer is not base64: {error}"))
 }
 
 /// Serialise a scene into the binary container described above.
@@ -533,7 +550,8 @@ pub fn encode_binary(scene: &CityScene) -> Result<Vec<u8>, String> {
             "data": blobs.push(&decode_b64(&texture.data)?),
         }));
     }
-    let to_value = |value: Result<Value, serde_json::Error>| value.map_err(|error| error.to_string());
+    let to_value =
+        |value: Result<Value, serde_json::Error>| value.map_err(|error| error.to_string());
     let header = json!({
         "version": scene.version,
         "seed": scene.seed,
@@ -610,7 +628,9 @@ mod tests {
         let scene = build_city_scene(&city(), SceneBudget::default());
         let mut short: Vec<String> = Vec::new();
         for mesh in &scene.meshes {
-            let Some(uvs) = mesh.uvs.as_deref() else { continue };
+            let Some(uvs) = mesh.uvs.as_deref() else {
+                continue;
+            };
             let expected = mesh.vertex_count * 2;
             if STANDARD.decode(uvs).map(|bytes| bytes.len() / 4) != Ok(expected) {
                 short.push(mesh.material.clone());
@@ -631,7 +651,9 @@ mod tests {
     fn a_colour_buffer_is_never_shorter_than_its_vertex_count() {
         let scene = build_city_scene(&city(), SceneBudget::default());
         for mesh in &scene.meshes {
-            let Some(colors) = mesh.colors.as_deref() else { continue };
+            let Some(colors) = mesh.colors.as_deref() else {
+                continue;
+            };
             assert_eq!(
                 STANDARD.decode(colors).map(|bytes| bytes.len()),
                 Ok(mesh.vertex_count * 4),
@@ -666,7 +688,11 @@ mod tests {
     #[test]
     fn instanced_groups_reference_a_known_instance_list() {
         let scene = build_city_scene(&city(), SceneBudget::default());
-        let keys: Vec<&str> = scene.instances.iter().map(|list| list.key.as_str()).collect();
+        let keys: Vec<&str> = scene
+            .instances
+            .iter()
+            .map(|list| list.key.as_str())
+            .collect();
         // A prototype this city happens not to use may legitimately have no
         // instances — a small city has no bus shelter.  What must hold is that
         // every *populated* list is consumed by some geometry, and that no
@@ -714,10 +740,17 @@ mod tests {
         // prototype part (sixteen species, each a wood, a leaf and a far-LOD
         // group).  The two scale differently, so they are budgeted separately: a
         // city that needs hundreds of either has lost its batching somewhere.
-        let plain = scene.meshes.iter().filter(|m| m.instance_of.is_none()).count();
+        let plain = scene
+            .meshes
+            .iter()
+            .filter(|m| m.instance_of.is_none())
+            .count();
         let instanced = scene.meshes.len() - plain;
         assert!(plain < 70, "the city needs {plain} material draw calls");
-        assert!(instanced < 110, "the city needs {instanced} instanced draw calls");
+        assert!(
+            instanced < 110,
+            "the city needs {instanced} instanced draw calls"
+        );
     }
 
     #[test]
@@ -793,9 +826,17 @@ mod binary_tests {
                 check(&entry["colors"], mesh.vertex_count * 4);
             }
         }
-        for (entry, texture) in header["textures"].as_array().unwrap().iter().zip(&scene.textures) {
+        for (entry, texture) in header["textures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(&scene.textures)
+        {
             // Sized by what the JSON form carries, not by width x height.
-            check(&entry["data"], STANDARD.decode(&texture.data).unwrap().len());
+            check(
+                &entry["data"],
+                STANDARD.decode(&texture.data).unwrap().len(),
+            );
         }
         assert!(header.get("network").is_none());
     }

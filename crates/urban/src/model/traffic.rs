@@ -113,14 +113,11 @@ pub fn synthesize_junction(rules: &TrafficRules, approaches: &[ApproachSpec]) ->
         .iter()
         .enumerate()
         .flat_map(|(i, a)| {
-            phases
-                .iter()
-                .skip(i + 1)
-                .flat_map(move |b| {
-                    a.movements
-                        .iter()
-                        .flat_map(move |x| b.movements.iter().map(move |y| (x.clone(), y.clone())))
-                })
+            phases.iter().skip(i + 1).flat_map(move |b| {
+                a.movements
+                    .iter()
+                    .flat_map(move |x| b.movements.iter().map(move |y| (x.clone(), y.clone())))
+            })
         })
         .collect();
 
@@ -211,9 +208,10 @@ mod tests {
         }];
         let plan = synthesize_junction(&rules, &approaches);
         assert!(!plan.signalized);
-        assert!(plan
-            .markings
-            .iter()
-            .any(|m| m.kind == MarkingKind::YieldTriangle));
+        assert!(
+            plan.markings
+                .iter()
+                .any(|m| m.kind == MarkingKind::YieldTriangle)
+        );
     }
 }

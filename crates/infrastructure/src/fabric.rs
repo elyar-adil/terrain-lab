@@ -10,8 +10,8 @@ use std::sync::Arc;
 use terrain_core::TerrainData;
 use world_core::{GridPoint, WorldGrid};
 use worldgen_contracts::{
-    EdgeSource, HeightField, NodeId, PinnedRoad, PinnedSet, Polyline, RoadClass, RoadNetwork, RoadTile, UrbanField, V2,
-    v2,
+    EdgeSource, HeightField, NodeId, PinnedRoad, PinnedSet, Polyline, RoadClass, RoadNetwork,
+    RoadTile, UrbanField, V2, v2,
 };
 use worldgen_core::hash::hash_words;
 use worldgen_core::noise::fbm;
@@ -31,14 +31,21 @@ pub struct GridHeight {
 
 impl GridHeight {
     pub fn new(terrain: &TerrainData, grid: WorldGrid) -> Self {
-        Self { size: grid.size, cell_m: f64::from(grid.cell_metres()), height: terrain.height.clone() }
+        Self {
+            size: grid.size,
+            cell_m: f64::from(grid.cell_metres()),
+            height: terrain.height.clone(),
+        }
     }
 }
 
 impl HeightField for GridHeight {
     fn height_m(&self, p: V2) -> f64 {
         let n = self.size;
-        let (fx, fy) = ((p.x / self.cell_m).clamp(0.0, (n - 1) as f64), (p.y / self.cell_m).clamp(0.0, (n - 1) as f64));
+        let (fx, fy) = (
+            (p.x / self.cell_m).clamp(0.0, (n - 1) as f64),
+            (p.y / self.cell_m).clamp(0.0, (n - 1) as f64),
+        );
         let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
         let (x1, y1) = ((x0 + 1).min(n - 1), (y0 + 1).min(n - 1));
         let (tx, ty) = (fx - x0 as f64, fy - y0 as f64);
@@ -72,7 +79,13 @@ pub struct SettlementUrban {
 }
 
 impl SettlementUrban {
-    pub fn new(settlements: &[SettlementSite], grid: WorldGrid, roads: &[Polyline], road_class: &[RoadClass], seed: u64) -> Self {
+    pub fn new(
+        settlements: &[SettlementSite],
+        grid: WorldGrid,
+        roads: &[Polyline],
+        road_class: &[RoadClass],
+        seed: u64,
+    ) -> Self {
         let cell_m = f64::from(grid.cell_metres());
         let sites = settlements
             .iter()
@@ -92,8 +105,14 @@ impl SettlementUrban {
                 let mut lobes = Vec::new();
                 for (road, class) in roads.iter().zip(road_class) {
                     let target = radius_m * 0.9;
-                    let best = road.0.iter().min_by(|a, b| (a.dist(centre) - target).abs().total_cmp(&(b.dist(centre) - target).abs()));
-                    if let Some(p) = best.filter(|p| (p.dist(centre) - target).abs() < radius_m * 0.5) {
+                    let best = road.0.iter().min_by(|a, b| {
+                        (a.dist(centre) - target)
+                            .abs()
+                            .total_cmp(&(b.dist(centre) - target).abs())
+                    });
+                    if let Some(p) =
+                        best.filter(|p| (p.dist(centre) - target).abs() < radius_m * 0.5)
+                    {
                         let gain = match class {
                             RoadClass::Motorway => 1.0,
                             RoadClass::Arterial => 0.8,
@@ -105,7 +124,10 @@ impl SettlementUrban {
                 }
                 let place = |salt: &str, lo: f64, hi: f64| {
                     let h = site_seed.derive(salt);
-                    let (a, r) = (h.derive("a").unit() * std::f64::consts::TAU, radius_m * (lo + (hi - lo) * h.derive("r").unit()));
+                    let (a, r) = (
+                        h.derive("a").unit() * std::f64::consts::TAU,
+                        radius_m * (lo + (hi - lo) * h.derive("r").unit()),
+                    );
                     centre + V2::from_angle(a) * r
                 };
                 Site {
@@ -141,7 +163,10 @@ impl SettlementUrban {
         let d = p - site.centre;
         let th = d.angle();
         let ph = site.phase;
-        let lump = 0.66 + 0.12 * (2.0 * th + ph).sin() + 0.07 * (3.0 * th + ph * 1.9).sin() + 0.04 * (5.0 * th - ph * 0.7).sin();
+        let lump = 0.66
+            + 0.12 * (2.0 * th + ph).sin()
+            + 0.07 * (3.0 * th + ph * 1.9).sin()
+            + 0.04 * (5.0 * th - ph * 0.7).sin();
         let mut reach = site.radius_m * lump;
         for &(angle, strength) in &site.lobes {
             let mut a = (th - angle).abs() % TAU;
@@ -178,7 +203,8 @@ impl UrbanField for SettlementUrban {
                 continue;
             }
             let g = |c: V2, s: f64| (-(p.dist(c) / (site.radius_m * s)).powi(2)).exp();
-            let base = g(site.centre + (site.core - site.centre), 0.5).max(0.62 * g(site.sub_core, 0.28));
+            let base =
+                g(site.centre + (site.core - site.centre), 0.5).max(0.62 * g(site.sub_core, 0.28));
             best = best.max(site.weight * base * self.urbanness(p).max(0.0).sqrt());
         }
         best
@@ -201,7 +227,12 @@ fn corner_radius_m(class: crate::RoadClass) -> f64 {
 /// path turns in steps; this rounds them to the curvature the class is built to.
 pub fn road_centreline_m(road: &Road, grid: WorldGrid) -> Polyline {
     let cell_m = f64::from(grid.cell_metres());
-    let raw = Polyline(road.path.iter().map(|p: &GridPoint| v2(p.x as f64 * cell_m, p.y as f64 * cell_m)).collect());
+    let raw = Polyline(
+        road.path
+            .iter()
+            .map(|p: &GridPoint| v2(p.x as f64 * cell_m, p.y as f64 * cell_m))
+            .collect(),
+    );
     round_corners(&raw, corner_radius_m(road.class), 20.0)
 }
 
@@ -226,7 +257,13 @@ impl WorldFabric {
     ) -> Result<Self, worldgen_core::Error> {
         let centrelines: Vec<Polyline> = roads.iter().map(|r| road_centreline_m(r, grid)).collect();
         let classes: Vec<RoadClass> = roads.iter().map(|r| r.class.contract()).collect();
-        let urban = Arc::new(SettlementUrban::new(settlements, grid, &centrelines, &classes, seed));
+        let urban = Arc::new(SettlementUrban::new(
+            settlements,
+            grid,
+            &centrelines,
+            &classes,
+            seed,
+        ));
         let pinned = PinnedSet::new(
             roads
                 .iter()
@@ -249,14 +286,28 @@ impl WorldFabric {
         let root = (2048.0_f64 * 2.0).max(2.0_f64.powf(world_m.log2().ceil()));
         let lattice_level = (root / 2048.0).log2().round() as u8;
         let frame = Frame::new([-2048.0, -2048.0], root);
-        let config = RoadsConfig { lattice_level, ..RoadsConfig::default() };
+        let config = RoadsConfig {
+            lattice_level,
+            ..RoadsConfig::default()
+        };
         let engine = worldgen_roads::engine(Seed::new(seed), frame, config, fields)?;
         Ok(Self {
             engine,
             rivers,
             urban,
-            centres: settlements.iter().map(|s| v2(s.location.x as f64 * f64::from(grid.cell_metres()), s.location.y as f64 * f64::from(grid.cell_metres()))).collect(),
-            radii_m: settlements.iter().map(|s| f64::from(settlement_radius_km(s.class)) * 1000.0).collect(),
+            centres: settlements
+                .iter()
+                .map(|s| {
+                    v2(
+                        s.location.x as f64 * f64::from(grid.cell_metres()),
+                        s.location.y as f64 * f64::from(grid.cell_metres()),
+                    )
+                })
+                .collect(),
+            radii_m: settlements
+                .iter()
+                .map(|s| f64::from(settlement_radius_km(s.class)) * 1000.0)
+                .collect(),
             frame,
             lattice_cell_m: 2048.0,
         })
@@ -277,10 +328,15 @@ impl WorldFabric {
         let mut tiles: Vec<Arc<RoadTile>> = Vec::new();
         for y in lo.y..=hi.y {
             for x in lo.x..=hi.x {
-                tiles.push(self.engine.get::<RoadTile>(ROADS, Cell::new(level, x, y)).map_err(|e| e.to_string())?);
+                tiles.push(
+                    self.engine
+                        .get::<RoadTile>(ROADS, Cell::new(level, x, y))
+                        .map_err(|e| e.to_string())?,
+                );
             }
         }
-        RoadNetwork::assemble(tiles.iter().map(|t| &**t)).map_err(|c| format!("tiles do not merge: {c:?}"))
+        RoadNetwork::assemble(tiles.iter().map(|t| &**t))
+            .map_err(|c| format!("tiles do not merge: {c:?}"))
     }
 
     pub fn centre_m(&self, settlement: usize) -> V2 {
@@ -352,7 +408,10 @@ fn clip_circle(line: &Polyline, centre: V2, radius: f64) -> Vec<(Polyline, bool,
     if let Some((points, cut_start)) = open {
         runs.push((points, cut_start, false));
     }
-    runs.into_iter().filter(|(p, _, _)| p.len() >= 2).map(|(p, s, e)| (Polyline(p), s, e)).collect()
+    runs.into_iter()
+        .filter(|(p, _, _)| p.len() >= 2)
+        .map(|(p, s, e)| (Polyline(p), s, e))
+        .collect()
 }
 
 /// Everything the city planner needs from the road layer for one town.
@@ -367,23 +426,36 @@ impl WorldFabric {
     /// The streets of a town: the network inside a circle around it, cut at the
     /// circle, without the country roads that have nothing to do with the town.
     pub fn town_streets(&self, settlement: usize) -> Result<TownStreets, String> {
-        let (centre, radius) =
-            (self.centre_m(settlement), self.radius_m(settlement) * 1.35 + f64::from(crate::WINDOW_TAIL_KM) * 1000.0);
+        let (centre, radius) = (
+            self.centre_m(settlement),
+            self.radius_m(settlement) * 1.35 + f64::from(crate::WINDOW_TAIL_KM) * 1000.0,
+        );
         let net = self.network(centre, radius + 600.0)?;
         let urban_field = self.urban.clone();
         // The waterways through the town: the longest is the river, the rest are
         // drawn as tributaries; a creek too narrow to see is stepped over, not bridged.
-        let mut waterways: Vec<(Polyline, f64)> =
-            self.rivers.through(centre, radius).into_iter().filter(|(_, width)| *width >= 9.0).collect();
+        let mut waterways: Vec<(Polyline, f64)> = self
+            .rivers
+            .through(centre, radius)
+            .into_iter()
+            .filter(|(_, width)| *width >= 9.0)
+            .collect();
         waterways.sort_by(|a, b| b.0.length().total_cmp(&a.0.length()));
         let over_drawn_water = |edge: &worldgen_contracts::RoadEdge| {
             edge.spans.iter().any(|span| {
                 let mid = span.from.lerp(span.to, 0.5);
-                waterways.iter().any(|(line, width)| line.closest(mid).is_some_and(|(d, _)| d < width * 0.5 + 14.0))
+                waterways.iter().any(|(line, width)| {
+                    line.closest(mid)
+                        .is_some_and(|(d, _)| d < width * 0.5 + 14.0)
+                })
             })
         };
-        let mut node_points: std::collections::HashMap<u64, urban::Point> = std::collections::HashMap::new();
-        let km = |p: V2| urban::Point { x_km: (p.x / 1000.0) as f32, y_km: (p.y / 1000.0) as f32 };
+        let mut node_points: std::collections::HashMap<u64, urban::Point> =
+            std::collections::HashMap::new();
+        let km = |p: V2| urban::Point {
+            x_km: (p.x / 1000.0) as f32,
+            y_km: (p.y / 1000.0) as f32,
+        };
         let mut roads = Vec::new();
         for edge in net.edges.values() {
             // A road whose pieces were cut by a tile border is whole again here.
@@ -401,13 +473,21 @@ impl WorldFabric {
                     }
                     let (first, last) = (run.first().unwrap(), run.last().unwrap());
                     let end_id = |node: NodeId, cut: bool, at: V2, tag: u64| {
-                        if cut || net.nodes.get(&node).is_none_or(|n| n.position.dist(at) > 1e-6) {
+                        if cut
+                            || net
+                                .nodes
+                                .get(&node)
+                                .is_none_or(|n| n.position.dist(at) > 1e-6)
+                        {
                             hash_words(&[edge.id.0, tag, at.x.to_bits(), at.y.to_bits()])
                         } else {
                             node.0
                         }
                     };
-                    let (from, to) = (end_id(edge.a, cut_start, first, 1), end_id(edge.b, cut_end, last, 2));
+                    let (from, to) = (
+                        end_id(edge.a, cut_start, first, 1),
+                        end_id(edge.b, cut_end, last, 2),
+                    );
                     if from == to {
                         continue;
                     }
@@ -423,16 +503,37 @@ impl WorldFabric {
                 }
             }
         }
-        let nodes = node_points.into_iter().map(|(id, point)| urban::ExternalNode { id, point }).collect();
-        let to_km = |line: &Polyline| -> Vec<urban::Point> { line.0.iter().map(|p| km(*p)).collect() };
+        let nodes = node_points
+            .into_iter()
+            .map(|(id, point)| urban::ExternalNode { id, point })
+            .collect();
+        let to_km =
+            |line: &Polyline| -> Vec<urban::Point> { line.0.iter().map(|p| km(*p)).collect() };
         let mut waterways = waterways.into_iter();
-        let (river, river_width_m) = waterways.next().map_or((Vec::new(), 0.0), |(line, width)| (to_km(&line), width as f32));
-        let tributaries: Vec<(Vec<urban::Point>, f32)> = waterways.map(|(line, width)| (to_km(&line), width as f32)).collect();
+        let (river, river_width_m) = waterways.next().map_or((Vec::new(), 0.0), |(line, width)| {
+            (to_km(&line), width as f32)
+        });
+        let tributaries: Vec<(Vec<urban::Point>, f32)> = waterways
+            .map(|(line, width)| (to_km(&line), width as f32))
+            .collect();
         let (u2, i2) = (self.urban.clone(), self.urban.clone());
         let fields = urban::ExternalFields {
-            urbanness: Box::new(move |p| u2.urbanness(v2(f64::from(p.x_km) * 1000.0, f64::from(p.y_km) * 1000.0)) as f32),
-            intensity: Box::new(move |p| i2.intensity(v2(f64::from(p.x_km) * 1000.0, f64::from(p.y_km) * 1000.0)) as f32),
+            urbanness: Box::new(move |p| {
+                u2.urbanness(v2(f64::from(p.x_km) * 1000.0, f64::from(p.y_km) * 1000.0)) as f32
+            }),
+            intensity: Box::new(move |p| {
+                i2.intensity(v2(f64::from(p.x_km) * 1000.0, f64::from(p.y_km) * 1000.0)) as f32
+            }),
         };
-        Ok(TownStreets { streets: urban::ExternalStreets { nodes, roads, river, tributaries }, fields, river_width_m })
+        Ok(TownStreets {
+            streets: urban::ExternalStreets {
+                nodes,
+                roads,
+                river,
+                tributaries,
+            },
+            fields,
+            river_width_m,
+        })
     }
 }

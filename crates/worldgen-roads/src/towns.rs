@@ -39,7 +39,15 @@ impl HashedTowns {
     }
 
     /// The strongest bump from the towns of one kind near `p`.
-    fn kind(&self, salt: &str, cell_m: f64, presence: f64, radius: (f64, f64), cap: f64, p: V2) -> f64 {
+    fn kind(
+        &self,
+        salt: &str,
+        cell_m: f64,
+        presence: f64,
+        radius: (f64, f64),
+        cap: f64,
+        p: V2,
+    ) -> f64 {
         let seed = self.seed.derive(salt);
         let (cx, cy) = ((p.x / cell_m).floor() as i64, (p.y / cell_m).floor() as i64);
         let mut best = 0.0_f64;
@@ -60,7 +68,8 @@ impl HashedTowns {
                 let local = (p - centre).rotate(-angle);
                 let d = v2(local.x / stretch, local.y * stretch).len() / r;
                 // And ragged at the edge.
-                let rag = 0.72 + 0.56 * fbm(h.derive("n"), p.x / (r * 0.55), p.y / (r * 0.55), 3, 0.5);
+                let rag =
+                    0.72 + 0.56 * fbm(h.derive("n"), p.x / (r * 0.55), p.y / (r * 0.55), 3, 0.5);
                 best = best.max(cap * smoothstep(1.1, 0.12, d * (2.0 - rag)));
             }
         }
@@ -70,8 +79,22 @@ impl HashedTowns {
 
 impl UrbanField for HashedTowns {
     fn urbanness(&self, p: V2) -> f64 {
-        let city = self.kind("city", self.city_cell_m, self.city_presence, self.city_radius_m, 1.0, p);
-        let village = self.kind("village", self.village_cell_m, self.village_presence, self.village_radius_m, 0.5, p);
+        let city = self.kind(
+            "city",
+            self.city_cell_m,
+            self.city_presence,
+            self.city_radius_m,
+            1.0,
+            p,
+        );
+        let village = self.kind(
+            "village",
+            self.village_cell_m,
+            self.village_presence,
+            self.village_radius_m,
+            0.5,
+            p,
+        );
         city.max(village)
     }
 }
@@ -94,7 +117,10 @@ mod tests {
             urban += usize::from(u > 0.3);
             dense += usize::from(u > 0.8);
         }
-        assert!(urban > n / 40 && urban < n / 2, "{urban} of {n} places are built up");
+        assert!(
+            urban > n / 40 && urban < n / 2,
+            "{urban} of {n} places are built up"
+        );
         assert!(dense > 0 && dense < urban);
     }
 
@@ -106,6 +132,9 @@ mod tests {
             let p = v2(k as f64 * 5.0, 3000.0);
             worst = worst.max((towns.urbanness(p) - towns.urbanness(p + v2(5.0, 0.0))).abs());
         }
-        assert!(worst < 0.08, "urbanness jumps by {worst} across five metres");
+        assert!(
+            worst < 0.08,
+            "urbanness jumps by {worst} across five metres"
+        );
     }
 }

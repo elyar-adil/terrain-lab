@@ -14,8 +14,8 @@ use super::{
 use crate::math::{Rng, Vec2, Vec3};
 use crate::mesh::{GroupStyle, MeshBuilder, MeshGroup};
 use crate::network::derive;
-use crate::species::{Bark, Bloom, Canopy, LeafForm, SPECIES, Species};
 use crate::spec::JunctionSpec;
+use crate::species::{Bark, Bloom, Canopy, LeafForm, SPECIES, Species};
 use urban::{ModernChinaSpec, generate_modern_chinese_city};
 
 fn city() -> urban::ModernCity {
@@ -41,10 +41,7 @@ fn groups_of<'a>(
     part: &str,
 ) -> Vec<&'a MeshGroup> {
     let key = format!("{}#{}", prototype.key, part);
-    meshes
-        .iter()
-        .filter(|mesh| mesh.material == key)
-        .collect()
+    meshes.iter().filter(|mesh| mesh.material == key).collect()
 }
 
 /// One prototype per species, every species present, and the set no bigger
@@ -78,7 +75,10 @@ fn every_species_has_a_prototype_and_the_set_is_bounded() {
         for part in ["bark", "leaf"] {
             let found = groups_of(&meshes, prototype, part);
             assert_eq!(found.len(), 1, "{}#{} is missing", prototype.key, part);
-            assert_eq!(found[0].instance_of.as_deref(), Some(prototype.key.as_str()));
+            assert_eq!(
+                found[0].instance_of.as_deref(),
+                Some(prototype.key.as_str())
+            );
         }
     }
 }
@@ -197,10 +197,9 @@ fn silhouette_is_different_per_species_measured_on_the_geometry() {
                     prototype.key
                 );
                 for normal in mesh.normals.chunks_exact(3) {
-                    let length = (normal[0] * normal[0]
-                        + normal[1] * normal[1]
-                        + normal[2] * normal[2])
-                        .sqrt();
+                    let length =
+                        (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2])
+                            .sqrt();
                     assert!(
                         (length - 1.0).abs() < 0.02,
                         "{}#{part} has a {length:.3}-length normal",
@@ -273,7 +272,11 @@ fn a_conifer_tapers_upward_and_a_vase_opens_upward() {
                 // A deodar is not a spire —it is as wide as a broad-crowned
                 // tree —but its tiers still narrow upward, less steeply than
                 // the metasequoia's.
-                assert!(ratio > 0.20, "{}'s crown is {ratio:.2}; a cedar's tiers are broad", species.key);
+                assert!(
+                    ratio > 0.20,
+                    "{}'s crown is {ratio:.2}; a cedar's tiers are broad",
+                    species.key
+                );
                 let (foot, crown) = (reach(prototype, 0.10, 0.30), reach(prototype, 0.55, 0.75));
                 assert!(
                     crown < foot * 0.92,
@@ -325,9 +328,12 @@ fn no_card_escapes_its_crowns_envelope() {
         for mesh in groups_of(&meshes, prototype, "leaf") {
             for card_vertices in mesh.positions.chunks_exact(12) {
                 let centre = Vec3::new(
-                    (card_vertices[0] + card_vertices[3] + card_vertices[6] + card_vertices[9]) / 4.0,
-                    (card_vertices[1] + card_vertices[4] + card_vertices[7] + card_vertices[10]) / 4.0,
-                    (card_vertices[2] + card_vertices[5] + card_vertices[8] + card_vertices[11]) / 4.0,
+                    (card_vertices[0] + card_vertices[3] + card_vertices[6] + card_vertices[9])
+                        / 4.0,
+                    (card_vertices[1] + card_vertices[4] + card_vertices[7] + card_vertices[10])
+                        / 4.0,
+                    (card_vertices[2] + card_vertices[5] + card_vertices[8] + card_vertices[11])
+                        / 4.0,
                 );
                 let radius = Vec2::new(centre.x, centre.z).length();
                 assert!(
@@ -511,9 +517,8 @@ fn canopy_opacity_follows_the_species_density() {
             sparse.push((layer, per_area));
         }
     }
-    let mean_cards = |values: &[(f32, f32)]| {
-        values.iter().map(|v| v.1).sum::<f32>() / values.len() as f32
-    };
+    let mean_cards =
+        |values: &[(f32, f32)]| values.iter().map(|v| v.1).sum::<f32>() / values.len() as f32;
     assert!(
         mean_cards(&dense) > mean_cards(&sparse) * 1.8,
         "the densest species need {} cards per unit of crown and the sparsest \
@@ -898,7 +903,11 @@ fn a_city_is_thousands_of_trees_on_a_few_prototypes() {
         &mut builder,
         city.seed,
     );
-    assert!(output.instances > 500, "only {} trees in a whole city", output.instances);
+    assert!(
+        output.instances > 500,
+        "only {} trees in a whole city",
+        output.instances
+    );
     assert!(output.instances <= super::TREE_BUDGET);
     assert!(!output.by_role.is_empty());
     assert!(
@@ -923,7 +932,10 @@ fn a_city_is_thousands_of_trees_on_a_few_prototypes() {
     let total: usize = lists.iter().map(|list| list.instances.len()).sum();
     assert_eq!(total, output.instances);
     // Every prototype is reachable, or the palette is not really in the city.
-    let used = lists.iter().filter(|list| !list.instances.is_empty()).count();
+    let used = lists
+        .iter()
+        .filter(|list| !list.instances.is_empty())
+        .count();
     assert!(used >= 16, "only {used} prototypes are actually planted");
 }
 
@@ -1079,39 +1091,100 @@ fn the_willow_hangs_and_the_pine_leans() {
     );
 }
 
-
 #[test]
 fn zz_signature_sheet() {
     let base: Species = Species {
-        key: "t", name_zh: "t", name_en: "t", canopy: Canopy::Rounded, leaf: LeafForm::Elliptic,
-        bark: Bark { colour: [0.20, 0.19, 0.18], fissure: 0.4, weathering: 1.0 },
-        foliage: [0.14, 0.19, 0.12], autumn: None,
-        bloom: Bloom { colour: None, density: 0.0, at: 0.0 },
-        height_m: (9.0, 12.0), crown_m: (3.2, 4.6), trunk_m: (0.16, 0.24),
-        clear_stem: 0.32, density: 0.70, leaf_scale: 0.30, evergreen: false, street_tolerant: true,
+        key: "t",
+        name_zh: "t",
+        name_en: "t",
+        canopy: Canopy::Rounded,
+        leaf: LeafForm::Elliptic,
+        bark: Bark {
+            colour: [0.20, 0.19, 0.18],
+            fissure: 0.4,
+            weathering: 1.0,
+        },
+        foliage: [0.14, 0.19, 0.12],
+        autumn: None,
+        bloom: Bloom {
+            colour: None,
+            density: 0.0,
+            at: 0.0,
+        },
+        height_m: (9.0, 12.0),
+        crown_m: (3.2, 4.6),
+        trunk_m: (0.16, 0.24),
+        clear_stem: 0.32,
+        density: 0.70,
+        leaf_scale: 0.30,
+        evergreen: false,
+        street_tolerant: true,
     };
     let clear_stem_of = |c: Canopy| match c {
-        Canopy::Conical => 0.58, Canopy::Layered => 0.18, Canopy::Fastigiate => 0.18,
-        Canopy::Umbrella => 0.42, Canopy::Open => 0.45, Canopy::Fan => 0.44,
-        Canopy::Weeping => 0.28, Canopy::Irregular => 0.35, Canopy::Banyan => 0.24,
-        Canopy::Oval => 0.26, Canopy::Vase => 0.30, Canopy::Rounded => 0.30,
+        Canopy::Conical => 0.58,
+        Canopy::Layered => 0.18,
+        Canopy::Fastigiate => 0.18,
+        Canopy::Umbrella => 0.42,
+        Canopy::Open => 0.45,
+        Canopy::Fan => 0.44,
+        Canopy::Weeping => 0.28,
+        Canopy::Irregular => 0.35,
+        Canopy::Banyan => 0.24,
+        Canopy::Oval => 0.26,
+        Canopy::Vase => 0.30,
+        Canopy::Rounded => 0.30,
     };
     let mut sigs: Vec<(Canopy, [f32; 4], f32, f32)> = Vec::new();
     for canopy in [
-        Canopy::Rounded, Canopy::Open, Canopy::Oval, Canopy::Fan, Canopy::Vase, Canopy::Conical,
-        Canopy::Layered, Canopy::Weeping, Canopy::Fastigiate, Canopy::Irregular,
-        Canopy::Umbrella, Canopy::Banyan,
+        Canopy::Rounded,
+        Canopy::Open,
+        Canopy::Oval,
+        Canopy::Fan,
+        Canopy::Vase,
+        Canopy::Conical,
+        Canopy::Layered,
+        Canopy::Weeping,
+        Canopy::Fastigiate,
+        Canopy::Irregular,
+        Canopy::Umbrella,
+        Canopy::Banyan,
     ] {
         let species: &'static Species = Box::leak(Box::new(Species {
-            key: "t", canopy, clear_stem: clear_stem_of(canopy), ..base
+            key: "t",
+            canopy,
+            clear_stem: clear_stem_of(canopy),
+            ..base
         }));
         let mut rng = Rng::new(0x7ee0_0000 ^ (canopy as u32) << 5);
         let (height, crown, trunk) = real_dimensions(species, 0, &mut rng);
-        let prototype = TreePrototype { key: "tree/t/0".into(), species, variant: 0, height, crown, trunk };
+        let prototype = TreePrototype {
+            key: "tree/t/0".into(),
+            species,
+            variant: 0,
+            height,
+            crown,
+            trunk,
+        };
         let (bark, leaf) = ("tree/t/0#bark".to_string(), "tree/t/0#leaf".to_string());
         let mut builder = MeshBuilder::new();
-        builder.style(&bark, GroupStyle { cast_shadow: true, receive_shadow: true, alpha_cutout: false, dynamic: false });
-        builder.style(&leaf, GroupStyle { cast_shadow: true, receive_shadow: true, alpha_cutout: true, dynamic: false });
+        builder.style(
+            &bark,
+            GroupStyle {
+                cast_shadow: true,
+                receive_shadow: true,
+                alpha_cutout: false,
+                dynamic: false,
+            },
+        );
+        builder.style(
+            &leaf,
+            GroupStyle {
+                cast_shadow: true,
+                receive_shadow: true,
+                alpha_cutout: true,
+                dynamic: false,
+            },
+        );
         Grower::new(&prototype, 0x1234_5678, &bark, &leaf, &mut builder).build();
         let meshes = builder.build().meshes;
         let leaf_group = meshes.iter().find(|m| m.material == leaf).unwrap();
@@ -1123,27 +1196,52 @@ fn zz_signature_sheet() {
             let x = (card[0] + card[3] + card[6] + card[9]) / 4.0;
             let z = (card[2] + card[5] + card[8] + card[11]) / 4.0;
             for (i, c) in [0.25_f32, 0.5, 0.75].iter().enumerate() {
-                if (y - c).abs() < 0.08 { b[i] = b[i].max(x.hypot(z)); }
+                if (y - c).abs() < 0.08 {
+                    b[i] = b[i].max(x.hypot(z));
+                }
             }
         }
-        let mut inner = 0; let mut tot = 0;
+        let mut inner = 0;
+        let mut tot = 0;
         for card in leaf_group.positions.chunks_exact(12) {
             let x = (card[0] + card[3] + card[6] + card[9]) / 4.0;
             let z = (card[2] + card[5] + card[8] + card[11]) / 4.0;
             tot += 1;
-            if x.hypot(z) < w * 0.55 { inner += 1; }
+            if x.hypot(z) < w * 0.55 {
+                inner += 1;
+            }
         }
-        sigs.push((canopy, [b[0] / w, b[1] / w, b[2] / w, w], w, inner as f32 / tot as f32));
+        sigs.push((
+            canopy,
+            [b[0] / w, b[1] / w, b[2] / w, w],
+            w,
+            inner as f32 / tot as f32,
+        ));
     }
     for (c, s, _w, v) in &sigs {
-        let mut near: Vec<(f32, Canopy)> = sigs.iter()
+        let mut near: Vec<(f32, Canopy)> = sigs
+            .iter()
             .filter(|o| o.0 != *c)
-            .map(|o| ((0..4).map(|i| (s[i] - o.1[i]).abs()).sum::<f32>() / 4.0, o.0))
+            .map(|o| {
+                (
+                    (0..4).map(|i| (s[i] - o.1[i]).abs()).sum::<f32>() / 4.0,
+                    o.0,
+                )
+            })
             .collect();
         near.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
         println!(
             "{:?} sig=[{:.3} {:.3} {:.3} {:.3}] inner={:.0}%  nearest: {:?}={:.4} {:?}={:.4}",
-            c, s[0], s[1], s[2], s[3], v * 100.0, near[0].1, near[0].0, near[1].1, near[1].0
+            c,
+            s[0],
+            s[1],
+            s[2],
+            s[3],
+            v * 100.0,
+            near[0].1,
+            near[0].0,
+            near[1].1,
+            near[1].0
         );
     }
 }

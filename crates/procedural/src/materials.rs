@@ -70,11 +70,7 @@ impl Rgb {
     }
 
     fn scale(self, t: f32) -> Rgb {
-        Rgb([
-            self.0[0] * t,
-            self.0[1] * t,
-            self.0[2] * t,
-        ])
+        Rgb([self.0[0] * t, self.0[1] * t, self.0[2] * t])
     }
 
     fn bytes(self) -> [u8; 3] {
@@ -302,7 +298,11 @@ fn ground_asphalt(u: f32, v: f32, profile: &WeatheringProfile) -> Rgb {
     let speck = hash01(profile.seed, (u * 512.0) as i32, (v * 512.0) as i32, 5);
     let mut colour = base.scale(0.85 + speck * 0.35);
     // Wheel tracks: two smoother, slightly darker bands along V.
-    let track: f32 = if (u - 0.32).abs() < 0.055 || (u - 0.68).abs() < 0.055 { 1.0 } else { 0.0 };
+    let track: f32 = if (u - 0.32).abs() < 0.055 || (u - 0.68).abs() < 0.055 {
+        1.0
+    } else {
+        0.0
+    };
     colour = colour.scale(1.0 - track * 0.10);
     // Patch repairs: large low-frequency blotches.
     let patch = crate::noise::fbm(profile.seed, u * 3.2, v * 3.2, 3, 19);
@@ -337,7 +337,8 @@ fn ground_sidewalk(u: f32, v: f32, profile: &WeatheringProfile) -> Rgb {
 
 fn ground_paver(u: f32, v: f32, profile: &WeatheringProfile) -> Rgb {
     let brick = brick_cell(u, v, 12, 0.05);
-    let paver = Rgb::new(0x9b8f7c).scale(0.88 + hash01(profile.seed, brick.brick, brick.course, 9) * 0.2);
+    let paver =
+        Rgb::new(0x9b8f7c).scale(0.88 + hash01(profile.seed, brick.brick, brick.course, 9) * 0.2);
     let joint = Rgb::new(0x6f6a5d);
     let mut colour = if brick.joint { joint } else { paver };
     let wear = sample(
@@ -372,7 +373,10 @@ mod tests {
     fn standard_set_covers_all_materials() {
         let set = standard_texture_set(64);
         assert_eq!(set.len(), 6);
-        assert!(set.iter().all(|texture| texture.rgba.len() == (64 * 64 * 4) as usize));
+        assert!(
+            set.iter()
+                .all(|texture| texture.rgba.len() == (64 * 64 * 4) as usize)
+        );
     }
 
     #[test]
@@ -385,10 +389,15 @@ mod tests {
             let x = (u * size as f32) as usize;
             let y = (v * size as f32) as usize;
             let index = (y * size as usize + x) * 4;
-            texture.rgba[index] as u32 + texture.rgba[index + 1] as u32 + texture.rgba[index + 2] as u32
+            texture.rgba[index] as u32
+                + texture.rgba[index + 1] as u32
+                + texture.rgba[index + 2] as u32
         };
         let window = at(1.0 / 12.0, 0.05);
         let wall = at(0.02, 0.05);
-        assert!(window < wall, "window ({window}) should be darker than wall ({wall})");
+        assert!(
+            window < wall,
+            "window ({window}) should be darker than wall ({wall})"
+        );
     }
 }

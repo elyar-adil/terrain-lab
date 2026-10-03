@@ -41,8 +41,12 @@ pub fn site_from_extent(min_x: f32, max_x: f32, min_y: f32, max_y: f32) -> CityS
 
 /// Site for a city from its node points, or `None` for an empty graph.
 pub fn site_from_points(points: impl IntoIterator<Item = (f32, f32)>) -> Option<CitySite> {
-    let (mut min_x, mut max_x, mut min_y, mut max_y) =
-        (f32::INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::NEG_INFINITY);
+    let (mut min_x, mut max_x, mut min_y, mut max_y) = (
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+    );
     let mut any = false;
     for (x, y) in points {
         any = true;
@@ -63,7 +67,12 @@ fn cell_metres(world_size_km: f32, mesh_size: usize) -> f32 {
 /// The pad level is the mean of the site's inner half radius, minus a hair so
 /// road surfaces sit just above the ground. Blend uses a smoothstep over
 /// [`BLEND_M`] beyond the pad radius.
-pub fn flatten_heights(heights: &mut [f32], mesh_size: usize, world_size_km: f32, sites: &[CitySite]) {
+pub fn flatten_heights(
+    heights: &mut [f32],
+    mesh_size: usize,
+    world_size_km: f32,
+    sites: &[CitySite],
+) {
     if mesh_size < 2 || heights.len() < mesh_size * mesh_size {
         return;
     }
@@ -111,7 +120,12 @@ pub fn flatten_heights(heights: &mut [f32], mesh_size: usize, world_size_km: f32
 
 /// Mark the vegetation-exclusion mask (255 = no plants) under every site, out
 /// to the pad radius plus [`VEGETATION_MARGIN_M`].
-pub fn exclude_vegetation(mask: &mut [u8], mesh_size: usize, world_size_km: f32, sites: &[CitySite]) {
+pub fn exclude_vegetation(
+    mask: &mut [u8],
+    mesh_size: usize,
+    world_size_km: f32,
+    sites: &[CitySite],
+) {
     if mesh_size < 2 || mask.len() < mesh_size * mesh_size {
         return;
     }
@@ -157,11 +171,18 @@ mod tests {
             .map(|i| 100.0 + 0.5 * (i % size) as f32 + 0.3 * (i / size) as f32)
             .collect();
         let original = heights.clone();
-        let site = CitySite { x_km: 10.0, y_km: 10.0, radius_m: 600.0 };
+        let site = CitySite {
+            x_km: 10.0,
+            y_km: 10.0,
+            radius_m: 600.0,
+        };
         flatten_heights(&mut heights, size, world, &[site]);
         let centre = 128 * size + 128;
         let near = 128 * size + 130;
-        assert!((heights[centre] - heights[near]).abs() < 0.2, "pad is not flat");
+        assert!(
+            (heights[centre] - heights[near]).abs() < 0.2,
+            "pad is not flat"
+        );
         assert_eq!(heights[0], original[0]);
         assert_eq!(heights[size * size - 1], original[size * size - 1]);
         let mut mask = vec![0_u8; size * size];

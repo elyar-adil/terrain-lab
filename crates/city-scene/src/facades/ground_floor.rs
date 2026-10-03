@@ -8,10 +8,11 @@
 //! and white sign boards is the single most recognisable feature of a Chinese
 //! retail street.
 
-use crate::facades::{
-    GROUND_FLOOR_BAY_W, GROUND_FLOOR_BAYS, GROUND_FLOOR_TILE_H, GROUND_FLOOR_TILE_W, GROUND_STOREY_M,
-};
 use crate::facades::tile::{shade, srgb8, value_noise};
+use crate::facades::{
+    GROUND_FLOOR_BAY_W, GROUND_FLOOR_BAYS, GROUND_FLOOR_TILE_H, GROUND_FLOOR_TILE_W,
+    GROUND_STOREY_M,
+};
 use crate::textures::{BakedTexture, hash};
 
 /// The three ground-floor variants.  Each is one shop bay by one ground storey
@@ -169,7 +170,11 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
                         // level apart from the signs.
                         let flute = ((u / 0.31) - (u / 0.31).floor() - 0.5).abs();
                         shade(
-                            if block.rem_euclid(2) == 0 { PIER_LIGHT } else { PIER },
+                            if block.rem_euclid(2) == 0 {
+                                PIER_LIGHT
+                            } else {
+                                PIER
+                            },
                             0.84 + flute * 0.26,
                         )
                     } else if (mullion - 0.30..mullion).contains(&u) {
@@ -179,10 +184,7 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
                         // and a bronze pull rail, and a mat behind the glass.
                         if h > 3.02 {
                             FRAME
-                        } else if (u - mullion - 0.22).abs() < 0.030
-                            && h > 1.00
-                            && h < 1.95
-                        {
+                        } else if (u - mullion - 0.22).abs() < 0.030 && h > 1.00 && h < 1.95 {
                             [0.320, 0.272, 0.170]
                         } else if u < mullion + 0.06 || u > door - 0.06 {
                             FRAME
@@ -233,13 +235,17 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
                             } else {
                                 1.0
                             };
-                            [0.235 * lit * fall * goods, 0.205 * lit * fall * goods, 0.160 * lit * fall * goods]
+                            [
+                                0.235 * lit * fall * goods,
+                                0.205 * lit * fall * goods,
+                                0.160 * lit * fall * goods,
+                            ]
                         }
                     } else {
                         // Shopfront glass above the hatch: dark, with the
                         // interior's own reflections as broad soft bands.
-                        let band = 0.82
-                            + 0.30 * value_noise(key.wrapping_add(601), u * 1.6, h * 0.9);
+                        let band =
+                            0.82 + 0.30 * value_noise(key.wrapping_add(601), u * 1.6, h * 0.9);
                         shade(GLASS, band)
                     }
                 }
@@ -320,7 +326,11 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
                             [0.320, 0.280, 0.180]
                         } else {
                             let panel = (h - 0.72) / 0.78;
-                            let recess = if (panel - 0.5).abs() < 0.34 { 0.72 } else { 1.0 };
+                            let recess = if (panel - 0.5).abs() < 0.34 {
+                                0.72
+                            } else {
+                                1.0
+                            };
                             shade(DOOR, recess)
                         }
                     } else if (0.42..1.46).contains(&u) || (2.94..3.98).contains(&u) {

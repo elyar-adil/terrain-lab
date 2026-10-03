@@ -36,7 +36,12 @@ pub fn fbm(seed: Seed, x: f64, y: f64, octaves: u32, gain: f64) -> f64 {
         // A rotation per octave keeps the lattice axes from lining up.
         let (s, c) = (0.5_f64, 0.866_025_403_784_438_6_f64);
         let (rx, ry) = (x * freq * c - y * freq * s, x * freq * s + y * freq * c);
-        sum += weight * value(seed.derive_index(i64::from(o)), rx + 17.0 * f64::from(o), ry - 31.0 * f64::from(o));
+        sum += weight
+            * value(
+                seed.derive_index(i64::from(o)),
+                rx + 17.0 * f64::from(o),
+                ry - 31.0 * f64::from(o),
+            );
         norm += weight;
         weight *= gain;
         freq *= 2.0;
@@ -56,7 +61,11 @@ mod tests {
             let x = i as f64 * 0.01;
             let v = value(s, x, 0.3);
             assert!((0.0..1.0).contains(&v));
-            assert!((v - prev).abs() < 0.08, "a step of 0.01 moved the value by {}", (v - prev).abs());
+            assert!(
+                (v - prev).abs() < 0.08,
+                "a step of 0.01 moved the value by {}",
+                (v - prev).abs()
+            );
             prev = v;
         }
         assert_eq!(value(s, 4.2, -7.7), value(s, 4.2, -7.7));

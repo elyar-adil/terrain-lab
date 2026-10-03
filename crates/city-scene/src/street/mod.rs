@@ -236,12 +236,7 @@ pub(super) fn ribbon(
                     pb,
                     b,
                     a,
-                    [
-                        (pa.x, pa.z),
-                        (pb.x, pb.z),
-                        (b.x, b.z),
-                        (a.x, a.z),
-                    ],
+                    [(pa.x, pa.z), (pb.x, pb.z), (b.x, b.z), (a.x, a.z)],
                     color,
                 ),
                 Uvs::Along(anchor) => {
@@ -354,7 +349,11 @@ fn declare(builder: &mut MeshBuilder) {
     }
     // The two dashed-line variants and the crossing are alpha-cut textures, not
     // opaque paint: their transparent gaps must show the asphalt underneath.
-    for material in ["marking.crosswalk", "marking.dashed-3-5", "marking.dashed-6-9"] {
+    for material in [
+        "marking.crosswalk",
+        "marking.dashed-3-5",
+        "marking.dashed-6-9",
+    ] {
         builder.style(
             material,
             GroupStyle {

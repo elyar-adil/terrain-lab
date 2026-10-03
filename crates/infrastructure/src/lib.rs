@@ -8,8 +8,8 @@ use urban::{
     CityOptions, ModernChinaSpec, ModernCity, ModernRoadClass, Point as UrbanPoint,
     RegionalApproach, UrbanModel, generate_modern_chinese_city_with_options,
 };
-use world_core::{GridPoint, ScalarLayer, WorldError};
 pub use world_core::WorldGrid;
+use world_core::{GridPoint, ScalarLayer, WorldError};
 
 pub mod fabric;
 pub mod rivers;
@@ -79,7 +79,8 @@ impl RoadClass {
     }
 
     pub fn profile(self) -> RoadProfile {
-        let section = worldgen_contracts::cross_section(self.contract(), worldgen_contracts::Setting::Rural);
+        let section =
+            worldgen_contracts::cross_section(self.contract(), worldgen_contracts::Setting::Rural);
         RoadProfile {
             carriageway_width_metres: section.width() as f32,
             right_of_way_width_metres: section.right_of_way() as f32,
@@ -275,7 +276,8 @@ pub fn generate_infrastructure_with(
             ModernChinaSpec {
                 centre,
                 radius_km,
-                rotation_radians: (config.seed ^ settlement.id.wrapping_mul(7919)) as f32 * 0.000_013,
+                rotation_radians: (config.seed ^ settlement.id.wrapping_mul(7919)) as f32
+                    * 0.000_013,
                 seed: config.seed ^ settlement.id.wrapping_mul(0x9e37_79b9),
                 density: (0.58 + settlement.score * 0.32).clamp(0.35, 0.92),
                 block_size_metres: 120.0,
@@ -283,20 +285,29 @@ pub fn generate_infrastructure_with(
                 river_width_metres: 64.0,
             },
             &approaches,
-            CityOptions { organic_footprint: true },
+            CityOptions {
+                organic_footprint: true,
+            },
         )
     };
     let modern_cities: Vec<ModernCity> = match planner {
         CityPlanner::Legacy => settlements.iter().map(legacy_city).collect(),
         CityPlanner::Fabric => {
-            let fabric = fabric::WorldFabric::new(terrain, grid, &settlements, &roads, u64::from(config.seed))
-                .map_err(|e| InfrastructureError::Fabric(e.to_string()))?;
+            let fabric = fabric::WorldFabric::new(
+                terrain,
+                grid,
+                &settlements,
+                &roads,
+                u64::from(config.seed),
+            )
+            .map_err(|e| InfrastructureError::Fabric(e.to_string()))?;
             settlements
                 .iter()
                 .enumerate()
                 .map(|(index, settlement)| match fabric.town_streets(index) {
                     Ok(town) => {
-                        let radius_km = settlement_radius_km(settlement.class) * 1.35 + WINDOW_TAIL_KM;
+                        let radius_km =
+                            settlement_radius_km(settlement.class) * 1.35 + WINDOW_TAIL_KM;
                         urban::generate_modern_chinese_city_from_streets(
                             ModernChinaSpec {
                                 centre: settlement_centre_km(grid, settlement),
@@ -306,7 +317,11 @@ pub fn generate_infrastructure_with(
                                 density: (0.58 + settlement.score * 0.32).clamp(0.35, 0.92),
                                 block_size_metres: 120.0,
                                 organic: 0.68,
-                                river_width_metres: if town.river_width_m > 0.0 { town.river_width_m } else { 64.0 },
+                                river_width_metres: if town.river_width_m > 0.0 {
+                                    town.river_width_m
+                                } else {
+                                    64.0
+                                },
                             },
                             town.streets,
                             town.fields,
@@ -375,7 +390,12 @@ impl InfrastructureData {
 
     /// Like [`Self::build_city_scene`], but only the part of the plan within `radius_m`
     /// of a local point: a look at one neighbourhood of a big town.
-    pub fn build_city_scene_clipped(&self, index: usize, centre: [f32; 2], radius_m: f32) -> Option<CityScene> {
+    pub fn build_city_scene_clipped(
+        &self,
+        index: usize,
+        centre: [f32; 2],
+        radius_m: f32,
+    ) -> Option<CityScene> {
         let settlement = self.settlements.get(index)?;
         let city = self.modern_cities.get(index)?.clipped(centre, radius_m);
         Some(build_city_scene(&city, scene_budget(settlement.class)))
@@ -412,7 +432,13 @@ fn settlement_centre_km(grid: WorldGrid, settlement: &SettlementSite) -> UrbanPo
 /// its corners rounded to the curvature the class is built to. The regional
 /// renderer and the town's street plan both draw this one line.
 fn road_path_km(road: &Road, grid: WorldGrid) -> Vec<UrbanPoint> {
-    road_centreline_km(road, grid).iter().map(|p| UrbanPoint { x_km: p[0], y_km: p[1] }).collect()
+    road_centreline_km(road, grid)
+        .iter()
+        .map(|p| UrbanPoint {
+            x_km: p[0],
+            y_km: p[1],
+        })
+        .collect()
 }
 
 /// The same line as plain `[x, y]` kilometres, for renderers.
@@ -441,10 +467,16 @@ fn road_approaches(
         .filter_map(|road| {
             let path_km = road_path_km(road, grid);
             let reaches = path_km.windows(2).any(|w| {
-                segment_distance_km([centre.x_km, centre.y_km], [w[0].x_km, w[0].y_km], [w[1].x_km, w[1].y_km])
-                    < radius_km * 1.05
+                segment_distance_km(
+                    [centre.x_km, centre.y_km],
+                    [w[0].x_km, w[0].y_km],
+                    [w[1].x_km, w[1].y_km],
+                ) < radius_km * 1.05
             });
-            reaches.then(|| RegionalApproach { class: modern_class(road.class), path_km })
+            reaches.then(|| RegionalApproach {
+                class: modern_class(road.class),
+                path_km,
+            })
         })
         .collect()
 }
@@ -475,7 +507,10 @@ impl InfrastructureData {
             .iter()
             .map(|s| {
                 let c = settlement_centre_km(grid, s);
-                Footprint { centre_km: [c.x_km, c.y_km], radius_km: settlement_radius_km(s.class) }
+                Footprint {
+                    centre_km: [c.x_km, c.y_km],
+                    radius_km: settlement_radius_km(s.class),
+                }
             })
             .collect()
     }
@@ -489,7 +524,10 @@ const FOOTPRINT_OWNERSHIP: f32 = urban::REGIONAL_ROAD_HANDOVER;
 /// The pieces of a regional road (world kilometres) that lie outside every
 /// built-up area.  A road that crosses a town comes back as two pieces that end
 /// at its edge; the town's own street plan carries it through.
-pub fn clip_outside_footprints(path_km: &[[f32; 2]], footprints: &[Footprint]) -> Vec<Vec<[f32; 2]>> {
+pub fn clip_outside_footprints(
+    path_km: &[[f32; 2]],
+    footprints: &[Footprint],
+) -> Vec<Vec<[f32; 2]>> {
     let mut pieces: Vec<Vec<[f32; 2]>> = Vec::new();
     let mut current: Vec<[f32; 2]> = Vec::new();
     let inside = |p: [f32; 2]| {
@@ -504,7 +542,10 @@ pub fn clip_outside_footprints(path_km: &[[f32; 2]], footprints: &[Footprint]) -
         let n = ((len / 0.01).ceil() as usize).max(1);
         for k in 0..n {
             let t = k as f32 / n as f32;
-            samples.push([w[0][0] + (w[1][0] - w[0][0]) * t, w[0][1] + (w[1][1] - w[0][1]) * t]);
+            samples.push([
+                w[0][0] + (w[1][0] - w[0][0]) * t,
+                w[0][1] + (w[1][1] - w[0][1]) * t,
+            ]);
         }
     }
     if let Some(last) = path_km.last() {
@@ -1333,14 +1374,19 @@ mod tests {
         let footprints = data.footprints();
         let mut checked = 0;
         for road in &data.roads {
-            let path: Vec<[f32; 2]> = road_path_km(road, grid).iter().map(|p| [p.x_km, p.y_km]).collect();
+            let path: Vec<[f32; 2]> = road_path_km(road, grid)
+                .iter()
+                .map(|p| [p.x_km, p.y_km])
+                .collect();
             for piece in clip_outside_footprints(&path, &footprints) {
                 for end in [piece[0], *piece.last().unwrap()] {
                     // A piece ends either at a town's handover circle or at the end of the road.
-                    let Some((_, city)) = footprints.iter().zip(&data.modern_cities).find(|(f, _)| {
-                        let d = (end[0] - f.centre_km[0]).hypot(end[1] - f.centre_km[1]);
-                        (d - f.radius_km * FOOTPRINT_OWNERSHIP).abs() < 0.012
-                    }) else {
+                    let Some((_, city)) =
+                        footprints.iter().zip(&data.modern_cities).find(|(f, _)| {
+                            let d = (end[0] - f.centre_km[0]).hypot(end[1] - f.centre_km[1]);
+                            (d - f.radius_km * FOOTPRINT_OWNERSHIP).abs() < 0.012
+                        })
+                    else {
                         continue;
                     };
                     // The road carries on as a street of its class or better: some
@@ -1350,27 +1396,35 @@ mod tests {
                     // few tens of metres off the regional road's own polyline.
                     let class = modern_class(road.class) as i32;
                     let ok = city.sd_roads.iter().any(|r| {
-                        let (a, b) = (&city.nodes[r.from as usize].point, &city.nodes[r.to as usize].point);
+                        let (a, b) = (
+                            &city.nodes[r.from as usize].point,
+                            &city.nodes[r.to as usize].point,
+                        );
                         (r.class as i32) <= class
-                            && segment_distance_km(end, [a.x_km, a.y_km], [b.x_km, b.y_km]) * 1000.0 < 45.0
+                            && segment_distance_km(end, [a.x_km, a.y_km], [b.x_km, b.y_km]) * 1000.0
+                                < 45.0
                     });
                     assert!(
                         ok,
                         "road {} ({:?}) is handed to a town at {:?} but no street of its class carries it on",
-                        road.id,
-                        road.class,
-                        end
+                        road.id, road.class, end
                     );
                     checked += 1;
                 }
             }
         }
-        assert!(checked > 0, "the fixture should have at least one road entering a town");
+        assert!(
+            checked > 0,
+            "the fixture should have at least one road entering a town"
+        );
     }
 
     #[test]
     fn a_road_through_a_town_is_clipped_to_two_pieces_at_its_edge() {
-        let town = Footprint { centre_km: [10.0, 10.0], radius_km: 1.0 };
+        let town = Footprint {
+            centre_km: [10.0, 10.0],
+            radius_km: 1.0,
+        };
         let road: Vec<[f32; 2]> = vec![[5.0, 10.0], [8.0, 10.0], [12.0, 10.0], [15.0, 10.0]];
         let pieces = clip_outside_footprints(&road, &[town]);
         assert_eq!(pieces.len(), 2);

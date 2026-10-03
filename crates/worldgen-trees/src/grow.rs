@@ -144,11 +144,18 @@ impl Path {
     /// Position, direction and radius at fraction `t` of the arc length.
     fn at(&self, t: f32) -> (V3, V3, f32) {
         let s = t.clamp(0.0, 1.0) * self.len();
-        let k = self.cum.partition_point(|&c| c < s).clamp(1, self.pts.len() - 1);
+        let k = self
+            .cum
+            .partition_point(|&c| c < s)
+            .clamp(1, self.pts.len() - 1);
         let (c0, c1) = (self.cum[k - 1], self.cum[k]);
         let f = if c1 > c0 { (s - c0) / (c1 - c0) } else { 0.0 };
         let dir = (self.pts[k] - self.pts[k - 1]).norm();
-        (self.pts[k - 1].lerp(self.pts[k], f), dir, self.rad[k - 1] + (self.rad[k] - self.rad[k - 1]) * f)
+        (
+            self.pts[k - 1].lerp(self.pts[k], f),
+            dir,
+            self.rad[k - 1] + (self.rad[k] - self.rad[k - 1]) * f,
+        )
     }
 }
 
@@ -160,10 +167,17 @@ struct EndGrid {
 
 impl EndGrid {
     fn new(cell: f32) -> Self {
-        Self { cell: cell.max(0.05), cells: std::collections::HashMap::new() }
+        Self {
+            cell: cell.max(0.05),
+            cells: std::collections::HashMap::new(),
+        }
     }
     fn key(&self, p: V3) -> (i32, i32, i32) {
-        ((p.x / self.cell).floor() as i32, (p.y / self.cell).floor() as i32, (p.z / self.cell).floor() as i32)
+        (
+            (p.x / self.cell).floor() as i32,
+            (p.y / self.cell).floor() as i32,
+            (p.z / self.cell).floor() as i32,
+        )
     }
     fn add(&mut self, p: V3) {
         let k = self.key(p);
@@ -213,7 +227,8 @@ impl Crown {
         let h = ((y - self.z0) / (self.height - self.z0).max(0.1)).clamp(0.0, 1.0);
         let lobe = 1.0
             + self.lobing
-                * (self.lobes[0] * (azimuth - self.lobes[1]).cos() + self.lobes[2] * (2.0 * (azimuth - self.lobes[3])).cos());
+                * (self.lobes[0] * (azimuth - self.lobes[1]).cos()
+                    + self.lobes[2] * (2.0 * (azimuth - self.lobes[3])).cos());
         self.radius * profile(self.habit, h) * lobe.max(0.4)
     }
 }
@@ -308,7 +323,13 @@ impl Grower {
         }
         if emit {
             for i in 1..pts.len() {
-                self.segments.push(Segment { a: pts[i - 1], b: pts[i], ra: rad[i - 1], rb: rad[i], level });
+                self.segments.push(Segment {
+                    a: pts[i - 1],
+                    b: pts[i],
+                    ra: rad[i - 1],
+                    rb: rad[i],
+                    level,
+                });
             }
         }
         Path { pts, rad, cum }
@@ -316,7 +337,10 @@ impl Grower {
 
     /// A broadleaf tree divides into spreading limbs; a conifer keeps one leader to the top.
     fn decurrent(&self) -> bool {
-        !matches!(self.crown.habit, Habit::Layered | Habit::Conical | Habit::Fastigiate | Habit::Fan)
+        !matches!(
+            self.crown.habit,
+            Habit::Layered | Habit::Conical | Habit::Fastigiate | Habit::Fan
+        )
     }
 
     fn trunk(&mut self, spec: &TreeSpec, r_dbh: f32, rng: &mut R) -> Path {
@@ -356,9 +380,21 @@ impl Grower {
             rad[k] = r;
         }
         // The trunk goes on below the ground: it is planted, not stood on.
-        self.segments.push(Segment { a: v3(0.0, -0.45, 0.0), b: pts[0], ra: rad[0], rb: rad[0], level: 0 });
+        self.segments.push(Segment {
+            a: v3(0.0, -0.45, 0.0),
+            b: pts[0],
+            ra: rad[0],
+            rb: rad[0],
+            level: 0,
+        });
         for i in 1..pts.len() {
-            self.segments.push(Segment { a: pts[i - 1], b: pts[i], ra: rad[i - 1], rb: rad[i], level: 0 });
+            self.segments.push(Segment {
+                a: pts[i - 1],
+                b: pts[i],
+                ra: rad[i - 1],
+                rb: rad[i],
+                level: 0,
+            });
         }
         // Buttress roots: ridges of wood that leave the trunk a little above the ground and
         // run out and down into it, thick where they join and thinning to nothing, so the
@@ -368,7 +404,8 @@ impl Grower {
         let n_roots = 7 + (rr.u() * 3.0) as usize;
         let phi0 = rr.range(0.0, std::f32::consts::TAU);
         for i in 0..n_roots {
-            let phi = phi0 + i as f32 * std::f32::consts::TAU / n_roots as f32 + rr.range(-0.25, 0.25);
+            let phi =
+                phi0 + i as f32 * std::f32::consts::TAU / n_roots as f32 + rr.range(-0.25, 0.25);
             let out = v3(phi.cos(), 0.0, phi.sin());
             let y0 = rr.range(0.18, 0.55) * (0.7 + 0.6 * foot_r.min(0.6) / 0.3).min(1.5);
             let at = trunk_axis_at(&pts, y0);
@@ -388,7 +425,13 @@ impl Grower {
                 let y = y0 * (1.0 - t).powf(2.2) - 0.30 * t.powf(1.3);
                 let pos = v3(p.x, y, p.z);
                 let r = (r_top * (1.0 - t * 0.85).powf(1.4)).max(0.015);
-                self.segments.push(Segment { a: prev, b: pos, ra: prev_r, rb: r, level: 1 });
+                self.segments.push(Segment {
+                    a: prev,
+                    b: pos,
+                    ra: prev_r,
+                    rb: r,
+                    level: 1,
+                });
                 prev = pos;
                 prev_r = r;
             }
@@ -408,7 +451,8 @@ impl Grower {
             let s = len * i as f32 / STEPS as f32;
             let p = start + dir * s;
             let radial = (p.x * p.x + p.z * p.z).sqrt();
-            let allowed = (self.crown.reach(p.y, p.z.atan2(p.x)) * margin).max(r0 + 0.35 + 0.15 * len);
+            let allowed =
+                (self.crown.reach(p.y, p.z.atan2(p.x)) * margin).max(r0 + 0.35 + 0.15 * len);
             if p.y > top || radial > allowed {
                 return (len * (i as f32 - 1.0) / STEPS as f32).max(floor.min(len));
             }
@@ -434,7 +478,11 @@ impl Grower {
         let stem = (h - z0).max(0.5);
         let count = ((a.limb_per_m * stem * (0.9 + 0.2 * spec.age)).round() as usize).clamp(3, 140);
         let whorl = a.whorl.max(1) as usize;
-        let groups = if a.whorl > 0 { count.div_ceil(whorl) } else { count };
+        let groups = if a.whorl > 0 {
+            count.div_ceil(whorl)
+        } else {
+            count
+        };
         let phi0 = rng.range(0.0, std::f32::consts::TAU);
         let r_ref = trunk.at((z0 / (h * 1.02)).clamp(0.0, 0.9)).2;
         for g in 0..groups {
@@ -448,16 +496,20 @@ impl Grower {
                 let seed = self.seed.derive_u64(0x11 + (g * 16 + w) as u64);
                 let mut lr = R::of(seed);
                 let phi = if a.whorl > 0 {
-                    phi0 + g as f32 * 0.9 + w as f32 * std::f32::consts::TAU / whorl as f32 + lr.range(-0.2, 0.2)
+                    phi0 + g as f32 * 0.9
+                        + w as f32 * std::f32::consts::TAU / whorl as f32
+                        + lr.range(-0.2, 0.2)
                 } else {
                     phi0 + g as f32 * GOLDEN_ANGLE + lr.range(-0.25, 0.25)
                 };
-                let theta = a.limb_down.0 + (a.limb_down.1 - a.limb_down.0) * hrel + lr.normal() * 0.10;
+                let theta =
+                    a.limb_down.0 + (a.limb_down.1 - a.limb_down.0) * hrel + lr.normal() * 0.10;
                 let theta = theta.clamp(0.12, 1.05);
                 let dir = Self::spawn_dir(axis, theta, phi);
                 // A limb reaches as far as the crown envelope allows in its direction.
                 let ask = (self.crown.radius * 3.0).max(2.0);
-                let mut len = self.fit(pos, dir, ask, 1.0, 0.25) * a.limb_len * lr.range(0.80, 1.05);
+                let mut len =
+                    self.fit(pos, dir, ask, 1.0, 0.25) * a.limb_len * lr.range(0.80, 1.05);
                 len = len.clamp(0.25, 16.0);
                 let mut r0 = (r_trunk * a.limb_radius).min(r_trunk * 0.9).max(0.010);
                 if self.decurrent() {
@@ -466,7 +518,22 @@ impl Grower {
                     r0 = big.min(r_ref * 0.8).max(r0);
                 }
                 let sag = a.limb_sag * lr.range(0.6, 1.5);
-                let path = self.trace(pos, dir, len, r0, 0.012, 0.9, 0.35, 0.10, sag, a.limb_up, a.tip_droop * 0.6, 1, &mut lr, true);
+                let path = self.trace(
+                    pos,
+                    dir,
+                    len,
+                    r0,
+                    0.012,
+                    0.9,
+                    0.35,
+                    0.10,
+                    sag,
+                    a.limb_up,
+                    a.tip_droop * 0.6,
+                    1,
+                    &mut lr,
+                    true,
+                );
                 self.branches(&path, spec, seed, &mut lr);
                 if self.decurrent() {
                     self.forks(&path, 2, spec, seed, &mut lr);
@@ -483,7 +550,10 @@ impl Grower {
     /// whole sectors bare. Sample the envelope; where no twig is near, grow a branch from
     /// the nearest wood toward the spot, so the crown is a mass and not a handful of arms.
     fn fill_gaps(&mut self, spec: &TreeSpec) {
-        if matches!(self.crown.habit, Habit::Layered | Habit::Conical | Habit::Fastigiate) {
+        if matches!(
+            self.crown.habit,
+            Habit::Layered | Habit::Conical | Habit::Fastigiate
+        ) {
             return;
         }
         let a = self.arch;
@@ -501,8 +571,12 @@ impl Grower {
             grid.add(t.1);
         }
         indexed = self.twigs.len().max(indexed);
-        let mut wood: Vec<(V3, V3, f32)> =
-            self.segments.iter().filter(|s| s.level == 1 || s.level == 2).map(|s| (s.a, s.b, s.ra)).collect();
+        let mut wood: Vec<(V3, V3, f32)> = self
+            .segments
+            .iter()
+            .filter(|s| s.level == 1 || s.level == 2)
+            .map(|s| (s.a, s.b, s.ra))
+            .collect();
         for i in 0..want {
             let y = z0 + stem * (0.06 + 0.92 * rng.u());
             let az = std::f32::consts::TAU * rng.u();
@@ -511,11 +585,11 @@ impl Grower {
             if grid.near(p, gap) {
                 continue;
             }
-            let Some(&(wa, wb, wr)) = wood
-                .iter()
-                .filter(|w| w.2 > 0.004)
-                .min_by(|x, y2| ((x.0 + x.1) * 0.5).dist(p).total_cmp(&((y2.0 + y2.1) * 0.5).dist(p)))
-            else {
+            let Some(&(wa, wb, wr)) = wood.iter().filter(|w| w.2 > 0.004).min_by(|x, y2| {
+                ((x.0 + x.1) * 0.5)
+                    .dist(p)
+                    .total_cmp(&((y2.0 + y2.1) * 0.5).dist(p))
+            }) else {
                 continue;
             };
             let start = wa.lerp(wb, 0.5);
@@ -529,7 +603,22 @@ impl Grower {
             let blen = self.fit(start, dir, dist.clamp(0.5, 5.5) * 1.1, 1.08, 0.3);
             let r0 = (wr * 0.6).clamp(0.006, 0.07);
             let before = self.segments.len();
-            let path = self.trace(start, dir, blen, r0, 0.006, 0.9, 0.22, 0.12, a.branch_sag * 0.7, a.branch_up, a.tip_droop * 0.4, 2, &mut br, true);
+            let path = self.trace(
+                start,
+                dir,
+                blen,
+                r0,
+                0.006,
+                0.9,
+                0.22,
+                0.12,
+                a.branch_sag * 0.7,
+                a.branch_up,
+                a.tip_droop * 0.4,
+                2,
+                &mut br,
+                true,
+            );
             self.twigs_on(&path, bseed, spec, &mut br);
             for t in &self.twigs[indexed..] {
                 grid.add(t.0);
@@ -567,7 +656,22 @@ impl Grower {
             let r0 = (r_par * 0.72).clamp(0.01, 0.6);
             let fseed = seed.derive_u64(0x7000 + u64::from(depth) * 8 + i as u64);
             let mut fr = R::of(fseed);
-            let path = self.trace(pos, dir, len, r0, 0.012, 0.9, 0.35, 0.10, a.limb_sag * 0.8, a.limb_up, a.tip_droop * 0.6, 1, &mut fr, true);
+            let path = self.trace(
+                pos,
+                dir,
+                len,
+                r0,
+                0.012,
+                0.9,
+                0.35,
+                0.10,
+                a.limb_sag * 0.8,
+                a.limb_up,
+                a.tip_droop * 0.6,
+                1,
+                &mut fr,
+                true,
+            );
             self.branches(&path, spec, fseed, &mut fr);
             self.forks(&path, depth - 1, spec, fseed, &mut fr);
         }
@@ -585,14 +689,32 @@ impl Grower {
             let t = (0.14 + 0.86 * ((i as f32 + br.range(0.1, 0.9)) / n as f32)).clamp(0.1, 0.99);
             let (pos, axis, r_parent) = limb.at(t);
             let phi = phi0 + i as f32 * GOLDEN_ANGLE + br.range(-0.3, 0.3);
-            let theta = (a.branch_down.0 + (a.branch_down.1 - a.branch_down.0) * t + br.normal() * 0.12).clamp(0.25, 1.0);
+            let theta =
+                (a.branch_down.0 + (a.branch_down.1 - a.branch_down.0) * t + br.normal() * 0.12)
+                    .clamp(0.25, 1.0);
             let dir = Self::spawn_dir(axis, theta, phi);
-            let mut blen = a.branch_len * limb.len() * (1.0 - t).max(0.12).powf(0.75) * br.range(0.7, 1.2);
+            let mut blen =
+                a.branch_len * limb.len() * (1.0 - t).max(0.12).powf(0.75) * br.range(0.7, 1.2);
             blen = blen.clamp(0.25, 7.0);
             // Keep the tip inside the crown.
             blen = self.fit(pos, dir, blen, 1.06, 0.12);
             let r0 = (r_parent * 0.55).clamp(0.006, 0.25);
-            let path = self.trace(pos, dir, blen, r0, 0.006, 0.9, 0.22, 0.14, a.branch_sag * br.range(0.5, 1.4), a.branch_up, a.tip_droop * 0.4, 2, &mut br, true);
+            let path = self.trace(
+                pos,
+                dir,
+                blen,
+                r0,
+                0.006,
+                0.9,
+                0.22,
+                0.14,
+                a.branch_sag * br.range(0.5, 1.4),
+                a.branch_up,
+                a.tip_droop * 0.4,
+                2,
+                &mut br,
+                true,
+            );
             self.twigs_on(&path, bseed, spec, &mut br);
         }
     }
@@ -612,7 +734,12 @@ impl Grower {
             let mut tr = R::of(tseed);
             // The last twig is the branch's own tip.
             let tip = i + 1 == n;
-            let t = if tip { 1.0 } else { (0.10 + 0.90 * ((i as f32 + tr.range(0.1, 0.9)) / (n - 1) as f32).powf(0.85)).clamp(0.08, 0.98) };
+            let t = if tip {
+                1.0
+            } else {
+                (0.10 + 0.90 * ((i as f32 + tr.range(0.1, 0.9)) / (n - 1) as f32).powf(0.85))
+                    .clamp(0.08, 0.98)
+            };
             let (pos, axis, r_parent) = branch.at(t);
             let dir = if tip {
                 (axis + tr.unit_vec() * 0.25).norm()
@@ -621,11 +748,19 @@ impl Grower {
                 let theta = tr.range(0.40, 0.85);
                 Self::spawn_dir(axis, theta, phi)
             };
-            let dir = if a.tip_droop >= 1.0 { (dir + v3(0.0, -1.1, 0.0)).norm() } else { dir };
+            let dir = if a.tip_droop >= 1.0 {
+                (dir + v3(0.0, -1.1, 0.0)).norm()
+            } else {
+                dir
+            };
             let tlen = tr.range(a.twig_len.0, a.twig_len.1) * (1.0 - 0.45 * t);
             // A twig outside the crown is cut back to it.
             let tlen = self.fit(pos, dir, tlen, 1.12, 0.05).max(0.05);
-            let mid = (pos + dir * (tlen * 0.5) + tr.unit_vec() * (tlen * 0.07) + v3(0.0, -a.tip_droop * 0.05 * tlen, 0.0)).clone();
+            let mid = (pos
+                + dir * (tlen * 0.5)
+                + tr.unit_vec() * (tlen * 0.07)
+                + v3(0.0, -a.tip_droop * 0.05 * tlen, 0.0))
+            .clone();
             let mut end = pos + dir * tlen + v3(0.0, -a.tip_droop * 0.12 * tlen, 0.0);
             let ymax = self.crown.height * 1.01;
             let (mut mid, end_y) = (mid, end.y.min(ymax));
@@ -636,8 +771,20 @@ impl Grower {
                 continue;
             }
             let r0 = (r_parent * 0.6).clamp(0.003, 0.012);
-            self.segments.push(Segment { a: pos, b: mid, ra: r0, rb: r0 * 0.7, level: 3 });
-            self.segments.push(Segment { a: mid, b: end, ra: r0 * 0.7, rb: 0.0015, level: 3 });
+            self.segments.push(Segment {
+                a: pos,
+                b: mid,
+                ra: r0,
+                rb: r0 * 0.7,
+                level: 3,
+            });
+            self.segments.push(Segment {
+                a: mid,
+                b: end,
+                ra: r0 * 0.7,
+                rb: 0.0015,
+                level: 3,
+            });
             self.twigs.push((pos, end, r0, 0.0015, tseed.0));
         }
     }
@@ -684,7 +831,9 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
     let lod = lod.min(3);
     let sp = &SPECIES[spec.species];
     let arch = architecture(sp.habit);
-    let seed = Seed::new(spec.seed).derive("tree").derive_u64(spec.species as u64);
+    let seed = Seed::new(spec.seed)
+        .derive("tree")
+        .derive_u64(spec.species as u64);
     let mut rng = R::of(seed.derive("dims"));
 
     // --- dimensions -----------------------------------------------------------
@@ -693,9 +842,13 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
     let f = ((h - sp.height_m.0) / span).clamp(-0.4, 1.4);
     let fc = f.clamp(0.0, 1.0);
     let open = 0.62 + 0.38 * spec.openness.clamp(0.0, 1.0);
-    let mut crown_r = (sp.crown_m.0 + (sp.crown_m.1 - sp.crown_m.0) * fc) * open * rng.range(0.92, 1.08);
+    let mut crown_r =
+        (sp.crown_m.0 + (sp.crown_m.1 - sp.crown_m.0) * fc) * open * rng.range(0.92, 1.08);
     crown_r *= 1.0 + 0.2 * (f - 1.0).max(0.0) + 0.25 * f.min(0.0);
-    let trunk_r = ((sp.trunk_m.0 + (sp.trunk_m.1 - sp.trunk_m.0) * fc) * (0.62 + 0.38 * spec.age) * rng.range(0.9, 1.1)).max(0.03);
+    let trunk_r = ((sp.trunk_m.0 + (sp.trunk_m.1 - sp.trunk_m.0) * fc)
+        * (0.62 + 0.38 * spec.age)
+        * rng.range(0.9, 1.1))
+    .max(0.03);
     let natural_base = (sp.clear_stem + (1.0 - spec.openness) * 0.16) * h;
     let z0 = natural_base.max(spec.lift_m).min(h * 0.75);
     let crown = Crown {
@@ -703,7 +856,12 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
         height: h,
         radius: crown_r.max(0.4),
         habit: sp.habit,
-        lobes: [rng.range(0.4, 1.0), rng.range(0.0, 6.28), rng.range(0.2, 0.8), rng.range(0.0, 6.28)],
+        lobes: [
+            rng.range(0.4, 1.0),
+            rng.range(0.0, 6.28),
+            rng.range(0.2, 0.8),
+            rng.range(0.0, 6.28),
+        ],
         lobing: arch.lobing * (0.6 + 0.8 * rng.u()),
     };
     let lean = {
@@ -733,7 +891,8 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
     // --- leaves -------------------------------------------------------------------
     let (cover, autumn, flush, bloom) = leaf_state(sp, spec.season);
     let mut leaves = Vec::new();
-    let budget = (LEAF_BUDGET[lod as usize] as f32 * (0.35 + 0.65 * sp.leaf_cover.min(5.0) / 5.0)).max(40.0);
+    let budget =
+        (LEAF_BUDGET[lod as usize] as f32 * (0.35 + 0.65 * sp.leaf_cover.min(5.0) / 5.0)).max(40.0);
     let n_target = budget * cover * keep_twigs;
     if n_target >= 1.0 {
         // Light decides where leaves are worth growing: the outer shell of the crown is lit,
@@ -755,17 +914,25 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
             let depth = side.min(top);
             0.12 + 0.88 * (-depth / 1.8).exp()
         };
-        let weight_total: f32 = grower.twigs.iter().map(|t| t.0.dist(t.1) * light(t.1)).sum::<f32>().max(0.05);
+        let weight_total: f32 = grower
+            .twigs
+            .iter()
+            .map(|t| t.0.dist(t.1) * light(t.1))
+            .sum::<f32>()
+            .max(0.05);
         let per_m = n_target / weight_total;
         // Leaf size: the crown's leaf area, shared out among the leaves drawn.
         let crown_area = std::f32::consts::PI * grower.crown.radius * grower.crown.radius;
-        let area_total = 1.9 * sp.leaf_cover * cover * keep_twigs * (0.55 + 0.45 * spec.openness) * crown_area;
+        let area_total =
+            1.9 * sp.leaf_cover * cover * keep_twigs * (0.55 + 0.45 * spec.openness) * crown_area;
         let k = 0.70 * sp.leaf_aspect.min(1.1);
         let opposite = matches!(sp.key, "feng-shu" | "gui-hua");
         // A farther level draws fewer, bigger leaves; the ceiling on their size rises with
         // how many fewer, so the crown keeps its mass.
         let stretch = (LEAF_BUDGET[0] as f32 / LEAF_BUDGET[lod as usize] as f32).sqrt();
-        let size = (area_total / (n_target * k)).sqrt().clamp(sp.leaf_len_m * 0.6, sp.leaf_len_m * 5.0 * stretch);
+        let size = (area_total / (n_target * k))
+            .sqrt()
+            .clamp(sp.leaf_len_m * 0.6, sp.leaf_len_m * 5.0 * stretch);
         let crown_centre = v3(0.0, 0.5 * (grower.crown.z0 + h), 0.0);
         for (ti, &(a, b, _, _, tseed)) in grower.twigs.iter().enumerate() {
             let mut lr = R::of(Seed::new(tseed).derive("leaves"));
@@ -789,14 +956,20 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
                     (j as f32 + kr.range(0.2, 0.9)) / count as f32
                 };
                 let base = a.lerp(b, s.clamp(0.0, 1.0));
-                let phi = leaf_azimuth(opposite, j, ti, phi0) + if opposite { kr.range(-0.08, 0.08) } else { kr.range(-0.3, 0.3) };
+                let phi = leaf_azimuth(opposite, j, ti, phi0)
+                    + if opposite {
+                        kr.range(-0.08, 0.08)
+                    } else {
+                        kr.range(-0.3, 0.3)
+                    };
                 let petiole = Grower::spawn_dir(axis, kr.range(0.55, 1.2), phi);
                 let outward = {
                     let o = base - crown_centre;
                     o.norm()
                 };
                 // The blade leans out of the crown, droops a little, and turns to the sky.
-                let mut dir = (petiole * 0.8 + outward * 0.35 + v3(0.0, -0.18 * kr.u(), 0.0)).norm();
+                let mut dir =
+                    (petiole * 0.8 + outward * 0.35 + v3(0.0, -0.18 * kr.u(), 0.0)).norm();
                 if sp.habit == Habit::Weeping {
                     dir = (dir + v3(0.0, -1.2, 0.0)).norm();
                 }
@@ -805,7 +978,8 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
                 let side = dir.cross(up_perp).norm();
                 let normal = (up_perp * roll.cos() + side * roll.sin()).norm();
                 let length = size * (kr.normal() * 0.18).exp() * (0.92 + 0.14 * kr.u());
-                let depth = (base.dist(crown_centre) / (grower.crown.radius.max(0.5) * 1.1)).clamp(0.0, 1.0);
+                let depth = (base.dist(crown_centre) / (grower.crown.radius.max(0.5) * 1.1))
+                    .clamp(0.0, 1.0);
                 leaves.push(Leaf {
                     pos: {
                         let mut pos = base + dir * (length * 0.10);
@@ -834,7 +1008,11 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
     let bark = {
         let mut br = R::of(seed.derive("bark"));
         let j = br.range(0.85, 1.15);
-        [sp.bark.colour[0] * j, sp.bark.colour[1] * j * br.range(0.96, 1.04), sp.bark.colour[2] * j]
+        [
+            sp.bark.colour[0] * j,
+            sp.bark.colour[1] * j * br.range(0.96, 1.04),
+            sp.bark.colour[2] * j,
+        ]
     };
     Tree {
         spec: *spec,

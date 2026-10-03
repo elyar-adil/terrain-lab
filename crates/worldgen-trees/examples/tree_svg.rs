@@ -16,7 +16,10 @@ fn main() {
     let species: Vec<usize> = if which == "all" {
         (0..SPECIES.len()).collect()
     } else {
-        which.split(',').map(|k| by_key(k).expect("species key")).collect()
+        which
+            .split(',')
+            .map(|k| by_key(k).expect("species key"))
+            .collect()
     };
     let k = 13.0_f32; // pixels per metre
     let (cell_w, row_h) = (11.0 * k * 1.6, 28.0 * k);
@@ -26,9 +29,16 @@ fn main() {
     writeln!(svg, r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}"><rect width="{width}" height="{height}" fill="#cfe0ee"/>"##).unwrap();
     for (r, &sp) in species.iter().enumerate() {
         let ground = row_h * (r as f32 + 1.0) - 14.0;
-        writeln!(svg, r##"<rect x="0" y="{ground}" width="{width}" height="8" fill="#8a7a5a"/>"##).unwrap();
+        writeln!(
+            svg,
+            r##"<rect x="0" y="{ground}" width="{width}" height="8" fill="#8a7a5a"/>"##
+        )
+        .unwrap();
         for c in 0..count {
-            let spec = TreeSpec { season, ..TreeSpec::typical(sp, 1000 + c as u64 * 7919) };
+            let spec = TreeSpec {
+                season,
+                ..TreeSpec::typical(sp, 1000 + c as u64 * 7919)
+            };
             let tree = grow(&spec, lod);
             let cx = cell_w * (c as f32 + 0.5);
             let s = &SPECIES[sp];
@@ -43,17 +53,32 @@ fn main() {
                 )
                 .unwrap();
             }
-            let fol = [s.foliage[0].powf(0.45), s.foliage[1].powf(0.45), s.foliage[2].powf(0.45)];
-            let aut = s.autumn.map(|a| [a[0].powf(0.45), a[1].powf(0.45), a[2].powf(0.45)]).unwrap_or(fol);
+            let fol = [
+                s.foliage[0].powf(0.45),
+                s.foliage[1].powf(0.45),
+                s.foliage[2].powf(0.45),
+            ];
+            let aut = s
+                .autumn
+                .map(|a| [a[0].powf(0.45), a[1].powf(0.45), a[2].powf(0.45)])
+                .unwrap_or(fol);
             for leaf in &tree.leaves {
                 let a = tree.autumn;
                 let col: Vec<u8> = (0..3)
-                    .map(|i| ((fol[i] * (1.0 - a) + aut[i] * a) * (0.7 + 0.5 * leaf.tint[1] as f32 / 255.0) * 255.0).clamp(0.0, 255.0) as u8)
+                    .map(|i| {
+                        ((fol[i] * (1.0 - a) + aut[i] * a)
+                            * (0.7 + 0.5 * leaf.tint[1] as f32 / 255.0)
+                            * 255.0)
+                            .clamp(0.0, 255.0) as u8
+                    })
                     .collect();
                 let ang = (-leaf.dir.y).atan2(leaf.dir.x).to_degrees();
                 let len = leaf.length * k;
                 let wid = (len * s.leaf_aspect * 0.6).max(0.5);
-                let c = (leaf.pos.x + leaf.dir.x * leaf.length * 0.5, leaf.pos.y + leaf.dir.y * leaf.length * 0.5);
+                let c = (
+                    leaf.pos.x + leaf.dir.x * leaf.length * 0.5,
+                    leaf.pos.y + leaf.dir.y * leaf.length * 0.5,
+                );
                 writeln!(
                     svg,
                     r##"<ellipse cx="{:.1}" cy="{:.1}" rx="{:.2}" ry="{:.2}" transform="rotate({:.0} {:.1} {:.1})" fill="rgb({},{},{})" fill-opacity="0.85"/>"##,
@@ -62,7 +87,14 @@ fn main() {
                 .unwrap();
             }
             if c == 0 {
-                writeln!(svg, r##"<text x="8" y="{}" font-size="20" fill="#222">{} {}</text>"##, ground - 8.0, s.name_zh, s.key).unwrap();
+                writeln!(
+                    svg,
+                    r##"<text x="8" y="{}" font-size="20" fill="#222">{} {}</text>"##,
+                    ground - 8.0,
+                    s.name_zh,
+                    s.key
+                )
+                .unwrap();
             }
         }
     }

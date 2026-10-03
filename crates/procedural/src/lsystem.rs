@@ -135,8 +135,7 @@ pub fn interpret(
     let mut radius = params.base_radius;
     let mut stack: Vec<([f32; 3], [f32; 3], [f32; 3], f32, f32)> = Vec::new();
 
-    let turn = |axis_kind: u8, sign: f32,
-                    heading: &mut [f32; 3], side: &mut [f32; 3]| {
+    let turn = |axis_kind: u8, sign: f32, heading: &mut [f32; 3], side: &mut [f32; 3]| {
         let axis = match axis_kind {
             // Yaw rotates around the local "up-left" axis: cross(heading, side).
             0 => cross(*heading, *side),
@@ -265,7 +264,10 @@ mod tests {
         // it started; a perfectly vertical trunk stays straight.
         let (segments, _) = interpret("F[&FFFFFF]", &droop, 0.0, &mut rng);
         let last = segments.last().unwrap();
-        assert!(last.end[1] < last.start[1], "strong negative tropism droops");
+        assert!(
+            last.end[1] < last.start[1],
+            "strong negative tropism droops"
+        );
         let (upright, _) = interpret("FFFFFF", &droop, 0.0, &mut rng);
         let trunk_last = upright.last().unwrap();
         assert!(trunk_last.end[1] > trunk_last.start[1]);

@@ -279,16 +279,16 @@ impl Path {
     }
 
     pub fn flat(points: Vec<Vec2>) -> Self {
-        Self::new(points.into_iter().map(|p| Vec3::from_plan(p, 0.0)).collect())
+        Self::new(
+            points
+                .into_iter()
+                .map(|p| Vec3::from_plan(p, 0.0))
+                .collect(),
+        )
     }
 
     pub fn from_plan(points: impl IntoIterator<Item = [f32; 2]>) -> Self {
-        Self::flat(
-            points
-                .into_iter()
-                .map(|p| Vec2::new(p[0], p[1]))
-                .collect(),
-        )
+        Self::flat(points.into_iter().map(|p| Vec2::new(p[0], p[1])).collect())
     }
 
     pub fn points(&self) -> &[Vec3] {
@@ -339,11 +339,7 @@ impl Path {
         let a = self.points[index];
         let b = self.points[index + 1];
         (
-            Vec3::new(
-                lerp(a.x, b.x, t),
-                lerp(a.y, b.y, t),
-                lerp(a.z, b.z, t),
-            ),
+            Vec3::new(lerp(a.x, b.x, t), lerp(a.y, b.y, t), lerp(a.z, b.z, t)),
             Vec2::new(b.x - a.x, b.z - a.z).normalize(),
         )
     }
@@ -368,7 +364,11 @@ impl Path {
     pub fn offset_at(&self, station: f32, offset: f32, lift: f32) -> Vec3 {
         let (position, tangent) = self.sample(station);
         let lateral = tangent.left_normal() * offset;
-        Vec3::new(position.x + lateral.x, position.y + lift, position.z + lateral.y)
+        Vec3::new(
+            position.x + lateral.x,
+            position.y + lift,
+            position.z + lateral.y,
+        )
     }
 
     /// Sub-path between two stations, resampled so the result has its own
@@ -400,7 +400,9 @@ impl Path {
         for index in 0..self.points.len() - 1 {
             let a = self.points[index];
             let b = self.points[index + 1];
-            let steps = (((b.x - a.x).hypot(b.z - a.z)) / max_segment).ceil().max(1.0) as usize;
+            let steps = (((b.x - a.x).hypot(b.z - a.z)) / max_segment)
+                .ceil()
+                .max(1.0) as usize;
             for step in 0..steps {
                 let t = step as f32 / steps as f32;
                 points.push(Vec3::new(
@@ -466,10 +468,7 @@ pub fn cubic_points(a: Vec2, b: Vec2, c: Vec2, d: Vec2, steps: usize) -> Vec<Vec
         .map(|index| {
             let t = index as f32 / steps as f32;
             let u = 1.0 - t;
-            a * (u * u * u)
-                + b * (3.0 * u * u * t)
-                + c * (3.0 * u * t * t)
-                + d * (t * t * t)
+            a * (u * u * u) + b * (3.0 * u * u * t) + c * (3.0 * u * t * t) + d * (t * t * t)
         })
         .collect()
 }
@@ -501,9 +500,7 @@ pub fn ring_centroid(ring: &[Vec2]) -> Vec2 {
     }
     let area = signed_area(ring);
     if area.abs() < EPSILON {
-        let sum = ring
-            .iter()
-            .fold(Vec2::ZERO, |acc, point| acc + *point);
+        let sum = ring.iter().fold(Vec2::ZERO, |acc, point| acc + *point);
         return sum / ring.len() as f32;
     }
     let mut accumulated = Vec2::ZERO;
@@ -602,11 +599,12 @@ pub fn triangulate(ring: &[Vec2]) -> Vec<[usize; 3]> {
             if cross3(a, b, c) <= EPSILON {
                 continue;
             }
-            if indices
-                .iter()
-                .any(|&other| other != previous && other != current && other != next
-                    && point_in_triangle(ring[other], a, b, c))
-            {
+            if indices.iter().any(|&other| {
+                other != previous
+                    && other != current
+                    && other != next
+                    && point_in_triangle(ring[other], a, b, c)
+            }) {
                 continue;
             }
             triangles.push([previous, current, next]);
@@ -708,11 +706,8 @@ impl Rng {
     /// Mix an integer into the stream so independent call sites (tree 3 versus
     /// tree 4) never share a correlated prefix.
     pub fn fork(&mut self, salt: u32) {
-        self.state = self
-            .state
-            .wrapping_mul(0x85eb_ca6b)
-            .rotate_left(13)
-            ^ salt.wrapping_mul(0x27d4_eb2f);
+        self.state =
+            self.state.wrapping_mul(0x85eb_ca6b).rotate_left(13) ^ salt.wrapping_mul(0x27d4_eb2f);
         self.state ^= self.state >> 15;
     }
 
@@ -761,7 +756,11 @@ impl Rng {
         let azimuth = self.unit() * std::f32::consts::TAU;
         let cos_polar = 2.0 * self.unit() - 1.0;
         let sin_polar = (1.0 - cos_polar * cos_polar).max(0.0).sqrt();
-        Vec3::new(sin_polar * azimuth.cos(), cos_polar, sin_polar * azimuth.sin())
+        Vec3::new(
+            sin_polar * azimuth.cos(),
+            cos_polar,
+            sin_polar * azimuth.sin(),
+        )
     }
 }
 
@@ -803,10 +802,7 @@ mod tests {
 
     #[test]
     fn trim_rebases_station_space_and_keeps_elevation() {
-        let path = Path::new(vec![
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(100.0, 0.0, 0.0),
-        ]);
+        let path = Path::new(vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(100.0, 0.0, 0.0)]);
         let trimmed = path.trim(20.0, 60.0);
         assert!((trimmed.length() - 40.0).abs() < 1.0e-4);
         let (position, _) = trimmed.sample(0.0);
@@ -884,9 +880,17 @@ mod tests {
 
     #[test]
     fn max_turn_degrees_detects_a_real_bend() {
-        let straight = Path::flat(vec![Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(20.0, 0.0)]);
+        let straight = Path::flat(vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 0.0),
+            Vec2::new(20.0, 0.0),
+        ]);
         assert!(straight.max_turn_degrees() < 0.01);
-        let bent = Path::flat(vec![Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0)]);
+        let bent = Path::flat(vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ]);
         assert!((bent.max_turn_degrees() - 90.0).abs() < 0.01);
     }
 

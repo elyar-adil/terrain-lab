@@ -122,11 +122,17 @@ impl CrossSection {
     }
     /// Distance from the centreline to the outer edge of the motor lanes.
     pub fn half_carriageway(&self) -> f64 {
-        self.median * 0.5 + self.inner_shoulder + f64::from(self.lanes_per_direction) * self.lane_width
+        self.median * 0.5
+            + self.inner_shoulder
+            + f64::from(self.lanes_per_direction) * self.lane_width
     }
     /// Lanes in total, both directions.
     pub fn lanes(&self) -> u8 {
-        if self.shared_lane { 1 } else { self.lanes_per_direction * 2 }
+        if self.shared_lane {
+            1
+        } else {
+            self.lanes_per_direction * 2
+        }
     }
     pub fn has_median(&self) -> bool {
         self.median > 0.3
@@ -137,12 +143,18 @@ impl CrossSection {
     pub fn lane_offset(&self, direction: i8, index_from_kerb: u8) -> f64 {
         let from_centre = self.median * 0.5
             + self.inner_shoulder
-            + f64::from(self.lanes_per_direction.saturating_sub(index_from_kerb).max(1)) * self.lane_width
+            + f64::from(
+                self.lanes_per_direction
+                    .saturating_sub(index_from_kerb)
+                    .max(1),
+            ) * self.lane_width
             - self.lane_width * 0.5;
         f64::from(direction) * from_centre
     }
     pub fn bike_offset(&self, direction: i8) -> Option<f64> {
-        (self.bike_lane > 0.0).then(|| f64::from(direction) * (self.half_carriageway() + self.shoulder + self.bike_lane * 0.5))
+        (self.bike_lane > 0.0).then(|| {
+            f64::from(direction) * (self.half_carriageway() + self.shoulder + self.bike_lane * 0.5)
+        })
     }
 }
 
@@ -150,7 +162,16 @@ impl CrossSection {
 pub fn cross_section(class: RoadClass, setting: Setting) -> CrossSection {
     use RoadClass::*;
     use Setting::*;
-    let s = |median, lanes, lane_width, inner_shoulder, shoulder, bike_lane, sidewalk, verge, paved, speed| CrossSection {
+    let s = |median,
+             lanes,
+             lane_width,
+             inner_shoulder,
+             shoulder,
+             bike_lane,
+             sidewalk,
+             verge,
+             paved,
+             speed| CrossSection {
         median,
         lanes_per_direction: lanes,
         lane_width,
@@ -237,8 +258,18 @@ mod tests {
         let motor = |c: CrossSection| 2.0 * (c.half_carriageway() + c.shoulder);
         for setting in [Setting::Rural, Setting::Urban] {
             for pair in RoadClass::ALL.windows(2) {
-                let (small, big) = (pair[0].cross_section(setting), pair[1].cross_section(setting));
-                assert!(motor(big) > motor(small), "{:?} {:?}: {} vs {}", setting, pair[1], motor(big), motor(small));
+                let (small, big) = (
+                    pair[0].cross_section(setting),
+                    pair[1].cross_section(setting),
+                );
+                assert!(
+                    motor(big) > motor(small),
+                    "{:?} {:?}: {} vs {}",
+                    setting,
+                    pair[1],
+                    motor(big),
+                    motor(small)
+                );
                 assert!(big.design_speed_kph >= small.design_speed_kph);
                 assert!(big.lanes() >= small.lanes());
             }
@@ -256,7 +287,12 @@ mod tests {
 
     #[test]
     fn open_country_roads_are_narrower_than_the_same_class_in_town() {
-        for c in [RoadClass::Arterial, RoadClass::Collector, RoadClass::Local, RoadClass::Service] {
+        for c in [
+            RoadClass::Arterial,
+            RoadClass::Collector,
+            RoadClass::Local,
+            RoadClass::Service,
+        ] {
             assert!(
                 c.cross_section(Setting::Rural).width() < c.cross_section(Setting::Urban).width(),
                 "{c:?} should widen as it enters a town"
@@ -284,7 +320,11 @@ mod tests {
         }
         assert_eq!(a.lane_offset(1, 0), -a.lane_offset(-1, 0));
         assert!(a.bike_offset(1).unwrap() > a.half_carriageway());
-        assert!(cross_section(RoadClass::Local, Setting::Urban).bike_offset(1).is_none());
+        assert!(
+            cross_section(RoadClass::Local, Setting::Urban)
+                .bike_offset(1)
+                .is_none()
+        );
         assert!(a.right_of_way() >= a.width());
     }
 
@@ -293,8 +333,14 @@ mod tests {
         assert_eq!(cross_section(RoadClass::Track, Setting::Rural).lanes(), 1);
         assert_eq!(cross_section(RoadClass::Track, Setting::Urban).lanes(), 1);
         assert_eq!(cross_section(RoadClass::Local, Setting::Rural).lanes(), 2);
-        assert_eq!(cross_section(RoadClass::Motorway, Setting::Rural).lanes(), 4);
-        assert_eq!(cross_section(RoadClass::Arterial, Setting::Urban).lanes(), 6);
+        assert_eq!(
+            cross_section(RoadClass::Motorway, Setting::Rural).lanes(),
+            4
+        );
+        assert_eq!(
+            cross_section(RoadClass::Arterial, Setting::Urban).lanes(),
+            6
+        );
     }
 
     #[test]

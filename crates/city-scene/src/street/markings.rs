@@ -206,7 +206,12 @@ pub(super) fn crosswalk_band(
     );
 }
 
-pub(super) fn road_markings(network: &Network, road: &Road, builder: &mut MeshBuilder, spec: &JunctionSpec) {
+pub(super) fn road_markings(
+    network: &Network,
+    road: &Road,
+    builder: &mut MeshBuilder,
+    spec: &JunctionSpec,
+) {
     let length = road.carriageway.length();
     if length < 2.0 {
         return;
@@ -391,7 +396,11 @@ pub(super) fn road_markings(network: &Network, road: &Road, builder: &mut MeshBu
     // Left-turn waiting box, drawn only where an innermost lane really turns
     // left and has company in the same direction.
     for at_start in [true, false] {
-        let node = if at_start { road.from_node } else { road.to_node };
+        let node = if at_start {
+            road.from_node
+        } else {
+            road.to_node
+        };
         let direction = if at_start { -1_i8 } else { 1_i8 };
         let Some(lane) = network.lanes.iter().find(|lane| {
             lane.road == road.id
@@ -407,7 +416,9 @@ pub(super) fn road_markings(network: &Network, road: &Road, builder: &mut MeshBu
         let companions = network
             .lanes
             .iter()
-            .filter(|other| other.road == road.id && other.to_node == node && other.direction == direction)
+            .filter(|other| {
+                other.road == road.id && other.to_node == node && other.direction == direction
+            })
             .count();
         if companions < 2 {
             continue;
@@ -440,7 +451,9 @@ pub(super) fn node_has_waiting_box(network: &Network, node: u32) -> bool {
             && network
                 .lanes
                 .iter()
-                .filter(|o| o.road == lane.road && o.to_node == node && o.direction == lane.direction)
+                .filter(|o| {
+                    o.road == lane.road && o.to_node == node && o.direction == lane.direction
+                })
                 .count()
                 >= 2
     })
@@ -465,7 +478,12 @@ pub(super) fn node_has_waiting_box(network: &Network, node: u32) -> bool {
 /// `median/2 + 0.2 .. median/2 + laneWidth - 0.2` span does, and the single
 /// transverse cap closes the deep end; the mouth of the box is closed by the
 /// road's own stop line, which is precisely at the box's near edge.
-pub(super) fn waiting_box(road: &Road, builder: &mut MeshBuilder, spec: &JunctionSpec, lane: &Lane) {
+pub(super) fn waiting_box(
+    road: &Road,
+    builder: &mut MeshBuilder,
+    spec: &JunctionSpec,
+    lane: &Lane,
+) {
     // An inbound lane's path always *ends* at the junction edge, so the box's
     // cap is a station past that end, on a short straight extension.
     let length = lane.path.length();
@@ -497,7 +515,15 @@ pub(super) fn waiting_box(road: &Road, builder: &mut MeshBuilder, spec: &Junctio
     let median_edge = lane.offset - side * (lane_width * 0.5 - 0.2);
     let kerb_edge = lane.offset + side * (lane_width * 0.5 - 0.2);
     for edge_offset in [median_edge, kerb_edge] {
-        stripe(builder, "marking.white", &surface, edge_offset, stop, cap, 0.12);
+        stripe(
+            builder,
+            "marking.white",
+            &surface,
+            edge_offset,
+            stop,
+            cap,
+            0.12,
+        );
     }
     // The deep-end cap: transverse, 300 mm deep, spanning the whole box.
     transverse_stripe(
@@ -821,8 +847,17 @@ pub fn junction_lane_guides(network: &Network, builder: &mut MeshBuilder) {
             continue;
         }
         {
-            let road_of = |lane: &str| lane.split('/').nth(1).and_then(|v| v.parse::<i32>().ok()).unwrap_or(-1);
-            let key = (connector.node, road_of(&connector.from_lane), road_of(&connector.to_lane));
+            let road_of = |lane: &str| {
+                lane.split('/')
+                    .nth(1)
+                    .and_then(|v| v.parse::<i32>().ok())
+                    .unwrap_or(-1)
+            };
+            let key = (
+                connector.node,
+                road_of(&connector.from_lane),
+                road_of(&connector.to_lane),
+            );
             if !drawn.insert(key) {
                 continue;
             }

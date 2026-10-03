@@ -41,10 +41,16 @@ pub struct Dependency {
 
 impl Dependency {
     pub const fn required(layer: LayerId) -> Self {
-        Self { layer, optional: false }
+        Self {
+            layer,
+            optional: false,
+        }
     }
     pub const fn optional(layer: LayerId) -> Self {
-        Self { layer, optional: true }
+        Self {
+            layer,
+            optional: true,
+        }
     }
 }
 
@@ -73,20 +79,35 @@ impl fmt::Display for Error {
         match self {
             Error::DuplicateLayer(l) => write!(f, "layer `{l}` is registered twice"),
             Error::MissingDependency { layer, needs } => {
-                write!(f, "layer `{layer}` needs `{needs}`, which is not registered")
+                write!(
+                    f,
+                    "layer `{layer}` needs `{needs}`, which is not registered"
+                )
             }
             Error::DependencyCycle(path) => {
                 let names: Vec<String> = path.iter().map(ToString::to_string).collect();
-                write!(f, "layers depend on each other in a loop: {}", names.join(" -> "))
+                write!(
+                    f,
+                    "layers depend on each other in a loop: {}",
+                    names.join(" -> ")
+                )
             }
             Error::UndeclaredInput { layer, asked } => {
-                write!(f, "layer `{layer}` read `{asked}` without declaring it as an input")
+                write!(
+                    f,
+                    "layer `{layer}` read `{asked}` without declaring it as an input"
+                )
             }
             Error::UnknownLayer(l) => write!(f, "no layer `{l}`"),
             Error::CellCycle { layer, cell } => {
-                write!(f, "layer `{layer}` at {cell:?} needed itself to compute itself")
+                write!(
+                    f,
+                    "layer `{layer}` at {cell:?} needed itself to compute itself"
+                )
             }
-            Error::WrongType { layer } => write!(f, "the product of `{layer}` is not the requested type"),
+            Error::WrongType { layer } => {
+                write!(f, "the product of `{layer}` is not the requested type")
+            }
             Error::Layer(message) => f.write_str(message),
         }
     }
@@ -149,7 +170,11 @@ pub struct EngineBuilder {
 
 impl EngineBuilder {
     pub fn new(seed: Seed, frame: Frame) -> Self {
-        Self { seed, frame, layers: Vec::new() }
+        Self {
+            seed,
+            frame,
+            layers: Vec::new(),
+        }
     }
 
     pub fn with<L: Layer>(mut self, layer: L) -> Self {
@@ -170,7 +195,10 @@ impl EngineBuilder {
         for layer in by_id.values() {
             for dep in layer.inputs() {
                 if !dep.optional && !by_id.contains_key(&dep.layer) {
-                    return Err(Error::MissingDependency { layer: layer.id(), needs: dep.layer });
+                    return Err(Error::MissingDependency {
+                        layer: layer.id(),
+                        needs: dep.layer,
+                    });
                 }
             }
         }
@@ -250,8 +278,11 @@ impl Engine {
     /// The world's identity: its seed and every layer with its version, in a fixed
     /// order. Two engines with the same identity produce the same world.
     pub fn identity(&self) -> (u64, Vec<(&'static str, u32)>) {
-        let mut layers: Vec<(&'static str, u32)> =
-            self.layers.values().map(|l| (l.id().0, l.version())).collect();
+        let mut layers: Vec<(&'static str, u32)> = self
+            .layers
+            .values()
+            .map(|l| (l.id().0, l.version()))
+            .collect();
         layers.sort();
         (self.seed.0, layers)
     }
@@ -265,10 +296,17 @@ impl Engine {
     /// The product of a layer for a cell.
     pub fn get<T: Any + Send + Sync>(&self, layer: LayerId, cell: Cell) -> Result<Arc<T>, Error> {
         let product = self.evaluate(layer, cell, &[])?;
-        product.downcast::<T>().map_err(|_| Error::WrongType { layer })
+        product
+            .downcast::<T>()
+            .map_err(|_| Error::WrongType { layer })
     }
 
-    fn evaluate(&self, layer: LayerId, cell: Cell, stack: &[(LayerId, Cell)]) -> Result<Product, Error> {
+    fn evaluate(
+        &self,
+        layer: LayerId,
+        cell: Cell,
+        stack: &[(LayerId, Cell)],
+    ) -> Result<Product, Error> {
         let l = self.layers.get(&layer).ok_or(Error::UnknownLayer(layer))?;
         let key = (layer, l.version(), cell);
         if let Some(hit) = self.cache.lock().map_err(poisoned)?.get(&key) {
@@ -279,7 +317,12 @@ impl Engine {
         }
         let mut next: Vec<(LayerId, Cell)> = stack.to_vec();
         next.push((layer, cell));
-        let ctx = Context { engine: self, layer, inputs: l.inputs(), stack: &next };
+        let ctx = Context {
+            engine: self,
+            layer,
+            inputs: l.inputs(),
+            stack: &next,
+        };
         let product = l.collapse(&ctx, cell)?;
         self.computed.fetch_add(1, Ordering::Relaxed);
         // If another thread got there first, keep its product: they are equal.
@@ -326,14 +369,19 @@ impl Context<'_> {
         self.inputs
             .iter()
             .find(|d| d.layer == layer)
-            .ok_or(Error::UndeclaredInput { layer: self.layer, asked: layer })
+            .ok_or(Error::UndeclaredInput {
+                layer: self.layer,
+                asked: layer,
+            })
     }
 
     /// A required input's product for a cell.
     pub fn input<T: Any + Send + Sync>(&self, layer: LayerId, cell: Cell) -> Result<Arc<T>, Error> {
         self.declared(layer)?;
         let product = self.engine.evaluate(layer, cell, self.stack)?;
-        product.downcast::<T>().map_err(|_| Error::WrongType { layer })
+        product
+            .downcast::<T>()
+            .map_err(|_| Error::WrongType { layer })
     }
 
     /// An optional input's product, or `None` if no such layer is registered.
@@ -402,7 +450,10 @@ mod tests {
 
     #[test]
     fn registration_rejects_duplicates_missing_inputs_and_loops() {
-        assert_eq!(builder().with(Source).with(Source).build().err(), Some(Error::DuplicateLayer(A)));
+        assert_eq!(
+            builder().with(Source).with(Source).build().err(),
+            Some(Error::DuplicateLayer(A))
+        );
         assert_eq!(
             builder().with(Doubler).build().err(),
             Some(Error::MissingDependency { layer: B, needs: A })
@@ -476,17 +527,30 @@ mod tests {
             }
         }
         let without = builder().with(Tolerant).build().unwrap();
-        assert_eq!(*without.get::<Option<u64>>(C, Cell::new(1, 0, 0)).unwrap(), None);
+        assert_eq!(
+            *without.get::<Option<u64>>(C, Cell::new(1, 0, 0)).unwrap(),
+            None
+        );
         let with = builder().with(Source).with(Tolerant).build().unwrap();
-        assert!(with.get::<Option<u64>>(C, Cell::new(1, 0, 0)).unwrap().is_some());
+        assert!(
+            with.get::<Option<u64>>(C, Cell::new(1, 0, 0))
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
     fn asking_for_the_wrong_type_or_layer_is_an_error_not_a_panic() {
         let engine = builder().with(Source).build().unwrap();
         let cell = Cell::new(0, 0, 0);
-        assert_eq!(engine.get::<String>(A, cell).err(), Some(Error::WrongType { layer: A }));
-        assert_eq!(engine.get::<u64>(B, cell).err(), Some(Error::UnknownLayer(B)));
+        assert_eq!(
+            engine.get::<String>(A, cell).err(),
+            Some(Error::WrongType { layer: A })
+        );
+        assert_eq!(
+            engine.get::<u64>(B, cell).err(),
+            Some(Error::UnknownLayer(B))
+        );
     }
 
     #[test]

@@ -45,13 +45,12 @@ impl RoadCrossSection {
     /// the furniture drift apart metre by metre, which is exactly the class of
     /// silent inconsistency this module exists to prevent.
     pub fn derived_width(&self) -> f32 {
-        2.0
-            * (self.median_metres * 0.5
-                + self.inner_shoulder
-                + self.motor_lanes_per_direction as f32 * self.motor_lane_width
-                + self.shoulder_width
-                + self.bike_lane_width
-                + self.sidewalk_metres)
+        2.0 * (self.median_metres * 0.5
+            + self.inner_shoulder
+            + self.motor_lanes_per_direction as f32 * self.motor_lane_width
+            + self.shoulder_width
+            + self.bike_lane_width
+            + self.sidewalk_metres)
     }
 
     /// Distance from the geometric centre to the kerb face.

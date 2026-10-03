@@ -93,13 +93,7 @@ const PARK: &[&str] = &[
 /// A compound courtyard is evergreen, sheltering and small — with one peach
 /// for the blossom and one silk tree for the shade, because a courtyard is
 /// where a Chinese city keeps its small pleasures.
-const COMPOUND: &[&str] = &[
-    "xiang-zhang",
-    "gui-hua",
-    "yu-shu",
-    "tao-shu",
-    "he-huan",
-];
+const COMPOUND: &[&str] = &["xiang-zhang", "gui-hua", "yu-shu", "tao-shu", "he-huan"];
 
 /// A riverbank in a Chinese city is a willow or a metasequoia avenue. The
 /// Wuhan and Nanjing embankments are lined with them and so is half the
@@ -111,7 +105,15 @@ const WATERFRONT: &[&str] = &["liu-shu", "shui-shan", "yang-shu", "yu-shu"];
 const ORCHARD: &[&str] = &["tao-shu"];
 
 /// A farmyard: poplars and willows, the locust and the elm, a peach by the door.
-const FARM: &[&str] = &["yang-shu", "liu-shu", "huai-shu", "yu-shu", "tao-shu", "ci-huai", "xiang-zhang"];
+const FARM: &[&str] = &[
+    "yang-shu",
+    "liu-shu",
+    "huai-shu",
+    "yu-shu",
+    "tao-shu",
+    "ci-huai",
+    "xiang-zhang",
+];
 
 /// A roundabout island is visible from every approach, so it gets the showy
 /// small trees and the ginkgo.
@@ -163,7 +165,9 @@ pub fn plant(
         let variant = rng.int(variants as u32) as u16;
         let index = prototypes
             .iter()
-            .position(|prototype| prototype.species.key == species.key && prototype.variant == variant)
+            .position(|prototype| {
+                prototype.species.key == species.key && prototype.variant == variant
+            })
             .unwrap_or(0);
         let prototype = &prototypes[index];
         let jitter = 0.90 + rng.unit() * 0.22;
@@ -250,8 +254,11 @@ pub fn plant(
             let median_half = section.median_metres * 0.5;
             let mut at = 20.0;
             while at < length - 20.0 {
-                let point =
-                    path.offset_at(at + (rng.unit() - 0.5) * 4.0, (rng.unit() - 0.5) * median_half * 0.5, 0.0);
+                let point = path.offset_at(
+                    at + (rng.unit() - 0.5) * 4.0,
+                    (rng.unit() - 0.5) * median_half * 0.5,
+                    0.0,
+                );
                 place(
                     TreeRole::Median,
                     Vec2::new(point.x, point.z),
@@ -269,7 +276,8 @@ pub fn plant(
 
     // --- park groves and compound interiors ---------------------------------
     // Where the houses of a garden stand, so a tree is not planted through one.
-    let mut footprints: std::collections::HashMap<u32, Vec<Vec<Vec2>>> = std::collections::HashMap::new();
+    let mut footprints: std::collections::HashMap<u32, Vec<Vec<Vec2>>> =
+        std::collections::HashMap::new();
     for building in buildings {
         if matches!(building.use_type, ParcelUse::Villa | ParcelUse::Farmstead) {
             let ring: Vec<Vec2> = building
@@ -321,7 +329,8 @@ pub fn plant(
                     rings.iter().any(|house| {
                         crate::math::point_in_ring(candidate, house)
                             || (0..house.len()).any(|i| {
-                                segment_distance(candidate, house[i], house[(i + 1) % house.len()]) < 3.2
+                                segment_distance(candidate, house[i], house[(i + 1) % house.len()])
+                                    < 3.2
                             })
                     })
                 });
@@ -375,7 +384,16 @@ pub fn plant(
                     (u + (rng.unit() - 0.5) * 0.8) * sin + v * cos,
                 );
                 if crate::math::point_in_ring(spot, &inner) {
-                    place(TreeRole::Orchard, spot, ORCHARD, prototypes, &mut rng, builder, &mut output, &mut counts);
+                    place(
+                        TreeRole::Orchard,
+                        spot,
+                        ORCHARD,
+                        prototypes,
+                        &mut rng,
+                        builder,
+                        &mut output,
+                        &mut counts,
+                    );
                     planted += 1;
                 }
                 u += 5.0;
@@ -504,7 +522,11 @@ pub fn plant(
 fn segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f32 {
     let ab = b - a;
     let len2 = ab.x * ab.x + ab.y * ab.y;
-    let t = if len2 < 1.0e-9 { 0.0 } else { (((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / len2).clamp(0.0, 1.0) };
+    let t = if len2 < 1.0e-9 {
+        0.0
+    } else {
+        (((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / len2).clamp(0.0, 1.0)
+    };
     let q = Vec2::new(a.x + ab.x * t, a.y + ab.y * t);
     ((p.x - q.x).powi(2) + (p.y - q.y).powi(2)).sqrt()
 }

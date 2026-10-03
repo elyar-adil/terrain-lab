@@ -50,15 +50,17 @@ pub fn roofscape(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &
                 rng.range(extent[1] + sample_z, extent[3] - sample_z),
             );
             let fits = point_in_ring(candidate, ring)
-                && [(-hw, -hd), (hw, -hd), (hw, hd), (-hw, hd)].iter().all(|(x, z)| {
-                    point_in_ring(
-                        Vec2::new(
-                            candidate.x + x * cos - z * sin,
-                            candidate.y + x * sin + z * cos,
-                        ),
-                        ring,
-                    )
-                });
+                && [(-hw, -hd), (hw, -hd), (hw, hd), (-hw, hd)]
+                    .iter()
+                    .all(|(x, z)| {
+                        point_in_ring(
+                            Vec2::new(
+                                candidate.x + x * cos - z * sin,
+                                candidate.y + x * sin + z * cos,
+                            ),
+                            ring,
+                        )
+                    });
             if fits {
                 return Some(candidate);
             }
@@ -98,9 +100,9 @@ pub fn roofscape(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &
     let mut stair_house: Option<Vec2> = None;
     // A tower crown is a small roof: if the full-size head house does not fit,
     // a smaller one does — real crowns carry a smaller machine room, not none.
-    let fitted = [1.0_f32, 0.8, 0.65]
-        .into_iter()
-        .find_map(|k| place_box(&mut rng, body_w * k + 0.40, body_d * k + 0.40, rotation).map(|p| (p, k)));
+    let fitted = [1.0_f32, 0.8, 0.65].into_iter().find_map(|k| {
+        place_box(&mut rng, body_w * k + 0.40, body_d * k + 0.40, rotation).map(|p| (p, k))
+    });
     if let Some((point, k)) = fitted {
         let (body_w, body_d) = (body_w * k, body_d * k);
         let (cap_w, cap_d) = (body_w + 0.40, body_d + 0.40);
@@ -130,7 +132,16 @@ pub fn roofscape(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &
         // bathroom exhausts of the top floor go straight out here.
         let outward = (point - ring_centroid(ring)).normalize();
         let door = point - outward * (body_d * 0.5 - 0.02);
-        crate::mesh::box_at(builder, "trim.dark", door, deck + 1.05, 0.95, 2.1, 0.08, rotation);
+        crate::mesh::box_at(
+            builder,
+            "trim.dark",
+            door,
+            deck + 1.05,
+            0.95,
+            2.1,
+            0.08,
+            rotation,
+        );
         stair_house = Some(point);
     }
     let rotation = rng.range(-0.40, 0.40);
@@ -152,7 +163,9 @@ pub fn roofscape(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &
     if rng.chance(0.7) {
         let anchor = stair_house
             .or_else(|| place(&mut rng, 0.45, 0.45))
-            .unwrap_or_else(|| Vec2::new((extent[0] + extent[2]) * 0.5, (extent[1] + extent[3]) * 0.5));
+            .unwrap_or_else(|| {
+                Vec2::new((extent[0] + extent[2]) * 0.5, (extent[1] + extent[3]) * 0.5)
+            });
         for (dx, dz, height) in [(0.55_f32, 0.30_f32, 1.1_f32), (0.95, -0.25, 1.5)] {
             let base = Vec2::new(anchor.x + dx, anchor.y + dz);
             if point_in_ring(base, ring) {
@@ -166,7 +179,14 @@ pub fn roofscape(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &
                     None,
                 );
                 // The cap slab, and the dark throat under it.
-                builder.wall("trim.dark", base, base, deck + height - 0.16, deck + height, None);
+                builder.wall(
+                    "trim.dark",
+                    base,
+                    base,
+                    deck + height - 0.16,
+                    deck + height,
+                    None,
+                );
                 builder.quad(
                     "trim.dark",
                     Vec3::new(base.x - 0.24, deck + height, base.y - 0.24),
@@ -197,16 +217,7 @@ pub fn roofscape(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &
         let d = 0.70 + rng.unit() * 0.40;
         let rotation = rng.range(-0.6, 0.6);
         if let Some(point) = place_box(&mut rng, w, d, rotation) {
-            crate::mesh::box_at(
-                builder,
-                "metal.ac",
-                point,
-                deck + 0.50,
-                w,
-                1.0,
-                d,
-                rotation,
-            );
+            crate::mesh::box_at(builder, "metal.ac", point, deck + 0.50, w, 1.0, d, rotation);
         }
     }
     if rng.chance(0.7)
@@ -257,7 +268,9 @@ pub fn roofscape(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &
 
     // Clothes poles (晾衣杆) on a low roof: two uprights and a rail, which is what
     // a Chinese apartment roof is actually for half the year.
-    if building.floors <= 8 && let Some(point) = place(&mut rng, 1.30, 0.35) {
+    if building.floors <= 8
+        && let Some(point) = place(&mut rng, 1.30, 0.35)
+    {
         let height = 1.5 + rng.unit() * 0.6;
         for offset in [-1.0_f32, 1.0] {
             builder.tube(
@@ -440,8 +453,7 @@ fn roof_patches(rng: &mut Rng, ring: &[Vec2], deck: f32, builder: &mut MeshBuild
     // A greening patch on a third of the roofs: planter beds on sleepers.
     if rng.chance(0.35) {
         let (pw, pd) = ((w * 0.22).min(3.2), (d * 0.24).min(2.6));
-        let at = centre
-            + Vec2::new((rng.unit() - 0.5) * w * 0.3, (rng.unit() - 0.5) * d * 0.3);
+        let at = centre + Vec2::new((rng.unit() - 0.5) * w * 0.3, (rng.unit() - 0.5) * d * 0.3);
         let patch = vec![
             Vec2::new(at.x - pw, at.y - pd),
             Vec2::new(at.x + pw, at.y - pd),
@@ -498,7 +510,11 @@ fn condenser_bank(rng: &mut Rng, ring: &[Vec2], deck: f32, builder: &mut MeshBui
             0.92,
             0.84,
             0.40,
-            if w >= d { 0.0 } else { std::f32::consts::FRAC_PI_2 },
+            if w >= d {
+                0.0
+            } else {
+                std::f32::consts::FRAC_PI_2
+            },
         );
     }
 }
@@ -506,7 +522,12 @@ fn condenser_bank(rng: &mut Rng, ring: &[Vec2], deck: f32, builder: &mut MeshBui
 /// Working plant on a tower's podium deck: an AC bank, a couple of tanks' worth
 /// of pipework and a greening patch — the 裙房 roof is where the residents walk
 /// the dog.
-pub fn podium_deck_props(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &mut MeshBuilder) {
+pub fn podium_deck_props(
+    building: &ModernBuilding,
+    ring: &[Vec2],
+    deck: f32,
+    builder: &mut MeshBuilder,
+) {
     let mut rng = Rng::new(building.id ^ 0x51f3_1e0d);
     condenser_bank(&mut rng, ring, deck, builder);
     roof_patches(&mut rng, ring, deck, builder);
@@ -542,10 +563,10 @@ pub(crate) fn ring_extent(ring: &[Vec2]) -> Option<[f32; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::math::signed_area;
-    use crate::mesh::MeshBuilder;
     use crate::buildings::{level, ring_of};
     use crate::facades::{GROUND_STOREY_M, STOREY_M};
+    use crate::math::signed_area;
+    use crate::mesh::MeshBuilder;
     use urban::{ModernChinaSpec, generate_modern_chinese_city};
 
     fn city() -> urban::ModernCity {
@@ -613,8 +634,9 @@ mod tests {
                 }
             }
         }
-        for (slot, label) in
-            ["stair head house", "water tank / condenser", "antenna mast"].iter().enumerate()
+        for (slot, label) in ["stair head house", "water tank / condenser", "antenna mast"]
+            .iter()
+            .enumerate()
         {
             assert!(
                 above[slot] > 20,
@@ -668,8 +690,7 @@ mod tests {
                     assert!(
                         inside,
                         "building {} has a {} vertex at {point:?}, {margin} m outside its roof",
-                        building.id,
-                        group.material
+                        building.id, group.material
                     );
                     assert!(
                         chunk[1] >= deck - 0.3,
@@ -681,7 +702,10 @@ mod tests {
                 }
             }
         }
-        assert!(placed > 200, "only {placed} roof-prop vertices were checked");
+        assert!(
+            placed > 200,
+            "only {placed} roof-prop vertices were checked"
+        );
     }
 
     #[test]
@@ -698,7 +722,10 @@ mod tests {
             &mut builder,
         );
         let groups = builder.build().meshes;
-        let roof = groups.iter().find(|g| g.material == "roof").expect("no roof");
+        let roof = groups
+            .iter()
+            .find(|g| g.material == "roof")
+            .expect("no roof");
         assert!(roof.positions.len() > 0);
         assert!(
             groups.iter().any(|g| g.material == "metal.ac"),

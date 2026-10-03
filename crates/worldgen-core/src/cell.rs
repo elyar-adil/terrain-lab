@@ -16,7 +16,10 @@ pub struct Frame {
 
 impl Frame {
     pub const fn new(origin: [f64; 2], root_size_m: f64) -> Self {
-        Self { origin, root_size_m }
+        Self {
+            origin,
+            root_size_m,
+        }
     }
 }
 
@@ -59,19 +62,29 @@ impl Cell {
     }
 
     pub fn parent(self) -> Option<Cell> {
-        (self.level > 0).then(|| Cell::new(self.level - 1, self.x.div_euclid(2), self.y.div_euclid(2)))
+        (self.level > 0)
+            .then(|| Cell::new(self.level - 1, self.x.div_euclid(2), self.y.div_euclid(2)))
     }
 
     /// The ancestor at `level` (this cell itself if it is already there).
     pub fn ancestor(self, level: u8) -> Cell {
         assert!(level <= self.level, "an ancestor is coarser than the cell");
         let shift = u32::from(self.level - level);
-        Cell::new(level, self.x.div_euclid(1_i64 << shift), self.y.div_euclid(1_i64 << shift))
+        Cell::new(
+            level,
+            self.x.div_euclid(1_i64 << shift),
+            self.y.div_euclid(1_i64 << shift),
+        )
     }
 
     pub fn children(self) -> [Cell; 4] {
         let (l, x, y) = (self.level + 1, self.x * 2, self.y * 2);
-        [Cell::new(l, x, y), Cell::new(l, x + 1, y), Cell::new(l, x, y + 1), Cell::new(l, x + 1, y + 1)]
+        [
+            Cell::new(l, x, y),
+            Cell::new(l, x + 1, y),
+            Cell::new(l, x, y + 1),
+            Cell::new(l, x + 1, y + 1),
+        ]
     }
 
     pub fn neighbour(self, dx: i64, dy: i64) -> Cell {
@@ -85,8 +98,14 @@ impl Cell {
 
     pub fn rect(self, frame: &Frame) -> Rect {
         let s = self.size_m(frame);
-        let min = [frame.origin[0] + self.x as f64 * s, frame.origin[1] + self.y as f64 * s];
-        Rect { min, max: [min[0] + s, min[1] + s] }
+        let min = [
+            frame.origin[0] + self.x as f64 * s,
+            frame.origin[1] + self.y as f64 * s,
+        ];
+        Rect {
+            min,
+            max: [min[0] + s, min[1] + s],
+        }
     }
 
     /// The cell at `level` containing a point in metres.

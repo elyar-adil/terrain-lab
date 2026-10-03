@@ -10,7 +10,8 @@
 
 use worldgen_core::hash::{hash_words, to_unit};
 use worldgen_core::{
-    Cell, Context, Dependency, Engine, EngineBuilder, Error, Frame, Layer, LayerId, Seed, edge_fraction,
+    Cell, Context, Dependency, Engine, EngineBuilder, Error, Frame, Layer, LayerId, Seed,
+    edge_fraction,
 };
 
 const RIVER: LayerId = LayerId("river");
@@ -43,7 +44,10 @@ impl Layer for RiverLayer {
             let t = i as f64 / 6.0;
             let base = west + (east - west) * t;
             let wobble = rng.range(-0.08, 0.08);
-            points.push([rect.min[0] + t * rect.width(), rect.min[1] + (base + wobble).clamp(0.0, 1.0) * h]);
+            points.push([
+                rect.min[0] + t * rect.width(),
+                rect.min[1] + (base + wobble).clamp(0.0, 1.0) * h,
+            ]);
         }
         points.push([rect.max[0], rect.min[1] + east * h]);
         Ok(River(points))
@@ -85,8 +89,14 @@ impl Layer for TreeLayer {
             }
         }
         let seed = ctx.seed();
-        let (i0, i1) = ((rect.min[0] / LATTICE_M).floor() as i64, (rect.max[0] / LATTICE_M).ceil() as i64);
-        let (j0, j1) = ((rect.min[1] / LATTICE_M).floor() as i64, (rect.max[1] / LATTICE_M).ceil() as i64);
+        let (i0, i1) = (
+            (rect.min[0] / LATTICE_M).floor() as i64,
+            (rect.max[0] / LATTICE_M).ceil() as i64,
+        );
+        let (j0, j1) = (
+            (rect.min[1] / LATTICE_M).floor() as i64,
+            (rect.max[1] / LATTICE_M).ceil() as i64,
+        );
         let mut out = Vec::new();
         for j in j0..j1 {
             for i in i0..i1 {
@@ -118,7 +128,11 @@ fn near(line: &[[f64; 2]], p: [f64; 2], within: f64) -> bool {
         let (a, b) = (s[0], s[1]);
         let d = [b[0] - a[0], b[1] - a[1]];
         let l2 = d[0] * d[0] + d[1] * d[1];
-        let t = if l2 == 0.0 { 0.0 } else { (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / l2).clamp(0.0, 1.0) };
+        let t = if l2 == 0.0 {
+            0.0
+        } else {
+            (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / l2).clamp(0.0, 1.0)
+        };
         ((p[0] - a[0] - d[0] * t).powi(2) + (p[1] - a[1] - d[1] * t).powi(2)).sqrt() < within
     })
 }
@@ -146,8 +160,15 @@ fn what_a_cell_contains_does_not_depend_on_the_order_it_was_asked_for() {
     let forward = engine(99);
     let backward = engine(99);
     let cs = cells();
-    let a: Vec<_> = cs.iter().map(|c| (*forward.get::<Trees>(TREES, *c).unwrap()).clone()).collect();
-    let b: Vec<_> = cs.iter().rev().map(|c| (*backward.get::<Trees>(TREES, *c).unwrap()).clone()).collect();
+    let a: Vec<_> = cs
+        .iter()
+        .map(|c| (*forward.get::<Trees>(TREES, *c).unwrap()).clone())
+        .collect();
+    let b: Vec<_> = cs
+        .iter()
+        .rev()
+        .map(|c| (*backward.get::<Trees>(TREES, *c).unwrap()).clone())
+        .collect();
     let b: Vec<_> = b.into_iter().rev().collect();
     assert_eq!(a, b);
     assert!(a.iter().any(|t| !t.0.is_empty()), "the fixture has trees");
@@ -161,15 +182,24 @@ fn a_cold_cache_and_a_warm_one_give_the_same_cell() {
     }
     let cold = engine(5);
     let target = Cell::new(RIVER_LEVEL, 1, 1);
-    assert_eq!(*warm.get::<Trees>(TREES, target).unwrap(), *cold.get::<Trees>(TREES, target).unwrap());
+    assert_eq!(
+        *warm.get::<Trees>(TREES, target).unwrap(),
+        *cold.get::<Trees>(TREES, target).unwrap()
+    );
 }
 
 #[test]
 fn a_different_seed_gives_a_different_world() {
     let (a, b) = (engine(1), engine(2));
     let target = Cell::new(RIVER_LEVEL, 0, 0);
-    assert_ne!(*a.get::<River>(RIVER, target).unwrap(), *b.get::<River>(RIVER, target).unwrap());
-    assert_ne!(*a.get::<Trees>(TREES, target).unwrap(), *b.get::<Trees>(TREES, target).unwrap());
+    assert_ne!(
+        *a.get::<River>(RIVER, target).unwrap(),
+        *b.get::<River>(RIVER, target).unwrap()
+    );
+    assert_ne!(
+        *a.get::<Trees>(TREES, target).unwrap(),
+        *b.get::<Trees>(TREES, target).unwrap()
+    );
 }
 
 #[test]
@@ -181,7 +211,10 @@ fn neighbouring_cells_agree_on_where_the_river_crosses_their_shared_side() {
         let here = e.get::<River>(RIVER, c).unwrap();
         let there = e.get::<River>(RIVER, east).unwrap();
         let (end, start) = (here.0.last().unwrap(), there.0.first().unwrap());
-        assert!((end[0] - start[0]).abs() < 1e-9 && (end[1] - start[1]).abs() < 1e-9, "{end:?} vs {start:?}");
+        assert!(
+            (end[0] - start[0]).abs() < 1e-9 && (end[1] - start[1]).abs() < 1e-9,
+            "{end:?} vs {start:?}"
+        );
         checked += 1;
     }
     assert!(checked > 20);
@@ -192,7 +225,9 @@ fn the_river_is_one_line_across_many_cells_not_a_row_of_unrelated_pieces() {
     // Along a row, consecutive cells chain end to start, so the whole river is a
     // single connected line however many cells it was computed in.
     let e = engine(7);
-    let row: Vec<_> = (-3..5).map(|x| e.get::<River>(RIVER, Cell::new(RIVER_LEVEL, x, 0)).unwrap()).collect();
+    let row: Vec<_> = (-3..5)
+        .map(|x| e.get::<River>(RIVER, Cell::new(RIVER_LEVEL, x, 0)).unwrap())
+        .collect();
     for w in row.windows(2) {
         assert_eq!(w[0].0.last().unwrap()[1], w[1].0.first().unwrap()[1]);
     }
@@ -209,7 +244,10 @@ fn zooming_in_adds_trees_and_never_moves_or_removes_the_ones_already_seen() {
         finer.extend(e.get::<Trees>(TREES, child).unwrap().0.iter().copied());
     }
     for tree in &coarse.0 {
-        assert!(finer.contains(tree), "tree {tree:?} seen at the coarse level vanished or moved");
+        assert!(
+            finer.contains(tree),
+            "tree {tree:?} seen at the coarse level vanished or moved"
+        );
     }
     assert!(finer.len() > coarse.0.len(), "a finer level has more trees");
 }
@@ -223,7 +261,10 @@ fn trees_keep_off_a_river_that_belongs_to_the_next_cell() {
             for dx in -1..=1 {
                 let river = e.get::<River>(RIVER, c.neighbour(dx, dy)).unwrap();
                 for t in &trees.0 {
-                    assert!(!near(&river.0, *t, 6.0), "a tree stands in the river at {t:?}");
+                    assert!(
+                        !near(&river.0, *t, 6.0),
+                        "a tree stands in the river at {t:?}"
+                    );
                 }
             }
         }

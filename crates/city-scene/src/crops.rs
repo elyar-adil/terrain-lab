@@ -63,13 +63,21 @@ fn smooth01(x: f32) -> f32 {
 
 fn srgb8(linear: f32) -> u8 {
     let c = linear.clamp(0.0, 1.0);
-    let encoded = if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+    let encoded = if c <= 0.003_130_8 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    };
     (encoded * 255.0 + 0.5) as u8
 }
 
 fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     let t = t.clamp(0.0, 1.0);
-    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
 }
 
 fn scale(a: [f32; 3], k: f32) -> [f32; 3] {
@@ -81,7 +89,15 @@ const SOIL_WET: [f32; 3] = [0.060, 0.042, 0.032];
 
 /// One texel of a crop: reflectance and relief. `u` runs along the rows, `v` across
 /// them, both in metres of ground and tiling over `CROP_TILE_M`.
-fn crop_texel(crop: CropKind, variant: u8, u: f32, v: f32, x: i32, y: i32, n: i32) -> ([f32; 3], f32) {
+fn crop_texel(
+    crop: CropKind,
+    variant: u8,
+    u: f32,
+    v: f32,
+    x: i32,
+    y: i32,
+    n: i32,
+) -> ([f32; 3], f32) {
     let grain = |salt: u32| hash(salt, x, y);
     // Slow variation across the plot: where it was watered, where it lodged.
     let patch = tiled_noise(11 + variant as u32, u * 0.8, v * 0.8, 3);
@@ -93,9 +109,17 @@ fn crop_texel(crop: CropKind, variant: u8, u: f32, v: f32, x: i32, y: i32, n: i3
             let spacing = 0.20;
             let phase = (v / spacing).fract();
             let row = (-(((phase - 0.5).abs() - 0.34) * 14.0)).clamp(0.0, 1.0);
-            let green = [[0.050, 0.130, 0.035], [0.090, 0.170, 0.045], [0.300, 0.235, 0.085]][variant.min(2) as usize];
+            let green = [
+                [0.050, 0.130, 0.035],
+                [0.090, 0.170, 0.045],
+                [0.300, 0.235, 0.085],
+            ][variant.min(2) as usize];
             let leaf = 0.80 + 0.40 * grain(21) + 0.18 * (fine - 0.5);
-            let colour = mix(SOIL, scale(green, leaf * (0.88 + 0.24 * patch)), 0.12 + 0.88 * row);
+            let colour = mix(
+                SOIL,
+                scale(green, leaf * (0.88 + 0.24 * patch)),
+                0.12 + 0.88 * row,
+            );
             (colour, row * 0.7 + grain(23) * 0.2)
         }
         CropKind::Rice => {
@@ -106,16 +130,27 @@ fn crop_texel(crop: CropKind, variant: u8, u: f32, v: f32, x: i32, y: i32, n: i3
                 0 => {
                     // Flooded after transplanting: sky in the water, seedlings in rows.
                     let water = mix([0.075, 0.095, 0.105], [0.14, 0.17, 0.19], patch);
-                    (mix(water, [0.09, 0.19, 0.05], plant * 0.85), 0.2 + plant * 0.5)
+                    (
+                        mix(water, [0.09, 0.19, 0.05], plant * 0.85),
+                        0.2 + plant * 0.5,
+                    )
                 }
                 1 => {
                     let green = [0.065, 0.185, 0.035];
-                    let c = mix(scale(SOIL_WET, 1.0), scale(green, 0.8 + 0.4 * grain(25) + 0.2 * (fine - 0.5)), 0.55 + 0.45 * plant);
+                    let c = mix(
+                        scale(SOIL_WET, 1.0),
+                        scale(green, 0.8 + 0.4 * grain(25) + 0.2 * (fine - 0.5)),
+                        0.55 + 0.45 * plant,
+                    );
                     (c, plant * 0.6)
                 }
                 _ => {
                     let gold = [0.30, 0.235, 0.065];
-                    let c = mix(SOIL_WET, scale(gold, 0.78 + 0.4 * grain(27) + 0.2 * patch), 0.6 + 0.4 * plant);
+                    let c = mix(
+                        SOIL_WET,
+                        scale(gold, 0.78 + 0.4 * grain(27) + 0.2 * patch),
+                        0.6 + 0.4 * plant,
+                    );
                     (c, plant * 0.6)
                 }
             }
@@ -126,11 +161,28 @@ fn crop_texel(crop: CropKind, variant: u8, u: f32, v: f32, x: i32, y: i32, n: i3
             match variant {
                 0 => {
                     let flower = 0.55 + 0.45 * grain(31);
-                    let c = mix([0.07, 0.17, 0.035], [0.62, 0.50, 0.025], (0.55 + 0.35 * patch + 0.25 * (fine - 0.5)) * flower);
+                    let c = mix(
+                        [0.07, 0.17, 0.035],
+                        [0.62, 0.50, 0.025],
+                        (0.55 + 0.35 * patch + 0.25 * (fine - 0.5)) * flower,
+                    );
                     (scale(c, 0.9 + 0.1 * rows), 0.5)
                 }
-                1 => (mix([0.10, 0.18, 0.04], [0.45, 0.38, 0.03], 0.35 + 0.4 * patch + 0.3 * grain(33)), 0.4),
-                _ => (scale([0.075, 0.150, 0.045], 0.8 + 0.4 * grain(35) + 0.3 * (fine - 0.5)), 0.4),
+                1 => (
+                    mix(
+                        [0.10, 0.18, 0.04],
+                        [0.45, 0.38, 0.03],
+                        0.35 + 0.4 * patch + 0.3 * grain(33),
+                    ),
+                    0.4,
+                ),
+                _ => (
+                    scale(
+                        [0.075, 0.150, 0.045],
+                        0.8 + 0.4 * grain(35) + 0.3 * (fine - 0.5),
+                    ),
+                    0.4,
+                ),
             }
         }
         CropKind::Corn => {
@@ -140,8 +192,18 @@ fn crop_texel(crop: CropKind, variant: u8, u: f32, v: f32, x: i32, y: i32, n: i3
             let band = (-(((phase - 0.5).abs() - 0.26) * 10.0)).clamp(0.0, 1.0);
             let plant = ((u / 0.25).fract() - 0.5).abs();
             let blades = band * (0.55 + 0.45 * (1.0 - plant * 1.5).clamp(0.0, 1.0));
-            let green = if variant == 2 { [0.20, 0.17, 0.065] } else if variant == 1 { [0.075, 0.165, 0.040] } else { [0.055, 0.140, 0.035] };
-            let colour = mix(SOIL, scale(green, 0.78 + 0.4 * grain(37) + 0.2 * patch), (0.10 + 0.90 * blades).clamp(0.0, 1.0));
+            let green = if variant == 2 {
+                [0.20, 0.17, 0.065]
+            } else if variant == 1 {
+                [0.075, 0.165, 0.040]
+            } else {
+                [0.055, 0.140, 0.035]
+            };
+            let colour = mix(
+                SOIL,
+                scale(green, 0.78 + 0.4 * grain(37) + 0.2 * patch),
+                (0.10 + 0.90 * blades).clamp(0.0, 1.0),
+            );
             (colour, blades * 0.8)
         }
         CropKind::Vegetables => {
@@ -158,7 +220,8 @@ fn crop_texel(crop: CropKind, variant: u8, u: f32, v: f32, x: i32, y: i32, n: i3
             let (cu, cv) = (iu as i32 % 16, iv as i32 % 12);
             let size = 0.42 + 0.30 * hash(41, cu, cv);
             let tone = 0.75 + 0.5 * hash(43, cu, cv);
-            let d = ((lu * pu).powi(2) + (lv * pv).powi(2)).sqrt() / (0.5 * pu.min(pv)) / size.max(0.2);
+            let d =
+                ((lu * pu).powi(2) + (lv * pv).powi(2)).sqrt() / (0.5 * pu.min(pv)) / size.max(0.2);
             // Lobed edge so a tuft is not a disc.
             let ang = (lv * pv).atan2(lu * pu);
             let lobes = 1.0 + 0.22 * (ang * 5.0 + hash(47, cu, cv) * 6.28).sin();
@@ -166,18 +229,27 @@ fn crop_texel(crop: CropKind, variant: u8, u: f32, v: f32, x: i32, y: i32, n: i3
             let bed_look = match variant {
                 0 => {
                     let leafy = scale([0.085, 0.215, 0.050], tone * (0.85 + 0.3 * (fine - 0.5)));
-                    (mix(scale(SOIL, 0.9), leafy, on_bed * blob), on_bed * (0.25 + 0.6 * blob))
+                    (
+                        mix(scale(SOIL, 0.9), leafy, on_bed * blob),
+                        on_bed * (0.25 + 0.6 * blob),
+                    )
                 }
                 1 => {
                     // Black mulch film with the crop pushing through at intervals.
                     let film = scale([0.020, 0.022, 0.026], 1.0 + 0.6 * (fine - 0.5));
                     let sprout = smooth01((1.0 - d / lobes * 1.9) / 0.4);
                     let c = mix(film, scale([0.08, 0.19, 0.05], tone), sprout);
-                    (mix(scale(SOIL, 0.9), c, on_bed), on_bed * (0.2 + 0.5 * sprout))
+                    (
+                        mix(scale(SOIL, 0.9), c, on_bed),
+                        on_bed * (0.2 + 0.5 * sprout),
+                    )
                 }
                 _ => {
                     let brassica = scale([0.075, 0.170, 0.100], tone * (0.85 + 0.3 * (fine - 0.5)));
-                    (mix(scale(SOIL, 0.9), brassica, on_bed * blob), on_bed * (0.25 + 0.7 * blob))
+                    (
+                        mix(scale(SOIL, 0.9), brassica, on_bed * blob),
+                        on_bed * (0.25 + 0.7 * blob),
+                    )
                 }
             };
             bed_look.pipe_furrow(furrow * 0.7)
@@ -187,18 +259,39 @@ fn crop_texel(crop: CropKind, variant: u8, u: f32, v: f32, x: i32, y: i32, n: i3
                 0 => {
                     // Ploughed: furrows 0.35 m, lit on one side.
                     let ridge = 0.5 + 0.5 * (std::f32::consts::TAU * v / (4.0 / 12.0)).sin();
-                    (scale(mix(SOIL, [0.17, 0.115, 0.075], 0.4 * patch), 0.65 + 0.55 * ridge * (0.7 + 0.5 * grain(43))), ridge)
+                    (
+                        scale(
+                            mix(SOIL, [0.17, 0.115, 0.075], 0.4 * patch),
+                            0.65 + 0.55 * ridge * (0.7 + 0.5 * grain(43)),
+                        ),
+                        ridge,
+                    )
                 }
                 1 => {
                     // Gone to weed.
-                    let weed = (0.45 + 0.55 * (patch + 0.5 * (fine - 0.5)).clamp(0.0, 1.0)).clamp(0.0, 1.0);
-                    (mix(SOIL, scale([0.10, 0.15, 0.045], 0.8 + 0.5 * grain(45)), weed), 0.3 * weed)
+                    let weed = (0.45 + 0.55 * (patch + 0.5 * (fine - 0.5)).clamp(0.0, 1.0))
+                        .clamp(0.0, 1.0);
+                    (
+                        mix(
+                            SOIL,
+                            scale([0.10, 0.15, 0.045], 0.8 + 0.5 * grain(45)),
+                            weed,
+                        ),
+                        0.3 * weed,
+                    )
                 }
                 _ => {
                     // Stubble and straw.
                     let straw = [0.27, 0.215, 0.105];
                     let lines = (std::f32::consts::TAU * v / 0.2).sin() * 0.5 + 0.5;
-                    (mix(scale(SOIL, 1.2), scale(straw, 0.7 + 0.4 * grain(47) + 0.25 * patch), 0.55 + 0.35 * lines), 0.4 * lines)
+                    (
+                        mix(
+                            scale(SOIL, 1.2),
+                            scale(straw, 0.7 + 0.4 * grain(47) + 0.25 * patch),
+                            0.55 + 0.35 * lines,
+                        ),
+                        0.4 * lines,
+                    )
                 }
             }
         }
@@ -206,9 +299,16 @@ fn crop_texel(crop: CropKind, variant: u8, u: f32, v: f32, x: i32, y: i32, n: i3
             // The floor under the trees: grass, with a mown strip down the middle of each alley.
             let alley = (v / 4.0).fract();
             let strip = ((alley - 0.5).abs() < 0.22) as i32 as f32;
-            let grass = scale([0.075, 0.125, 0.040], 0.75 + 0.5 * grain(49) + 0.3 * (fine - 0.5));
+            let grass = scale(
+                [0.075, 0.125, 0.040],
+                0.75 + 0.5 * grain(49) + 0.3 * (fine - 0.5),
+            );
             let bare = mix(SOIL, [0.13, 0.10, 0.07], patch);
-            let c = if variant == 1 { mix(bare, grass, strip * 0.6 + 0.2) } else { mix(grass, scale(grass, 1.15), strip) };
+            let c = if variant == 1 {
+                mix(bare, grass, strip * 0.6 + 0.2)
+            } else {
+                mix(grass, scale(grass, 1.15), strip)
+            };
             (c, 0.2)
         }
     }
@@ -222,7 +322,10 @@ trait PipeFurrow {
 
 impl PipeFurrow for ([f32; 3], f32) {
     fn pipe_furrow(self, furrow: f32) -> ([f32; 3], f32) {
-        (mix(self.0, scale(SOIL_WET, 1.1), furrow * 0.7), self.1 * (1.0 - furrow * 0.8))
+        (
+            mix(self.0, scale(SOIL_WET, 1.1), furrow * 0.7),
+            self.1 * (1.0 - furrow * 0.8),
+        )
     }
 }
 
@@ -287,9 +390,17 @@ mod tests {
     fn crops_are_not_the_colour_of_a_lawn_or_of_a_road() {
         // A field is a mid-value surface: not black, not white.
         for texture in crop_textures(64) {
-            let mean: f32 = texture.rgba.chunks_exact(4).map(|p| (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0).sum::<f32>()
+            let mean: f32 = texture
+                .rgba
+                .chunks_exact(4)
+                .map(|p| (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0)
+                .sum::<f32>()
                 / (texture.width * texture.height) as f32;
-            assert!(mean > 30.0 && mean < 190.0, "{} has mean {mean}", texture.name);
+            assert!(
+                mean > 30.0 && mean < 190.0,
+                "{} has mean {mean}",
+                texture.name
+            );
         }
     }
 }

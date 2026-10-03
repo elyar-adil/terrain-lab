@@ -27,7 +27,13 @@ fn main() {
     }
     let crossings = degrees.values().filter(|degree| **degree >= 3).count();
     let bridges = city.hd_roads.iter().filter(|road| road.bridge).count();
-    println!("nodes={} roads={} crossings={} bridges={}", city.nodes.len(), city.sd_roads.len(), crossings, bridges);
+    println!(
+        "nodes={} roads={} crossings={} bridges={}",
+        city.nodes.len(),
+        city.sd_roads.len(),
+        crossings,
+        bridges
+    );
     println!(
         "blocks={} parcels={} buildings={} compounds={} trees={}",
         city.blocks.len(),

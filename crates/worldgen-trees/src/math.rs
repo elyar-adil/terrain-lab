@@ -22,7 +22,11 @@ impl V3 {
         self.x * o.x + self.y * o.y + self.z * o.z
     }
     pub fn cross(self, o: V3) -> V3 {
-        v3(self.y * o.z - self.z * o.y, self.z * o.x - self.x * o.z, self.x * o.y - self.y * o.x)
+        v3(
+            self.y * o.z - self.z * o.y,
+            self.z * o.x - self.x * o.z,
+            self.x * o.y - self.y * o.x,
+        )
     }
     pub fn len(self) -> f32 {
         self.dot(self).sqrt()
@@ -42,7 +46,11 @@ impl V3 {
     }
     /// Any unit vector perpendicular to `self` (which should be unit).
     pub fn any_perp(self) -> V3 {
-        let helper = if self.y.abs() < 0.9 { V3::UP } else { v3(1.0, 0.0, 0.0) };
+        let helper = if self.y.abs() < 0.9 {
+            V3::UP
+        } else {
+            v3(1.0, 0.0, 0.0)
+        };
         self.cross(helper).norm()
     }
     /// Rotate `self` about the unit axis by `angle` radians (Rodrigues).

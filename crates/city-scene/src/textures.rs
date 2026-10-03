@@ -1,4 +1,4 @@
-﻿//! Procedural texture baking: the ground, the paint and the shared types.
+//! Procedural texture baking: the ground, the paint and the shared types.
 //!
 //! The previous port decoded six baked textures from the payload and then never
 //! assigned one to a material, so the city was lit by a 128x128 CPU loop that
@@ -56,9 +56,8 @@ pub const GROUND_TILE_M: f32 = 4.0;
 /// Cheap deterministic value noise, shared by every bake in the crate so two
 /// surfaces that both ask for "some grain" get the same character.
 pub(crate) fn hash(seed: u32, x: i32, y: i32) -> f32 {
-    let mut value = seed
-        ^ (x as u32).wrapping_mul(0x9e37_79b9)
-        ^ (y as u32).wrapping_mul(0x85eb_ca6b);
+    let mut value =
+        seed ^ (x as u32).wrapping_mul(0x9e37_79b9) ^ (y as u32).wrapping_mul(0x85eb_ca6b);
     value ^= value >> 16;
     value = value.wrapping_mul(0x7feb_352d);
     value ^= value >> 15;
@@ -297,12 +296,24 @@ pub fn grass_texture(size: usize) -> BakedTexture {
             let u = x as f32 / size as f32;
             let v = y as f32 / size as f32;
             let clump = signed_noise(31, u * 12.0, v * 12.0, 12.0) * 16.0;
-            let blade = if hash(37, x as i32, y as i32) < 0.26 { 16.0 } else { 0.0 };
+            let blade = if hash(37, x as i32, y as i32) < 0.26 {
+                16.0
+            } else {
+                0.0
+            };
             // Bare earth: the thin places a clipped bed always has.
             let bare = noise(0x9d17, u * 4.0, v * 4.0, 4.0);
-            let earth = if bare > 0.62 { (bare - 0.62) * 210.0 } else { 0.0 };
+            let earth = if bare > 0.62 {
+                (bare - 0.62) * 210.0
+            } else {
+                0.0
+            };
             let dry = signed_noise(41, u * 6.0, v * 6.0, 6.0) * 11.0;
-            let leaf = if hash(43, x as i32, y as i32) < 0.012 { 22.0 } else { 0.0 };
+            let leaf = if hash(43, x as i32, y as i32) < 0.012 {
+                22.0
+            } else {
+                0.0
+            };
             let red = 66.0 + clump + blade + dry * 1.15 + leaf - earth;
             let green = 90.0 + clump + blade + dry + leaf * 0.8 - earth * 0.75;
             let blue = 52.0 + clump * 0.7 + blade * 0.6 + dry * 0.6 - earth * 0.55;
@@ -606,7 +617,9 @@ mod tests {
     use super::*;
 
     fn luma(rgba: &[u8], index: usize) -> f32 {
-        0.2126 * rgba[index] as f32 + 0.7152 * rgba[index + 1] as f32 + 0.0722 * rgba[index + 2] as f32
+        0.2126 * rgba[index] as f32
+            + 0.7152 * rgba[index + 1] as f32
+            + 0.0722 * rgba[index + 2] as f32
     }
 
     /// Sorted linear-reflectance percentiles of a texture's opaque pixels.
@@ -804,7 +817,10 @@ mod tests {
         // A canopy card must be mostly hole, or the tree reads as a solid blob,
         // and it must not be nearly empty, or it reads as noise.
         assert!(opaque > total / 8, "leaf card coverage {opaque}/{total}");
-        assert!(opaque < total * 2 / 3, "leaf card is too solid: {opaque}/{total}");
+        assert!(
+            opaque < total * 2 / 3,
+            "leaf card is too solid: {opaque}/{total}"
+        );
     }
 
     #[test]
@@ -834,7 +850,10 @@ mod tests {
         values.sort_by(|a, b| a.total_cmp(b));
         let dark = values.iter().take(values.len() / 10).sum::<f32>() / (values.len() / 10) as f32;
         let median = values[values.len() / 2];
-        assert!(median > dark + 20.0, "joints {dark:.0} do not read against {median:.0}");
+        assert!(
+            median > dark + 20.0,
+            "joints {dark:.0} do not read against {median:.0}"
+        );
     }
 
     #[test]

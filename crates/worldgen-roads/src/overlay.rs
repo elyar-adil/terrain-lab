@@ -17,8 +17,8 @@
 use std::sync::Arc;
 
 use worldgen_contracts::{
-    EdgeId, EdgeSource, NodeId, NodeKind, PinnedRoad, Polyline, RoadEdge, RoadNode, Setting, Span, SpanKind, V2, closest_on_segment,
-    segment_intersection, v2,
+    EdgeId, EdgeSource, NodeId, NodeKind, PinnedRoad, Polyline, RoadEdge, RoadNode, Setting, Span,
+    SpanKind, V2, closest_on_segment, segment_intersection, v2,
 };
 use worldgen_core::hash::hash_words;
 use worldgen_core::{Cell, Context, Dependency, Error, Layer, LayerId, Rect};
@@ -70,7 +70,10 @@ impl Near {
 
 fn bounds_of(line: &Polyline) -> Rect {
     let (lo, hi) = line.bounds().unwrap_or((V2::ZERO, V2::ZERO));
-    Rect { min: [lo.x, lo.y], max: [hi.x, hi.y] }
+    Rect {
+        min: [lo.x, lo.y],
+        max: [hi.x, hi.y],
+    }
 }
 
 /// Where a generated street's line meets a given road, in order along the street.
@@ -81,7 +84,10 @@ fn crossings(line: &Polyline, near: &Near) -> Vec<Crossing> {
         let len = w[0].dist(w[1]);
         for &(a, b) in &near.segments {
             if let Some((point, t, _)) = segment_intersection(w[0], w[1], a, b) {
-                out.push(Crossing { point, arc: run + t * len });
+                out.push(Crossing {
+                    point,
+                    arc: run + t * len,
+                });
             }
         }
         run += len;
@@ -93,7 +99,10 @@ fn crossings(line: &Polyline, near: &Near) -> Vec<Crossing> {
 }
 
 fn distance_to(near: &Near, p: V2) -> f64 {
-    near.segments.iter().map(|&(a, b)| closest_on_segment(a, b, p).2).fold(f64::INFINITY, f64::min)
+    near.segments
+        .iter()
+        .map(|&(a, b)| closest_on_segment(a, b, p).2)
+        .fold(f64::INFINITY, f64::min)
 }
 
 /// The slice of a polyline between two arc lengths, with the end points given
@@ -113,16 +122,24 @@ fn slice(line: &[V2], from: (f64, V2), to: (f64, V2)) -> Polyline {
 
 impl OverlayLayer {
     fn reach(&self, cell_m: f64) -> f64 {
-        (self.config.corner_jitter + 0.1) * cell_m + 2.0 * (self.config.warp_amp_m + self.config.wiggle_amp_m) + 40.0
+        (self.config.corner_jitter + 0.1) * cell_m
+            + 2.0 * (self.config.warp_amp_m + self.config.wiggle_amp_m)
+            + 40.0
     }
 
     /// The given roads that come near a generated street, with only the nearby segments.
     fn near_edge(&self, line: &Polyline) -> Vec<Near> {
         let b = bounds_of(line);
-        let window = Rect { min: [b.min[0] - SHADOW_M, b.min[1] - SHADOW_M], max: [b.max[0] + SHADOW_M, b.max[1] + SHADOW_M] };
+        let window = Rect {
+            min: [b.min[0] - SHADOW_M, b.min[1] - SHADOW_M],
+            max: [b.max[0] + SHADOW_M, b.max[1] + SHADOW_M],
+        };
         self.fields
             .pinned
-            .within(v2(window.min[0], window.min[1]), v2(window.max[0], window.max[1]))
+            .within(
+                v2(window.min[0], window.min[1]),
+                v2(window.max[0], window.max[1]),
+            )
             .into_iter()
             .filter_map(|r| Near::new(r, window))
             .collect()
@@ -145,7 +162,10 @@ impl OverlayLayer {
                 continue;
             }
             counted += 1;
-            if near.iter().any(|r| r.road.class >= e.class && distance_to(r, p) < SHADOW_M) {
+            if near
+                .iter()
+                .any(|r| r.road.class >= e.class && distance_to(r, p) < SHADOW_M)
+            {
                 beside += 1;
             }
         }
@@ -191,10 +211,28 @@ impl OverlayLayer {
                 .collect();
             let id = EdgeId::between(w[0].2, w[1].2, e.id.0);
             let nodes = [
-                RoadNode { id: w[0].2, position: w[0].1, kind: NodeKind::Junction },
-                RoadNode { id: w[1].2, position: w[1].1, kind: NodeKind::Junction },
+                RoadNode {
+                    id: w[0].2,
+                    position: w[0].1,
+                    kind: NodeKind::Junction,
+                },
+                RoadNode {
+                    id: w[1].2,
+                    position: w[1].1,
+                    kind: NodeKind::Junction,
+                },
             ];
-            out.push((RoadEdge { id, a: w[0].2, b: w[1].2, spans, pieces: vec![piece], ..e.clone() }, nodes));
+            out.push((
+                RoadEdge {
+                    id,
+                    a: w[0].2,
+                    b: w[1].2,
+                    spans,
+                    pieces: vec![piece],
+                    ..e.clone()
+                },
+                nodes,
+            ));
         }
         Some(out)
     }
@@ -203,7 +241,13 @@ impl OverlayLayer {
 /// Identity of the node where a given road crosses a lattice border.
 fn border_node(road: u64, segment: usize, border: Border, cell: Cell) -> NodeId {
     let line = if border.axis == 0 { cell.x } else { cell.y } + i64::from(border.max);
-    NodeId(hash_words(&[road, segment as u64, u64::from(border.axis), line as u64, 0xB0D]))
+    NodeId(hash_words(&[
+        road,
+        segment as u64,
+        u64::from(border.axis),
+        line as u64,
+        0xB0D,
+    ]))
 }
 
 impl Layer for OverlayLayer {
@@ -222,13 +266,17 @@ impl Layer for OverlayLayer {
         let rect = cell.rect(frame);
         let reach = self.reach(cell_size(frame, self.config.lattice_level));
         let window = rect.grown(reach);
-        let pinned = self.fields.pinned.within(v2(window.min[0], window.min[1]), v2(window.max[0], window.max[1]));
+        let pinned = self.fields.pinned.within(
+            v2(window.min[0], window.min[1]),
+            v2(window.max[0], window.max[1]),
+        );
         let own = ctx.input::<CellNetwork>(CELLS, cell)?;
         if pinned.is_empty() {
             return Ok((*own).clone());
         }
 
-        let mut nodes: std::collections::BTreeMap<NodeId, RoadNode> = std::collections::BTreeMap::new();
+        let mut nodes: std::collections::BTreeMap<NodeId, RoadNode> =
+            std::collections::BTreeMap::new();
         let mut edges: Vec<RoadEdge> = Vec::new();
 
         // Generated streets, cut where they cross a given road.
@@ -265,11 +313,17 @@ impl Layer for OverlayLayer {
                 for net in &ring {
                     for e in &net.edges {
                         let b = bounds_of(&e.pieces[0]);
-                        if b.max[0] < rect.min[0] || b.min[0] > rect.max[0] || b.max[1] < rect.min[1] || b.min[1] > rect.max[1] {
+                        if b.max[0] < rect.min[0]
+                            || b.min[0] > rect.max[0]
+                            || b.max[1] < rect.min[1]
+                            || b.min[1] > rect.max[1]
+                        {
                             continue;
                         }
                         let around = self.near_edge(&e.pieces[0]);
-                        let Some(mine) = around.iter().find(|r| r.road.id == road.id) else { continue };
+                        let Some(mine) = around.iter().find(|r| r.road.id == road.id) else {
+                            continue;
+                        };
                         if self.is_shadow(e, &around) {
                             continue;
                         }
@@ -279,7 +333,8 @@ impl Layer for OverlayLayer {
                             }
                             if let Some((d, arc)) = run_line.closest(c.point) {
                                 if d < 1e-6 {
-                                    let id = NodeId(hash_words(&[road.id, e.id.0, k as u64, 0xC805]));
+                                    let id =
+                                        NodeId(hash_words(&[road.id, e.id.0, k as u64, 0xC805]));
                                     stops.push((arc, c.point, id));
                                 }
                             }
@@ -307,11 +362,19 @@ impl Layer for OverlayLayer {
                     }
                     let piece = slice(&run.points, (w[0].0, w[0].1), (w[1].0, w[1].1));
                     let mid = piece.at(piece.length() * 0.5).map_or(w[0].1, |m| m.0);
-                    let setting =
-                        if self.fields.urban.urbanness(mid) >= self.config.urban_threshold { Setting::Urban } else { Setting::Rural };
+                    let setting = if self.fields.urban.urbanness(mid) >= self.config.urban_threshold
+                    {
+                        Setting::Urban
+                    } else {
+                        Setting::Rural
+                    };
                     let spans = given_road_spans(&*self.fields.water, &piece);
                     for (id, p) in [(w[0].2, w[0].1), (w[1].2, w[1].1)] {
-                        nodes.entry(id).or_insert(RoadNode { id, position: p, kind: NodeKind::Junction });
+                        nodes.entry(id).or_insert(RoadNode {
+                            id,
+                            position: p,
+                            kind: NodeKind::Junction,
+                        });
                     }
                     edges.push(RoadEdge {
                         id: EdgeId::between(w[0].2, w[1].2, road.id),
@@ -326,8 +389,15 @@ impl Layer for OverlayLayer {
                 }
             }
         }
-        let referenced: std::collections::BTreeSet<NodeId> = edges.iter().flat_map(|e| [e.a, e.b]).collect();
-        Ok(CellNetwork { nodes: nodes.into_values().filter(|n| referenced.contains(&n.id)).collect(), edges })
+        let referenced: std::collections::BTreeSet<NodeId> =
+            edges.iter().flat_map(|e| [e.a, e.b]).collect();
+        Ok(CellNetwork {
+            nodes: nodes
+                .into_values()
+                .filter(|n| referenced.contains(&n.id))
+                .collect(),
+            edges,
+        })
     }
 }
 
@@ -341,12 +411,21 @@ fn given_road_spans(water: &dyn worldgen_contracts::WaterField, line: &Polyline)
         .map(|k| total * k as f64 / n as f64)
         .filter(|&s| line.at(s).is_some_and(|(p, _)| water.is_water(p)))
         .collect();
-    let (Some(&first), Some(&last)) = (wet.first(), wet.last()) else { return Vec::new() };
+    let (Some(&first), Some(&last)) = (wet.first(), wet.last()) else {
+        return Vec::new();
+    };
     if wet.len() <= 1 {
         return Vec::new();
     }
-    let (Some((from, _)), Some((to, _))) = (line.at((first - APPROACH_M).max(0.0)), line.at((last + APPROACH_M).min(total))) else {
+    let (Some((from, _)), Some((to, _))) = (
+        line.at((first - APPROACH_M).max(0.0)),
+        line.at((last + APPROACH_M).min(total)),
+    ) else {
         return Vec::new();
     };
-    vec![Span { kind: SpanKind::Bridge, from, to }]
+    vec![Span {
+        kind: SpanKind::Bridge,
+        from,
+        to,
+    }]
 }

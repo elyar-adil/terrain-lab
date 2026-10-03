@@ -16,12 +16,19 @@ pub fn mix64(mut z: u64) -> u64 {
 /// Combine two hashes; order matters.
 #[inline]
 pub fn combine(a: u64, b: u64) -> u64 {
-    mix64(a ^ mix64(b).wrapping_add(GOLDEN).wrapping_add(a << 6).wrapping_add(a >> 2))
+    mix64(
+        a ^ mix64(b)
+            .wrapping_add(GOLDEN)
+            .wrapping_add(a << 6)
+            .wrapping_add(a >> 2),
+    )
 }
 
 /// Hash a sequence of words; order matters.
 pub fn hash_words(words: &[u64]) -> u64 {
-    words.iter().fold(0x243F_6A88_85A3_08D3, |acc, w| combine(acc, *w))
+    words
+        .iter()
+        .fold(0x243F_6A88_85A3_08D3, |acc, w| combine(acc, *w))
 }
 
 /// Hash a string (FNV-1a, then mixed). Used for labels, which are constants.

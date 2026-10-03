@@ -60,7 +60,12 @@ pub fn build_shrub_prototype(builder: &mut MeshBuilder) {
             let d = (ring + 1) * stride + side;
             builder.quad_uv_shaded(
                 "hedge",
-                [(points[a].0, points[a].1), (points[b].0, points[b].1), (points[c].0, points[c].1), (points[d].0, points[d].1)],
+                [
+                    (points[a].0, points[a].1),
+                    (points[b].0, points[b].1),
+                    (points[c].0, points[c].1),
+                    (points[d].0, points[d].1),
+                ],
                 [points[a].2, points[b].2, points[c].2, points[d].2],
                 None,
             );
@@ -122,11 +127,7 @@ pub fn build_tuft_prototype(builder: &mut MeshBuilder) {
 }
 
 /// Median shrubs along a divided road, as instances of the shrub prototype.
-pub fn plant_median_shrubs(
-    network: &Network,
-    builder: &mut MeshBuilder,
-    seed: u32,
-) -> usize {
+pub fn plant_median_shrubs(network: &Network, builder: &mut MeshBuilder, seed: u32) -> usize {
     let mut rng = Rng::new(seed ^ 0x5b12);
     let mut count = 0;
     for road in &network.roads {

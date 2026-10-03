@@ -15,5 +15,7 @@ pub mod math;
 pub mod params;
 pub mod species;
 
-pub use grow::{LEAF_BUDGET, Leaf, Segment, Tree, TreeSpec, WOOD_LEVEL, grow, leaf_azimuth, leaf_state};
+pub use grow::{
+    LEAF_BUDGET, Leaf, Segment, Tree, TreeSpec, WOOD_LEVEL, grow, leaf_azimuth, leaf_state,
+};
 pub use species::{Bark, Bloom, Habit, LeafForm, SPECIES, Species, by_key};

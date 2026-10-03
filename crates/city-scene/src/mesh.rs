@@ -184,15 +184,17 @@ impl MeshBuilder {
     fn buffers(&mut self, material: &str) -> &mut Buffers {
         let meta = *self.meta.entry(material.to_owned()).or_default();
         let _ = meta;
-        self.groups.entry(material.to_owned()).or_insert_with(|| Buffers {
-            positions: Vec::with_capacity(INITIAL_VERTS * 3),
-            normals: Vec::with_capacity(INITIAL_VERTS * 3),
-            colors: None,
-            uvs: None,
-            indices: Vec::with_capacity(INITIAL_INDICES),
-            with_colors: false,
-            with_uvs: false,
-        })
+        self.groups
+            .entry(material.to_owned())
+            .or_insert_with(|| Buffers {
+                positions: Vec::with_capacity(INITIAL_VERTS * 3),
+                normals: Vec::with_capacity(INITIAL_VERTS * 3),
+                colors: None,
+                uvs: None,
+                indices: Vec::with_capacity(INITIAL_INDICES),
+                with_colors: false,
+                with_uvs: false,
+            })
     }
 
     /// Append a triangle with an explicit per-vertex normal.  Used for
@@ -220,11 +222,17 @@ impl MeshBuilder {
         if !a.0.is_finite() || !b.0.is_finite() || !c.0.is_finite() {
             return;
         }
-        let ambient = if material.starts_with("facade/") { self.ambient_tint } else { None };
+        let ambient = if material.starts_with("facade/") {
+            self.ambient_tint
+        } else {
+            None
+        };
         let buffers = self.buffers(material);
         let base = (buffers.positions.len() / 3) as u32;
         for (position, normal) in [a, b, c] {
-            buffers.positions.extend_from_slice(&[position.x, position.y, position.z]);
+            buffers
+                .positions
+                .extend_from_slice(&[position.x, position.y, position.z]);
             buffers
                 .normals
                 .extend_from_slice(&[normal.x, normal.y, normal.z]);
@@ -239,20 +247,15 @@ impl MeshBuilder {
                 colors.extend_from_slice(&packed);
             }
         }
-        buffers.indices.extend_from_slice(&[base, base + 1, base + 2]);
+        buffers
+            .indices
+            .extend_from_slice(&[base, base + 1, base + 2]);
         let _ = fallback_normal;
     }
 
     /// Append a triangle, deriving a flat normal from the winding.  The workhorse
     /// for road surfaces, markings and building walls.
-    pub fn tri_flat(
-        &mut self,
-        material: &str,
-        a: Vec3,
-        b: Vec3,
-        c: Vec3,
-        color: Option<[f32; 3]>,
-    ) {
+    pub fn tri_flat(&mut self, material: &str, a: Vec3, b: Vec3, c: Vec3, color: Option<[f32; 3]>) {
         if !a.is_finite() || !b.is_finite() || !c.is_finite() {
             return;
         }
@@ -274,10 +277,8 @@ impl MeshBuilder {
         if ring.len() < 3 {
             return;
         }
-        let centre = ring
-            .iter()
-            .fold(Vec3::default(), |acc, point| acc + *point)
-            / ring.len() as f32;
+        let centre =
+            ring.iter().fold(Vec3::default(), |acc, point| acc + *point) / ring.len() as f32;
         for index in 0..ring.len() {
             let next = (index + 1) % ring.len();
             self.tri(
@@ -378,7 +379,11 @@ impl MeshBuilder {
             return;
         }
         let normal = face_normal(a, b, c);
-        let ambient = if material.starts_with("facade/") { self.ambient_tint } else { None };
+        let ambient = if material.starts_with("facade/") {
+            self.ambient_tint
+        } else {
+            None
+        };
         let buffers = self.buffers(material);
         let base = (buffers.positions.len() / 3) as u32;
         for (position, normal) in [(a, normal), (b, normal), (c, normal)] {
@@ -405,7 +410,9 @@ impl MeshBuilder {
                 store.extend_from_slice(&pack_tint(&tint));
             }
         }
-        buffers.indices.extend_from_slice(&[base, base + 1, base + 2]);
+        buffers
+            .indices
+            .extend_from_slice(&[base, base + 1, base + 2]);
     }
 
     /// A quad whose four corners carry individual normals *and* explicit
@@ -424,13 +431,7 @@ impl MeshBuilder {
     /// A horizontal surface with world-space metre UVs, for ground plates and
     /// roof decks whose texture tiles on a fixed physical grid.  Ear-clipped, so
     /// a concave block face is covered exactly once.
-    pub fn ground_uv(
-        &mut self,
-        material: &str,
-        ring: &[Vec2],
-        y: f32,
-        color: Option<[f32; 3]>,
-    ) {
+    pub fn ground_uv(&mut self, material: &str, ring: &[Vec2], y: f32, color: Option<[f32; 3]>) {
         if ring.len() < 3 {
             return;
         }
@@ -457,14 +458,20 @@ impl MeshBuilder {
         uv: Option<[(f32, f32); 4]>,
         color: Option<[f32; 3]>,
     ) {
-        let ambient = if material.starts_with("facade/") { self.ambient_tint } else { None };
+        let ambient = if material.starts_with("facade/") {
+            self.ambient_tint
+        } else {
+            None
+        };
         let buffers = self.buffers(material);
         let base = (buffers.positions.len() / 3) as u32;
         for (position, normal) in corners {
             if !position.is_finite() {
                 return;
             }
-            buffers.positions.extend_from_slice(&[position.x, position.y, position.z]);
+            buffers
+                .positions
+                .extend_from_slice(&[position.x, position.y, position.z]);
             buffers
                 .normals
                 .extend_from_slice(&[normal.x, normal.y, normal.z]);
@@ -532,7 +539,15 @@ impl MeshBuilder {
     /// Indexed: four vertices and six indices, not six vertices.  A city emits
     /// well over a hundred thousand quads, and the vertex saving is the
     /// difference between a payload that streams and one that does not.
-    pub fn quad(&mut self, material: &str, a: Vec3, b: Vec3, c: Vec3, d: Vec3, color: Option<[f32; 3]>) {
+    pub fn quad(
+        &mut self,
+        material: &str,
+        a: Vec3,
+        b: Vec3,
+        c: Vec3,
+        d: Vec3,
+        color: Option<[f32; 3]>,
+    ) {
         if !a.is_finite() || !b.is_finite() || !c.is_finite() || !d.is_finite() {
             return;
         }
@@ -557,14 +572,20 @@ impl MeshBuilder {
         d: (Vec3, Vec3),
         color: Option<[f32; 3]>,
     ) {
-        let ambient = if material.starts_with("facade/") { self.ambient_tint } else { None };
+        let ambient = if material.starts_with("facade/") {
+            self.ambient_tint
+        } else {
+            None
+        };
         let buffers = self.buffers(material);
         let base = (buffers.positions.len() / 3) as u32;
         for (position, normal) in [a, b, c, d] {
             if !position.is_finite() {
                 return;
             }
-            buffers.positions.extend_from_slice(&[position.x, position.y, position.z]);
+            buffers
+                .positions
+                .extend_from_slice(&[position.x, position.y, position.z]);
             buffers
                 .normals
                 .extend_from_slice(&[normal.x, normal.y, normal.z]);
@@ -625,7 +646,9 @@ impl MeshBuilder {
         if length <= 1.0e-4 || to <= from {
             return;
         }
-        let steps = (((to - from) / crate::math::MAX_RESAMPLE_METRES).ceil().max(1.0)) as usize;
+        let steps = (((to - from) / crate::math::MAX_RESAMPLE_METRES)
+            .ceil()
+            .max(1.0)) as usize;
         let mut previous: Option<(Vec3, Vec3)> = None;
         for step in 0..=steps {
             let station = from + (to - from) * step as f32 / steps as f32;
@@ -662,7 +685,9 @@ impl MeshBuilder {
         if length <= 1.0e-4 || to <= from {
             return;
         }
-        let steps = (((to - from) / crate::math::MAX_RESAMPLE_METRES).ceil().max(1.0)) as usize;
+        let steps = (((to - from) / crate::math::MAX_RESAMPLE_METRES)
+            .ceil()
+            .max(1.0)) as usize;
         let mut previous: Option<(Vec3, Vec3, f32)> = None;
         for step in 0..=steps {
             let station = from + (to - from) * step as f32 / steps as f32;
@@ -836,7 +861,11 @@ impl MeshBuilder {
             let vertices = buffers.positions.len() / 3;
             if let Some(uvs) = &mut buffers.uvs {
                 if uvs.len() < vertices * 2 {
-                    let (u, v) = if uvs.len() >= 2 { (uvs[0], uvs[1]) } else { (0.0, 0.0) };
+                    let (u, v) = if uvs.len() >= 2 {
+                        (uvs[0], uvs[1])
+                    } else {
+                        (0.0, 0.0)
+                    };
                     uvs.resize(vertices * 2, 0.0);
                     for chunk in uvs.chunks_exact_mut(2) {
                         chunk[0] = u;
@@ -908,7 +937,8 @@ pub fn box_at(
     rotation_y: f32,
 ) {
     let (sin, cos) = rotation_y.sin_cos();
-    let point = |x: f32, z: f32| Vec2::new(centre.x + x * cos - z * sin, centre.y + x * sin + z * cos);
+    let point =
+        |x: f32, z: f32| Vec2::new(centre.x + x * cos - z * sin, centre.y + x * sin + z * cos);
     let hw = width * 0.5;
     let hd = depth * 0.5;
     let y0 = y_centre - height * 0.5;
@@ -924,7 +954,14 @@ pub fn box_at(
     // each edge backwards or every side faces into the box and is culled from
     // outside, leaving only its inside walls visible.
     for index in 0..4 {
-        builder.wall(material, corners[(index + 1) % 4], corners[index], y0, y1, None);
+        builder.wall(
+            material,
+            corners[(index + 1) % 4],
+            corners[index],
+            y0,
+            y1,
+            None,
+        );
     }
     builder.quad(
         material,
@@ -1025,13 +1062,25 @@ mod tests {
             for tri in group.indices.chunks(3) {
                 let p = |i: u32| {
                     let k = i as usize * 3;
-                    Vec3::new(group.positions[k], group.positions[k + 1], group.positions[k + 2])
+                    Vec3::new(
+                        group.positions[k],
+                        group.positions[k + 1],
+                        group.positions[k + 2],
+                    )
                 };
                 let (a, b, c) = (p(tri[0]), p(tri[1]), p(tri[2]));
                 let geometric = (b - a).cross(c - a);
-                let middle = Vec3::new((a.x + b.x + c.x) / 3.0 - centre.x, (a.y + b.y + c.y) / 3.0 - 5.0, (a.z + b.z + c.z) / 3.0 - centre.y);
-                let outward = geometric.x * middle.x + geometric.y * middle.y + geometric.z * middle.z;
-                assert!(outward > 0.0, "a face points into the box at rotation {rotation}: {geometric:?}");
+                let middle = Vec3::new(
+                    (a.x + b.x + c.x) / 3.0 - centre.x,
+                    (a.y + b.y + c.y) / 3.0 - 5.0,
+                    (a.z + b.z + c.z) / 3.0 - centre.y,
+                );
+                let outward =
+                    geometric.x * middle.x + geometric.y * middle.y + geometric.z * middle.z;
+                assert!(
+                    outward > 0.0,
+                    "a face points into the box at rotation {rotation}: {geometric:?}"
+                );
             }
         }
     }
@@ -1055,7 +1104,10 @@ mod tests {
         let long = Path::flat(vec![Vec2::new(0.0, 0.0), Vec2::new(600.0, 0.0)]);
         let mut builder = MeshBuilder::new();
         builder.ribbon("asphalt", &long, -3.0, 3.0, 0.0, 600.0, 0.0, None);
-        assert!(builder.index_count("asphalt") <= 20 * 6, "600 m of road cost too much");
+        assert!(
+            builder.index_count("asphalt") <= 20 * 6,
+            "600 m of road cost too much"
+        );
     }
 
     #[test]
@@ -1093,9 +1145,21 @@ mod tests {
     #[test]
     fn instances_do_not_consume_geometry_buffers() {
         let mut builder = MeshBuilder::new();
-        builder.style("tree:leaf", GroupStyle { cast_shadow: true, ..GroupStyle::default() });
-        builder.add_instance("tree:leaf", Instance::new(1.0, 0.0, 2.0, 0.3, 1.0, [1.0, 1.0, 1.0]));
-        builder.add_instance("tree:leaf", Instance::new(4.0, 0.0, 5.0, 1.1, 0.8, [0.9, 1.0, 0.9]));
+        builder.style(
+            "tree:leaf",
+            GroupStyle {
+                cast_shadow: true,
+                ..GroupStyle::default()
+            },
+        );
+        builder.add_instance(
+            "tree:leaf",
+            Instance::new(1.0, 0.0, 2.0, 0.3, 1.0, [1.0, 1.0, 1.0]),
+        );
+        builder.add_instance(
+            "tree:leaf",
+            Instance::new(4.0, 0.0, 5.0, 1.1, 0.8, [0.9, 1.0, 0.9]),
+        );
         assert_eq!(builder.total_instances(), 2);
         assert_eq!(builder.total_vertices(), 0);
     }

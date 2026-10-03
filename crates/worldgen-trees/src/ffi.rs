@@ -43,12 +43,18 @@ fn q(x: f32) -> u8 {
 /// Serialise a tree into the interface's buffer layout.
 pub fn encode(tree: &Tree) -> Vec<u8> {
     let sp = &SPECIES[tree.spec.species];
-    let mut b = Vec::with_capacity(HEADER_WORDS * 4 + tree.segments.len() * 32 + tree.leaves.len() * 20);
+    let mut b =
+        Vec::with_capacity(HEADER_WORDS * 4 + tree.segments.len() * 32 + tree.leaves.len() * 20);
     u(&mut b, MAGIC);
     u(&mut b, VERSION);
     u(&mut b, tree.segments.len() as u32);
     u(&mut b, tree.leaves.len() as u32);
-    for x in [tree.height, tree.crown_radius, tree.crown_base, tree.trunk_radius] {
+    for x in [
+        tree.height,
+        tree.crown_radius,
+        tree.crown_base,
+        tree.trunk_radius,
+    ] {
         f(&mut b, x);
     }
     for x in tree.bark {
@@ -164,10 +170,16 @@ mod tests {
         assert_eq!(word(0), MAGIC);
         let (segments, leaves) = (word(2) as usize, word(3) as usize);
         assert!(segments > 100 && leaves > 100);
-        assert_eq!(bytes.len(), HEADER_WORDS * 4 + segments * 32 + leaves * (16 + 4 * 4));
+        assert_eq!(
+            bytes.len(),
+            HEADER_WORDS * 4 + segments * 32 + leaves * (16 + 4 * 4)
+        );
         // The first leaf's direction decodes to a unit vector.
         let at = HEADER_WORDS * 4 + segments * 32 + leaves * 16;
-        let d: Vec<f32> = bytes[at..at + 3].iter().map(|&x| f32::from(x as i8) / 127.0).collect();
+        let d: Vec<f32> = bytes[at..at + 3]
+            .iter()
+            .map(|&x| f32::from(x as i8) / 127.0)
+            .collect();
         let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         assert!((len - 1.0).abs() < 0.05, "{len}");
         assert_eq!(tree_species_key(0), "xiang-zhang".len() as u32);

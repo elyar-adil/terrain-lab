@@ -22,7 +22,9 @@ use worldgen_core::hash::{hash_words, to_unit};
 use worldgen_core::{Cell, Context, Dependency, Error, Layer, LayerId, Seed};
 
 use crate::config::{RoadsConfig, TOP_RUNG};
-use crate::lattice::{CHORDS, CellChords, Chord, Division, corner, corner_id, fabric_seed, make_chord_reaching};
+use crate::lattice::{
+    CHORDS, CellChords, Chord, Division, corner, corner_id, fabric_seed, make_chord_reaching,
+};
 
 pub const QUADS: LayerId = LayerId("roads.quads");
 
@@ -110,8 +112,18 @@ impl Layer for QuadLayer {
             corner_id(fabric, i, j + 1),
         ];
         // Chord order: bottom, right, top, left; all run in the direction the face does.
-        let lattice = [own.bottom.clone(), right.left.clone(), above.bottom.clone(), own.left.clone()];
-        let mut build = Build { fabric, urban: &*self.urban, chords: Vec::new(), blocks: Vec::new() };
+        let lattice = [
+            own.bottom.clone(),
+            right.left.clone(),
+            above.bottom.clone(),
+            own.left.clone(),
+        ];
+        let mut build = Build {
+            fabric,
+            urban: &*self.urban,
+            chords: Vec::new(),
+            blocks: Vec::new(),
+        };
         for c in lattice {
             build.chords.push(ChordObj {
                 chord: c,
@@ -125,10 +137,30 @@ impl Layer for QuadLayer {
         let root = Face {
             corners,
             ids,
-            bottom: FaceSide { chord: 0, t0: 0.0, t1: 1.0, forward: true },
-            right: FaceSide { chord: 1, t0: 0.0, t1: 1.0, forward: true },
-            top: FaceSide { chord: 2, t0: 0.0, t1: 1.0, forward: true },
-            left: FaceSide { chord: 3, t0: 0.0, t1: 1.0, forward: true },
+            bottom: FaceSide {
+                chord: 0,
+                t0: 0.0,
+                t1: 1.0,
+                forward: true,
+            },
+            right: FaceSide {
+                chord: 1,
+                t0: 0.0,
+                t1: 1.0,
+                forward: true,
+            },
+            top: FaceSide {
+                chord: 2,
+                t0: 0.0,
+                t1: 1.0,
+                forward: true,
+            },
+            left: FaceSide {
+                chord: 3,
+                t0: 0.0,
+                t1: 1.0,
+                forward: true,
+            },
             finest: TOP_RUNG,
         };
         build.expand(root, TOP_RUNG as i8);
@@ -137,14 +169,26 @@ impl Layer for QuadLayer {
             let mut nodes: Vec<UsedNode> = build.chords[k]
                 .used
                 .iter()
-                .map(|&i| UsedNode { id: chord.divisions[i].id, t: chord.divisions[i].t, pos: chord.divisions[i].pos })
+                .map(|&i| UsedNode {
+                    id: chord.divisions[i].id,
+                    t: chord.divisions[i].t,
+                    pos: chord.divisions[i].pos,
+                })
                 .collect();
             nodes.sort_by(|a, b| a.t.partial_cmp(&b.t).unwrap());
             nodes
         };
         let (used_bottom, used_right, used_top, used_left) = (used(0), used(1), used(2), used(3));
         let edges = build.edges();
-        Ok(Quad { corners, edges, blocks: build.blocks, used_bottom, used_top, used_left, used_right })
+        Ok(Quad {
+            corners,
+            edges,
+            blocks: build.blocks,
+            used_bottom,
+            used_top,
+            used_left,
+            used_right,
+        })
     }
 }
 
@@ -192,7 +236,11 @@ struct Boundary {
 
 impl Boundary {
     fn param(&self, s: f64) -> f64 {
-        let (a, b) = if self.forward { (self.t0, self.t1) } else { (self.t1, self.t0) };
+        let (a, b) = if self.forward {
+            (self.t0, self.t1)
+        } else {
+            (self.t1, self.t0)
+        };
         a + (b - a) * s
     }
 }
@@ -240,8 +288,10 @@ impl Build<'_> {
         let len = |a: V2, b: V2| a.dist(b);
         let [bl, br, tr, tl] = face.corners;
         let extent = 0.25 * (len(bl, br) + len(br, tr) + len(tr, tl) + len(tl, bl));
-        let a_pairs = self.match_sides(&face.bottom, &face.top, r, len(bl, br), len(tl, tr), extent);
-        let b_pairs = self.match_sides(&face.left, &face.right, r, len(bl, tl), len(br, tr), extent);
+        let a_pairs =
+            self.match_sides(&face.bottom, &face.top, r, len(bl, br), len(tl, tr), extent);
+        let b_pairs =
+            self.match_sides(&face.left, &face.right, r, len(bl, tl), len(br, tr), extent);
         if a_pairs.is_empty() && b_pairs.is_empty() {
             return self.expand(face, rung - 1);
         }
@@ -263,7 +313,12 @@ impl Build<'_> {
         let b_index = self.commit(b_lines, r, &b_reach);
 
         let (na, nb) = (a_index.len(), b_index.len());
-        let whole = |chord: usize| Boundary { chord, t0: 0.0, t1: 1.0, forward: true };
+        let whole = |chord: usize| Boundary {
+            chord,
+            t0: 0.0,
+            t1: 1.0,
+            forward: true,
+        };
         let row_bounds: Vec<Boundary> = std::iter::once(Boundary::of(&face.bottom))
             .chain(b_index.iter().map(|&k| whole(k)))
             .chain(std::iter::once(Boundary::of(&face.top)))
@@ -274,17 +329,48 @@ impl Build<'_> {
             .collect();
         let side = |b: &Boundary, s0: f64, s1: f64| {
             let (ta, tb) = (b.param(s0), b.param(s1));
-            FaceSide { chord: b.chord, t0: ta.min(tb), t1: ta.max(tb), forward: b.forward }
+            FaceSide {
+                chord: b.chord,
+                t0: ta.min(tb),
+                t1: ta.max(tb),
+                forward: b.forward,
+            }
         };
         for c in 1..=na + 1 {
             for rw in 1..=nb + 1 {
                 let child = Face {
-                    corners: [grid.pos[c - 1][rw - 1], grid.pos[c][rw - 1], grid.pos[c][rw], grid.pos[c - 1][rw]],
-                    ids: [grid.id[c - 1][rw - 1], grid.id[c][rw - 1], grid.id[c][rw], grid.id[c - 1][rw]],
-                    bottom: side(&row_bounds[rw - 1], grid.along_row[c - 1][rw - 1], grid.along_row[c][rw - 1]),
-                    top: side(&row_bounds[rw], grid.along_row[c - 1][rw], grid.along_row[c][rw]),
-                    left: side(&col_bounds[c - 1], grid.along_col[c - 1][rw - 1], grid.along_col[c - 1][rw]),
-                    right: side(&col_bounds[c], grid.along_col[c][rw - 1], grid.along_col[c][rw]),
+                    corners: [
+                        grid.pos[c - 1][rw - 1],
+                        grid.pos[c][rw - 1],
+                        grid.pos[c][rw],
+                        grid.pos[c - 1][rw],
+                    ],
+                    ids: [
+                        grid.id[c - 1][rw - 1],
+                        grid.id[c][rw - 1],
+                        grid.id[c][rw],
+                        grid.id[c - 1][rw],
+                    ],
+                    bottom: side(
+                        &row_bounds[rw - 1],
+                        grid.along_row[c - 1][rw - 1],
+                        grid.along_row[c][rw - 1],
+                    ),
+                    top: side(
+                        &row_bounds[rw],
+                        grid.along_row[c - 1][rw],
+                        grid.along_row[c][rw],
+                    ),
+                    left: side(
+                        &col_bounds[c - 1],
+                        grid.along_col[c - 1][rw - 1],
+                        grid.along_col[c - 1][rw],
+                    ),
+                    right: side(
+                        &col_bounds[c],
+                        grid.along_col[c][rw - 1],
+                        grid.along_col[c][rw],
+                    ),
                     finest: r,
                 };
                 self.expand(child, rung - 1);
@@ -294,14 +380,26 @@ impl Build<'_> {
 
     fn finish(&mut self, face: Face) {
         let id = hash_words(&[face.ids[0].0, face.ids[1].0, face.ids[2].0, face.ids[3].0]);
-        self.blocks.push(Block { id, corners: face.corners, rung: face.finest });
+        self.blocks.push(Block {
+            id,
+            corners: face.corners,
+            rung: face.finest,
+        });
     }
 
     /// Match divisions of one rung on two opposite sides. A division with no partner
     /// on the other side still starts a street: it is given a partner on the far side
     /// at the same fraction of the way along, so a town beside one side of a face is
     /// served by streets that run across the face from it.
-    fn match_sides(&mut self, from: &FaceSide, to: &FaceSide, rung: u8, len_from: f64, len_to: f64, extent: f64) -> Vec<(usize, f64, usize, f64)> {
+    fn match_sides(
+        &mut self,
+        from: &FaceSide,
+        to: &FaceSide,
+        rung: u8,
+        len_from: f64,
+        len_to: f64,
+        extent: f64,
+    ) -> Vec<(usize, f64, usize, f64)> {
         let (f, t) = (self.divisions_on(from, rung), self.divisions_on(to, rung));
         let mean_len = 0.5 * (len_from + len_to);
         let mut pairs: Vec<(usize, f64, usize, f64)> = Vec::new(); // (division on from, s, division on to, s)
@@ -364,7 +462,11 @@ impl Build<'_> {
     fn mirror(&mut self, side: &FaceSide, s: f64, rung: u8, spacing: f64) -> Option<(usize, f64)> {
         const SLOT_M: f64 = 30.0;
         let chord = &self.chords[side.chord].chord;
-        let t_raw = if side.forward { side.t0 + (side.t1 - side.t0) * s } else { side.t1 - (side.t1 - side.t0) * s };
+        let t_raw = if side.forward {
+            side.t0 + (side.t1 - side.t0) * s
+        } else {
+            side.t1 - (side.t1 - side.t0) * s
+        };
         let slot = (t_raw * chord.len / SLOT_M).round();
         let t = slot * SLOT_M / chord.len;
         let (near_start, near_end) = (t * chord.len, (1.0 - t) * chord.len);
@@ -396,22 +498,44 @@ impl Build<'_> {
         let id = NodeId(hash_words(&[chord.id, slot as i64 as u64, 0x5107]));
         let pos = chord.a.lerp(chord.b, t);
         let chord = &mut self.chords[side.chord].chord;
-        chord.divisions.push(Division { id, t, level: rung, pos, spacing_m: spacing });
+        chord.divisions.push(Division {
+            id,
+            t,
+            level: rung,
+            pos,
+            spacing_m: spacing,
+        });
         Some((chord.divisions.len() - 1, s_of(t)))
     }
 
     /// Make the streets of a family: new chords with their own finer divisions.
     /// Nothing is recorded yet; see [`Build::commit`].
-    fn streets(&self, pairs: &[(usize, f64, usize, f64)], from: &FaceSide, to: &FaceSide, rung: u8, salt: u64) -> Vec<Street> {
+    fn streets(
+        &self,
+        pairs: &[(usize, f64, usize, f64)],
+        from: &FaceSide,
+        to: &FaceSide,
+        rung: u8,
+        salt: u64,
+    ) -> Vec<Street> {
         let mut out = Vec::new();
         for &(fk, sf, tk, st) in pairs {
-            let (df, dt) = (&self.chords[from.chord].chord.divisions[fk], &self.chords[to.chord].chord.divisions[tk]);
+            let (df, dt) = (
+                &self.chords[from.chord].chord.divisions[fk],
+                &self.chords[to.chord].chord.divisions[tk],
+            );
             let id = hash_words(&[df.id.0, dt.id.0, salt]);
             if to_unit(hash_words(&[self.fabric.0, id, 0x9E])) >= PRESENT[usize::from(rung)] {
                 continue;
             }
             // Its own divisions are made once the grid says how wide the faces beside it are.
-            let chord = Chord { id, a: df.pos, b: dt.pos, len: df.pos.dist(dt.pos), divisions: Vec::new() };
+            let chord = Chord {
+                id,
+                a: df.pos,
+                b: dt.pos,
+                len: df.pos.dist(dt.pos),
+                divisions: Vec::new(),
+            };
             out.push(Street {
                 chord,
                 from: (from.chord, fk),
@@ -446,7 +570,11 @@ impl Build<'_> {
                 i8::try_from(rung).unwrap() - 1,
                 reach_m[k].max(1.0),
             );
-            chord.divisions.retain(|d| st.crossings.iter().all(|c| (c.0 - d.t).abs() * len > 0.3 * d.spacing_m));
+            chord.divisions.retain(|d| {
+                st.crossings
+                    .iter()
+                    .all(|c| (c.0 - d.t).abs() * len > 0.3 * d.spacing_m)
+            });
             self.chords.push(ChordObj {
                 chord,
                 used: BTreeSet::new(),
@@ -468,14 +596,25 @@ impl Build<'_> {
             // The two end nodes are the divisions this street started from; recover
             // them from the first and last crossing-or-division by parameter.
             let mut stops: Vec<(f64, NodeId, V2)> = obj.crossings.clone();
-            stops.extend(obj.used.iter().map(|&k| (ch.divisions[k].t, ch.divisions[k].id, ch.divisions[k].pos)));
+            stops.extend(
+                obj.used
+                    .iter()
+                    .map(|&k| (ch.divisions[k].t, ch.divisions[k].id, ch.divisions[k].pos)),
+            );
             stops.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap());
             let mut chain = vec![(0.0, obj.start, ch.a)];
             chain.extend(stops);
             chain.push((1.0, obj.end, ch.b));
             for w in chain.windows(2) {
                 if w[0].2.dist(w[1].2) > 1.0 {
-                    out.push(QEdge { a: w[0].1, a_pos: w[0].2, b: w[1].1, b_pos: w[1].2, slot: ch.id, level: obj.rung });
+                    out.push(QEdge {
+                        a: w[0].1,
+                        a_pos: w[0].2,
+                        b: w[1].1,
+                        b_pos: w[1].2,
+                        slot: ch.id,
+                        level: obj.rung,
+                    });
                 }
             }
         }
@@ -497,7 +636,13 @@ fn reaches(grid: &Grid, count: usize, columns: bool) -> Vec<f64> {
         let gap = |a: usize, b: usize| -> f64 {
             let (lo, hi) = if columns { (0, n_rows) } else { (0, n_cols) };
             let samples: Vec<f64> = (lo..hi)
-                .map(|t| if columns { grid.pos[a][t].dist(grid.pos[b][t]) } else { grid.pos[t][a].dist(grid.pos[t][b]) })
+                .map(|t| {
+                    if columns {
+                        grid.pos[a][t].dist(grid.pos[b][t])
+                    } else {
+                        grid.pos[t][a].dist(grid.pos[t][b])
+                    }
+                })
                 .collect();
             samples.iter().sum::<f64>() / samples.len().max(1) as f64
         };
@@ -527,7 +672,12 @@ fn grid(face: &Face, a_lines: &mut [Street], b_lines: &mut [Street]) -> Option<G
     let mut along_col = vec![vec![0.0; nb + 2]; na + 2];
     let mut along_row = vec![vec![0.0; nb + 2]; na + 2];
     let [bl, br, tr, tl] = face.corners;
-    for (c, r, p, k) in [(0, 0, bl, 0), (na + 1, 0, br, 1), (na + 1, nb + 1, tr, 2), (0, nb + 1, tl, 3)] {
+    for (c, r, p, k) in [
+        (0, 0, bl, 0),
+        (na + 1, 0, br, 1),
+        (na + 1, nb + 1, tr, 2),
+        (0, nb + 1, tl, 3),
+    ] {
         pos[c][r] = p;
         id[c][r] = face.ids[k];
         along_row[c][r] = if c == 0 { 0.0 } else { 1.0 };
@@ -535,7 +685,10 @@ fn grid(face: &Face, a_lines: &mut [Street], b_lines: &mut [Street]) -> Option<G
     }
     for (k, a) in a_lines.iter().enumerate() {
         let c = k + 1;
-        for (r, p, i, row_s) in [(0, a.chord.a, a.from_id, a.s_from), (nb + 1, a.chord.b, a.to_id, a.s_to)] {
+        for (r, p, i, row_s) in [
+            (0, a.chord.a, a.from_id, a.s_from),
+            (nb + 1, a.chord.b, a.to_id, a.s_to),
+        ] {
             pos[c][r] = p;
             id[c][r] = i;
             along_row[c][r] = row_s;
@@ -544,7 +697,10 @@ fn grid(face: &Face, a_lines: &mut [Street], b_lines: &mut [Street]) -> Option<G
     }
     for (k, b) in b_lines.iter().enumerate() {
         let r = k + 1;
-        for (c, p, i, col_s) in [(0, b.chord.a, b.from_id, b.s_from), (na + 1, b.chord.b, b.to_id, b.s_to)] {
+        for (c, p, i, col_s) in [
+            (0, b.chord.a, b.from_id, b.s_from),
+            (na + 1, b.chord.b, b.to_id, b.s_to),
+        ] {
             pos[c][r] = p;
             id[c][r] = i;
             along_col[c][r] = col_s;
@@ -564,11 +720,21 @@ fn grid(face: &Face, a_lines: &mut [Street], b_lines: &mut [Street]) -> Option<G
             b_lines[kb].crossings.push((tb, node, point));
         }
     }
-    Some(Grid { pos, id, along_col, along_row })
+    Some(Grid {
+        pos,
+        id,
+        along_col,
+        along_row,
+    })
 }
 
 impl Boundary {
     fn of(side: &FaceSide) -> Boundary {
-        Boundary { chord: side.chord, t0: side.t0, t1: side.t1, forward: side.forward }
+        Boundary {
+            chord: side.chord,
+            t0: side.t0,
+            t1: side.t1,
+            forward: side.forward,
+        }
     }
 }

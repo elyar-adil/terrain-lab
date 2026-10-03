@@ -32,7 +32,10 @@ pub(super) fn extract_faces(pts: &[V], edges: &[(usize, usize, ModernRoadClass)]
             continue;
         }
         let key = (a.min(b), a.max(b));
-        if let Some(e) = unique.iter_mut().find(|e| (e.0.min(e.1), e.0.max(e.1)) == key) {
+        if let Some(e) = unique
+            .iter_mut()
+            .find(|e| (e.0.min(e.1), e.0.max(e.1)) == key)
+        {
             if (c as i32) > (e.2 as i32) {
                 e.2 = c;
             }
@@ -50,7 +53,10 @@ pub(super) fn extract_faces(pts: &[V], edges: &[(usize, usize, ModernRoadClass)]
             degree[e.1] += 1;
         }
         let before = unique.len();
-        for e in unique.iter().filter(|e| degree[e.0] <= 1 || degree[e.1] <= 1) {
+        for e in unique
+            .iter()
+            .filter(|e| degree[e.0] <= 1 || degree[e.1] <= 1)
+        {
             spurs.push((pts[e.0], pts[e.1], e.2));
         }
         unique.retain(|e| degree[e.0] > 1 && degree[e.1] > 1);
@@ -60,8 +66,20 @@ pub(super) fn extract_faces(pts: &[V], edges: &[(usize, usize, ModernRoadClass)]
     }
     let half_count = unique.len() * 2;
     // half-edge h: even = a->b, odd = b->a
-    let origin = |h: usize| if h % 2 == 0 { unique[h / 2].0 } else { unique[h / 2].1 };
-    let target = |h: usize| if h % 2 == 0 { unique[h / 2].1 } else { unique[h / 2].0 };
+    let origin = |h: usize| {
+        if h % 2 == 0 {
+            unique[h / 2].0
+        } else {
+            unique[h / 2].1
+        }
+    };
+    let target = |h: usize| {
+        if h % 2 == 0 {
+            unique[h / 2].1
+        } else {
+            unique[h / 2].0
+        }
+    };
     let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); pts.len()];
     for h in 0..half_count {
         outgoing[origin(h)].push(h);
@@ -118,7 +136,12 @@ pub(super) fn extract_faces(pts: &[V], edges: &[(usize, usize, ModernRoadClass)]
             })
             .collect();
         let open = vec![false; ring.len()];
-        faces.push(Face { ring, classes, edge_len, open });
+        faces.push(Face {
+            ring,
+            classes,
+            edge_len,
+            open,
+        });
     }
     Extraction { faces, spurs }
 }
@@ -153,7 +176,10 @@ fn triangulate(ring: &[V]) -> Vec<[usize; 3]> {
             if (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0) <= 1.0e-4 {
                 continue;
             }
-            if idx.iter().any(|&o| o != ia && o != ib && o != ic && point_in_tri(ring[o], a, b, c)) {
+            if idx
+                .iter()
+                .any(|&o| o != ia && o != ib && o != ic && point_in_tri(ring[o], a, b, c))
+            {
                 continue;
             }
             pick = Some(k);
@@ -176,7 +202,8 @@ fn triangulate(ring: &[V]) -> Vec<[usize; 3]> {
 pub(super) fn split_concave(face: Face) -> Vec<Face> {
     let n = face.ring.len();
     let ring = &face.ring;
-    let convexish = (0..n).all(|i| turn(ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n]) > -REFLEX_TOL);
+    let convexish =
+        (0..n).all(|i| turn(ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n]) > -REFLEX_TOL);
     if convexish || n < 4 {
         return vec![face];
     }
@@ -187,7 +214,8 @@ pub(super) fn split_concave(face: Face) -> Vec<Face> {
                 let (p, q) = (&polys[pi], &polys[qi]);
                 for x in 0..p.len() {
                     let (u, v) = (p[x], p[(x + 1) % p.len()]);
-                    let Some(y) = (0..q.len()).find(|&y| q[y] == v && q[(y + 1) % q.len()] == u) else {
+                    let Some(y) = (0..q.len()).find(|&y| q[y] == v && q[(y + 1) % q.len()] == u)
+                    else {
                         continue;
                     };
                     // p rotated to start at v and end at u; q rotated to start at u and end at v.
@@ -197,8 +225,11 @@ pub(super) fn split_concave(face: Face) -> Vec<Face> {
                     merged.extend_from_slice(&qrot[1..qrot.len() - 1]);
                     let m = merged.len();
                     let ok = (0..m).all(|k| {
-                        turn(ring[merged[(k + m - 1) % m]], ring[merged[k]], ring[merged[(k + 1) % m]])
-                            > -REFLEX_TOL
+                        turn(
+                            ring[merged[(k + m - 1) % m]],
+                            ring[merged[k]],
+                            ring[merged[(k + 1) % m]],
+                        ) > -REFLEX_TOL
                     });
                     if ok {
                         polys[pi] = merged;
@@ -226,7 +257,12 @@ pub(super) fn split_concave(face: Face) -> Vec<Face> {
                 let (pa, pb) = (ring[a], ring[b]);
                 edge_len.push((pb.0 - pa.0).hypot(pb.1 - pa.1));
             }
-            Face { ring: pts, classes, edge_len, open }
+            Face {
+                ring: pts,
+                classes,
+                edge_len,
+                open,
+            }
         })
         .collect()
 }

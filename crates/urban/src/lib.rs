@@ -6,20 +6,20 @@ pub mod modern;
 
 pub use legacy::{BarcelonaGenerator, ManhattanGenerator, ParisianGenerator, UrbanGenerator};
 pub use model::{
-    ActionCandidate, ActionKind, ApproachSpec, ArrowStyle, BuildingFacade, BuildingMass, CityFrameInfo,
-    CityGraph, CityJunction, CitySpec, CityStyle, Compound, CropKind, DrivingSide, Field, GrowthState, HdLane, HdRoad,
-    JunctionKind, JunctionPhase, JurisdictionId, LaneMarking, LaneUse, MarkingKind,
-    ModelWeights, ModernBuilding, ModernChinaSpec, ModernCity, ModernRoadClass, MorphologyPrior,
-    MorphologyStats, Movement, Parcel, ParcelUse, Point, RoadConnector, RoadCrossSection, RoofStyle,
-    SdNode, SdRoad, SignalHead, SignalStyle, SplitMix64, StreetClass, StreetSegment, TreeInstance,
-    TreeSpecies, TrafficRules, Tributary, TurnArrow, UrbanBlock, UrbanModel, cross_section, measure,
-    sample_action, synthesize_junction,
+    ActionCandidate, ActionKind, ApproachSpec, ArrowStyle, BuildingFacade, BuildingMass,
+    CityFrameInfo, CityGraph, CityJunction, CitySpec, CityStyle, Compound, CropKind, DrivingSide,
+    Field, GrowthState, HdLane, HdRoad, JunctionKind, JunctionPhase, JurisdictionId, LaneMarking,
+    LaneUse, MarkingKind, ModelWeights, ModernBuilding, ModernChinaSpec, ModernCity,
+    ModernRoadClass, MorphologyPrior, MorphologyStats, Movement, Parcel, ParcelUse, Point,
+    RoadConnector, RoadCrossSection, RoofStyle, SdNode, SdRoad, SignalHead, SignalStyle,
+    SplitMix64, StreetClass, StreetSegment, TrafficRules, TreeInstance, TreeSpecies, Tributary,
+    TurnArrow, UrbanBlock, UrbanModel, cross_section, measure, sample_action, synthesize_junction,
 };
 pub use modern::{
     CityOptions, ExternalFields, ExternalNode, ExternalRoad, ExternalStreets,
-    generate_modern_chinese_city_from_streets, REGIONAL_ROAD_HANDOVER, RegionalApproach, generate_modern_chinese_city,
-    generate_modern_chinese_city_with_approaches, generate_modern_chinese_city_with_options,
-    hash_u32, junction_trim_m,
+    REGIONAL_ROAD_HANDOVER, RegionalApproach, generate_modern_chinese_city,
+    generate_modern_chinese_city_from_streets, generate_modern_chinese_city_with_approaches,
+    generate_modern_chinese_city_with_options, hash_u32, junction_trim_m,
 };
 
 /// Public style dispatcher. Modern Chinese generation stays in `modern`,
@@ -231,7 +231,10 @@ mod tests {
     #[test]
     fn a_regional_road_enters_town_as_the_same_road() {
         let spec = ModernChinaSpec {
-            centre: Point { x_km: 10.0, y_km: 10.0 },
+            centre: Point {
+                x_km: 10.0,
+                y_km: 10.0,
+            },
             radius_km: 1.2,
             seed: 7,
             ..ModernChinaSpec::default()
@@ -258,7 +261,8 @@ mod tests {
         for approach in &approaches {
             // Where the road crosses the outer ring, there must be a street node
             // within a junction's width, and an arterial leaving it.
-            let r = |p: Point| (p.x_km - spec.centre.x_km).hypot(p.y_km - spec.centre.y_km) * 1000.0;
+            let r =
+                |p: Point| (p.x_km - spec.centre.x_km).hypot(p.y_km - spec.centre.y_km) * 1000.0;
             let entry = approach
                 .path_km
                 .windows(2)
@@ -273,17 +277,27 @@ mod tests {
                 })
                 .expect("road crosses the ring");
             // An arterial street must leave the ring right at the entry and run inward.
-            let to_entry = |n: &SdNode| (n.point.x_km - entry.x_km).hypot(n.point.y_km - entry.y_km) * 1000.0;
-            let from_centre = |n: &SdNode| (n.point.x_km - spec.centre.x_km).hypot(n.point.y_km - spec.centre.y_km) * 1000.0;
+            let to_entry =
+                |n: &SdNode| (n.point.x_km - entry.x_km).hypot(n.point.y_km - entry.y_km) * 1000.0;
+            let from_centre = |n: &SdNode| {
+                (n.point.x_km - spec.centre.x_km).hypot(n.point.y_km - spec.centre.y_km) * 1000.0
+            };
             let found = city.sd_roads.iter().any(|r| {
                 if r.class != ModernRoadClass::Arterial {
                     return false;
                 }
                 let (a, b) = (&city.nodes[r.from as usize], &city.nodes[r.to as usize]);
-                let (outer, inner) = if from_centre(a) > from_centre(b) { (a, b) } else { (b, a) };
+                let (outer, inner) = if from_centre(a) > from_centre(b) {
+                    (a, b)
+                } else {
+                    (b, a)
+                };
                 to_entry(outer) < 40.0 && from_centre(inner) < from_centre(outer) - 20.0
             });
-            assert!(found, "no arterial street leaves the ring at the regional road's entry");
+            assert!(
+                found,
+                "no arterial street leaves the ring at the regional road's entry"
+            );
         }
         // One connected network: every road reaches every other.
         let mut parent: Vec<usize> = (0..city.nodes.len()).collect();
@@ -295,17 +309,27 @@ mod tests {
             x
         }
         for r in &city.sd_roads {
-            let (a, b) = (root(&mut parent, r.from as usize), root(&mut parent, r.to as usize));
+            let (a, b) = (
+                root(&mut parent, r.from as usize),
+                root(&mut parent, r.to as usize),
+            );
             parent[a] = b;
         }
         let first = root(&mut parent, city.sd_roads[0].from as usize);
-        assert!(city.sd_roads.iter().all(|r| root(&mut parent, r.to as usize) == first));
+        assert!(
+            city.sd_roads
+                .iter()
+                .all(|r| root(&mut parent, r.to as usize) == first)
+        );
     }
 
     #[test]
     fn an_organic_town_is_not_a_disc() {
         let spec = ModernChinaSpec {
-            centre: Point { x_km: 10.0, y_km: 10.0 },
+            centre: Point {
+                x_km: 10.0,
+                y_km: 10.0,
+            },
             radius_km: 1.6,
             seed: 31,
             ..ModernChinaSpec::default()
@@ -314,18 +338,28 @@ mod tests {
         let organic = generate_modern_chinese_city_with_options(
             spec,
             &[],
-            CityOptions { organic_footprint: true },
+            CityOptions {
+                organic_footprint: true,
+            },
         );
         assert!(!organic.buildings.is_empty());
-        assert!(organic.buildings.len() < disc.buildings.len(), "the built-up area must be smaller than the disc");
+        assert!(
+            organic.buildings.len() < disc.buildings.len(),
+            "the built-up area must be smaller than the disc"
+        );
         // Reach of the buildings in twelve compass sectors: a disc is the same
         // in all of them, a real town is not.
         let reach = |city: &ModernCity| -> Vec<f32> {
             let mut sectors = vec![0.0_f32; 12];
             for b in &city.buildings {
                 let c = &b.footprint[0];
-                let (dx, dy) = ((c.x_km - spec.centre.x_km) * 1000.0, (c.y_km - spec.centre.y_km) * 1000.0);
-                let sector = ((dy.atan2(dx) + std::f32::consts::PI) / std::f32::consts::TAU * 12.0) as usize % 12;
+                let (dx, dy) = (
+                    (c.x_km - spec.centre.x_km) * 1000.0,
+                    (c.y_km - spec.centre.y_km) * 1000.0,
+                );
+                let sector = ((dy.atan2(dx) + std::f32::consts::PI) / std::f32::consts::TAU * 12.0)
+                    as usize
+                    % 12;
                 sectors[sector] = sectors[sector].max(dx.hypot(dy));
             }
             sectors
@@ -334,7 +368,10 @@ mod tests {
             let mean = v.iter().sum::<f32>() / v.len() as f32;
             (v.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / v.len() as f32).sqrt() / mean
         };
-        assert!(spread(&reach(&organic)) > spread(&reach(&disc)) * 1.5, "outline is as round as a disc");
+        assert!(
+            spread(&reach(&organic)) > spread(&reach(&disc)) * 1.5,
+            "outline is as round as a disc"
+        );
         // No ring road bounds it.
         assert!(
             organic.nodes.iter().all(|n| n.role != "regional-gateway"),
@@ -348,7 +385,10 @@ mod tests {
     #[test]
     fn streets_run_through_bends_without_a_kink() {
         let city = generate_modern_chinese_city(ModernChinaSpec {
-            centre: Point { x_km: 5.0, y_km: 5.0 },
+            centre: Point {
+                x_km: 5.0,
+                y_km: 5.0,
+            },
             radius_km: 1.0,
             seed: 12,
             ..ModernChinaSpec::default()
@@ -373,10 +413,16 @@ mod tests {
                 let sd = &city.sd_roads[road.id as usize];
                 let c = &road.centreline;
                 (c.len() >= 2).then(|| {
-                    if sd.from == node.id { heading(c[0], c[1]) } else { heading(c[c.len() - 1], c[c.len() - 2]) }
+                    if sd.from == node.id {
+                        heading(c[0], c[1])
+                    } else {
+                        heading(c[c.len() - 1], c[c.len() - 2])
+                    }
                 })
             };
-            let (Some(h0), Some(h1)) = (leaving(at[0]), leaving(at[1])) else { continue };
+            let (Some(h0), Some(h1)) = (leaving(at[0]), leaving(at[1])) else {
+                continue;
+            };
             // A straight-through road has the two leaving directions opposite.
             let mut kink = (h0 - h1).abs() % std::f32::consts::TAU;
             if kink > std::f32::consts::PI {
@@ -390,20 +436,39 @@ mod tests {
             checked += 1;
             worst = worst.max(bend);
         }
-        assert!(checked > 10, "the fixture has too few bends to test ({checked})");
+        assert!(
+            checked > 10,
+            "the fixture has too few bends to test ({checked})"
+        );
         // A smooth curve still turns a few degrees across one four-metre chord
         // (curvature times chord), and that is what is measured here; an
         // unsmoothed bend turns 10 to 30 degrees at once.
-        assert!(worst < 7.0, "a street kinks {worst:.1} degrees where it should run straight on");
+        assert!(
+            worst < 7.0,
+            "a street kinks {worst:.1} degrees where it should run straight on"
+        );
     }
 
     /// A square street grid at `spacing_m`, `n` streets each way, centred on the
     /// origin, as an external network would supply it.
     fn grid_streets(n: i32, spacing_m: f32, river: Vec<Point>) -> (ExternalStreets, f32) {
-        grid_streets_at(n, spacing_m, river, Point { x_km: 0.0, y_km: 0.0 })
+        grid_streets_at(
+            n,
+            spacing_m,
+            river,
+            Point {
+                x_km: 0.0,
+                y_km: 0.0,
+            },
+        )
     }
 
-    fn grid_streets_at(n: i32, spacing_m: f32, river: Vec<Point>, centre: Point) -> (ExternalStreets, f32) {
+    fn grid_streets_at(
+        n: i32,
+        spacing_m: f32,
+        river: Vec<Point>,
+        centre: Point,
+    ) -> (ExternalStreets, f32) {
         let half = (n - 1) as f32 * spacing_m * 0.5;
         let p = |i: i32, j: i32| Point {
             x_km: centre.x_km + (i as f32 * spacing_m - half) / 1_000.0,
@@ -414,11 +479,18 @@ mod tests {
         let mut roads = Vec::new();
         for j in 0..n {
             for i in 0..n {
-                nodes.push(ExternalNode { id: id(i, j), point: p(i, j) });
+                nodes.push(ExternalNode {
+                    id: id(i, j),
+                    point: p(i, j),
+                });
                 for (di, dj) in [(1, 0), (0, 1)] {
                     let (i2, j2) = (i + di, j + dj);
                     if i2 < n && j2 < n {
-                        let class = if (i + j) % 4 == 0 { ModernRoadClass::Arterial } else { ModernRoadClass::Collector };
+                        let class = if (i + j) % 4 == 0 {
+                            ModernRoadClass::Arterial
+                        } else {
+                            ModernRoadClass::Collector
+                        };
                         roads.push(ExternalRoad {
                             from: id(i, j),
                             to: id(i2, j2),
@@ -430,12 +502,23 @@ mod tests {
                 }
             }
         }
-        (ExternalStreets { nodes, roads, river, tributaries: Vec::new() }, half)
+        (
+            ExternalStreets {
+                nodes,
+                roads,
+                river,
+                tributaries: Vec::new(),
+            },
+            half,
+        )
     }
 
     #[test]
     fn a_street_network_from_outside_gets_blocks_lots_and_buildings() {
-        let centre = Point { x_km: 10.0, y_km: 20.0 };
+        let centre = Point {
+            x_km: 10.0,
+            y_km: 20.0,
+        };
         let (streets, half) = grid_streets_at(9, 140.0, Vec::new(), centre);
         let spec = ModernChinaSpec {
             centre,
@@ -443,29 +526,52 @@ mod tests {
             rotation_radians: 0.0,
             ..ModernChinaSpec::default()
         };
-        let fields = ExternalFields { urbanness: Box::new(|_| 1.0), intensity: Box::new(|_| 0.7) };
+        let fields = ExternalFields {
+            urbanness: Box::new(|_| 1.0),
+            intensity: Box::new(|_| 0.7),
+        };
         let city = generate_modern_chinese_city_from_streets(spec, streets, fields);
         assert_eq!(city.sd_roads.len(), 2 * 9 * 8);
         assert_eq!(city.hd_roads.len(), city.sd_roads.len());
-        assert!(city.hd_roads.iter().all(|r| !r.lanes.is_empty()), "every road has lanes");
+        assert!(
+            city.hd_roads.iter().all(|r| !r.lanes.is_empty()),
+            "every road has lanes"
+        );
         assert!(city.blocks.len() >= 40, "{} blocks", city.blocks.len());
         assert!(city.parcels.len() >= 100, "{} parcels", city.parcels.len());
-        assert!(city.buildings.len() >= 80, "{} buildings", city.buildings.len());
+        assert!(
+            city.buildings.len() >= 80,
+            "{} buildings",
+            city.buildings.len()
+        );
         // Buildings stay off the carriageway: each footprint corner is clear of every street centreline.
         let lines: Vec<(Point, Point, f32)> = city
             .hd_roads
             .iter()
-            .flat_map(|r| r.centreline.windows(2).map(move |w| (w[0], w[1], r.width_metres)))
+            .flat_map(|r| {
+                r.centreline
+                    .windows(2)
+                    .map(move |w| (w[0], w[1], r.width_metres))
+            })
             .collect();
         for b in city.buildings.iter().take(200) {
             for corner in &b.footprint {
                 for (a, c, width) in &lines {
-                    let (ax, ay, cx, cy) = (a.x_km * 1000.0, a.y_km * 1000.0, c.x_km * 1000.0, c.y_km * 1000.0);
+                    let (ax, ay, cx, cy) = (
+                        a.x_km * 1000.0,
+                        a.y_km * 1000.0,
+                        c.x_km * 1000.0,
+                        c.y_km * 1000.0,
+                    );
                     let (px, py) = (corner.x_km * 1000.0, corner.y_km * 1000.0);
                     let (dx, dy) = (cx - ax, cy - ay);
-                    let t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy).max(1e-6)).clamp(0.0, 1.0);
+                    let t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy).max(1e-6))
+                        .clamp(0.0, 1.0);
                     let d = (px - (ax + dx * t)).hypot(py - (ay + dy * t));
-                    assert!(d > width * 0.5, "a building corner is {d:.1} m from a street {width} m wide");
+                    assert!(
+                        d > width * 0.5,
+                        "a building corner is {d:.1} m from a street {width} m wide"
+                    );
                 }
             }
         }
@@ -475,7 +581,10 @@ mod tests {
     fn a_town_the_fields_say_is_empty_gets_no_buildings() {
         let (streets, half) = grid_streets(7, 140.0, Vec::new());
         let spec = ModernChinaSpec {
-            centre: Point { x_km: 0.0, y_km: 0.0 },
+            centre: Point {
+                x_km: 0.0,
+                y_km: 0.0,
+            },
             radius_km: half / 1_000.0 * 1.5,
             rotation_radians: 0.0,
             ..ModernChinaSpec::default()
@@ -487,8 +596,16 @@ mod tests {
         };
         let city = generate_modern_chinese_city_from_streets(spec, streets, fields);
         assert!(!city.buildings.is_empty());
-        let west = city.buildings.iter().filter(|b| b.footprint.iter().all(|c| c.x_km < -0.02)).count();
-        let east = city.buildings.iter().filter(|b| b.footprint.iter().all(|c| c.x_km > 0.0)).count();
+        let west = city
+            .buildings
+            .iter()
+            .filter(|b| b.footprint.iter().all(|c| c.x_km < -0.02))
+            .count();
+        let east = city
+            .buildings
+            .iter()
+            .filter(|b| b.footprint.iter().all(|c| c.x_km > 0.0))
+            .count();
         assert_eq!(west, 0, "{west} buildings stand in the fields");
         assert!(east > 20, "{east} buildings in the town");
     }
@@ -499,7 +616,10 @@ mod tests {
         let river: Vec<Point> = (0..=20)
             .map(|k| {
                 let y = -0.4 + 0.04 * k as f32;
-                Point { x_km: 0.02 + 0.03 * (y * 6.0).sin(), y_km: y }
+                Point {
+                    x_km: 0.02 + 0.03 * (y * 6.0).sin(),
+                    y_km: y,
+                }
             })
             .collect();
         let (mut streets, half) = grid_streets(9, 140.0, river.clone());
@@ -510,13 +630,19 @@ mod tests {
             !(a.x_km == b.x_km && (a.x_km - 0.02).abs() < 0.05)
         });
         let spec = ModernChinaSpec {
-            centre: Point { x_km: 0.0, y_km: 0.0 },
+            centre: Point {
+                x_km: 0.0,
+                y_km: 0.0,
+            },
             radius_km: half / 1_000.0 * 1.5,
             rotation_radians: 0.0,
             river_width_metres: 50.0,
             ..ModernChinaSpec::default()
         };
-        let fields = ExternalFields { urbanness: Box::new(|_| 1.0), intensity: Box::new(|_| 0.6) };
+        let fields = ExternalFields {
+            urbanness: Box::new(|_| 1.0),
+            intensity: Box::new(|_| 0.6),
+        };
         let city = generate_modern_chinese_city_from_streets(spec, streets, fields);
         assert_eq!(city.river.as_ref().map(Vec::len), Some(river.len()));
         // No building stands in the water.
@@ -528,10 +654,16 @@ mod tests {
                 river
                     .windows(2)
                     .map(|w| {
-                        let (ax, ay, bx, by) = (w[0].x_km * 1000.0, w[0].y_km * 1000.0, w[1].x_km * 1000.0, w[1].y_km * 1000.0);
+                        let (ax, ay, bx, by) = (
+                            w[0].x_km * 1000.0,
+                            w[0].y_km * 1000.0,
+                            w[1].x_km * 1000.0,
+                            w[1].y_km * 1000.0,
+                        );
                         let (px, py) = (c.x_km * 1000.0, c.y_km * 1000.0);
                         let (dx, dy) = (bx - ax, by - ay);
-                        let t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+                        let t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy))
+                            .clamp(0.0, 1.0);
                         (px - (ax + dx * t)).hypot(py - (ay + dy * t))
                     })
                     .fold(f32::MAX, f32::min)

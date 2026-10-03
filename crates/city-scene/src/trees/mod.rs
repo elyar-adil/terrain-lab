@@ -47,10 +47,10 @@
 //! * [`shrub`] — the clipped shrub and grass-tuft prototypes.
 
 pub(crate) mod cards;
+pub mod far;
 /// Publicly nameable but entirely `pub(crate)` inside: a documentation anchor,
 /// so [`crate::species`] can point at the canopy records by path.
 pub mod forms;
-pub mod far;
 mod grow;
 mod plant;
 mod shrub;
@@ -78,7 +78,11 @@ pub const TUFT_BUDGET: usize = 6000;
 /// How many prototypes a species is built as. One for a park tree that appears
 /// forty times, two for an avenue tree that appears four hundred.
 pub(crate) fn two_variant_count(species: &Species) -> usize {
-    if TWO_VARIANT.contains(&species.key) { 2 } else { 1 }
+    if TWO_VARIANT.contains(&species.key) {
+        2
+    } else {
+        1
+    }
 }
 
 /// The eight species a Chinese avenue is actually made of, and therefore the
@@ -186,9 +190,11 @@ fn real_dimensions(species: &Species, variant: u16, rng: &mut Rng) -> (f32, f32,
     };
     let crown = lerp_between(species.crown_m, crown_fraction, rng);
     // A short tree of a big species carries a proportionally thicker trunk.
-    let stocky = 1.0 + 0.30 * (1.0 - (height - species.height_m.0)
-        / (species.height_m.1 - species.height_m.0)
-        .max(0.1));
+    let stocky = 1.0
+        + 0.30
+            * (1.0
+                - (height - species.height_m.0)
+                    / (species.height_m.1 - species.height_m.0).max(0.1));
     let trunk = lerp_between(species.trunk_m, (0.84, 1.00), rng) * stocky;
     (height, crown, trunk)
 }

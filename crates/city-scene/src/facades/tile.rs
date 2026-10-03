@@ -8,14 +8,16 @@
 //! `tile_height_m` is four storeys, so a renderer that repeats the texture by
 //! its physical size reproduces the bay rhythm and the floor lines exactly.
 
-use crate::facades::designs::{design, Cladding, DESIGNS, FacadeDesign, tile_height_m};
+use crate::facades::designs::{Cladding, DESIGNS, FacadeDesign, design, tile_height_m};
 use crate::textures::{BakedTexture, hash};
 
 /// The 24 facade tiles, one texture each so a renderer can bind one and never
 /// branch.  The material key is `facade/NN` and it is the only contract between
 /// this module and the renderer.
 pub fn facade_textures(size: usize) -> Vec<BakedTexture> {
-    (0..DESIGNS.len()).map(|index| facade_tile(index, size)).collect()
+    (0..DESIGNS.len())
+        .map(|index| facade_tile(index, size))
+        .collect()
 }
 
 /// Encode a **linear** reflectance as an sRGB byte, which is what the renderer
@@ -108,7 +110,12 @@ pub(crate) fn pier_half_at(design: &FacadeDesign, k: i32, bay_w: f32) -> f32 {
 /// A window has to fit in the clear wall.  This is not a detail: an opening that
 /// runs under a pier is an opening that has been cut by a column, and it is the
 /// single most obvious way a procedural facade gives itself away at fifty metres.
-pub(crate) fn bay_clearance(design: &FacadeDesign, bays: i32, bay: i32, bay_w: f32) -> (f32, f32, f32) {
+pub(crate) fn bay_clearance(
+    design: &FacadeDesign,
+    bays: i32,
+    bay: i32,
+    bay_w: f32,
+) -> (f32, f32, f32) {
     let left = pier_half_at(design, bay, bay_w);
     // The boundary at the far side of the last bay is the *next tile's* first
     // boundary, so the pattern stays exactly periodic over the tile repeat.
@@ -118,7 +125,16 @@ pub(crate) fn bay_clearance(design: &FacadeDesign, bays: i32, bay: i32, bay_w: f
     (left, right, clear)
 }
 
-fn opening_for(design: &FacadeDesign, key: u32, bay: i32, storey: i32, left: f32, right: f32, bay_w: f32, clear: f32) -> Opening {
+fn opening_for(
+    design: &FacadeDesign,
+    key: u32,
+    bay: i32,
+    storey: i32,
+    left: f32,
+    right: f32,
+    bay_w: f32,
+    clear: f32,
+) -> Opening {
     let a = hash(key.wrapping_add(11), bay, storey);
     let b = hash(key.wrapping_add(29), bay, storey);
     let c = hash(key.wrapping_add(47), bay, storey);
@@ -138,7 +154,11 @@ fn opening_for(design: &FacadeDesign, key: u32, bay: i32, storey: i32, left: f32
         y1: y0 + design.open_h,
         blind: c < design.blind,
         tone: 0.70 + d * 0.70,
-        curtain: if e < 0.34 { 0.35 + hash(key, storey, bay) * 0.55 } else { 0.0 },
+        curtain: if e < 0.34 {
+            0.35 + hash(key, storey, bay) * 0.55
+        } else {
+            0.0
+        },
         curtain_hue: hash(key.wrapping_add(131), bay, storey),
         grille: hash(key.wrapping_add(151), bay, storey) < design.grille,
         wash: if hash(key.wrapping_add(173), bay, storey) < 0.45 {
@@ -169,13 +189,24 @@ fn facade_tile(index: usize, size: usize) -> BakedTexture {
             // `um` runs along the wall in metres, `m` up it in metres.
             let um = (x as f32 + 0.5) / px_per_m;
             let m = (1.0 - (y as f32 + 0.5) / n as f32) * tile_h;
-            let storey = ((m / design.storey_m).floor() as i32).clamp(0, crate::facades::STOREYS_PER_TILE as i32 - 1);
+            let storey = ((m / design.storey_m).floor() as i32)
+                .clamp(0, crate::facades::STOREYS_PER_TILE as i32 - 1);
             let ml = m - storey as f32 * design.storey_m;
             let bays_i = design.bays.max(1) as i32;
             let bay = ((um / bay_w).floor() as i32).clamp(0, bays_i - 1);
             let bx = um - bay as f32 * bay_w;
             let rgb = if design.cladding == Cladding::CurtainWall {
-                curtain_sample(design, key, um, ml, bay, bx, bay_w, storey, (x as i32, y as i32))
+                curtain_sample(
+                    design,
+                    key,
+                    um,
+                    ml,
+                    bay,
+                    bx,
+                    bay_w,
+                    storey,
+                    (x as i32, y as i32),
+                )
             } else {
                 let (left, right, clear) = bay_clearance(design, bays_i, bay, bay_w);
                 masonry_sample(
@@ -243,7 +274,10 @@ fn masonry_sample(
     let x1 = opening.cx + opening.w * 0.5;
 
     // --- 1. the opening, from the inside out -------------------------------
-    let in_frame = bx > x0 - frame_w && bx < x1 + frame_w && ml > opening.y0 - frame_w && ml < opening.y1 + frame_w;
+    let in_frame = bx > x0 - frame_w
+        && bx < x1 + frame_w
+        && ml > opening.y0 - frame_w
+        && ml < opening.y1 + frame_w;
     if in_frame {
         let in_glass = bx > x0 && bx < x1 && ml > opening.y0 && ml < opening.y1;
         if in_glass {
@@ -294,11 +328,7 @@ fn masonry_sample(
                     let fold = ((v * 11.0).fract() - 0.5).abs() * 0.10;
                     let rail = if v < 0.045 { 0.55 } else { 0.0 };
                     let linen = 0.52 + 0.16 * opening.curtain_hue - fold + rail;
-                    return [
-                        linen * 1.03,
-                        linen,
-                        linen * 0.94,
-                    ];
+                    return [linen * 1.03, linen, linen * 0.94];
                 }
             }
             // A faint interior falloff, the horizontal banding a reflection off a
@@ -306,7 +336,11 @@ fn masonry_sample(
             // a sash window is two lights, and the light nearer the room's
             // ceiling shows more of the ceiling.
             let interior = 0.86 + 0.22 * (1.0 - v);
-            let band = if ((v * 6.0).fract() - 0.5).abs() < 0.10 { 1.10 } else { 1.0 };
+            let band = if ((v * 6.0).fract() - 0.5).abs() < 0.10 {
+                1.10
+            } else {
+                1.0
+            };
             let cross = 0.94 + 0.12 * (1.0 - u);
             if opening.grille {
                 // 防盗窗: a pale steel grille over the opening.  Two louvre
@@ -368,7 +402,10 @@ fn masonry_sample(
         // is very slightly lighter than the narrow one, which is what makes the
         // 2:1 rhythm read.
         let wide = (left > design.pier_w * 0.5) || (right > design.pier_w * 0.5);
-        return shade(design.pier, 0.78 + 0.22 * edge + if wide { 0.04 } else { 0.0 });
+        return shade(
+            design.pier,
+            0.78 + 0.22 * edge + if wide { 0.04 } else { 0.0 },
+        );
     }
 
     // --- 5. the inter-storey band -------------------------------------------
@@ -398,7 +435,8 @@ fn masonry_sample(
         && ml > opening.y0 - 0.15 - 0.85 * opening.wash
         && ml < opening.y0 - 0.15
     {
-        let t = (ml - (opening.y0 - 0.15 - 0.85 * opening.wash)) / (0.85 * opening.wash).max(1.0e-3);
+        let t =
+            (ml - (opening.y0 - 0.15 - 0.85 * opening.wash)) / (0.85 * opening.wash).max(1.0e-3);
         let streak = 0.72 + 0.28 * value_noise(key.wrapping_add(233), um * 5.0, m * 1.2);
         return shade(design.wall, 1.0 - 0.20 * opening.wash * (1.0 - t) * streak);
     }
@@ -441,7 +479,11 @@ fn wall_field(
             // thing on a brick wall, and it is what makes brick read as brick
             // from fifty metres.
             let course = (m / 0.072).floor() as i32;
-            let stagger = if course.rem_euclid(2) == 0 { 0.0 } else { 0.120 };
+            let stagger = if course.rem_euclid(2) == 0 {
+                0.0
+            } else {
+                0.120
+            };
             let bx = um + stagger;
             let along = bx / 0.240;
             let face = along - along.floor();
@@ -451,7 +493,8 @@ fn wall_field(
             // grid of pale lines, not as brick.
             let joint = face < 0.045 || face > 0.975 || up < 0.13 || up > 0.93;
             if joint {
-                let mortar = 0.330 + 0.045 * hash(key.wrapping_add(401), along.floor() as i32, course);
+                let mortar =
+                    0.330 + 0.045 * hash(key.wrapping_add(401), along.floor() as i32, course);
                 return [mortar, mortar * 0.985, mortar * 0.945];
             }
             // Every brick was fired separately, so the wall is a mosaic.
@@ -479,11 +522,14 @@ fn wall_field(
                 let fx = tx - tx.floor();
                 let fy = ty - ty.floor();
                 if fx < joint / module || fy < joint / module {
-                    let grout = 0.40 + 0.06 * hash(key.wrapping_add(433), tx.floor() as i32, ty.floor() as i32);
+                    let grout = 0.40
+                        + 0.06 * hash(key.wrapping_add(433), tx.floor() as i32, ty.floor() as i32);
                     return [grout, grout * 0.99, grout * 0.96];
                 }
                 // Fired tile, so each one is its own colour.
-                let fire = (hash(key.wrapping_add(449), tx.floor() as i32, ty.floor() as i32) - 0.5) * 0.040;
+                let fire = (hash(key.wrapping_add(449), tx.floor() as i32, ty.floor() as i32)
+                    - 0.5)
+                    * 0.040;
                 colour = [colour[0] + fire, colour[1] + fire, colour[2] + fire * 0.92];
             }
             if design.motif {
@@ -494,8 +540,13 @@ fn wall_field(
                 let dx = (um - module_centre).abs();
                 let dy = (ml - 1.55).abs();
                 if dx < 0.14 && dy < 0.14 {
-                    let checker = ((um / 0.047).floor() as i32 + (m / 0.047).floor() as i32) % 2 == 0;
-                    let motif = if checker { [0.075, 0.105, 0.115] } else { [0.150, 0.190, 0.195] };
+                    let checker =
+                        ((um / 0.047).floor() as i32 + (m / 0.047).floor() as i32) % 2 == 0;
+                    let motif = if checker {
+                        [0.075, 0.105, 0.115]
+                    } else {
+                        [0.150, 0.190, 0.195]
+                    };
                     return motif;
                 }
             }
@@ -521,11 +572,7 @@ fn wall_field(
             // Smooth render: a faint trowel banding, and the drip edge of a
             // coat of paint every so often.
             let trowel = (value_noise(key.wrapping_add(463), um * 3.2, m * 0.6) - 0.5) * 0.016;
-            [
-                colour[0] + trowel,
-                colour[1] + trowel,
-                colour[2] + trowel,
-            ]
+            [colour[0] + trowel, colour[1] + trowel, colour[2] + trowel]
         }
     }
 }
@@ -635,7 +682,11 @@ fn curtain_sample(
     // A faint vertical gradient: the room is darker at the ceiling, and a
     // neighbouring slab reflects in the upper half of the pane.
     let depth = 0.88 + 0.20 * (1.0 - v);
-    let sheen = if ((um * 2.2) - (um * 2.2).floor()) < 0.14 { 1.06 } else { 1.0 };
+    let sheen = if ((um * 2.2) - (um * 2.2).floor()) < 0.14 {
+        1.06
+    } else {
+        1.0
+    };
     let _ = px;
     [
         glass[0] * depth * sheen,
@@ -691,7 +742,11 @@ pub fn roof_texture(size: usize) -> BakedTexture {
             // read as camouflage from the air.
             let drift = (value_noise(29, u * 1.1, v * 1.1) - 0.5) * 0.030;
             let grain = (hash(41, x as i32, y as i32) - 0.5) * 0.042;
-            let pebble = if hash(43, x as i32 / 2, y as i32 / 2) < 0.10 { 0.030 } else { 0.0 };
+            let pebble = if hash(43, x as i32 / 2, y as i32 / 2) < 0.10 {
+                0.030
+            } else {
+                0.0
+            };
             value += drift + grain + pebble;
             relief += (grain.abs() + pebble) * 6.0;
 
@@ -742,7 +797,11 @@ impl RoofCovering {
             RoofCovering::BlueSteel => "roof.steel",
         }
     }
-    pub const ALL: [RoofCovering; 3] = [RoofCovering::GreyClay, RoofCovering::Terracotta, RoofCovering::BlueSteel];
+    pub const ALL: [RoofCovering; 3] = [
+        RoofCovering::GreyClay,
+        RoofCovering::Terracotta,
+        RoofCovering::BlueSteel,
+    ];
 }
 
 /// A pitched roof's covering, baked in metres of slope. `u` runs across the
@@ -820,7 +879,13 @@ pub fn pitched_roof_texture(covering: RoofCovering, size: usize) -> BakedTexture
             }
             value *= 1.0 + grain;
             let colour = [
-                base[0] * value * if matches!(covering, RoofCovering::GreyClay) { 1.0 + moss_tint(u, v) } else { 1.0 },
+                base[0]
+                    * value
+                    * if matches!(covering, RoofCovering::GreyClay) {
+                        1.0 + moss_tint(u, v)
+                    } else {
+                        1.0
+                    },
                 base[1] * value,
                 base[2] * value,
             ];
@@ -975,7 +1040,11 @@ mod tests {
             worst.0
         );
         // And the palette has to use its whole range, not cluster.
-        assert!(hi - lo > 0.35, "the palette spans only {:.3} of value", hi - lo);
+        assert!(
+            hi - lo > 0.35,
+            "the palette spans only {:.3} of value",
+            hi - lo
+        );
     }
 
     #[test]
@@ -1023,7 +1092,11 @@ mod tests {
         let heights: Vec<u8> = texture.rgba.chunks(4).map(|pixel| pixel[3]).collect();
         let lo = *heights.iter().min().unwrap();
         let hi = *heights.iter().max().unwrap();
-        assert!(hi > lo + 12, "the roof has no relief to differentiate ({}..{lo})", hi);
+        assert!(
+            hi > lo + 12,
+            "the roof has no relief to differentiate ({}..{lo})",
+            hi
+        );
         let values: Vec<f32> = texture
             .rgba
             .chunks(4)

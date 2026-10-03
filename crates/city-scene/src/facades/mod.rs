@@ -49,9 +49,9 @@ pub(crate) mod designs;
 pub(crate) mod ground_floor;
 pub(crate) mod tile;
 
-pub use designs::{design, tile_height_m, Cladding, DESIGNS, FacadeDesign};
+pub use designs::{Cladding, DESIGNS, FacadeDesign, design, tile_height_m};
 pub use ground_floor::ground_floor_textures;
-pub use tile::{facade_textures, pitched_roof_texture, roof_texture, RoofCovering};
+pub use tile::{RoofCovering, facade_textures, pitched_roof_texture, roof_texture};
 
 // ---------------------------------------------------------------------------
 // the module constants

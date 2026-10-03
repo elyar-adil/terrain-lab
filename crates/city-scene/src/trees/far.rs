@@ -14,8 +14,8 @@
 //! so the lobes shade as rounded clumps. Prototypes are authored at unit height
 //! (the instance scale supplies the metres), and come in three detail levels.
 
-use super::forms;
 use super::TAU;
+use super::forms;
 use crate::math::{Rng, Vec3};
 use crate::species::{SPECIES, Species};
 
@@ -210,7 +210,11 @@ fn build(species: &'static Species, lod: u8) -> FarTree {
             let off = r * 0.55;
             let shade = rng.range(0.82, 1.10);
             b.lobe(
-                Vec3::new(a.cos() * off, y + rng.range(-0.15, 0.15) * ry, a.sin() * off),
+                Vec3::new(
+                    a.cos() * off,
+                    y + rng.range(-0.15, 0.15) * ry,
+                    a.sin() * off,
+                ),
                 Vec3::new(r * 0.46, ry * 0.9, r * 0.46),
                 lat,
                 lon,
@@ -291,7 +295,12 @@ pub struct FarTreePayload {
 pub fn far_tree_payload() -> Vec<FarTreePayload> {
     use base64::{Engine, engine::general_purpose::STANDARD};
     let floats = |values: &[f32]| {
-        STANDARD.encode(values.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>())
+        STANDARD.encode(
+            values
+                .iter()
+                .flat_map(|v| v.to_le_bytes())
+                .collect::<Vec<u8>>(),
+        )
     };
     far_tree_set()
         .into_iter()
@@ -324,10 +333,26 @@ mod tests {
         assert_eq!(set.len(), FAR_SPECIES.len() * 3);
         for tree in &set {
             let triangles = tree.indices.len() / 3;
-            let top = tree.positions.chunks(3).map(|p| p[1]).fold(f32::MIN, f32::max);
-            let bottom = tree.positions.chunks(3).map(|p| p[1]).fold(f32::MAX, f32::min);
-            assert!((0.9..=1.12).contains(&top), "{} tops out at {top}", tree.species);
-            assert!(bottom >= -0.02, "{} starts below ground: {bottom}", tree.species);
+            let top = tree
+                .positions
+                .chunks(3)
+                .map(|p| p[1])
+                .fold(f32::MIN, f32::max);
+            let bottom = tree
+                .positions
+                .chunks(3)
+                .map(|p| p[1])
+                .fold(f32::MAX, f32::min);
+            assert!(
+                (0.9..=1.12).contains(&top),
+                "{} tops out at {top}",
+                tree.species
+            );
+            assert!(
+                bottom >= -0.02,
+                "{} starts below ground: {bottom}",
+                tree.species
+            );
             assert!(tree.positions.iter().all(|v| v.is_finite()));
             assert!(
                 tree.indices

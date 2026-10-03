@@ -48,7 +48,11 @@ pub fn facade_metrics(
     // Towers (compact plan) widen their bays slightly so a short face still
     // carries two bays, matching real point-tower elevations.
     let is_tower = width_m.max(depth_m) < 34.0;
-    let bay = if is_tower { target_bay * 0.78 } else { target_bay };
+    let bay = if is_tower {
+        target_bay * 0.78
+    } else {
+        target_bay
+    };
     let bays = ((width_m / bay).round() as u16).clamp(2, 40);
     let (storey, ground, opening, balcony) = match kind {
         FacadeKind::Residential => (3.0, 3.6, 0.30, 1),

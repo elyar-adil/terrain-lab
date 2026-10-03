@@ -98,7 +98,14 @@ pub struct RoadEdge {
 impl RoadEdge {
     /// Everything about the edge except its geometry, for consistency checks.
     fn identity(&self) -> (NodeId, NodeId, RoadClass, Setting, &[Span], EdgeSource) {
-        (self.a, self.b, self.class, self.setting, &self.spans, self.source)
+        (
+            self.a,
+            self.b,
+            self.class,
+            self.setting,
+            &self.spans,
+            self.source,
+        )
     }
 }
 
@@ -127,7 +134,9 @@ pub struct RoadNetwork {
 }
 
 impl RoadNetwork {
-    pub fn assemble<'a>(tiles: impl IntoIterator<Item = &'a RoadTile>) -> Result<RoadNetwork, Conflict> {
+    pub fn assemble<'a>(
+        tiles: impl IntoIterator<Item = &'a RoadTile>,
+    ) -> Result<RoadNetwork, Conflict> {
         let mut net = RoadNetwork::default();
         for tile in tiles {
             for n in &tile.nodes {
@@ -141,7 +150,9 @@ impl RoadNetwork {
             }
             for e in &tile.edges {
                 match net.edges.get_mut(&e.id) {
-                    Some(old) if old.identity() != e.identity() => return Err(Conflict::Edge(e.id)),
+                    Some(old) if old.identity() != e.identity() => {
+                        return Err(Conflict::Edge(e.id));
+                    }
                     Some(old) => {
                         for piece in &e.pieces {
                             if !old.pieces.contains(piece) {
@@ -170,7 +181,10 @@ impl RoadNetwork {
 
     /// Roads meeting at a node.
     pub fn degree(&self, node: NodeId) -> usize {
-        self.edges.values().filter(|e| e.a == node || e.b == node).count()
+        self.edges
+            .values()
+            .filter(|e| e.a == node || e.b == node)
+            .count()
     }
 }
 
@@ -178,7 +192,11 @@ impl RoadNetwork {
 /// Pieces from neighbouring tiles meet exactly because refinement does not depend
 /// on the window, so equality here is exact, not a tolerance.
 pub fn stitch(pieces: Vec<Polyline>) -> Vec<Polyline> {
-    let mut chains: Vec<Vec<V2>> = pieces.into_iter().filter(|p| p.0.len() >= 2).map(|p| p.0).collect();
+    let mut chains: Vec<Vec<V2>> = pieces
+        .into_iter()
+        .filter(|p| p.0.len() >= 2)
+        .map(|p| p.0)
+        .collect();
     loop {
         let mut joined = false;
         'search: for i in 0..chains.len() {
@@ -196,7 +214,12 @@ pub fn stitch(pieces: Vec<Polyline>) -> Vec<Polyline> {
             break;
         }
     }
-    chains.sort_by(|a, b| a[0].x.partial_cmp(&b[0].x).unwrap().then(a[0].y.partial_cmp(&b[0].y).unwrap()));
+    chains.sort_by(|a, b| {
+        a[0].x
+            .partial_cmp(&b[0].x)
+            .unwrap()
+            .then(a[0].y.partial_cmp(&b[0].y).unwrap())
+    });
     chains.into_iter().map(Polyline).collect()
 }
 
@@ -206,7 +229,11 @@ mod tests {
     use crate::geom::v2;
 
     fn node(id: u64, x: f64, y: f64) -> RoadNode {
-        RoadNode { id: NodeId(id), position: v2(x, y), kind: NodeKind::Junction }
+        RoadNode {
+            id: NodeId(id),
+            position: v2(x, y),
+            kind: NodeKind::Junction,
+        }
     }
 
     fn edge(a: u64, b: u64, pieces: Vec<Vec<V2>>) -> RoadEdge {
@@ -236,12 +263,20 @@ mod tests {
         let left = RoadTile {
             cell,
             nodes: vec![node(1, 0.0, 0.0), node(2, 200.0, 0.0)],
-            edges: vec![edge(1, 2, vec![vec![v2(0.0, 0.0), v2(60.0, 4.0), v2(100.0, 5.0)]])],
+            edges: vec![edge(
+                1,
+                2,
+                vec![vec![v2(0.0, 0.0), v2(60.0, 4.0), v2(100.0, 5.0)]],
+            )],
         };
         let right = RoadTile {
             cell: cell.neighbour(1, 0),
             nodes: vec![node(1, 0.0, 0.0), node(2, 200.0, 0.0)],
-            edges: vec![edge(1, 2, vec![vec![v2(100.0, 5.0), v2(150.0, 2.0), v2(200.0, 0.0)]])],
+            edges: vec![edge(
+                1,
+                2,
+                vec![vec![v2(100.0, 5.0), v2(150.0, 2.0), v2(200.0, 0.0)]],
+            )],
         };
         // The order tiles arrive in must not matter.
         for tiles in [[&left, &right], [&right, &left]] {
@@ -259,21 +294,50 @@ mod tests {
     #[test]
     fn a_seam_bug_is_reported_not_papered_over() {
         let cell = Cell::new(4, 0, 0);
-        let one = RoadTile { cell, nodes: vec![node(1, 0.0, 0.0)], edges: vec![] };
-        let other = RoadTile { cell, nodes: vec![node(1, 3.0, 0.0)], edges: vec![] };
-        assert_eq!(RoadNetwork::assemble([&one, &other]).unwrap_err(), Conflict::Node(NodeId(1)));
+        let one = RoadTile {
+            cell,
+            nodes: vec![node(1, 0.0, 0.0)],
+            edges: vec![],
+        };
+        let other = RoadTile {
+            cell,
+            nodes: vec![node(1, 3.0, 0.0)],
+            edges: vec![],
+        };
+        assert_eq!(
+            RoadNetwork::assemble([&one, &other]).unwrap_err(),
+            Conflict::Node(NodeId(1))
+        );
 
         let mut a = edge(1, 2, vec![]);
         let mut b = edge(1, 2, vec![]);
         b.class = RoadClass::Local;
         a.class = RoadClass::Collector;
         let nodes = vec![node(1, 0.0, 0.0), node(2, 9.0, 0.0)];
-        let t1 = RoadTile { cell, nodes: nodes.clone(), edges: vec![a] };
-        let t2 = RoadTile { cell, nodes, edges: vec![b] };
-        assert!(matches!(RoadNetwork::assemble([&t1, &t2]), Err(Conflict::Edge(_))));
+        let t1 = RoadTile {
+            cell,
+            nodes: nodes.clone(),
+            edges: vec![a],
+        };
+        let t2 = RoadTile {
+            cell,
+            nodes,
+            edges: vec![b],
+        };
+        assert!(matches!(
+            RoadNetwork::assemble([&t1, &t2]),
+            Err(Conflict::Edge(_))
+        ));
 
-        let dangling = RoadTile { cell, nodes: vec![node(1, 0.0, 0.0)], edges: vec![edge(1, 2, vec![])] };
-        assert!(matches!(RoadNetwork::assemble([&dangling]), Err(Conflict::MissingNode(..))));
+        let dangling = RoadTile {
+            cell,
+            nodes: vec![node(1, 0.0, 0.0)],
+            edges: vec![edge(1, 2, vec![])],
+        };
+        assert!(matches!(
+            RoadNetwork::assemble([&dangling]),
+            Err(Conflict::MissingNode(..))
+        ));
     }
 
     #[test]

@@ -87,7 +87,9 @@ impl CityFrame {
             return true;
         }
         self.external.as_ref().is_some_and(|e| {
-            e.tributaries.iter().any(|(line, half)| line.len() >= 2 && geom::ring_polyline_dist(ring, line) < half + margin)
+            e.tributaries.iter().any(|(line, half)| {
+                line.len() >= 2 && geom::ring_polyline_dist(ring, line) < half + margin
+            })
         })
     }
 
@@ -253,11 +255,17 @@ pub fn generate_modern_chinese_city_with_approaches(
 fn approach_lobes(frame: &CityFrame, approaches: &[RegionalApproach]) -> Vec<(f32, f32)> {
     let mut lobes: Vec<(f32, f32)> = Vec::new();
     for approach in approaches {
-        let local: Vec<(f32, f32)> = approach.path_km.iter().map(|p| frame.to_local(*p)).collect();
+        let local: Vec<(f32, f32)> = approach
+            .path_km
+            .iter()
+            .map(|p| frame.to_local(*p))
+            .collect();
         // The point of the road nearest 0.9 of the radius gives its bearing.
         let target = frame.radius_m * 0.9;
         let Some(best) = local.iter().min_by(|a, b| {
-            (a.0.hypot(a.1) - target).abs().total_cmp(&(b.0.hypot(b.1) - target).abs())
+            (a.0.hypot(a.1) - target)
+                .abs()
+                .total_cmp(&(b.0.hypot(b.1) - target).abs())
         }) else {
             continue;
         };
@@ -376,7 +384,10 @@ pub fn generate_modern_chinese_city_from_streets(
     let (centre, rotation) = (spec.centre, spec.rotation_radians);
     let world_of = move |x: f32, z: f32| {
         let (c, s) = (rotation.cos(), rotation.sin());
-        Point { x_km: centre.x_km + (x * c - z * s) / 1_000.0, y_km: centre.y_km + (x * s + z * c) / 1_000.0 }
+        Point {
+            x_km: centre.x_km + (x * c - z * s) / 1_000.0,
+            y_km: centre.y_km + (x * s + z * c) / 1_000.0,
+        }
     };
     let (u2, i2) = (urban.clone(), intensity.clone());
     let river: Vec<geom::V> = streets.river.iter().map(|p| frame.to_local(*p)).collect();
@@ -387,7 +398,12 @@ pub fn generate_modern_chinese_city_from_streets(
         tributaries: streets
             .tributaries
             .iter()
-            .map(|(line, width)| (line.iter().map(|p| frame.to_local(*p)).collect(), width * 0.5))
+            .map(|(line, width)| {
+                (
+                    line.iter().map(|p| frame.to_local(*p)).collect(),
+                    width * 0.5,
+                )
+            })
             .collect(),
     });
     let frame = frame;
@@ -395,7 +411,8 @@ pub fn generate_modern_chinese_city_from_streets(
     // Renumber nodes 0..n and keep only those a road uses.
     let mut index: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
     let mut nodes: Vec<crate::SdNode> = Vec::new();
-    let mut position: std::collections::HashMap<u64, Point> = streets.nodes.iter().map(|n| (n.id, n.point)).collect();
+    let mut position: std::collections::HashMap<u64, Point> =
+        streets.nodes.iter().map(|n| (n.id, n.point)).collect();
     let mut sd_roads = Vec::new();
     let mut hd_roads = Vec::new();
     let rules = roads::china_rules();
@@ -403,19 +420,38 @@ pub fn generate_modern_chinese_city_from_streets(
     for road in &streets.roads {
         let mut ends = [0_u32; 2];
         for (k, id) in [road.from, road.to].into_iter().enumerate() {
-            let Some(point) = position.get(&id).copied() else { continue };
+            let Some(point) = position.get(&id).copied() else {
+                continue;
+            };
             ends[k] = *index.entry(id).or_insert_with(|| {
                 let (x, z) = frame.to_local(point);
-                let role = if x.abs() < block_m * 1.2 && z.abs() < block_m * 1.2 { "core-junction" } else { "district-junction" };
-                nodes.push(crate::SdNode { id: nodes.len() as u32, point, role: role.into() });
+                let role = if x.abs() < block_m * 1.2 && z.abs() < block_m * 1.2 {
+                    "core-junction"
+                } else {
+                    "district-junction"
+                };
+                nodes.push(crate::SdNode {
+                    id: nodes.len() as u32,
+                    point,
+                    role: role.into(),
+                });
                 nodes.len() as u32 - 1
             });
         }
-        if !position.contains_key(&road.from) || !position.contains_key(&road.to) || ends[0] == ends[1] {
+        if !position.contains_key(&road.from)
+            || !position.contains_key(&road.to)
+            || ends[0] == ends[1]
+        {
             continue;
         }
         let id = sd_roads.len() as u32;
-        sd_roads.push(crate::SdRoad { id, from: ends[0], to: ends[1], class: road.class, bridge: road.bridge });
+        sd_roads.push(crate::SdRoad {
+            id,
+            from: ends[0],
+            to: ends[1],
+            class: road.class,
+            bridge: road.bridge,
+        });
         let mut centreline = road.centreline.clone();
         if let (Some(first), Some(last)) = (centreline.first_mut(), position.get(&road.from)) {
             *first = *last;
@@ -442,14 +478,22 @@ pub fn generate_modern_chinese_city_from_streets(
         sd_roads: &sd_roads,
         hd_roads: &hd_roads,
     });
-    let ParcelOutput { blocks, parcels, buildings, fields } = build_parcels(&frame, &nodes, &sd_roads);
+    let ParcelOutput {
+        blocks,
+        parcels,
+        buildings,
+        fields,
+    } = build_parcels(&frame, &nodes, &sd_roads);
     let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
     ModernCity {
         version: 3,
         jurisdiction: "ChinaMainland".into(),
         style: CityStyle::ChineseModern,
         seed: spec.seed,
-        frame: crate::model::scene::CityFrameInfo { origin: spec.centre, rotation_radians: spec.rotation_radians },
+        frame: crate::model::scene::CityFrameInfo {
+            origin: spec.centre,
+            rotation_radians: spec.rotation_radians,
+        },
         nodes,
         sd_roads,
         hd_roads,

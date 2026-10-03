@@ -95,7 +95,10 @@ pub fn evolve(
     let mut level = Level {
         n: first,
         height: seeded_start(&smooth, first, seed),
-        uplift: smooth.iter().map(|h| (h - SEA_LEVEL).max(0.0) * UPLIFT_RATE).collect(),
+        uplift: smooth
+            .iter()
+            .map(|h| (h - SEA_LEVEL).max(0.0) * UPLIFT_RATE)
+            .collect(),
         erodibility: coarse_resistance
             .iter()
             .zip(heterogeneity(first, seed))
@@ -184,7 +187,10 @@ fn seeded_start(smooth: &[f32], n: usize, seed: u32) -> Vec<f32> {
 /// and spacing, which is the signature of a simulation rather than a mountain.
 fn heterogeneity(n: usize, seed: u32) -> Vec<f32> {
     let value = |gx: i32, gy: i32, salt: u32| -> f32 {
-        let mut v = seed ^ (gx as u32).wrapping_mul(0x9e37_79b9) ^ (gy as u32).wrapping_mul(0x85eb_ca6b) ^ salt.wrapping_mul(0xc2b2_ae35);
+        let mut v = seed
+            ^ (gx as u32).wrapping_mul(0x9e37_79b9)
+            ^ (gy as u32).wrapping_mul(0x85eb_ca6b)
+            ^ salt.wrapping_mul(0xc2b2_ae35);
         v ^= v >> 16;
         v = v.wrapping_mul(0x7feb_352d);
         v ^= v >> 15;
@@ -203,7 +209,9 @@ fn heterogeneity(n: usize, seed: u32) -> Vec<f32> {
         .into_par_iter()
         .map(|i| {
             let (x, y) = ((i % n) as f32, (i / n) as f32);
-            let v = octave(x, y, 5.0, 1) * 1.0 + octave(x, y, 17.0, 2) * 0.7 + octave(x, y, 53.0, 3) * 0.45;
+            let v = octave(x, y, 5.0, 1) * 1.0
+                + octave(x, y, 17.0, 2) * 0.7
+                + octave(x, y, 53.0, 3) * 0.45;
             (v * 1.3).exp()
         })
         .collect()
@@ -233,7 +241,11 @@ fn step(level: &mut Level, cell: f32) {
                         continue;
                     }
                     let j = (y as isize + oy) as usize * n + (x as isize + ox) as usize;
-                    let dist = if ox != 0 && oy != 0 { std::f32::consts::SQRT_2 } else { 1.0 };
+                    let dist = if ox != 0 && oy != 0 {
+                        std::f32::consts::SQRT_2
+                    } else {
+                        1.0
+                    };
                     let slope = (filled[i] - filled[j]) / dist;
                     if slope > best_slope {
                         best_slope = slope;
@@ -266,11 +278,19 @@ fn step(level: &mut Level, cell: f32) {
         let r = receiver[i];
         if r == NONE {
             // Base level (edge or sea): fixed, but a lake-filled sink keeps its fill.
-            next[i] = if level.height[i] <= SEA_LEVEL { level.height[i] } else { filled[i] };
+            next[i] = if level.height[i] <= SEA_LEVEL {
+                level.height[i]
+            } else {
+                filled[i]
+            };
             continue;
         }
         let r = r as usize;
-        let dx = if (i % n) != (r % n) && (i / n) != (r / n) { cell * std::f32::consts::SQRT_2 } else { cell };
+        let dx = if (i % n) != (r % n) && (i / n) != (r / n) {
+            cell * std::f32::consts::SQRT_2
+        } else {
+            cell
+        };
         let f = level.erodibility[i] * area[i].powf(AREA_EXPONENT) / dx;
         next[i] = (filled[i] + level.uplift[i] + f * next[r]) / (1.0 + f);
     }
@@ -377,7 +397,10 @@ mod tests {
         evolve(&mut h, &r, 128, 150.0, 3, &mut |_| {});
         let max_before = before.iter().copied().fold(0.0_f32, f32::max);
         let max_after = h.iter().copied().fold(0.0_f32, f32::max);
-        assert!((max_after / max_before - 1.0).abs() < 0.02, "{max_before} -> {max_after}");
+        assert!(
+            (max_after / max_before - 1.0).abs() < 0.02,
+            "{max_before} -> {max_after}"
+        );
         // Terrain at or below the sea, and the map edge, are base level.
         for (i, (&b, &a)) in before.iter().zip(&h).enumerate() {
             let (x, y) = (i % 128, i / 128);
@@ -396,7 +419,11 @@ mod tests {
         // No closed basins: the evolved surface has nowhere to hold water.
         let mut filled = vec![0.0; n * n];
         crate::priority_flood(&h, n, &mut filled);
-        let pits = h.iter().zip(&filled).filter(|(a, b)| **b - **a > 1.0).count();
+        let pits = h
+            .iter()
+            .zip(&filled)
+            .filter(|(a, b)| **b - **a > 1.0)
+            .count();
         assert!(pits < n * n / 200, "{pits} cells sit in depressions");
         // Rivers cut the ridge into spurs and gullies: far more small-scale relief
         // than the smooth plan it started from.

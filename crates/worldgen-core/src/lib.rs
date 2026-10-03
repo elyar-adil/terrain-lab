@@ -69,7 +69,10 @@ mod basics {
         assert_eq!(s.derive("roads"), s.derive("roads"));
         assert_ne!(s.derive("roads"), s.derive("trees"));
         assert_ne!(s.derive_index(1), s.derive_index(2));
-        assert_ne!(s.derive_cell(Cell::new(1, 2, 3)), s.derive_cell(Cell::new(1, 3, 2)));
+        assert_ne!(
+            s.derive_cell(Cell::new(1, 2, 3)),
+            s.derive_cell(Cell::new(1, 3, 2))
+        );
         let mut rng = s.rng();
         let a: Vec<u64> = (0..5).map(|_| rng.next_u64()).collect();
         let mut again = s.rng();
@@ -82,7 +85,8 @@ mod basics {
         // Avalanche: flipping one input bit changes about half the output bits.
         let mut total = 0u32;
         for bit in 0..64 {
-            total += (mix64(0x1234_5678_9ABC_DEF0) ^ mix64(0x1234_5678_9ABC_DEF0 ^ (1 << bit))).count_ones();
+            total += (mix64(0x1234_5678_9ABC_DEF0) ^ mix64(0x1234_5678_9ABC_DEF0 ^ (1 << bit)))
+                .count_ones();
         }
         let mean = f64::from(total) / 64.0;
         assert!((26.0..38.0).contains(&mean), "mean flipped bits {mean}");

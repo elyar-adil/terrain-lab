@@ -7,7 +7,7 @@ use crate::math::{Path, Vec2};
 use crate::mesh::MeshBuilder;
 use crate::network::{Lane, LaneUse, Network, Road, derive};
 use crate::spec::{ARROW_LENGTH_MM, JunctionSpec, MM, Movement};
-use urban::{cross_section, generate_modern_chinese_city, ModernChinaSpec, ModernRoadClass};
+use urban::{ModernChinaSpec, ModernRoadClass, cross_section, generate_modern_chinese_city};
 
 use super::markings::{approaches, crosswalk_band, dashed_stripe, drive_arrow, waiting_box};
 use super::signals::signal_axis;
@@ -32,7 +32,10 @@ fn city_network() -> Network {
 /// A straight lane heading `+X`, 3.5 m wide, long enough for the arrow.
 fn straight_lane(movements: &[Movement]) -> Lane {
     let length = 90.0;
-    let path = Path::flat(vec![crate::math::Vec2::new(0.0, 0.0), crate::math::Vec2::new(length, 0.0)]);
+    let path = Path::flat(vec![
+        crate::math::Vec2::new(0.0, 0.0),
+        crate::math::Vec2::new(length, 0.0),
+    ]);
     Lane {
         id: "test".into(),
         road: 0,
@@ -106,13 +109,12 @@ fn a_right_arrow_head_lands_on_the_drivers_right_and_a_left_arrow_on_its_left() 
         "a left arrow's head is not on the driver's left: {left_head:?}"
     );
     // And the whole stencil leans that way: the tip is the extreme vertex.
-    let tip = |points: &[(f32, f32)]| {
-        *points
-            .iter()
-            .max_by(|a, b| a.0.total_cmp(&b.0))
-            .unwrap()
-    };
-    assert!(tip(&right).1 > 0.0, "right arrow tip at z={}", tip(&right).1);
+    let tip = |points: &[(f32, f32)]| *points.iter().max_by(|a, b| a.0.total_cmp(&b.0)).unwrap();
+    assert!(
+        tip(&right).1 > 0.0,
+        "right arrow tip at z={}",
+        tip(&right).1
+    );
     assert!(tip(&left).1 < 0.0, "left arrow tip at z={}", tip(&left).1);
 
     // A straight arrow is symmetric about the centreline.
@@ -135,10 +137,7 @@ fn a_right_arrow_head_lands_on_the_drivers_right_and_a_left_arrow_on_its_left() 
     // The arrow is drawn at the reserved footprint — the source kernel's
     // `min(footprint, total - tipGap - 1.5)` — not at the bare stencil length,
     // because a 3 m arrow is invisible at queueing distance.
-    let span = right
-        .iter()
-        .map(|p| p.0)
-        .fold(f32::MAX, f32::min)
+    let span = right.iter().map(|p| p.0).fold(f32::MAX, f32::min)
         ..right.iter().map(|p| p.0).fold(f32::MIN, f32::max);
     let length = span.end - span.start;
     assert!(
@@ -184,14 +183,24 @@ fn a_short_approach_shortens_the_arrow_instead_of_dropping_it() {
     let mut builder = MeshBuilder::new();
     declare(&mut builder);
     drive_arrow(&mut builder, &lane, &spec);
-    assert!(builder.index_count("marking.white") > 0, "a 18.5 m lane dropped its arrow");
+    assert!(
+        builder.index_count("marking.white") > 0,
+        "a 18.5 m lane dropped its arrow"
+    );
     let scene = builder.build();
     let xs: Vec<f32> = scene
         .meshes
         .iter()
-        .flat_map(|group| group.positions.chunks(3).map(|c| c[0]).collect::<Vec<f32>>())
+        .flat_map(|group| {
+            group
+                .positions
+                .chunks(3)
+                .map(|c| c[0])
+                .collect::<Vec<f32>>()
+        })
         .collect();
-    let length = xs.iter().copied().fold(f32::MIN, f32::max) - xs.iter().copied().fold(f32::MAX, f32::min);
+    let length =
+        xs.iter().copied().fold(f32::MIN, f32::max) - xs.iter().copied().fold(f32::MAX, f32::min);
     // The reserved footprint is 4.0 m, but the *straight* stencil is only
     // 3000 mm long — `ARROW_LENGTH_MM` (3050) is the longest stencil in the
     // table, the turn arrow's reach, and it is what the draw code scales by.
@@ -205,7 +214,10 @@ fn a_short_approach_shortens_the_arrow_instead_of_dropping_it() {
     );
     // And it must still be shorter than the footprint it was fitted into, which
     // is the whole point of the shortening.
-    assert!(length < reserved, "a {length} m arrow did not shrink into {reserved} m");
+    assert!(
+        length < reserved,
+        "a {length} m arrow did not shrink into {reserved} m"
+    );
 }
 
 #[test]
@@ -244,7 +256,10 @@ fn an_arrow_never_leaves_its_lane() {
 #[test]
 fn a_crossing_band_is_one_quad_with_a_bar_pattern() {
     let spec = JunctionSpec::default();
-    let path = Path::flat(vec![crate::math::Vec2::new(0.0, 0.0), crate::math::Vec2::new(120.0, 0.0)]);
+    let path = Path::flat(vec![
+        crate::math::Vec2::new(0.0, 0.0),
+        crate::math::Vec2::new(120.0, 0.0),
+    ]);
     let surface = Carriageway::on_path(path, 16.0);
     let mut builder = MeshBuilder::new();
     declare(&mut builder);
@@ -259,8 +274,17 @@ fn a_crossing_band_is_one_quad_with_a_bar_pattern() {
         "the crossing's gaps must show the asphalt through them"
     );
     let uvs = scene.meshes[0].uvs.as_ref().unwrap();
-    let u_span = uvs.chunks(2).map(|pair| pair[0]).fold(f32::MAX, f32::min).abs()
-        .max(uvs.chunks(2).map(|pair| pair[0]).fold(f32::MIN, f32::max).abs());
+    let u_span = uvs
+        .chunks(2)
+        .map(|pair| pair[0])
+        .fold(f32::MAX, f32::min)
+        .abs()
+        .max(
+            uvs.chunks(2)
+                .map(|pair| pair[0])
+                .fold(f32::MIN, f32::max)
+                .abs(),
+        );
     // 31.0 m of crossing: the texture holds eight bars per 8.4 m, so the
     // renderer tiles it about 3.7 times and the pitch stays 1.05 m.
     assert!((u_span - 31.0).abs() < 0.2, "U span was {u_span}");
@@ -274,7 +298,10 @@ fn the_crosswalk_bar_pitch_survives_the_current_resampling() {
     // with the design table anyway: if a future change coarsens the ribbon
     // step, the depth must still be exact.
     let spec = JunctionSpec::default();
-    let path = Path::flat(vec![crate::math::Vec2::new(0.0, 0.0), crate::math::Vec2::new(60.0, 0.0)]);
+    let path = Path::flat(vec![
+        crate::math::Vec2::new(0.0, 0.0),
+        crate::math::Vec2::new(60.0, 0.0),
+    ]);
     let surface = Carriageway::on_path(path, 8.0);
     let mut builder = MeshBuilder::new();
     declare(&mut builder);
@@ -282,8 +309,8 @@ fn the_crosswalk_bar_pitch_survives_the_current_resampling() {
     let scene = builder.build();
     let positions = &scene.meshes[0].positions;
     let xs: Vec<f32> = positions.chunks(3).map(|c| c[0]).collect();
-    let depth = xs.iter().copied().fold(f32::MIN, f32::max)
-        - xs.iter().copied().fold(f32::MAX, f32::min);
+    let depth =
+        xs.iter().copied().fold(f32::MIN, f32::max) - xs.iter().copied().fold(f32::MAX, f32::min);
     assert!(
         (depth - spec.crosswalk.depth).abs() < 0.05,
         "crossing depth is {depth} m, expected {}",
@@ -296,7 +323,10 @@ fn a_dash_run_anchored_at_a_stop_line_starts_with_a_dash() {
     // The invariant `laneLineStartFor` exists for: the first thing past the
     // stop line is paint, not a five-metre hole in the queue's lane.
     let spec = JunctionSpec::default();
-    let path = Path::flat(vec![crate::math::Vec2::new(0.0, 0.0), crate::math::Vec2::new(200.0, 0.0)]);
+    let path = Path::flat(vec![
+        crate::math::Vec2::new(0.0, 0.0),
+        crate::math::Vec2::new(200.0, 0.0),
+    ]);
     let surface = Carriageway::on_path(path, 8.0);
     let anchor = spec.solid_zone_gap + spec.guide_zone;
     let mut builder = MeshBuilder::new();
@@ -316,18 +346,33 @@ fn a_dash_run_anchored_at_a_stop_line_starts_with_a_dash() {
     // `V` is metres from the anchor, and the texture's period is 8 m, so the
     // first sample past the anchor is inside the first 3 m of paint.
     let v_min = uvs.chunks(2).map(|pair| pair[1]).fold(f32::MAX, f32::min);
-    assert!((v_min).abs() < 1.0e-3, "V does not start at the anchor: {v_min}");
+    assert!(
+        (v_min).abs() < 1.0e-3,
+        "V does not start at the anchor: {v_min}"
+    );
     let v_max = uvs.chunks(2).map(|pair| pair[1]).fold(f32::MIN, f32::max);
     assert!((v_max - 30.0).abs() < 0.1, "V span was {}", v_max - v_min);
 }
 
 #[test]
 fn a_dashed_divider_is_one_quad_not_one_quad_per_dash() {
-    let path = Path::flat(vec![crate::math::Vec2::new(0.0, 0.0), crate::math::Vec2::new(300.0, 0.0)]);
+    let path = Path::flat(vec![
+        crate::math::Vec2::new(0.0, 0.0),
+        crate::math::Vec2::new(300.0, 0.0),
+    ]);
     let surface = Carriageway::on_path(path, 4.0);
     let mut builder = MeshBuilder::new();
     declare(&mut builder);
-    dashed_stripe(&mut builder, "marking.dashed-3-5", &surface, 0.0, 0.0, 300.0, 0.15, 0.0);
+    dashed_stripe(
+        &mut builder,
+        "marking.dashed-3-5",
+        &surface,
+        0.0,
+        0.0,
+        300.0,
+        0.15,
+        0.0,
+    );
     // 300 m of 3-on/5-off would be 37 geometry dashes.  The texture carries
     // the pattern, so the band is resampled only coarsely along the road.
     let triangles = builder.index_count("marking.dashed-3-5") / 3;
@@ -348,7 +393,10 @@ fn a_dashed_divider_is_one_quad_not_one_quad_per_dash() {
         .fold(0.0_f32, f32::max);
     // UVs are metres, so `V` must span the real 300 m for the texture's
     // 8 m period to fall in the right places.
-    assert!(span > 250.0, "V span was {span}, the dash period would be wrong");
+    assert!(
+        span > 250.0,
+        "V span was {span}, the dash period would be wrong"
+    );
 }
 
 #[test]
@@ -356,7 +404,10 @@ fn every_crossing_end_gets_a_crosswalk_and_a_stop_line() {
     let network = city_network();
     let mut builder = MeshBuilder::new();
     build(&network, &mut builder, 42);
-    assert!(builder.vertex_count("marking.crosswalk") > 0, "no crossings at all");
+    assert!(
+        builder.vertex_count("marking.crosswalk") > 0,
+        "no crossings at all"
+    );
     assert!(
         builder.index_count("marking.white") > 10_000,
         "expected a full set of markings, got {} indices",
@@ -378,11 +429,7 @@ fn all_stencils() -> Vec<Vec<Movement>> {
 
 /// Plan-space axis-aligned boxes, one per triangle, for one material.
 fn material_bounds(scene: &crate::mesh::SceneGeometry, material: &str) -> Vec<[f32; 4]> {
-    let Some(group) = scene
-        .meshes
-        .iter()
-        .find(|group| group.material == material)
-    else {
+    let Some(group) = scene.meshes.iter().find(|group| group.material == material) else {
         return Vec::new();
     };
     let mut out = Vec::new();
@@ -391,10 +438,7 @@ fn material_bounds(scene: &crate::mesh::SceneGeometry, material: &str) -> Vec<[f
             .iter()
             .map(|index| {
                 let index = *index as usize;
-                (
-                    group.positions[index * 3],
-                    group.positions[index * 3 + 2],
-                )
+                (group.positions[index * 3], group.positions[index * 3 + 2])
             })
             .collect();
         let lo = (
@@ -449,10 +493,8 @@ fn a_four_port_junction_is_complete_on_every_arm() {
                 (cx - mouth.x).hypot(cz - mouth.y) < junction.radius * 0.5 + 14.0
             })
             .min_by(|a, b| {
-                let da = ((a[0] + a[2]) * 0.5 - mouth.x)
-                    .hypot((a[1] + a[3]) * 0.5 - mouth.y);
-                let db = ((b[0] + b[2]) * 0.5 - mouth.x)
-                    .hypot((b[1] + b[3]) * 0.5 - mouth.y);
+                let da = ((a[0] + a[2]) * 0.5 - mouth.x).hypot((a[1] + a[3]) * 0.5 - mouth.y);
+                let db = ((b[0] + b[2]) * 0.5 - mouth.x).hypot((b[1] + b[3]) * 0.5 - mouth.y);
                 da.total_cmp(&db)
             })
             .copied();
@@ -493,7 +535,11 @@ fn a_four_port_junction_is_complete_on_every_arm() {
             let cz = (quad[1] + quad[3]) * 0.5;
             (cx - mouth.x).hypot(cz - mouth.y) < junction.radius * 0.5 + 12.0
         });
-        assert!(found, "arm has no stop line near ({:.1}, {:.1})", mouth.x, mouth.y);
+        assert!(
+            found,
+            "arm has no stop line near ({:.1}, {:.1})",
+            mouth.x, mouth.y
+        );
     }
     assert!(vertex_count > 0, "no corner paving emitted");
     for junction in &network.junctions {
@@ -546,7 +592,10 @@ fn every_crossing_lands_where_the_spec_says_it_does() {
 #[test]
 fn the_carrageway_crowns_from_the_median_and_flattens_into_the_box() {
     let spec = JunctionSpec::default();
-    let path = Path::flat(vec![crate::math::Vec2::new(0.0, 0.0), crate::math::Vec2::new(200.0, 0.0)]);
+    let path = Path::flat(vec![
+        crate::math::Vec2::new(0.0, 0.0),
+        crate::math::Vec2::new(200.0, 0.0),
+    ]);
     let mut surface = Carriageway::on_path(path, 16.0);
     surface.flatten = 20.0;
     // Mid-road the crest stands proud of the gutter...
@@ -583,10 +632,18 @@ fn junction_layer_never_emits_a_non_finite_vertex() {
     build(&network, &mut builder, 42);
     for group in builder.build().meshes {
         for value in &group.positions {
-            assert!(value.is_finite(), "{} has a non-finite position", group.material);
+            assert!(
+                value.is_finite(),
+                "{} has a non-finite position",
+                group.material
+            );
         }
         for value in &group.normals {
-            assert!(value.is_finite(), "{} has a non-finite normal", group.material);
+            assert!(
+                value.is_finite(),
+                "{} has a non-finite normal",
+                group.material
+            );
         }
     }
 }
@@ -676,7 +733,8 @@ fn a_signal_housing_hangs_inside_the_gb_14886_window() {
     assert!(!output.signals.is_empty(), "no signals built");
     let mut highest_bottom = f32::MIN;
     for rig in &output.signals {
-        let centre = rig.lamps.iter().map(|lamp| lamp.position[1]).sum::<f32>() / rig.lamps.len() as f32;
+        let centre =
+            rig.lamps.iter().map(|lamp| lamp.position[1]).sum::<f32>() / rig.lamps.len() as f32;
         let bottom = centre - HOUSING_HALF;
         assert!(
             (5.2..=6.5).contains(&bottom),
@@ -698,7 +756,11 @@ fn a_signal_housing_hangs_inside_the_gb_14886_window() {
         .iter()
         .find(|group| group.material == "signal.body")
         .expect("no signal bodies built");
-    let top = body.positions.chunks(3).map(|c| c[1]).fold(f32::MIN, f32::max);
+    let top = body
+        .positions
+        .chunks(3)
+        .map(|c| c[1])
+        .fold(f32::MIN, f32::max);
     assert!(
         top > highest_bottom + 0.05,
         "nothing of the rig stands above the housing top {highest_bottom:.2}"

@@ -501,7 +501,8 @@ pub fn derive(
                 for step in 0..=steps {
                     let station = length * step as f32 / steps as f32;
                     points.push(
-                        carriageway.plan_at(station) + carriageway.tangent_at(station).left_normal() * offset,
+                        carriageway.plan_at(station)
+                            + carriageway.tangent_at(station).left_normal() * offset,
                     );
                 }
                 if direction < 0 {
@@ -511,7 +512,10 @@ pub fn derive(
                 }
                 let path = Path::flat(points);
                 let (use_kind, _) = lane_use_for(class, index);
-                let id = format!("road/{road_id}/lane/{}/{index}", if direction > 0 { "f" } else { "b" });
+                let id = format!(
+                    "road/{road_id}/lane/{}/{index}",
+                    if direction > 0 { "f" } else { "b" }
+                );
                 ids.push(id.clone());
                 network.lanes.push(Lane {
                     id,
@@ -541,7 +545,10 @@ pub fn derive(
                 if direction < 0 {
                     points.reverse();
                 }
-                let id = format!("road/{road_id}/lane/{}/bike", if direction > 0 { "f" } else { "b" });
+                let id = format!(
+                    "road/{road_id}/lane/{}/bike",
+                    if direction > 0 { "f" } else { "b" }
+                );
                 ids.push(id.clone());
                 network.lanes.push(Lane {
                     id,
@@ -597,9 +604,10 @@ pub fn derive(
             let mut candidates: Vec<(usize, Movement, f32, Vec2)> = Vec::new();
             for &target_index in &outgoing {
                 let target = &network.lanes[target_index];
-                if target.road == lane.road || target.use_kind != LaneUse::Through
-                    && target.use_kind != LaneUse::LeftTurn
-                    && target.use_kind != LaneUse::RightTurn
+                if target.road == lane.road
+                    || target.use_kind != LaneUse::Through
+                        && target.use_kind != LaneUse::LeftTurn
+                        && target.use_kind != LaneUse::RightTurn
                 {
                     continue;
                 }
@@ -647,19 +655,16 @@ pub fn derive(
                 0
             };
             let dedicated_right = 0_usize;
-            let allowed = lane_movement_sets(
-                inbound_on_road,
-                &available,
-                dedicated_left,
-                dedicated_right,
-            );
+            let allowed =
+                lane_movement_sets(inbound_on_road, &available, dedicated_left, dedicated_right);
             let Some(allowed_set) = allowed.get(lane.index as usize) else {
                 continue;
             };
 
             // Group candidates by target road so each exit road produces one
             // connector, exactly as the source kernel does.
-            let mut target_roads: Vec<u32> = candidates.iter().map(|c| network.lanes[c.0].road).collect();
+            let mut target_roads: Vec<u32> =
+                candidates.iter().map(|c| network.lanes[c.0].road).collect();
             target_roads.sort_unstable();
             target_roads.dedup();
             for target_road in target_roads {
@@ -701,7 +706,12 @@ pub fn derive(
                 // and stays straight.
                 let cross = dir.cross(out);
                 let (handle, handle_out) = if movement == Movement::Straight || cross.abs() < 0.08 {
-                    let h = distance * if movement == Movement::Straight { 0.33 } else { 0.45 };
+                    let h = distance
+                        * if movement == Movement::Straight {
+                            0.33
+                        } else {
+                            0.45
+                        };
                     (h, h)
                 } else {
                     let along_in = gap.cross(out) / cross;
@@ -742,7 +752,9 @@ pub fn derive(
                     continue;
                 }
                 network.lanes[lane_index].successors.push(to_id.clone());
-                network.lanes[target_lane_index].predecessors.push(from_id.clone());
+                network.lanes[target_lane_index]
+                    .predecessors
+                    .push(from_id.clone());
                 network.connectors.push(Connector {
                     id,
                     node,
@@ -807,9 +819,9 @@ pub fn derive(
                 road.centreline
                     .tangent_at((road.trim_start + 2.0).min(road.centreline.length()))
             } else {
-                -road.centreline.tangent_at(
-                    (road.centreline.length() - road.trim_end - 2.0).max(0.0),
-                )
+                -road
+                    .centreline
+                    .tangent_at((road.centreline.length() - road.trim_end - 2.0).max(0.0))
             };
             let outward = -inward;
             let side = if at_start { -1.0 } else { 1.0 };
@@ -871,24 +883,26 @@ pub fn derive(
                         let t = i as f32 / 7.0;
                         // Bulge to the mean radius in the middle of the arc.
                         let bulge = (std::f32::consts::PI * t).sin();
-                        let r = r0 + (r1 - r0) * t + (r_mid.max(r0.max(r1)) - (r0 + (r1 - r0) * t)) * bulge * 0.5;
+                        let r = r0
+                            + (r1 - r0) * t
+                            + (r_mid.max(r0.max(r1)) - (r0 + (r1 - r0) * t)) * bulge * 0.5;
                         let angle = a0 + delta * t;
                         centre + Vec2::new(angle.cos(), angle.sin()) * r
                     })
                     .collect::<Vec<Vec2>>()
             } else {
-            cubic_points(
-                port.right,
-                // `dir` points from the road *towards* the junction (it is the
-                // negated into-the-road tangent), so the handles run along each
-                // kerb line into the box.  With the opposite sign the corner
-                // bows away from the junction and reads as a convex blob rather
-                // than a kerb return.
-                port.right + port.dir * handle,
-                next.left + next.dir * handle,
-                next.left,
-                8,
-            )
+                cubic_points(
+                    port.right,
+                    // `dir` points from the road *towards* the junction (it is the
+                    // negated into-the-road tangent), so the handles run along each
+                    // kerb line into the box.  With the opposite sign the corner
+                    // bows away from the junction and reads as a convex blob rather
+                    // than a kerb return.
+                    port.right + port.dir * handle,
+                    next.left + next.dir * handle,
+                    next.left,
+                    8,
+                )
             };
             // Drop the two endpoints; they are already the port corners.
             for point in corner.iter().skip(1).take(7) {
@@ -927,7 +941,10 @@ pub fn derive(
                 .iter()
                 .filter_map(|id| network.road(*id))
                 .any(|road| {
-                    matches!(road.class, ModernRoadClass::Arterial | ModernRoadClass::Expressway)
+                    matches!(
+                        road.class,
+                        ModernRoadClass::Arterial | ModernRoadClass::Expressway
+                    )
                 });
             if has_major {
                 JunctionKind::Signalized

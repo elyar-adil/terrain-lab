@@ -32,7 +32,12 @@ impl Seed {
     }
 
     pub fn derive_cell(self, cell: Cell) -> Seed {
-        Seed(hash_words(&[self.0, u64::from(cell.level), cell.x as u64, cell.y as u64]))
+        Seed(hash_words(&[
+            self.0,
+            u64::from(cell.level),
+            cell.x as u64,
+            cell.y as u64,
+        ]))
     }
 
     /// A number in `[0, 1)`.
@@ -54,7 +59,10 @@ impl Seed {
     }
 
     pub fn rng(self) -> Rng {
-        Rng { key: mix64(self.0 ^ 0xA076_1D64_78BD_642F), counter: 0 }
+        Rng {
+            key: mix64(self.0 ^ 0xA076_1D64_78BD_642F),
+            counter: 0,
+        }
     }
 }
 

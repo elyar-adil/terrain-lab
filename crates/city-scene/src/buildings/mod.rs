@@ -42,13 +42,11 @@
 //!    blockout no matter how good the walls are.
 
 pub(crate) mod details;
-pub(crate) mod roofscape;
 pub(crate) mod house;
+pub(crate) mod roofscape;
 mod shell;
 
-use urban::{
-    CityFrameInfo, Compound, ModernBuilding, Parcel, ParcelUse, Point, UrbanBlock,
-};
+use urban::{CityFrameInfo, Compound, ModernBuilding, Parcel, ParcelUse, Point, UrbanBlock};
 
 use crate::facades::{GROUND_STOREY_M, design};
 use crate::math::{Vec2, Vec3, signed_area};
@@ -227,7 +225,9 @@ fn podium_storeys(building: &ModernBuilding) -> f32 {
         // whole number of 公建 storeys (3.0 – 3.3 m) so its shopfront band and
         // its deck land on floors.  Two to four retail storeys is the Chinese
         // norm; five only on the biggest plots.
-        (building.podium_height_metres / 3.3).round().clamp(2.0, 4.0)
+        (building.podium_height_metres / 3.3)
+            .round()
+            .clamp(2.0, 4.0)
     } else {
         2.0
     }
@@ -290,11 +290,7 @@ pub(crate) fn crown_tile_for(shaft: usize, id: u32) -> usize {
         // A glass tower's crown is a pale stone cap — or, on every other block,
         // the mint-green glazing of the 2010s, which is the single most
         // recognisable residential-tower crown in the country.
-        if id % 2 == 0 {
-            13
-        } else {
-            14
-        }
+        if id % 2 == 0 { 13 } else { 14 }
     } else {
         16
     }
@@ -408,7 +404,10 @@ pub fn build(
         }
         // Residential compounds are landscaped (lawn, hedges, paths); only
         // commercial, mixed and civic plots are hard-paved forecourts.
-        let material = if matches!(parcel.use_type, ParcelUse::Park | ParcelUse::Residential | ParcelUse::Villa | ParcelUse::Farmstead) {
+        let material = if matches!(
+            parcel.use_type,
+            ParcelUse::Park | ParcelUse::Residential | ParcelUse::Villa | ParcelUse::Farmstead
+        ) {
             "parcel.green"
         } else {
             "parcel.paving"
@@ -512,7 +511,12 @@ pub(crate) fn facade_wall(
 
 /// A walled residential compound: boundary wall, a gate portal on the street
 /// front, an internal fire lane and a lawn.
-fn compound_shell(compound: &Compound, ring: &[Vec2], frame: CityFrameInfo, builder: &mut MeshBuilder) {
+fn compound_shell(
+    compound: &Compound,
+    ring: &[Vec2],
+    frame: CityFrameInfo,
+    builder: &mut MeshBuilder,
+) {
     // Clockwise in plan, so wall quads face outward (see `building_shell`).
     let mut outward = ring.to_vec();
     if signed_area(&outward) > 0.0 {
@@ -524,19 +528,58 @@ fn compound_shell(compound: &Compound, ring: &[Vec2], frame: CityFrameInfo, buil
     for index in 0..outward.len() {
         let a = outward[index];
         let b = outward[(index + 1) % outward.len()];
-        builder.wall("wall.render", a, b, level::GROUND, level::GROUND + height, None);
-        builder.wall("trim.light", a, b, level::GROUND + height, level::GROUND + height + 0.14, None);
+        builder.wall(
+            "wall.render",
+            a,
+            b,
+            level::GROUND,
+            level::GROUND + height,
+            None,
+        );
+        builder.wall(
+            "trim.light",
+            a,
+            b,
+            level::GROUND + height,
+            level::GROUND + height + 0.14,
+            None,
+        );
         builder.wall("trim.dark", a, b, level::GROUND, level::GROUND + 0.35, None);
         if a.distance(b) > 1.8 {
-            builder.wall("trim.light", a, b, level::GROUND + height - 0.55, level::GROUND + height - 0.45, None);
+            builder.wall(
+                "trim.light",
+                a,
+                b,
+                level::GROUND + height - 0.55,
+                level::GROUND + height - 0.45,
+                None,
+            );
         }
     }
     if compound.gate_points.len() >= 2 {
         let a = gate_point(compound.gate_points[0], frame);
         let b = gate_point(compound.gate_points[1], frame);
         for point in [a, b] {
-            crate::mesh::box_at(builder, "wall.render", point, level::GROUND + 2.1, 0.9, 4.2, 0.9, 0.0);
-            crate::mesh::box_at(builder, "trim.dark", point, level::GROUND + 4.32, 1.2, 0.24, 1.2, 0.0);
+            crate::mesh::box_at(
+                builder,
+                "wall.render",
+                point,
+                level::GROUND + 2.1,
+                0.9,
+                4.2,
+                0.9,
+                0.0,
+            );
+            crate::mesh::box_at(
+                builder,
+                "trim.dark",
+                point,
+                level::GROUND + 4.32,
+                1.2,
+                0.24,
+                1.2,
+                0.0,
+            );
         }
         let span = b - a;
         let bearing = Vec2::new(span.x, span.y).angle();
@@ -552,7 +595,11 @@ fn compound_shell(compound: &Compound, ring: &[Vec2], frame: CityFrameInfo, buil
         );
         // A sliding gate leaf, half open, which is what every compound gate is.
         let mid = (a + b) * 0.5;
-        let dir = if a.distance(b) > 0.1 { (b - a).normalize() } else { Vec2::new(1.0, 0.0) };
+        let dir = if a.distance(b) > 0.1 {
+            (b - a).normalize()
+        } else {
+            Vec2::new(1.0, 0.0)
+        };
         crate::mesh::box_at(
             builder,
             "trim.dark",
@@ -568,10 +615,7 @@ fn compound_shell(compound: &Compound, ring: &[Vec2], frame: CityFrameInfo, buil
     // *textured* material, and a bare quad into it desyncs the group's optional
     // UV layer from its vertex count — the payload bug the renderer caught.
     for path in &compound.paths {
-        let ring: Vec<Vec2> = path
-            .iter()
-            .map(|point| gate_point(*point, frame))
-            .collect();
+        let ring: Vec<Vec2> = path.iter().map(|point| gate_point(*point, frame)).collect();
         if ring.len() < 2 {
             continue;
         }
@@ -629,10 +673,19 @@ mod tests {
             let centre = ring_centroid(&ring);
             let mut builder = MeshBuilder::new();
             shell::building_shell(building, &ring, &mut builder);
-            for group in builder.build().meshes.iter().filter(|g| g.material.starts_with("facade/")) {
+            for group in builder
+                .build()
+                .meshes
+                .iter()
+                .filter(|g| g.material.starts_with("facade/"))
+            {
                 let p = |i: u32| {
                     let i = i as usize * 3;
-                    Vec3::new(group.positions[i], group.positions[i + 1], group.positions[i + 2])
+                    Vec3::new(
+                        group.positions[i],
+                        group.positions[i + 1],
+                        group.positions[i + 2],
+                    )
                 };
                 for tri in group.indices.chunks_exact(3) {
                     let (a, b, c) = (p(tri[0]), p(tri[1]), p(tri[2]));
@@ -695,8 +748,16 @@ mod tests {
             || material.starts_with("ground/")
             || matches!(
                 material,
-                "roof" | "trim.light" | "trim.dark" | "balcony.slab" | "metal.ac" | "awning"
-                    | "wall.render" | "sign/shop" | "block.ground" | "parcel.paving"
+                "roof"
+                    | "trim.light"
+                    | "trim.dark"
+                    | "balcony.slab"
+                    | "metal.ac"
+                    | "awning"
+                    | "wall.render"
+                    | "sign/shop"
+                    | "block.ground"
+                    | "parcel.paving"
                     | "parcel.green"
             )
     }
@@ -742,7 +803,10 @@ mod tests {
     #[test]
     fn every_building_emits_a_facade_with_metre_uvs() {
         let groups = built().meshes;
-        let facades: Vec<_> = groups.iter().filter(|g| g.material.starts_with("facade/")).collect();
+        let facades: Vec<_> = groups
+            .iter()
+            .filter(|g| g.material.starts_with("facade/"))
+            .collect();
         assert!(!facades.is_empty());
         for group in facades {
             let uvs = group.uvs.as_ref().expect("facades need metre UVs");
@@ -750,7 +814,11 @@ mod tests {
             // UVs are metres, so they must span more than a tile somewhere or the
             // wall sampled a single texel — the artefact this port removes.
             let span = uvs.iter().fold(0.0_f32, |acc, value| acc.max(value.abs()));
-            assert!(span > 3.0, "{} has degenerate UVs (max {span})", group.material);
+            assert!(
+                span > 3.0,
+                "{} has degenerate UVs (max {span})",
+                group.material
+            );
         }
     }
 
@@ -788,12 +856,17 @@ mod tests {
     fn every_textured_building_group_carries_uvs_on_every_vertex() {
         let groups = built().meshes;
         for group in &groups {
-            if !matches!(group.material.as_str(), "roof" | "parcel.paving" | "parcel.green" | "block.ground" | "sign/shop")
-            {
+            if !matches!(
+                group.material.as_str(),
+                "roof" | "parcel.paving" | "parcel.green" | "block.ground" | "sign/shop"
+            ) {
                 continue;
             }
             let uvs = group.uvs.as_ref().unwrap_or_else(|| {
-                panic!("{} is texture-bound and needs UVs on every vertex", group.material)
+                panic!(
+                    "{} is texture-bound and needs UVs on every vertex",
+                    group.material
+                )
             });
             assert_eq!(
                 uvs.len(),
@@ -818,7 +891,9 @@ mod tests {
             if ring.len() < 3 {
                 continue;
             }
-            let Some(extent) = roofscape::ring_extent(&ring) else { continue };
+            let Some(extent) = roofscape::ring_extent(&ring) else {
+                continue;
+            };
             footprints.push((extent, ring));
         }
         let mut tops: Vec<f32> = vec![f32::MIN; footprints.len()];
@@ -845,7 +920,11 @@ mod tests {
                 }
             }
         }
-        let measured: Vec<f32> = tops.iter().copied().filter(|top| top.is_finite() && *top > 1.0).collect();
+        let measured: Vec<f32> = tops
+            .iter()
+            .copied()
+            .filter(|top| top.is_finite() && *top > 1.0)
+            .collect();
         assert!(
             measured.len() > city.buildings.len() / 2,
             "only {} of {} buildings produced a measurable shell",
@@ -856,10 +935,19 @@ mod tests {
         // storey bands, not round numbers: a 多层 walk-up tops out below 26 m, a
         // 板楼 sits in the middle, and a 塔楼 clears twenty storeys.
         let low = measured.iter().filter(|h| **h < 26.0).count();
-        let mid = measured.iter().filter(|h| (26.0..58.0).contains(*h)).count();
+        let mid = measured
+            .iter()
+            .filter(|h| (26.0..58.0).contains(*h))
+            .count();
         let tall = measured.iter().filter(|h| **h >= 58.0).count();
-        assert!(low > 3, "only {low} low-rise buildings; a city of towers is not a city");
-        assert!(mid > 3, "only {mid} mid-rise buildings; the 板楼 band is missing");
+        assert!(
+            low > 3,
+            "only {low} low-rise buildings; a city of towers is not a city"
+        );
+        assert!(
+            mid > 3,
+            "only {mid} mid-rise buildings; the 板楼 band is missing"
+        );
         assert!(tall > 0, "nothing above 58 m: there is no skyline");
         // And the heights must genuinely vary, not cluster.
         let mut sorted = measured.clone();
@@ -946,7 +1034,15 @@ mod tests {
             ..ModernChinaSpec::default()
         });
         let mut builder = MeshBuilder::new();
-        build(&city.blocks, &city.parcels, &city.buildings, &city.compounds, &city.fields, city.frame, &mut builder);
+        build(
+            &city.blocks,
+            &city.parcels,
+            &city.buildings,
+            &city.compounds,
+            &city.fields,
+            city.frame,
+            &mut builder,
+        );
         let groups = builder.build().meshes;
         let mut glazed = 0;
         let mut masonry = 0;
@@ -959,7 +1055,10 @@ mod tests {
             }
         }
         assert!(masonry > 0, "no masonry in the city");
-        assert!(glazed > 0, "no curtain wall in the city: it is not a Chinese skyline");
+        assert!(
+            glazed > 0,
+            "no curtain wall in the city: it is not a Chinese skyline"
+        );
     }
 
     #[test]
@@ -1050,6 +1149,13 @@ fn draw_field(field: &urban::Field, ring: &[Vec2], builder: &mut MeshBuilder) {
         let along = (b - a).normalize();
         let out = Vec2::new(along.y, -along.x);
         let (a_out, b_out) = (a + out * 0.30, b + out * 0.30);
-        builder.quad("field.ridge", Vec3::from_plan(a, y + 0.14), Vec3::from_plan(b, y + 0.14), Vec3::from_plan(b_out, y), Vec3::from_plan(a_out, y), None);
+        builder.quad(
+            "field.ridge",
+            Vec3::from_plan(a, y + 0.14),
+            Vec3::from_plan(b, y + 0.14),
+            Vec3::from_plan(b_out, y),
+            Vec3::from_plan(a_out, y),
+            None,
+        );
     }
 }

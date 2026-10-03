@@ -79,7 +79,9 @@ struct RenderRoad {
 /// Regional roads in world kilometres, minus the stretch inside every town: a
 /// town's own street plan carries the road through, so drawing the regional
 /// polyline there as well put two disagreeing road networks on top of each other.
-fn regional_road_pieces(infrastructure: &InfrastructureData) -> Vec<(&infrastructure::Road, Vec<[f32; 2]>)> {
+fn regional_road_pieces(
+    infrastructure: &InfrastructureData,
+) -> Vec<(&infrastructure::Road, Vec<[f32; 2]>)> {
     let grid = infrastructure.urban_land.grid;
     let footprints = infrastructure.footprints();
     let mut out = Vec::new();
@@ -350,7 +352,8 @@ fn rasterize_road_coverage(
     roads: &[infrastructure::Road],
     right_of_way: bool,
 ) {
-    let grid = infrastructure::WorldGrid::new(source_size, world_size_km).expect("a valid world grid");
+    let grid =
+        infrastructure::WorldGrid::new(source_size, world_size_km).expect("a valid world grid");
     let metres_per_pixel = world_size_km * 1000.0 / (target_size - 1) as f32;
     for road in roads {
         let profile = road.class.profile();
@@ -863,14 +866,18 @@ fn install_city_plans(infrastructure: &InfrastructureData) {
         .zip(infrastructure.modern_cities.iter())
         .map(|(settlement, city)| (settlement.class, city.clone()))
         .collect();
-    *CITY_WORLD.lock().unwrap_or_else(|error| error.into_inner()) =
-        Some(CityWorld { plans, scenes: std::collections::HashMap::new() });
+    *CITY_WORLD.lock().unwrap_or_else(|error| error.into_inner()) = Some(CityWorld {
+        plans,
+        scenes: std::collections::HashMap::new(),
+    });
 }
 
 /// The finished scene of one city, building it on the first request.
 async fn ensure_city_scene(index: usize) -> Result<std::sync::Arc<city_scene::CityScene>, String> {
     let (class, city) = {
-        let guard = CITY_WORLD.lock().map_err(|_| "the city cache is poisoned")?;
+        let guard = CITY_WORLD
+            .lock()
+            .map_err(|_| "the city cache is poisoned")?;
         let world = guard
             .as_ref()
             .ok_or_else(|| "no cities: generate the world first".to_owned())?;
@@ -902,7 +909,9 @@ async fn ensure_city_scene(index: usize) -> Result<std::sync::Arc<city_scene::Ci
     .map_err(|error| format!("building the city scene failed: {error}"))?;
     let scene = std::sync::Arc::new(scene);
     {
-        let mut guard = CITY_WORLD.lock().map_err(|_| "the city cache is poisoned")?;
+        let mut guard = CITY_WORLD
+            .lock()
+            .map_err(|_| "the city cache is poisoned")?;
         if let Some(world) = guard.as_mut() {
             // A concurrent request may have built it first; keep that one.
             world.scenes.entry(index).or_insert_with(|| scene.clone());
@@ -975,171 +984,169 @@ pub fn build_payload(
             .count(),
     };
     let analysis_previews = analysis_previews(&terrain, &infrastructure)?;
-        let mesh_size = 512_usize.min(terrain.size);
-        // Settlement footprints, then level the mesh under them and keep plants
-        // out of them: the city is built on a flat frame, so terrain generation
-        // (not the renderer) makes the ground agree with it.
-        let city_sites: Vec<terrain_core::sites::CitySite> = infrastructure
-            .modern_cities
-            .iter()
-            .filter_map(|city| {
-                terrain_core::sites::site_from_points(
-                    city.nodes.iter().map(|node| (node.point.x_km, node.point.y_km)),
-                )
-            })
-            .collect();
-        let mut mesh_heights = downsample_height(&terrain, mesh_size);
-        terrain_core::sites::flatten_heights(
-            &mut mesh_heights,
-            mesh_size,
-            config.world_size_km,
-            &city_sites,
-        );
-        let height_bytes: Vec<u8> = mesh_heights
-            .into_iter()
-            .flat_map(f32::to_le_bytes)
-            .collect();
-        let mut forest_bytes = Vec::with_capacity(mesh_size * mesh_size);
-        for y in 0..mesh_size {
-            for x in 0..mesh_size {
-                let sx = x * (terrain.size - 1) / (mesh_size - 1);
-                let sy = y * (terrain.size - 1) / (mesh_size - 1);
-                forest_bytes
-                    .push((terrain.forest[sy * terrain.size + sx].clamp(0.0, 1.0) * 255.0) as u8);
-            }
-        }
-        let mut vegetation_exclusion_bytes = vegetation_exclusion_mask(&infrastructure, mesh_size);
-        terrain_core::sites::exclude_vegetation(
-            &mut vegetation_exclusion_bytes,
-            mesh_size,
-            config.world_size_km,
-            &city_sites,
-        );
-        let (urban_bytes, cultivated_bytes, crop_bytes, road_bytes) =
-            infrastructure_surface_masks(&infrastructure, mesh_size);
-        // Ground the shader may paint procedurally: everything but built-up land,
-        // fields and roads (kept as baked) and water.
-        let built: Vec<u8> = (0..mesh_size * mesh_size)
-            .map(|i| urban_bytes[i].max(cultivated_bytes[i]).max(road_bytes[i]))
-            .collect();
-        let material_bytes = terrain_core::material_control_map(&terrain, mesh_size, Some(&built));
-        let max_flow = terrain.flow.iter().copied().fold(1.0_f32, f32::max);
-        let max_flow_log = max_flow.ln_1p();
-        let mut water_height_bytes = Vec::with_capacity(mesh_size * mesh_size * 4);
-        for y in 0..mesh_size {
-            for x in 0..mesh_size {
-                let sx = x * (terrain.size - 1) / (mesh_size - 1);
-                let sy = y * (terrain.size - 1) / (mesh_size - 1);
-                let index = sy * terrain.size + sx;
-                let open_ocean = terrain.height[index] < 58.0;
-                let lake = terrain.lake[index] > 0.05;
-                let surface_height = if open_ocean {
-                    58.0
-                } else if lake {
-                    terrain.filled_height[index]
-                } else {
-                    terrain.height[index] + 0.35
-                };
-                water_height_bytes.extend_from_slice(&surface_height.to_le_bytes());
-            }
-        }
-        let water_data_size = 512_usize.min(terrain.size);
-        let mut water_mask_bytes = Vec::with_capacity(water_data_size * water_data_size);
-        let mut water_kind_bytes = Vec::with_capacity(water_data_size * water_data_size);
-        let mut flow_direction_bytes = Vec::with_capacity(water_data_size * water_data_size * 2);
-        let mut flow_strength_bytes = Vec::with_capacity(water_data_size * water_data_size);
-        for y in 0..water_data_size {
-            for x in 0..water_data_size {
-                let sx = x * (terrain.size - 1) / (water_data_size - 1);
-                let sy = y * (terrain.size - 1) / (water_data_size - 1);
-                let index = sy * terrain.size + sx;
-                let open_ocean = terrain.height[index] < 58.0;
-                let lake = terrain.lake[index] > 0.05;
-                water_mask_bytes.push((terrain.water[index].clamp(0.0, 1.0) * 255.0) as u8);
-                water_kind_bytes.push(if open_ocean {
-                    255
-                } else if lake {
-                    128
-                } else {
-                    0
-                });
-                flow_direction_bytes
-                    .push(((terrain.flow_direction_x[index].clamp(-1.0, 1.0) * 127.0) as i8) as u8);
-                flow_direction_bytes
-                    .push(((terrain.flow_direction_y[index].clamp(-1.0, 1.0) * 127.0) as i8) as u8);
-                flow_strength_bytes.push(
-                    ((terrain.flow[index].ln_1p() / max_flow_log).clamp(0.0, 1.0) * 255.0) as u8,
-                );
-            }
-        }
-        let preview_size = 1024_usize.min(config.grid_size.max(512));
-        let mut image = render_satellite(&terrain, &config, preview_size, |value, stage| {
-            progress(value, stage)
-        })
-        .map_err(|error| error.to_string())?;
-        composite_world_surface(&mut image, &terrain, &infrastructure);
-        let mut png = Cursor::new(Vec::new());
-        image
-            .write_to(&mut png, ImageFormat::Png)
-            .map_err(|error| error.to_string())?;
-        progress(1.0, "卫星影像生成完成");
-        let result = GenerationResult {
-            preview_data_url: format!(
-                "data:image/png;base64,{}",
-                STANDARD.encode(png.into_inner())
-            ),
-            width: image.width(),
-            height: image.height(),
-            world_size_km: config.world_size_km,
-            elapsed_ms: started.elapsed().as_millis(),
-            stats,
-            mesh_size,
-            water_data_size,
-            height_data_base64: STANDARD.encode(height_bytes),
-            forest_data_base64: STANDARD.encode(forest_bytes),
-            material_data_base64: STANDARD.encode(material_bytes),
-            vegetation_exclusion_data_base64: STANDARD.encode(vegetation_exclusion_bytes),
-            urban_data_base64: STANDARD.encode(urban_bytes),
-            cultivated_data_base64: STANDARD.encode(cultivated_bytes),
-            crop_data_base64: STANDARD.encode(crop_bytes),
-            road_data_base64: STANDARD.encode(road_bytes),
-            roads: render_roads(&infrastructure),
-            cities: serde_json::to_value(&infrastructure.cities)
-                .map_err(|error| error.to_string())?,
-            city_sites,
-            far_trees: city_scene::trees::far_tree_payload(),
-            modern_cities: serde_json::to_value(&infrastructure.modern_cities)
-                .map_err(|error| error.to_string())?,
-            // The city scenes are **not** part of this payload. They are tens of
-            // megabytes of base64 vertex buffers per city, and a three-city world
-            // serialises to several hundred megabytes of JSON. Handing that to a
-            // webview that does not read it kills the webview, so `city_scene`
-            // serves one city on demand instead. See `generate_terrain`.
-            vegetation_prototypes: serde_json::to_value(
-                procedural::standard_prototype_set(2),
+    let mesh_size = 512_usize.min(terrain.size);
+    // Settlement footprints, then level the mesh under them and keep plants
+    // out of them: the city is built on a flat frame, so terrain generation
+    // (not the renderer) makes the ground agree with it.
+    let city_sites: Vec<terrain_core::sites::CitySite> = infrastructure
+        .modern_cities
+        .iter()
+        .filter_map(|city| {
+            terrain_core::sites::site_from_points(
+                city.nodes
+                    .iter()
+                    .map(|node| (node.point.x_km, node.point.y_km)),
             )
+        })
+        .collect();
+    let mut mesh_heights = downsample_height(&terrain, mesh_size);
+    terrain_core::sites::flatten_heights(
+        &mut mesh_heights,
+        mesh_size,
+        config.world_size_km,
+        &city_sites,
+    );
+    let height_bytes: Vec<u8> = mesh_heights
+        .into_iter()
+        .flat_map(f32::to_le_bytes)
+        .collect();
+    let mut forest_bytes = Vec::with_capacity(mesh_size * mesh_size);
+    for y in 0..mesh_size {
+        for x in 0..mesh_size {
+            let sx = x * (terrain.size - 1) / (mesh_size - 1);
+            let sy = y * (terrain.size - 1) / (mesh_size - 1);
+            forest_bytes
+                .push((terrain.forest[sy * terrain.size + sx].clamp(0.0, 1.0) * 255.0) as u8);
+        }
+    }
+    let mut vegetation_exclusion_bytes = vegetation_exclusion_mask(&infrastructure, mesh_size);
+    terrain_core::sites::exclude_vegetation(
+        &mut vegetation_exclusion_bytes,
+        mesh_size,
+        config.world_size_km,
+        &city_sites,
+    );
+    let (urban_bytes, cultivated_bytes, crop_bytes, road_bytes) =
+        infrastructure_surface_masks(&infrastructure, mesh_size);
+    // Ground the shader may paint procedurally: everything but built-up land,
+    // fields and roads (kept as baked) and water.
+    let built: Vec<u8> = (0..mesh_size * mesh_size)
+        .map(|i| urban_bytes[i].max(cultivated_bytes[i]).max(road_bytes[i]))
+        .collect();
+    let material_bytes = terrain_core::material_control_map(&terrain, mesh_size, Some(&built));
+    let max_flow = terrain.flow.iter().copied().fold(1.0_f32, f32::max);
+    let max_flow_log = max_flow.ln_1p();
+    let mut water_height_bytes = Vec::with_capacity(mesh_size * mesh_size * 4);
+    for y in 0..mesh_size {
+        for x in 0..mesh_size {
+            let sx = x * (terrain.size - 1) / (mesh_size - 1);
+            let sy = y * (terrain.size - 1) / (mesh_size - 1);
+            let index = sy * terrain.size + sx;
+            let open_ocean = terrain.height[index] < 58.0;
+            let lake = terrain.lake[index] > 0.05;
+            let surface_height = if open_ocean {
+                58.0
+            } else if lake {
+                terrain.filled_height[index]
+            } else {
+                terrain.height[index] + 0.35
+            };
+            water_height_bytes.extend_from_slice(&surface_height.to_le_bytes());
+        }
+    }
+    let water_data_size = 512_usize.min(terrain.size);
+    let mut water_mask_bytes = Vec::with_capacity(water_data_size * water_data_size);
+    let mut water_kind_bytes = Vec::with_capacity(water_data_size * water_data_size);
+    let mut flow_direction_bytes = Vec::with_capacity(water_data_size * water_data_size * 2);
+    let mut flow_strength_bytes = Vec::with_capacity(water_data_size * water_data_size);
+    for y in 0..water_data_size {
+        for x in 0..water_data_size {
+            let sx = x * (terrain.size - 1) / (water_data_size - 1);
+            let sy = y * (terrain.size - 1) / (water_data_size - 1);
+            let index = sy * terrain.size + sx;
+            let open_ocean = terrain.height[index] < 58.0;
+            let lake = terrain.lake[index] > 0.05;
+            water_mask_bytes.push((terrain.water[index].clamp(0.0, 1.0) * 255.0) as u8);
+            water_kind_bytes.push(if open_ocean {
+                255
+            } else if lake {
+                128
+            } else {
+                0
+            });
+            flow_direction_bytes
+                .push(((terrain.flow_direction_x[index].clamp(-1.0, 1.0) * 127.0) as i8) as u8);
+            flow_direction_bytes
+                .push(((terrain.flow_direction_y[index].clamp(-1.0, 1.0) * 127.0) as i8) as u8);
+            flow_strength_bytes
+                .push(((terrain.flow[index].ln_1p() / max_flow_log).clamp(0.0, 1.0) * 255.0) as u8);
+        }
+    }
+    let preview_size = 1024_usize.min(config.grid_size.max(512));
+    let mut image = render_satellite(&terrain, &config, preview_size, |value, stage| {
+        progress(value, stage)
+    })
+    .map_err(|error| error.to_string())?;
+    composite_world_surface(&mut image, &terrain, &infrastructure);
+    let mut png = Cursor::new(Vec::new());
+    image
+        .write_to(&mut png, ImageFormat::Png)
+        .map_err(|error| error.to_string())?;
+    progress(1.0, "卫星影像生成完成");
+    let result = GenerationResult {
+        preview_data_url: format!(
+            "data:image/png;base64,{}",
+            STANDARD.encode(png.into_inner())
+        ),
+        width: image.width(),
+        height: image.height(),
+        world_size_km: config.world_size_km,
+        elapsed_ms: started.elapsed().as_millis(),
+        stats,
+        mesh_size,
+        water_data_size,
+        height_data_base64: STANDARD.encode(height_bytes),
+        forest_data_base64: STANDARD.encode(forest_bytes),
+        material_data_base64: STANDARD.encode(material_bytes),
+        vegetation_exclusion_data_base64: STANDARD.encode(vegetation_exclusion_bytes),
+        urban_data_base64: STANDARD.encode(urban_bytes),
+        cultivated_data_base64: STANDARD.encode(cultivated_bytes),
+        crop_data_base64: STANDARD.encode(crop_bytes),
+        road_data_base64: STANDARD.encode(road_bytes),
+        roads: render_roads(&infrastructure),
+        cities: serde_json::to_value(&infrastructure.cities).map_err(|error| error.to_string())?,
+        city_sites,
+        far_trees: city_scene::trees::far_tree_payload(),
+        modern_cities: serde_json::to_value(&infrastructure.modern_cities)
             .map_err(|error| error.to_string())?,
-            material_textures: serde_json::Value::Array(
-                procedural::standard_texture_set(256)
-                    .into_iter()
-                    .map(|texture| {
-                        serde_json::json!({
-                            "name": texture.name,
-                            "width": texture.width,
-                            "height": texture.height,
-                            "data": STANDARD.encode(&texture.rgba),
-                        })
+        // The city scenes are **not** part of this payload. They are tens of
+        // megabytes of base64 vertex buffers per city, and a three-city world
+        // serialises to several hundred megabytes of JSON. Handing that to a
+        // webview that does not read it kills the webview, so `city_scene`
+        // serves one city on demand instead. See `generate_terrain`.
+        vegetation_prototypes: serde_json::to_value(procedural::standard_prototype_set(2))
+            .map_err(|error| error.to_string())?,
+        material_textures: serde_json::Value::Array(
+            procedural::standard_texture_set(256)
+                .into_iter()
+                .map(|texture| {
+                    serde_json::json!({
+                        "name": texture.name,
+                        "width": texture.width,
+                        "height": texture.height,
+                        "data": STANDARD.encode(&texture.rgba),
                     })
-                    .collect(),
-            ),
-            water_height_data_base64: STANDARD.encode(water_height_bytes),
-            water_mask_base64: STANDARD.encode(water_mask_bytes),
-            water_kind_base64: STANDARD.encode(water_kind_bytes),
-            flow_direction_base64: STANDARD.encode(flow_direction_bytes),
-            flow_strength_base64: STANDARD.encode(flow_strength_bytes),
-            analysis_previews,
-            infrastructure_summary,
-        };
+                })
+                .collect(),
+        ),
+        water_height_data_base64: STANDARD.encode(water_height_bytes),
+        water_mask_base64: STANDARD.encode(water_mask_bytes),
+        water_kind_base64: STANDARD.encode(water_kind_bytes),
+        flow_direction_base64: STANDARD.encode(flow_direction_bytes),
+        flow_strength_base64: STANDARD.encode(flow_strength_bytes),
+        analysis_previews,
+        infrastructure_summary,
+    };
     Ok((result, infrastructure))
 }
 

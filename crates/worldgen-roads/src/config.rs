@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use worldgen_contracts::{DryLand, FlatGround, HeightField, NoPinnedRoads, PinnedRoads, UrbanField, WaterField};
+use worldgen_contracts::{
+    DryLand, FlatGround, HeightField, NoPinnedRoads, PinnedRoads, UrbanField, WaterField,
+};
 
 /// One rung of the street hierarchy. A rung exists where the place is built up
 /// at least `min_urban`, and its streets lie `base_spacing_m` apart in the dense
@@ -22,11 +24,36 @@ pub struct LevelSpec {
 /// From the arterial grid down to the alleys between buildings: 主干路, 次干路,
 /// 支路, 小区路, 巷.
 pub const LEVELS: [LevelSpec; 5] = [
-    LevelSpec { level: 0, base_spacing_m: 78.0, min_urban: 0.7, reach_m: 50.0 },
-    LevelSpec { level: 1, base_spacing_m: 150.0, min_urban: 0.5, reach_m: 110.0 },
-    LevelSpec { level: 2, base_spacing_m: 290.0, min_urban: 0.3, reach_m: 240.0 },
-    LevelSpec { level: 3, base_spacing_m: 520.0, min_urban: 0.15, reach_m: 500.0 },
-    LevelSpec { level: 4, base_spacing_m: 1000.0, min_urban: 0.0, reach_m: 0.0 },
+    LevelSpec {
+        level: 0,
+        base_spacing_m: 78.0,
+        min_urban: 0.7,
+        reach_m: 50.0,
+    },
+    LevelSpec {
+        level: 1,
+        base_spacing_m: 150.0,
+        min_urban: 0.5,
+        reach_m: 110.0,
+    },
+    LevelSpec {
+        level: 2,
+        base_spacing_m: 290.0,
+        min_urban: 0.3,
+        reach_m: 240.0,
+    },
+    LevelSpec {
+        level: 3,
+        base_spacing_m: 520.0,
+        min_urban: 0.15,
+        reach_m: 500.0,
+    },
+    LevelSpec {
+        level: 4,
+        base_spacing_m: 1000.0,
+        min_urban: 0.0,
+        reach_m: 0.0,
+    },
 ];
 
 /// The coarsest rung: the lattice chords themselves, and the arterial grid.
@@ -80,7 +107,12 @@ pub struct Fields {
 
 impl Fields {
     pub fn new(urban: Arc<dyn UrbanField>) -> Self {
-        Self { urban, water: Arc::new(DryLand), height: Arc::new(FlatGround(0.0)), pinned: Arc::new(NoPinnedRoads) }
+        Self {
+            urban,
+            water: Arc::new(DryLand),
+            height: Arc::new(FlatGround(0.0)),
+            pinned: Arc::new(NoPinnedRoads),
+        }
     }
     pub fn with_water(mut self, water: Arc<dyn WaterField>) -> Self {
         self.water = water;

@@ -47,7 +47,11 @@ pub(super) fn right_of_way(class: ModernRoadClass) -> f32 {
 /// Setback of face edge `i`: a street's right-of-way, or half the lot gap along
 /// a cut between two pieces of the same block.
 fn edge_row(face: &super::blocks::Face, i: usize) -> f32 {
-    if face.open[i] { LOT_GAP_M * 0.5 } else { right_of_way(face.classes[i]) }
+    if face.open[i] {
+        LOT_GAP_M * 0.5
+    } else {
+        right_of_way(face.classes[i])
+    }
 }
 
 pub(super) fn build_parcels(
@@ -92,7 +96,9 @@ pub(super) fn build_parcels(
         // A big face of the country can have its middle in the fields and its
         // edge in the suburb: judge it by the most built-up place on its boundary.
         let face_built = if frame.external.is_some() {
-            face.ring.iter().fold(built, |m, p| m.max(frame.urbanness(p.0, p.1)))
+            face.ring
+                .iter()
+                .fold(built, |m, p| m.max(frame.urbanness(p.0, p.1)))
         } else {
             built
         };
@@ -105,7 +111,11 @@ pub(super) fn build_parcels(
         }
         let fi = face_index as i32;
         let centrality = frame.core_weight(centre.0, centre.1)
-            * if frame.organic_footprint { 0.35 + 0.65 * built } else { 1.0 };
+            * if frame.organic_footprint {
+                0.35 + 0.65 * built
+            } else {
+                1.0
+            };
 
         // ---- street setbacks -> buildable envelope ----
         let mut envelope = face.ring.clone();
@@ -117,11 +127,7 @@ pub(super) fn build_parcels(
                 continue;
             }
             let n = (-(b.1 - a.1) / len, (b.0 - a.0) / len);
-            envelope = clip_half(
-                &envelope,
-                n,
-                n.0 * a.0 + n.1 * a.1 + edge_row(face, i),
-            );
+            envelope = clip_half(&envelope, n, n.0 * a.0 + n.1 * a.1 + edge_row(face, i));
             if envelope.len() < 3 {
                 break;
             }
@@ -141,7 +147,11 @@ pub(super) fn build_parcels(
                 continue;
             }
             let n = (-(b.1 - a.1) / len, (b.0 - a.0) / len);
-            let inset = if face.open[i] { 0.0 } else { (right_of_way(face.classes[i]) - BUILDING_LINE_M - 1.2).max(1.0) };
+            let inset = if face.open[i] {
+                0.0
+            } else {
+                (right_of_way(face.classes[i]) - BUILDING_LINE_M - 1.2).max(1.0)
+            };
             plate = clip_half(&plate, n, n.0 * a.0 + n.1 * a.1 + inset);
             if plate.len() < 3 {
                 break;
@@ -159,10 +169,13 @@ pub(super) fn build_parcels(
             let split = |ring: &[V]| -> Vec<Vec<V>> {
                 let c = centroid(ring);
                 let (n, d) = frame.river_split(c);
-                [clip_half(ring, n, d + bank), clip_half(ring, (-n.0, -n.1), -d + bank)]
-                    .into_iter()
-                    .filter(|p| p.len() >= 3 && signed_area(p) > 300.0)
-                    .collect()
+                [
+                    clip_half(ring, n, d + bank),
+                    clip_half(ring, (-n.0, -n.1), -d + bank),
+                ]
+                .into_iter()
+                .filter(|p| p.len() >= 3 && signed_area(p) > 300.0)
+                .collect()
             };
             let banks = split(&plate);
             let mut envs = split(&envelope);
@@ -172,7 +185,10 @@ pub(super) fn build_parcels(
             (vec![plate.clone()], vec![envelope])
         };
         for ring in &block_rings {
-            blocks.push(UrbanBlock { boundary: to_world(ring), courtyard: None });
+            blocks.push(UrbanBlock {
+                boundary: to_world(ring),
+                courtyard: None,
+            });
         }
         if block_rings.is_empty() {
             continue;
@@ -218,9 +234,8 @@ pub(super) fn build_parcels(
         let (wa, wb) = (face.ring[widest], face.ring[(widest + 1) % face.ring.len()]);
 
         // A few very large faces stay one lot: a walled compound or campus.
-        let superblock = face_area > 13_000.0
-            && centrality < 0.55
-            && modern_hash(seed, fi, 4, 777) < 0.45;
+        let superblock =
+            face_area > 13_000.0 && centrality < 0.55 && modern_hash(seed, fi, 4, 777) < 0.45;
         let target = if superblock {
             1.0e9
         } else {
@@ -247,8 +262,8 @@ pub(super) fn build_parcels(
                         continue;
                     }
                 }
-                let waterfront = ring_polyline_dist(lot, &river_local)
-                    < river_half + QUAY_OFF_M + 45.0;
+                let waterfront =
+                    ring_polyline_dist(lot, &river_local) < river_half + QUAY_OFF_M + 45.0;
                 let plaza = centrality > 0.45 && lot_area < 3_400.0 && noise(777) < 0.09;
                 let use_type = if park_block || plaza || (waterfront && n > 0.82) {
                     ParcelUse::Park
@@ -326,28 +341,31 @@ pub(super) fn build_parcels(
                         (0.0, 0.25),
                         (0.0, -0.25),
                     ];
-                    let placed = [1.0_f32, 0.92, 0.84, 0.76, 0.68, 0.58, 0.5].iter().find_map(|s| {
-                        shifts.iter().find_map(|(sx, sz)| {
-                            let ring: Vec<V> = footprint
-                                .iter()
-                                .map(|p| {
-                                    ob.to_world(
-                                        fc.0 + (p.0 - fc.0) * s + sx * fw,
-                                        fc.1 + (p.1 - fc.1) * s + sz * fd,
-                                    )
-                                })
-                                .collect();
-                            let clear_of_spurs = spurs.iter().all(|(a, b, class)| {
-                                let row = right_of_way(*class);
-                                ring.iter().all(|p| point_seg_dist(*p, *a, *b) >= row)
-                                    && ring
-                                        .iter()
-                                        .zip(ring.iter().cycle().skip(1))
-                                        .all(|(p, q)| seg_seg_dist(*p, *q, *a, *b) >= row)
-                            });
-                            (clear_of_spurs && ring.iter().all(|p| point_in(lot, *p))).then_some(ring)
-                        })
-                    });
+                    let placed = [1.0_f32, 0.92, 0.84, 0.76, 0.68, 0.58, 0.5]
+                        .iter()
+                        .find_map(|s| {
+                            shifts.iter().find_map(|(sx, sz)| {
+                                let ring: Vec<V> = footprint
+                                    .iter()
+                                    .map(|p| {
+                                        ob.to_world(
+                                            fc.0 + (p.0 - fc.0) * s + sx * fw,
+                                            fc.1 + (p.1 - fc.1) * s + sz * fd,
+                                        )
+                                    })
+                                    .collect();
+                                let clear_of_spurs = spurs.iter().all(|(a, b, class)| {
+                                    let row = right_of_way(*class);
+                                    ring.iter().all(|p| point_seg_dist(*p, *a, *b) >= row)
+                                        && ring
+                                            .iter()
+                                            .zip(ring.iter().cycle().skip(1))
+                                            .all(|(p, q)| seg_seg_dist(*p, *q, *a, *b) >= row)
+                                });
+                                (clear_of_spurs && ring.iter().all(|p| point_in(lot, *p)))
+                                    .then_some(ring)
+                            })
+                        });
                     let Some(ring) = placed else {
                         return;
                     };
@@ -420,8 +438,11 @@ pub(super) fn build_parcels(
                 };
                 match use_type {
                     ParcelUse::Commercial => {
-                        let podium_floors =
-                            if centrality < 0.3 || noise(731) < 0.5 { 3 } else { 4 };
+                        let podium_floors = if centrality < 0.3 || noise(731) < 0.5 {
+                            3
+                        } else {
+                            4
+                        };
                         emit(
                             rect(bx0, bx1, bz0, bz1, 0.06),
                             podium_floors,
@@ -433,18 +454,27 @@ pub(super) fn build_parcels(
                         );
                         let tower_area = 24.0 * 20.0;
                         let _ = tower_area;
-                        let tower_floors = ((6.0 + 30.0 * centrality.powf(1.15) * (0.7 + 0.3 * density))
+                        let tower_floors = ((6.0
+                            + 30.0 * centrality.powf(1.15) * (0.7 + 0.3 * density))
                             * (0.72 + 0.56 * noise(745)))
                         .round()
                         .clamp(5.0, 38.0) as u16;
                         let size = 0.85 + 0.3 * centrality;
                         let tower_w = 30.0 * size * (0.85 + noise(737) * 0.3);
                         let tower_d = 26.0 * size * (0.85 + noise(739) * 0.3);
-                        let towers = if parcel_area > 6_800.0 && noise(741) < 0.45 { 2 } else { 1 };
+                        let towers = if parcel_area > 6_800.0 && noise(741) < 0.45 {
+                            2
+                        } else {
+                            1
+                        };
                         for t in 0..towers {
                             let (tx, tz) = if towers == 2 {
                                 (
-                                    if t == 0 { bx0 + width * 0.26 } else { bx0 + width * 0.74 },
+                                    if t == 0 {
+                                        bx0 + width * 0.26
+                                    } else {
+                                        bx0 + width * 0.74
+                                    },
                                     bz0 + depth * (0.30 + 0.4 * noise(743)),
                                 )
                             } else {
@@ -484,7 +514,8 @@ pub(super) fn build_parcels(
                         );
                         let tower_area = 22.0 * 18.0;
                         let _ = tower_area;
-                        let tower_floors = ((5.0 + 24.0 * centrality.powf(1.15) * (0.7 + 0.3 * density))
+                        let tower_floors = ((5.0
+                            + 24.0 * centrality.powf(1.15) * (0.7 + 0.3 * density))
                             * (0.72 + 0.56 * noise(755)))
                         .round()
                         .clamp(4.0, 32.0) as u16;
@@ -532,7 +563,10 @@ pub(super) fn build_parcels(
                     ParcelUse::Residential if !compound => {
                         // A street-wall block: the building fills its lot and
                         // meets the pavement, as in any dense city centre.
-                        let floors = (4.0 + noise(763) * 5.0 + 11.0 * centrality.powf(1.2) * density).round() as u16;
+                        let floors = (4.0
+                            + noise(763) * 5.0
+                            + 11.0 * centrality.powf(1.2) * density)
+                            .round() as u16;
                         emit(
                             rect(bx0, bx1, bz0, bz1, 0.03 + 0.2 * (1.0 - centrality)),
                             floors.clamp(4, 18),
@@ -547,7 +581,11 @@ pub(super) fn build_parcels(
                         // A walled compound: the lot is tiled into cells, each
                         // holding a slab or tower, a minority left as garden.
                         let slab_style = noise(753) < 0.5;
-                        let (cw, cd) = if slab_style { (46.0, 28.0) } else { (34.0, 30.0) };
+                        let (cw, cd) = if slab_style {
+                            (46.0, 28.0)
+                        } else {
+                            (34.0, 30.0)
+                        };
                         let nx = ((width / cw).floor() as usize).max(1);
                         let nz = ((depth / cd).floor() as usize).max(1);
                         let (cell_w, cell_d) = (width / nx as f32, depth / nz as f32);
@@ -563,7 +601,8 @@ pub(super) fn build_parcels(
                                 let floors = (6.0
                                     + (4.0 + 22.0 * centrality) * (0.5 + 0.7 * cn(783)))
                                 .round()
-                                .clamp(6.0, 34.0) as u16;
+                                .clamp(6.0, 34.0)
+                                    as u16;
                                 let (w, d) = if slab_style {
                                     ((cell_w * 0.86).min(72.0), 12.5 + cn(785) * 2.5)
                                 } else {
@@ -573,7 +612,13 @@ pub(super) fn build_parcels(
                                     )
                                 };
                                 emit(
-                                    rect(cx - w * 0.5, cx + w * 0.5, cz - d * 0.5, cz + d * 0.5, 0.0),
+                                    rect(
+                                        cx - w * 0.5,
+                                        cx + w * 0.5,
+                                        cz - d * 0.5,
+                                        cz + d * 0.5,
+                                        0.0,
+                                    ),
                                     floors,
                                     ParcelUse::Residential,
                                     0,
@@ -597,12 +642,31 @@ pub(super) fn build_parcels(
     let mut occupied: Vec<Vec<V>> = parcels
         .iter()
         .map(|p| p.ring.iter().map(|q| frame.to_local(*q)).collect())
-        .chain(fields.iter().map(|f| f.ring.iter().map(|q| frame.to_local(*q)).collect()))
+        .chain(
+            fields
+                .iter()
+                .map(|f| f.ring.iter().map(|q| frame.to_local(*q)).collect()),
+        )
         .collect();
     if frame.external.is_some() {
-        suburb::roadside_fields(frame, &pts, &edges, &river_local, river_half, seed, &mut occupied, &mut fields, &mut next_field);
+        suburb::roadside_fields(
+            frame,
+            &pts,
+            &edges,
+            &river_local,
+            river_half,
+            seed,
+            &mut occupied,
+            &mut fields,
+            &mut next_field,
+        );
     }
-    ParcelOutput { blocks, parcels, buildings, fields }
+    ParcelOutput {
+        blocks,
+        parcels,
+        buildings,
+        fields,
+    }
 }
 
 /// Recursive oriented-box bisection into lots no larger than `target` m².
@@ -616,8 +680,11 @@ fn subdivide(poly: &[V], target: f32, seed: u32, key: i32, depth: u32, out: &mut
     }
     let t = 0.42 + 0.16 * modern_hash(seed, key, depth as i32, 769 + depth as i32);
     // Cut across the longer side.
-    let (axis, lo, hi) =
-        if w >= d { (ob.u, ob.min_u, ob.max_u) } else { (ob.v, ob.min_v, ob.max_v) };
+    let (axis, lo, hi) = if w >= d {
+        (ob.u, ob.min_u, ob.max_u)
+    } else {
+        (ob.v, ob.min_v, ob.max_v)
+    };
     let s = lo + (hi - lo) * t;
     let a = clip_half(poly, (-axis.0, -axis.1), -(s - LOT_GAP_M));
     let b = clip_half(poly, axis, s + LOT_GAP_M);
@@ -633,5 +700,10 @@ fn subdivide(poly: &[V], target: f32, seed: u32, key: i32, depth: u32, out: &mut
 fn rect(x0: f32, x1: f32, z0: f32, z1: f32, shrink: f32) -> Vec<V> {
     let dx = (x1 - x0) * shrink * 0.5;
     let dz = (z1 - z0) * shrink * 0.5;
-    vec![(x0 + dx, z0 + dz), (x1 - dx, z0 + dz), (x1 - dx, z1 - dz), (x0 + dx, z1 - dz)]
+    vec![
+        (x0 + dx, z0 + dz),
+        (x1 - dx, z0 + dz),
+        (x1 - dx, z1 - dz),
+        (x0 + dx, z1 - dz),
+    ]
 }

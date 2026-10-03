@@ -41,7 +41,10 @@ impl Layer for RoadsLayer {
         let s = cell_size(frame, self.config.lattice_level);
         let reach = self.reach(s);
         let range = |lo: f64, hi: f64, origin: f64| {
-            (((lo - reach - origin) / s).floor() as i64, ((hi + reach - origin) / s).floor() as i64)
+            (
+                ((lo - reach - origin) / s).floor() as i64,
+                ((hi + reach - origin) / s).floor() as i64,
+            )
         };
         let (i0, i1) = range(rect.min[0], rect.max[0], frame.origin[0]);
         let (j0, j1) = range(rect.min[1], rect.max[1], frame.origin[1]);
@@ -50,7 +53,8 @@ impl Layer for RoadsLayer {
         let mut nodes: std::collections::BTreeMap<_, RoadNode> = std::collections::BTreeMap::new();
         for j in j0..=j1 {
             for i in i0..=i1 {
-                let net = ctx.input::<CellNetwork>(OVERLAY, Cell::new(self.config.lattice_level, i, j))?;
+                let net =
+                    ctx.input::<CellNetwork>(OVERLAY, Cell::new(self.config.lattice_level, i, j))?;
                 for e in &net.edges {
                     if e.class < self.config.min_class {
                         continue;
@@ -59,7 +63,10 @@ impl Layer for RoadsLayer {
                     if pieces.is_empty() {
                         continue;
                     }
-                    edges.push(RoadEdge { pieces, ..e.clone() });
+                    edges.push(RoadEdge {
+                        pieces,
+                        ..e.clone()
+                    });
                 }
                 for n in &net.nodes {
                     nodes.entry(n.id).or_insert_with(|| n.clone());
@@ -67,8 +74,12 @@ impl Layer for RoadsLayer {
             }
         }
         // A node belongs to the tile only because a road does.
-        let referenced: std::collections::BTreeSet<_> = edges.iter().flat_map(|e| [e.a, e.b]).collect();
-        let nodes = nodes.into_values().filter(|n| referenced.contains(&n.id)).collect();
+        let referenced: std::collections::BTreeSet<_> =
+            edges.iter().flat_map(|e| [e.a, e.b]).collect();
+        let nodes = nodes
+            .into_values()
+            .filter(|n| referenced.contains(&n.id))
+            .collect();
         edges.sort_by_key(|e| e.id);
         Ok(RoadTile { cell, nodes, edges })
     }

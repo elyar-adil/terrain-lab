@@ -29,7 +29,12 @@ const TACTILE_SETBACK: f32 = 0.18;
 const KERB_FLAT: f32 = 0.55;
 
 /// Station ranges where the kerb is dropped for a crossing, as `(from, to)`.
-fn dropped_kerb(road: &Carriageway, spec: &JunctionSpec, crossing_start: bool, crossing_end: bool) -> Vec<(f32, f32)> {
+fn dropped_kerb(
+    road: &Carriageway,
+    spec: &JunctionSpec,
+    crossing_start: bool,
+    crossing_end: bool,
+) -> Vec<(f32, f32)> {
     let mut ranges = Vec::new();
     for (base, outward, crossing) in [
         (0.0_f32, -1.0_f32, crossing_start),
@@ -299,7 +304,12 @@ fn kerb_ramp(
 
 /// The median: two kerb faces, a planted bed, and the yellow-on-black hazard
 /// marking on the nose at each junction end.
-fn median_and_hazard(builder: &mut MeshBuilder, road: &Road, surface: &Carriageway, spec: &JunctionSpec) {
+fn median_and_hazard(
+    builder: &mut MeshBuilder,
+    road: &Road,
+    surface: &Carriageway,
+    spec: &JunctionSpec,
+) {
     let section = road.section;
     if !section.has_median() {
         return;
@@ -399,7 +409,12 @@ fn hazard_stripes(
 /// asphalt, so the patch is lighter than the road around it.  Cheap in
 /// triangles, and the single most effective cure for "this surface has never
 /// been driven on".
-fn road_furniture_marks(builder: &mut MeshBuilder, road: &Road, surface: &Carriageway, spec: &JunctionSpec) {
+fn road_furniture_marks(
+    builder: &mut MeshBuilder,
+    road: &Road,
+    surface: &Carriageway,
+    spec: &JunctionSpec,
+) {
     if surface.length < 24.0 {
         return;
     }
@@ -448,7 +463,11 @@ fn road_furniture_marks(builder: &mut MeshBuilder, road: &Road, surface: &Carria
     let _ = spec;
 }
 
-pub(super) fn junction_geometry(junction: &Junction, builder: &mut MeshBuilder, spec: &JunctionSpec) {
+pub(super) fn junction_geometry(
+    junction: &Junction,
+    builder: &mut MeshBuilder,
+    spec: &JunctionSpec,
+) {
     let _ = spec;
     if junction.ports.len() < 2 {
         return;
@@ -531,7 +550,12 @@ pub(super) fn junction_geometry(junction: &Junction, builder: &mut MeshBuilder, 
 
 /// The junction's own markings: the yellow no-stopping box on a large signalised
 /// junction, and the give-way line of triangles on every unsignalised approach.
-pub(super) fn junction_details(junction: &Junction, builder: &mut MeshBuilder, spec: &JunctionSpec, grid: bool) {
+pub(super) fn junction_details(
+    junction: &Junction,
+    builder: &mut MeshBuilder,
+    spec: &JunctionSpec,
+    grid: bool,
+) {
     if grid {
         yellow_grid_box(junction, builder, spec);
     }
@@ -728,7 +752,12 @@ pub(super) fn roundabout(junction: &Junction, builder: &mut MeshBuilder, spec: &
             None,
         );
     }
-    builder.ground_uv("median.plant", &ring(island, 36), super::level::MEDIAN + 0.10, None);
+    builder.ground_uv(
+        "median.plant",
+        &ring(island, 36),
+        super::level::MEDIAN + 0.10,
+        None,
+    );
 
     // Give-way triangles and a deflection arrow on every entry.
     for port in &junction.ports {

@@ -26,7 +26,14 @@ pub fn edge_hash(seed: Seed, a: Cell, b: Cell) -> u64 {
         "cells on a shared side are adjacent"
     );
     let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-    hash_words(&[seed.0, u64::from(lo.level), lo.x as u64, lo.y as u64, hi.x as u64, hi.y as u64])
+    hash_words(&[
+        seed.0,
+        u64::from(lo.level),
+        lo.x as u64,
+        lo.y as u64,
+        hi.x as u64,
+        hi.y as u64,
+    ])
 }
 
 /// A position along the shared side, in `[0, 1)`: where something crosses it.

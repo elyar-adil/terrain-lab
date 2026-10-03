@@ -75,7 +75,14 @@ pub(crate) fn balconies(
             builder.wall("trim.dark", b_out, a_out, y - 0.20, y, None);
             // The railing: a solid pale parapet at the code height, with a coping.
             builder.wall("trim.light", a_out, b_out, y, y + rail, None);
-            builder.wall("balcony.slab", b_out, a_out, y + rail, y + rail + 0.09, None);
+            builder.wall(
+                "balcony.slab",
+                b_out,
+                a_out,
+                y + rail,
+                y + rail + 0.09,
+                None,
+            );
             // One return, so the balcony is an object and not a floating plane.
             // Both returns would be correct and cost another quad a storey.
             builder.wall("balcony.slab", a, a_out, y, y + rail + 0.09, None);
@@ -172,8 +179,8 @@ pub(crate) fn wall_ac_units(
                 if (serial >> 12) % 100 >= 64 {
                     continue;
                 }
-                let t = (berth as f32 + 0.5 + ((serial >> 20) % 100) as f32 / 250.0)
-                    / berths as f32;
+                let t =
+                    (berth as f32 + 0.5 + ((serial >> 20) % 100) as f32 / 250.0) / berths as f32;
                 let along = (b - a).normalize();
                 let anchor = a + along * (length * t.clamp(0.1, 0.9));
                 condenser_unit(builder, anchor, centre, y - 0.42);
@@ -620,7 +627,13 @@ pub(crate) fn retail_band(
 /// street roughly a third of the units are shut, and the ribbed slats catch
 /// raking light in a way nothing else at street level does.  Every fourth bay of
 /// every fourth shopfront gets one, which is about the real proportion.
-fn roller_shutters(ring: &[Vec2], centre: Vec2, building: &ModernBuilding, floor: f32, builder: &mut MeshBuilder) {
+fn roller_shutters(
+    ring: &[Vec2],
+    centre: Vec2,
+    building: &ModernBuilding,
+    floor: f32,
+    builder: &mut MeshBuilder,
+) {
     let mut serial = building.id.wrapping_mul(2_246_822_519);
     for index in 0..ring.len() {
         let a = ring[index];
@@ -678,7 +691,13 @@ fn roller_shutters(ring: &[Vec2], centre: Vec2, building: &ModernBuilding, floor
 /// a bracket.  The density of bright rectangles over a footway is half of what
 /// makes a Chinese street recognisable, and they are the one thing on a
 /// building that is *meant* to be bright.
-fn sign_boxes(ring: &[Vec2], centre: Vec2, building: &ModernBuilding, floor: f32, builder: &mut MeshBuilder) {
+fn sign_boxes(
+    ring: &[Vec2],
+    centre: Vec2,
+    building: &ModernBuilding,
+    floor: f32,
+    builder: &mut MeshBuilder,
+) {
     let y = floor + crate::facades::GROUND_STOREY_M - 1.55;
     for index in 0..ring.len() {
         let a = ring[index];
@@ -815,7 +834,14 @@ pub(crate) fn downpipe(ring: &[Vec2], base: f32, top: f32, id: u32, builder: &mu
         let y = base + (top - base) * t;
         builder.wall("trim.dark", a, anchor, y - 0.04, y + 0.04, None);
     }
-    builder.wall("trim.dark", anchor, anchor + outward * 0.18, base + 0.12, base + 0.35, None);
+    builder.wall(
+        "trim.dark",
+        anchor,
+        anchor + outward * 0.18,
+        base + 0.12,
+        base + 0.35,
+        None,
+    );
 }
 
 /// A canopy over the main entrance, on the edge the parcel's gate points at.
@@ -843,9 +869,23 @@ pub(crate) fn entrance_canopy(ring: &[Vec2], building: &ModernBuilding, builder:
         Vec3::from_plan(p0 + outward * depth, y - 0.30),
         None,
     );
-    builder.wall("awning", p1 + outward * depth, p0 + outward * depth, y - 0.44, y - 0.30, None);
+    builder.wall(
+        "awning",
+        p1 + outward * depth,
+        p0 + outward * depth,
+        y - 0.44,
+        y - 0.30,
+        None,
+    );
     // The fascia, and the brackets.
-    builder.wall("trim.light", p1 + outward * depth, p0 + outward * depth, y - 0.30, y - 0.16, None);
+    builder.wall(
+        "trim.light",
+        p1 + outward * depth,
+        p0 + outward * depth,
+        y - 0.30,
+        y - 0.16,
+        None,
+    );
     for t in [0.12_f32, 0.5, 0.88] {
         let anchor = p0.lerp(p1, t);
         builder.tube(
@@ -875,7 +915,14 @@ pub(crate) fn entrance_canopy(ring: &[Vec2], building: &ModernBuilding, builder:
             Vec3::from_plan(q0, super::level::GROUND + rise - 0.06),
             None,
         );
-        builder.wall("trim.light", q1, q0, super::level::GROUND, super::level::GROUND + rise, None);
+        builder.wall(
+            "trim.light",
+            q1,
+            q0,
+            super::level::GROUND,
+            super::level::GROUND + rise,
+            None,
+        );
     }
 }
 
@@ -923,7 +970,15 @@ mod tests {
             let base = level::GROUND + GROUND_STOREY_M;
             let top = base + (building.floors as f32 - 1.0).max(1.0) * STOREY_M;
             let mut builder = MeshBuilder::new();
-            balconies(&outward, &fronts, building, base, top, STOREY_M, &mut builder);
+            balconies(
+                &outward,
+                &fronts,
+                building,
+                base,
+                top,
+                STOREY_M,
+                &mut builder,
+            );
             for group in builder.build().meshes {
                 for chunk in group.positions.chunks_exact(3) {
                     let point = Vec2::new(chunk[0], chunk[2]);
@@ -943,7 +998,10 @@ mod tests {
                 }
             }
         }
-        assert!(checked > 200, "only {checked} balcony vertices were checked");
+        assert!(
+            checked > 200,
+            "only {checked} balcony vertices were checked"
+        );
     }
 
     /// The guard heights actually built follow the two-band code rule: a
@@ -972,7 +1030,15 @@ mod tests {
             let base = level::GROUND + GROUND_STOREY_M;
             let top = base + (building.floors as f32 - 1.0).max(1.0) * STOREY_M;
             let mut builder = MeshBuilder::new();
-            balconies(&outward, &fronts, building, base, top, STOREY_M, &mut builder);
+            balconies(
+                &outward,
+                &fronts,
+                building,
+                base,
+                top,
+                STOREY_M,
+                &mut builder,
+            );
             let rail = rule::balcony_rail_m(building.floors);
             let expected = base + rail;
             for group in builder.build().meshes {
@@ -1024,7 +1090,10 @@ mod tests {
             design,
         );
         let groups = builder.build().meshes;
-        let group = groups.iter().find(|g| g.material == "facade/00").expect("no relief");
+        let group = groups
+            .iter()
+            .find(|g| g.material == "facade/00")
+            .expect("no relief");
         let uvs = group.uvs.as_ref().expect("relief carries metre UVs");
         // Every relief vertex's U sits on a bay boundary: u % pitch ≈ 0 (within
         // half a strip width of it).
@@ -1038,7 +1107,10 @@ mod tests {
                 on_module += 1;
             }
         }
-        assert!(on_module > 20, "only {on_module} relief vertices on the bay module");
+        assert!(
+            on_module > 20,
+            "only {on_module} relief vertices on the bay module"
+        );
     }
 
     /// 飘窗 courses only grow on the 2000s tile-clad designs, and project the
