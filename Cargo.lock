@@ -336,6 +336,7 @@ dependencies = [
  "serde",
  "serde_json",
  "urban",
+ "worldgen-core",
 ]
 
 [[package]]
@@ -2345,6 +2346,7 @@ name = "procedural"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "worldgen-core",
 ]
 
 [[package]]
@@ -3370,6 +3372,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.19",
  "urban",
+ "worldgen-core",
 ]
 
 [[package]]
@@ -3778,6 +3781,7 @@ dependencies = [
  "procedural",
  "serde",
  "worldgen-contracts",
+ "worldgen-core",
 ]
 
 [[package]]

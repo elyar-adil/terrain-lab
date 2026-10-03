@@ -14,6 +14,7 @@ use crate::facades::{
     GROUND_STOREY_M,
 };
 use crate::textures::{BakedTexture, hash};
+use worldgen_core::hash::avalanche01;
 
 /// The three ground-floor variants.  Each is one shop bay by one ground storey
 /// at true scale, so a door is 2.1 m tall on the wall rather than a stretched
@@ -38,26 +39,13 @@ const SIGN_BOARDS: [[f32; 3]; 6] = [
     [0.185, 0.132, 0.048], // bakery gold on brown
 ];
 
-/// A per-bay decision in `0..1`.  The shared `hash` is a half-finalised mix whose
-/// outputs are correlated for consecutive small integers, which is exactly what a
-/// bay index is, so bays get the full 32-bit avalanche.
-fn bay_hash(seed: u32, bay: i32) -> f32 {
-    let mut v = seed ^ (bay as u32).wrapping_mul(0x9e37_79b9);
-    v ^= v >> 16;
-    v = v.wrapping_mul(0x85eb_ca6b);
-    v ^= v >> 13;
-    v = v.wrapping_mul(0xc2b2_ae35);
-    v ^= v >> 16;
-    v as f32 / u32::MAX as f32
-}
-
 /// The sign board of one bay.  Neighbouring shops never share a board: each bay
 /// steps a random 1..N-1 places on from the one before it.
 fn sign_board(key: u32, bay: i32) -> usize {
     let n = SIGN_BOARDS.len();
-    let mut index = (bay_hash(key.wrapping_add(701), 0) * n as f32) as usize % n;
+    let mut index = (avalanche01(key, 0, 0, 701) * n as f32) as usize % n;
     for b in 1..=bay.max(0) {
-        let step = 1 + (bay_hash(key.wrapping_add(701), b) * (n - 1) as f32) as usize % (n - 1);
+        let step = 1 + (avalanche01(key, b, 0, 701) * (n - 1) as f32) as usize % (n - 1);
         index = (index + step) % n;
     }
     index
@@ -134,14 +122,14 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
             // One sign board per bay: every 4.2 m unit picked its own colour the
             // day it opened, and the run of colours down a street is the look.
             let board = sign_board(key, bay);
-            let plain_pick = bay_hash(key.wrapping_add(733), bay);
+            let plain_pick = avalanche01(key, bay, 0, 733);
             let fascia = if plain_pick < 0.30 {
                 // Some units never re-clad: bare render fascia.
-                shade(FASCIA, 0.85 + 0.3 * bay_hash(key.wrapping_add(751), bay))
+                shade(FASCIA, 0.85 + 0.3 * avalanche01(key, bay, 0, 751))
             } else {
                 shade(
                     SIGN_BOARDS[board],
-                    0.92 + 0.16 * bay_hash(key.wrapping_add(769), bay),
+                    0.92 + 0.16 * avalanche01(key, bay, 0, 769),
                 )
             };
 

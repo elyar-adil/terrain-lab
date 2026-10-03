@@ -15,8 +15,9 @@ use urban::{
     cross_section,
 };
 
-use crate::math::{Path, Rng, Vec2, Vec3, cubic_points, smoothstep};
+use crate::math::{Path, Rng, Vec2, Vec3, cubic_points};
 use crate::spec::{JunctionSpec, Movement, classify_movement, lane_movement_sets};
+use worldgen_core::smootherstep;
 
 /// Roadbed elevation of the carriageway surface, above the block datum.  Every
 /// other surface in the crate is offset from this so kerbs, sidewalks and
@@ -419,8 +420,8 @@ pub fn derive(
                 station += path_points[index - 1].distance(path_points[index]);
             }
             let elevation = if elevated {
-                let rise = smoothstep((station - trim_start - 10.0) / rise_len);
-                let fall = smoothstep((full_length - trim_end - 10.0 - station) / fall_len);
+                let rise = smootherstep((station - trim_start - 10.0) / rise_len);
+                let fall = smootherstep((full_length - trim_end - 10.0 - station) / fall_len);
                 let t = station / full_length.max(1.0);
                 start_y + (end_y - start_y) * t + deck * rise.min(fall)
             } else {
@@ -739,7 +740,7 @@ pub fn derive(
                     .enumerate()
                     .map(|(index, point)| {
                         let t = index as f32 / steps.max(1) as f32;
-                        Vec3::from_plan(*point, lerp_height(y_from, y_to, smoothstep(t)))
+                        Vec3::from_plan(*point, lerp_height(y_from, y_to, smootherstep(t)))
                     })
                     .collect();
                 let id = format!(

@@ -1,30 +1,21 @@
 //! Deterministic value noise and fBm shared by every procedural system —
 //! weathering masks, asphalt aggregate, facade variation, terrain detail.
-//! One implementation lives here so no consumer grows its own hash.
+//! The hash and the smoothing curve come from `worldgen-core`; this module keeps
+//! only the `f32` lattice noise built on them.
 
-/// 2-D integer hash to a float in [0, 1).  Same construction as the world
-/// generators use, kept here as the single source of truth.
+use worldgen_core::smooth01;
+
+/// 2-D integer hash to a float in [0, 1]: `worldgen_core::hash::cell01`.
 pub fn hash01(seed: u32, x: i32, y: i32, salt: i32) -> f32 {
-    let mut value = seed
-        ^ (x as u32).wrapping_mul(0x9e37_79b9)
-        ^ (y as u32).wrapping_mul(0x85eb_ca6b)
-        ^ (salt as u32).wrapping_mul(0xc2b2_ae35);
-    value ^= value >> 16;
-    value = value.wrapping_mul(0x7feb_352d);
-    value ^= value >> 15;
-    value as f32 / u32::MAX as f32
-}
-
-fn smooth(t: f32) -> f32 {
-    t * t * (3.0 - 2.0 * t)
+    worldgen_core::hash::cell01(seed, x, y, salt as u32)
 }
 
 /// Bilinear value noise in [0, 1) at an arbitrary (possibly fractional) point.
 pub fn value_noise(seed: u32, x: f32, y: f32, salt: i32) -> f32 {
     let xi = x.floor() as i32;
     let yi = y.floor() as i32;
-    let tx = smooth(x - x.floor());
-    let ty = smooth(y - y.floor());
+    let tx = smooth01(x - x.floor());
+    let ty = smooth01(y - y.floor());
     let a = hash01(seed, xi, yi, salt);
     let b = hash01(seed, xi + 1, yi, salt);
     let c = hash01(seed, xi, yi + 1, salt);

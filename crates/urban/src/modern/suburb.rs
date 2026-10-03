@@ -21,6 +21,7 @@ use super::parcels::right_of_way;
 use crate::{
     BuildingFacade, CropKind, Field, ModernBuilding, ModernRoadClass, Parcel, ParcelUse, RoofStyle,
 };
+use worldgen_core::smoothstep;
 
 /// Built-up level (the settlement field's `urbanness`) at and above which a lot is
 /// town: a walk-up block fronting the street.
@@ -48,11 +49,6 @@ pub(super) fn zone(built: f32) -> Zone {
     } else {
         Zone::Open
     }
-}
-
-fn smooth(e0: f32, e1: f32, x: f32) -> f32 {
-    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
 }
 
 /// A volume of a house, in the lot's own frame: `s` along the street, `d` away
@@ -176,8 +172,8 @@ pub(super) fn place_frontage(f: &Frontage<'_>, sink: &mut Sink<'_>) {
             // rare in the country.
             let keep = match z {
                 Zone::Town => 0.96,
-                Zone::Villa => 0.50 + 0.42 * smooth(VILLA_BUILT, TOWN_BUILT, built),
-                _ => 0.10 + 0.55 * smooth(OPEN_BUILT, VILLA_BUILT, built),
+                Zone::Villa => 0.50 + 0.42 * smoothstep(VILLA_BUILT, TOWN_BUILT, built),
+                _ => 0.10 + 0.55 * smoothstep(OPEN_BUILT, VILLA_BUILT, built),
             };
             if noise(1103) > keep {
                 stats[2] += 1;
@@ -307,7 +303,7 @@ fn roof_for(roll: f32, hip: f32, gable: f32) -> RoofStyle {
 fn villa(built: f32, noise: &dyn Fn(i32) -> f32) -> Plan {
     // Plots are larger the further out: the town edge is tight, the country club
     // end is generous.
-    let roomy = 1.0 - smooth(VILLA_BUILT, TOWN_BUILT, built);
+    let roomy = 1.0 - smoothstep(VILLA_BUILT, TOWN_BUILT, built);
     let width = 24.0 + 14.0 * noise(1121) + 8.0 * roomy;
     let depth = 32.0 + 12.0 * noise(1123) + 8.0 * roomy;
     let mw = (11.0 + 6.0 * noise(1125)).min(width - 9.0);

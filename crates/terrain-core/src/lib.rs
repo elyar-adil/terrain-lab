@@ -6,6 +6,8 @@ use std::{
     collections::{BinaryHeap, VecDeque},
 };
 use thiserror::Error;
+use worldgen_core::hash::mix32;
+use worldgen_core::{clamp01, lerp, smooth01, smoothstep};
 
 pub mod evolution;
 pub mod fluvial;
@@ -1572,21 +1574,16 @@ fn bilinear(data: &[f32], n: usize, x: f32, y: f32) -> f32 {
 }
 
 fn hash(x: i32, y: i32, seed: u32) -> f32 {
-    let mut value =
-        (x as u32).wrapping_mul(0x9e37_79b1) ^ (y as u32).wrapping_mul(0x85eb_ca77) ^ seed;
-    value ^= value >> 16;
-    value = value.wrapping_mul(0x7feb_352d);
-    value ^= value >> 15;
-    value = value.wrapping_mul(0x846c_a68b);
-    value ^= value >> 16;
+    let value =
+        mix32((x as u32).wrapping_mul(0x9e37_79b1) ^ (y as u32).wrapping_mul(0x85eb_ca77) ^ seed);
     value as f32 / u32::MAX as f32 * 2.0 - 1.0
 }
 
 fn value_noise(x: f32, y: f32, seed: u32) -> f32 {
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
-    let tx = smooth_curve(x - x.floor());
-    let ty = smooth_curve(y - y.floor());
+    let tx = smooth01(x - x.floor());
+    let ty = smooth01(y - y.floor());
     let a = hash(x0, y0, seed);
     let b = hash(x0 + 1, y0, seed);
     let c = hash(x0, y0 + 1, seed);
@@ -1612,18 +1609,6 @@ fn fbm(x: f32, y: f32, seed: u32, octaves: usize) -> f32 {
     value / total.max(f32::EPSILON)
 }
 
-fn smooth_curve(value: f32) -> f32 {
-    value * value * (3.0 - 2.0 * value)
-}
-fn smoothstep(edge0: f32, edge1: f32, value: f32) -> f32 {
-    smooth_curve(clamp01((value - edge0) / (edge1 - edge0)))
-}
-fn clamp01(value: f32) -> f32 {
-    value.clamp(0.0, 1.0)
-}
-fn lerp(a: f32, b: f32, amount: f32) -> f32 {
-    a + (b - a) * amount
-}
 fn mix3(a: [f32; 3], b: [f32; 3], amount: f32) -> [f32; 3] {
     [
         lerp(a[0], b[0], amount),

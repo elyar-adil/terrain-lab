@@ -7,6 +7,7 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+worldgen-core = { path = "../worldgen-core" }
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

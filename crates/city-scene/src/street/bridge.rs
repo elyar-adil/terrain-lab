@@ -1,9 +1,10 @@
 //! The structure that carries a street over something else: parapets with a
 //! capping rail, and piers on real ground.
 
-use crate::math::{Vec2, Vec3, hash01};
+use crate::math::{Vec2, Vec3};
 use crate::mesh::{GroupStyle, MeshBuilder};
 use crate::network::Road;
+use worldgen_core::hash::cell01;
 
 use super::{Carriageway, offset_path, sweep};
 
@@ -224,10 +225,10 @@ fn river_bridge(road: &Road, surface: &Carriageway, length: f32, builder: &mut M
     let start = surface.path.sample(0.0).0;
     let (ha, hb) = ((start.x * 0.5) as i32, (start.z * 0.5) as i32);
     let lu = length as u32;
-    let kind = choose_kind(length, hash01(0x5B1D, ha, hb, lu));
-    let paint = PAINTS[(hash01(0x77A1, ha, hb, lu) * PAINTS.len() as f32) as usize % PAINTS.len()];
-    let stone_towers = hash01(0x1234, ha, hb, lu) < 0.5;
-    let a_frame = hash01(0x9911, ha, hb, lu) < 0.5;
+    let kind = choose_kind(length, cell01(0x5B1D, ha, hb, lu));
+    let paint = PAINTS[(cell01(0x77A1, ha, hb, lu) * PAINTS.len() as f32) as usize % PAINTS.len()];
+    let stone_towers = cell01(0x1234, ha, hb, lu) < 0.5;
+    let a_frame = cell01(0x9911, ha, hb, lu) < 0.5;
     let dy = |st: f32| surface.path.sample(st.clamp(0.0, length)).0.y;
     let yaw_at = |st: f32| {
         let t = surface.path.sample(st.clamp(0.0, length)).1;

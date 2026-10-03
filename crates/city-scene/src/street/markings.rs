@@ -8,10 +8,11 @@
 
 use urban::ModernRoadClass;
 
-use crate::math::{Path, Vec2, Vec3, smoothstep};
+use crate::math::{Path, Vec2, Vec3};
 use crate::mesh::MeshBuilder;
 use crate::network::{Lane, LaneUse, Network, Road};
 use crate::spec::{ARROW_LENGTH_MM, JunctionSpec, Movement};
+use worldgen_core::smootherstep;
 
 use super::{Carriageway, Uvs, ribbon};
 
@@ -767,7 +768,7 @@ pub(super) fn approach_taper(road: &Road, builder: &mut MeshBuilder, spec: &Junc
         let extra = |station: f32| {
             let distance = (approach.base - station) * approach.outward;
             spec.taper_lane_width
-                * smoothstep((1.0 - (distance - 4.0) / spec.taper_len).clamp(0.0, 1.0))
+                * smootherstep((1.0 - (distance - 4.0) / spec.taper_len).clamp(0.0, 1.0))
         };
         let steps = ((to - from) / 4.0).ceil().max(1.0) as usize;
         let mut previous: Option<(Vec3, Vec3, Vec3, Vec3)> = None;

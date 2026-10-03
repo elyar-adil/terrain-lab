@@ -2,6 +2,7 @@
 //! drawing, not for accumulating error.
 
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
+pub use worldgen_core::smoothstep;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct V3 {
@@ -88,11 +89,6 @@ impl Neg for V3 {
     fn neg(self) -> V3 {
         v3(-self.x, -self.y, -self.z)
     }
-}
-
-pub fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
-    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
 }
 
 pub const GOLDEN_ANGLE: f32 = 2.399_963_2; // 137.507764 degrees

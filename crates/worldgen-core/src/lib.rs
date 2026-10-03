@@ -16,11 +16,13 @@ pub mod edge;
 pub mod engine;
 pub mod hash;
 pub mod noise;
+pub mod scalar;
 pub mod seed;
 
 pub use cell::{Cell, Frame, Rect};
 pub use edge::{edge_fraction, edge_hash, sides};
 pub use engine::{Context, Dependency, Engine, EngineBuilder, Error, Layer, LayerId};
+pub use scalar::{Real, clamp01, inv_lerp, lerp, smooth01, smootherstep, smoothstep};
 pub use seed::{Rng, Seed};
 
 #[cfg(test)]

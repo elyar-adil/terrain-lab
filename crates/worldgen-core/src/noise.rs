@@ -10,15 +10,14 @@ fn lattice(seed: Seed, ix: i64, iy: i64) -> f64 {
     to_unit(hash_words(&[seed.0, ix as u64, iy as u64, 0x401E]))
 }
 
-fn fade(t: f64) -> f64 {
-    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
-}
-
 /// Value noise in `[0, 1)`; features are about one unit across.
 pub fn value(seed: Seed, x: f64, y: f64) -> f64 {
     let (fx, fy) = (x.floor(), y.floor());
     let (ix, iy) = (fx as i64, fy as i64);
-    let (tx, ty) = (fade(x - fx), fade(y - fy));
+    let (tx, ty) = (
+        crate::scalar::smootherstep(x - fx),
+        crate::scalar::smootherstep(y - fy),
+    );
     let a = lattice(seed, ix, iy);
     let b = lattice(seed, ix + 1, iy);
     let c = lattice(seed, ix, iy + 1);

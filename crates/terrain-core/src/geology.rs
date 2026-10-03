@@ -5,6 +5,8 @@
 //! field generator to a particular erosion or rendering implementation.
 
 use serde::{Deserialize, Serialize};
+use worldgen_core::hash::mix32;
+use worldgen_core::{lerp, smooth01};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -290,14 +292,6 @@ pub fn generate_geology(config: GeologyConfig) -> Result<GeologyField, GeologyEr
     })
 }
 
-fn mix32(mut value: u32) -> u32 {
-    value ^= value >> 16;
-    value = value.wrapping_mul(0x7feb_352d);
-    value ^= value >> 15;
-    value = value.wrapping_mul(0x846c_a68b);
-    value ^ (value >> 16)
-}
-
 fn hash01(seed: u32, x: u32, y: u32) -> f32 {
     let bits = mix32(seed ^ x.wrapping_mul(0x9e37_79b9) ^ y.wrapping_mul(0x85eb_ca6b));
     (bits >> 8) as f32 / 16_777_215.0
@@ -306,20 +300,12 @@ fn hash01(seed: u32, x: u32, y: u32) -> f32 {
 fn value_noise(x: f32, y: f32, seed: u32) -> f32 {
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
-    let tx = smooth(x - x.floor());
-    let ty = smooth(y - y.floor());
+    let tx = smooth01(x - x.floor());
+    let ty = smooth01(y - y.floor());
     let corner = |ix: i32, iy: i32| hash01(seed, ix as u32, iy as u32);
     let top = lerp(corner(x0, y0), corner(x0 + 1, y0), tx);
     let bottom = lerp(corner(x0, y0 + 1), corner(x0 + 1, y0 + 1), tx);
     lerp(top, bottom, ty)
-}
-
-fn smooth(value: f32) -> f32 {
-    value * value * (3.0 - 2.0 * value)
-}
-
-fn lerp(a: f32, b: f32, amount: f32) -> f32 {
-    a + (b - a) * amount
 }
 
 #[cfg(test)]

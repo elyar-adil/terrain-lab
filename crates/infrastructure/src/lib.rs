@@ -10,6 +10,8 @@ use urban::{
 };
 pub use world_core::WorldGrid;
 use world_core::{GridPoint, ScalarLayer, WorldError};
+use worldgen_core::hash::mix32;
+use worldgen_core::{clamp01, smoothstep};
 
 pub mod fabric;
 pub mod rivers;
@@ -711,15 +713,11 @@ fn distance_transform(grid: WorldGrid, distance: &mut [f32]) {
 }
 
 fn hash01(x: u32, y: u32, salt: u32) -> f32 {
-    let mut value = x
-        .wrapping_mul(0x9e37_79b9)
-        .wrapping_add(y.wrapping_mul(0x85eb_ca6b))
-        .wrapping_add(salt.wrapping_mul(0xc2b2_ae35));
-    value ^= value >> 16;
-    value = value.wrapping_mul(0x7feb_352d);
-    value ^= value >> 15;
-    value = value.wrapping_mul(0x846c_a68b);
-    value ^= value >> 16;
+    let value = mix32(
+        x.wrapping_mul(0x9e37_79b9)
+            .wrapping_add(y.wrapping_mul(0x85eb_ca6b))
+            .wrapping_add(salt.wrapping_mul(0xc2b2_ae35)),
+    );
     value as f32 / u32::MAX as f32
 }
 
@@ -1161,15 +1159,6 @@ fn slope_ratio(terrain: &TerrainData, grid: WorldGrid, point: GridPoint) -> f32 
     let dx = (right - left) / (2.0 * grid.cell_metres());
     let dy = (down - up) / (2.0 * grid.cell_metres());
     (dx * dx + dy * dy).sqrt()
-}
-
-fn smoothstep(edge0: f32, edge1: f32, value: f32) -> f32 {
-    let t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
-fn clamp01(value: f32) -> f32 {
-    value.clamp(0.0, 1.0)
 }
 
 #[cfg(test)]

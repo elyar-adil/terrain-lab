@@ -12,6 +12,7 @@
 //! disagree about where "13 m before the stop line" is.
 
 use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub};
+use worldgen_core::lerp;
 
 pub const EPSILON: f32 = 1.0e-6;
 /// Subdivision step for a surface that has to follow terrain.
@@ -229,18 +230,6 @@ impl Neg for Vec3 {
     fn neg(self) -> Self {
         Self::new(-self.x, -self.y, -self.z)
     }
-}
-
-/// Clamped quintic smoothstep.  Every elevation ramp in the crate uses it
-/// because its first *and* second derivatives vanish at both ends, so bridge
-/// decks and kerb ramps never show a slope discontinuity.
-pub fn smoothstep(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
-    t * t * t * (10.0 + t * (-15.0 + 6.0 * t))
-}
-
-pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
 }
 
 pub fn clamp(value: f32, low: f32, high: f32) -> f32 {
@@ -676,17 +665,6 @@ pub fn inset_ring(ring: &[Vec2], distance: f32) -> Vec<Vec2> {
     }
     result
 }
-pub fn hash01(seed: u32, a: i32, b: i32, salt: u32) -> f32 {
-    let mut value = seed
-        ^ (a as u32).wrapping_mul(0x9e37_79b9)
-        ^ (b as u32).wrapping_mul(0x85eb_ca6b)
-        ^ salt.wrapping_mul(0xc2b2_ae35);
-    value ^= value >> 16;
-    value = value.wrapping_mul(0x7feb_352d);
-    value ^= value >> 15;
-    value as f32 / u32::MAX as f32
-}
-
 /// mulberry32.  A city must be byte-identical for a seed, so every stochastic
 /// decision draws from one of these rather than from `rand`.
 #[derive(Debug, Clone)]

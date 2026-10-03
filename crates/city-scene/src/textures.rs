@@ -56,12 +56,7 @@ pub const GROUND_TILE_M: f32 = 4.0;
 /// Cheap deterministic value noise, shared by every bake in the crate so two
 /// surfaces that both ask for "some grain" get the same character.
 pub(crate) fn hash(seed: u32, x: i32, y: i32) -> f32 {
-    let mut value =
-        seed ^ (x as u32).wrapping_mul(0x9e37_79b9) ^ (y as u32).wrapping_mul(0x85eb_ca6b);
-    value ^= value >> 16;
-    value = value.wrapping_mul(0x7feb_352d);
-    value ^= value >> 15;
-    value as f32 / u32::MAX as f32
+    worldgen_core::hash::cell01(seed, x, y, 0)
 }
 
 /// Bilinear value noise on a **wrapping** lattice.

@@ -24,6 +24,7 @@ name = "analyze_frames"
 path = "examples/analyze_frames.rs"
 
 [dependencies]
+worldgen-core = { path = "../worldgen-core" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 rayon = "1.10"
 serde = { version = "1", features = ["derive"] }

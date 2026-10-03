@@ -10,6 +10,7 @@
 
 use crate::facades::designs::{Cladding, DESIGNS, FacadeDesign, design, tile_height_m};
 use crate::textures::{BakedTexture, hash};
+use worldgen_core::smooth01;
 
 /// The 24 facade tiles, one texture each so a renderer can bind one and never
 /// branch.  The material key is `facade/NN` and it is the only contract between
@@ -41,7 +42,7 @@ pub(super) fn srgb8(linear: f32) -> u8 {
 pub(super) fn value_noise(seed: u32, x: f32, y: f32) -> f32 {
     let (x0, y0) = (x.floor(), y.floor());
     let (fx, fy) = (x - x0, y - y0);
-    let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+    let (sx, sy) = (smooth01(fx), smooth01(fy));
     let (ix, iy) = (x0 as i32, y0 as i32);
     let n00 = hash(seed, ix, iy);
     let n10 = hash(seed, ix + 1, iy);

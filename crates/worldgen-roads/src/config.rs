@@ -1,6 +1,7 @@
 //! The numbers that make a road network look like one place and not another.
 
 use std::sync::Arc;
+pub(crate) use worldgen_core::smoothstep;
 
 use worldgen_contracts::{
     DryLand, FlatGround, HeightField, NoPinnedRoads, PinnedRoads, UrbanField, WaterField,
@@ -126,11 +127,6 @@ impl Fields {
         self.height = height;
         self
     }
-}
-
-pub(crate) fn smoothstep(e0: f64, e1: f64, x: f64) -> f64 {
-    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
 }
 
 /// Spacing of a rung's streets at a place of the given urbanness; `None` where the

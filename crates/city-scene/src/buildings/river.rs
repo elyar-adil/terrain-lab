@@ -4,8 +4,10 @@
 
 use urban::{CityFrameInfo, Point};
 
-use crate::math::{Vec2, Vec3, hash01, signed_area};
+use crate::math::{Vec2, Vec3, signed_area};
 use crate::mesh::{GroupStyle, MeshBuilder};
+use worldgen_core::hash::cell01;
+use worldgen_core::smooth01;
 
 use super::ring_of;
 
@@ -23,11 +25,6 @@ fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
         a[1] + (b[1] - a[1]) * t,
         a[2] + (b[2] - a[2]) * t,
     ]
-}
-
-fn smooth(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
 }
 
 /// The river as a water surface plus its banks. `crossings` are (plan point,
@@ -129,11 +126,11 @@ pub fn build_water(
     let depth_colour = |off: f32, s: f32| {
         // 0 at the bank, 1 in the centre.
         let from_bank = (half - off.abs()).max(0.0);
-        let t = smooth(from_bank / (half * 0.85).max(4.0));
+        let t = smooth01(from_bank / (half * 0.85).max(4.0));
         let base = mix(
             shallow,
-            mix(mid, deep, smooth((t - 0.45) / 0.55)),
-            smooth(t * 1.6),
+            mix(mid, deep, smooth01((t - 0.45) / 0.55)),
+            smooth01(t * 1.6),
         );
         // Slowly varying turbidity along the reach: sediment-brown-green patches.
         let turb = 0.5 + 0.5 * (s * 0.013 + 1.3).sin() * (s * 0.037).sin();
@@ -197,7 +194,7 @@ pub fn build_water(
     let paving = [0.50, 0.49, 0.47];
     for sg in [-1.0_f32, 1.0] {
         let side_id = if sg > 0.0 { 1 } else { 2 };
-        let chunk = |s: f32| hash01(0xA11, (s / 70.0) as i32, side_id, 7);
+        let chunk = |s: f32| cell01(0xA11, (s / 70.0) as i32, side_id, 7);
         let urban = |i: usize| {
             let s = (arc[i] + arc[(i + 1).min(n - 1)]) * 0.5;
             let mid_pt = (line[i] + line[(i + 1).min(n - 1)]) * 0.5;
@@ -207,7 +204,7 @@ pub fn build_water(
             let s = arc[i];
             let cell = (s / 55.0) as i32;
             let centre = (cell as f32 + 0.5) * 55.0;
-            hash01(0xB22, cell, side_id, 3) < 0.45 && (s - centre).abs() < 2.4
+            cell01(0xB22, cell, side_id, 3) < 0.45 && (s - centre).abs() < 2.4
         };
         let oe = sg * half;
         let mut prev_active = false;
@@ -240,7 +237,7 @@ pub fn build_water(
             builder.wall(QUAY, a_w, b_w, WATER_Y, TOP, Some(stone));
             builder.wall(QUAY, b_w, a_w, WATER_Y, TOP, Some(stone));
             let s = arc[i];
-            let tone = 0.94 + 0.12 * hash01(0xC33, (s / 4.0) as i32, side_id, 1);
+            let tone = 0.94 + 0.12 * cell01(0xC33, (s / 4.0) as i32, side_id, 1);
             let top_col = [paving[0] * tone, paving[1] * tone, paving[2] * tone];
             if stairs {
                 // Landing flush with the walkway, then steps down into the water.

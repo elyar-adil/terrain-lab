@@ -312,7 +312,7 @@ fn leaf_colour(species: &Species, roll: f32) -> [f32; 3] {
     }
 }
 
-/// `0 -> 1` ramp between two points, because `math::smoothstep` is
+/// `0 -> 1` ramp between two points, because `worldgen_core::smootherstep` is
 /// single-argument.
 fn ramp(t: f32, lo: f32, hi: f32) -> f32 {
     let t = ((t - lo) / (hi - lo).max(1.0e-5)).clamp(0.0, 1.0);
