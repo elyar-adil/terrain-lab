@@ -1,0 +1,480 @@
+{
+ "shots": [
+  {
+   "group": "city",
+   "page": "city-harness.html",
+   "name": "street",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "city",
+   "page": "city-harness.html",
+   "name": "junction",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "city",
+   "page": "city-harness.html",
+   "name": "tower",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "city",
+   "page": "city-harness.html",
+   "name": "district",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "city",
+   "page": "city-harness.html",
+   "name": "skyline",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "city",
+   "page": "city-harness.html",
+   "name": "aerial",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "city",
+   "page": "city-harness.html",
+   "name": "aerial",
+   "scene": "/city-lite.json",
+   "cam": "-430,300,-430,0,12,0,40",
+   "tag": "back"
+  },
+  {
+   "group": "city",
+   "page": "city-harness.html",
+   "name": "aerial",
+   "scene": "/city-lite.json",
+   "cam": "1,560,1,0,0,0,38",
+   "tag": "plan"
+  },
+  {
+   "group": "city",
+   "page": "city-harness.html",
+   "name": "district",
+   "scene": "/city-lite.json",
+   "cam": "150,38,-210,-20,14,20,52",
+   "tag": "back"
+  },
+  {
+   "group": "city",
+   "page": "city-harness.html",
+   "name": "street",
+   "scene": "/city-lite.json",
+   "cam": "30,6.5,-100,-40,3,10,55",
+   "tag": "reverse"
+  },
+  {
+   "group": "city",
+   "page": "city-harness.html",
+   "name": "junction",
+   "scene": "/city-lite.json",
+   "cam": "4,42,6,-4,0,-4,50",
+   "tag": "plan"
+  },
+  {
+   "group": "city",
+   "page": "city-harness.html",
+   "name": "tower",
+   "scene": "/city-lite.json",
+   "cam": "-70,30,-72,6,35,6,55",
+   "tag": "far"
+  },
+  {
+   "group": "facades",
+   "page": "gallery.html",
+   "name": "facade",
+   "cam": "30,8,40,30,6.4,0,60",
+   "tag": "front1",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "facades",
+   "page": "gallery.html",
+   "name": "facade",
+   "cam": "100,8,40,100,6.4,0,60",
+   "tag": "front2",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "facades",
+   "page": "gallery.html",
+   "name": "facade",
+   "cam": "170,8,40,170,6.4,0,60",
+   "tag": "front3",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "facades",
+   "page": "gallery.html",
+   "name": "facade",
+   "cam": "-22,9,26,24,6.4,0,60",
+   "tag": "oblique-left",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "facades",
+   "page": "gallery.html",
+   "name": "facade",
+   "cam": "214,9,26,170,6.4,0,60",
+   "tag": "oblique-right",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "facades",
+   "page": "gallery.html",
+   "name": "facade",
+   "cam": "30,1.5,8,30,12,0,70",
+   "tag": "looking-up",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "ground",
+   "page": "gallery.html",
+   "name": "ground",
+   "cam": "0,2.4,-3,0,2.2,-20,70",
+   "tag": "shop-front",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "ground",
+   "page": "gallery.html",
+   "name": "ground",
+   "cam": "-26,2.4,-6,-4,2.2,-20,60",
+   "tag": "shop-oblique",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "ground",
+   "page": "gallery.html",
+   "name": "ground",
+   "cam": "36,2.4,-3,36,2.2,-20,70",
+   "tag": "lobby-front",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "ground",
+   "page": "gallery.html",
+   "name": "ground",
+   "cam": "10,2.4,-6,32,2.2,-20,60",
+   "tag": "lobby-oblique",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "ground",
+   "page": "gallery.html",
+   "name": "ground",
+   "cam": "72,2.4,-3,72,2.2,-20,70",
+   "tag": "home-front",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "ground",
+   "page": "gallery.html",
+   "name": "ground",
+   "cam": "46,2.4,-6,68,2.2,-20,60",
+   "tag": "home-oblique",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "ground",
+   "page": "gallery.html",
+   "name": "ground",
+   "cam": "129,3,-2,129,2.2,-20,80",
+   "tag": "pads",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "trees",
+   "page": "tree-harness.html",
+   "name": "all",
+   "query": "species=all&h=12&post=0&cam=0,7,48,0,5,-12&fov=50",
+   "tag": "front",
+   "cheap": false
+  },
+  {
+   "group": "trees",
+   "page": "tree-harness.html",
+   "name": "all",
+   "query": "species=all&h=12&post=0&cam=-62,22,58,0,5,-14&fov=50",
+   "tag": "oblique",
+   "cheap": false
+  },
+  {
+   "group": "trees",
+   "page": "tree-harness.html",
+   "name": "all",
+   "query": "species=all&h=12&post=0&cam=0,120,22,0,0,-14&fov=45",
+   "tag": "top",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "yin-xing",
+   "query": "species=yin-xing&h=12&post=0&season=0.5&cam=0,6,34,0,5.5,0&fov=45",
+   "tag": "front",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "yin-xing",
+   "query": "species=yin-xing&h=12&post=0&season=0.5&cam=24,9,24,0,5.5,0&fov=45",
+   "tag": "three-quarter",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "yin-xing",
+   "query": "species=yin-xing&h=12&post=0&season=0.5&cam=9,1.2,9,0,9,0&fov=60",
+   "tag": "looking-up",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "liu-shu",
+   "query": "species=liu-shu&h=12&post=0&season=0.5&cam=0,6,34,0,5.5,0&fov=45",
+   "tag": "front",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "liu-shu",
+   "query": "species=liu-shu&h=12&post=0&season=0.5&cam=24,9,24,0,5.5,0&fov=45",
+   "tag": "three-quarter",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "liu-shu",
+   "query": "species=liu-shu&h=12&post=0&season=0.5&cam=9,1.2,9,0,9,0&fov=60",
+   "tag": "looking-up",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "song-shu",
+   "query": "species=song-shu&h=12&post=0&season=0.5&cam=0,6,34,0,5.5,0&fov=45",
+   "tag": "front",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "song-shu",
+   "query": "species=song-shu&h=12&post=0&season=0.5&cam=24,9,24,0,5.5,0&fov=45",
+   "tag": "three-quarter",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "song-shu",
+   "query": "species=song-shu&h=12&post=0&season=0.5&cam=9,1.2,9,0,9,0&fov=60",
+   "tag": "looking-up",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "xiang-zhang",
+   "query": "species=xiang-zhang&h=12&post=0&season=0.5&cam=0,6,34,0,5.5,0&fov=45",
+   "tag": "front",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "xiang-zhang",
+   "query": "species=xiang-zhang&h=12&post=0&season=0.5&cam=24,9,24,0,5.5,0&fov=45",
+   "tag": "three-quarter",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "xiang-zhang",
+   "query": "species=xiang-zhang&h=12&post=0&season=0.5&cam=9,1.2,9,0,9,0&fov=60",
+   "tag": "looking-up",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "wu-tong",
+   "query": "species=wu-tong&h=12&post=0&season=0.5&cam=0,6,34,0,5.5,0&fov=45",
+   "tag": "front",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "wu-tong",
+   "query": "species=wu-tong&h=12&post=0&season=0.5&cam=24,9,24,0,5.5,0&fov=45",
+   "tag": "three-quarter",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "wu-tong",
+   "query": "species=wu-tong&h=12&post=0&season=0.5&cam=9,1.2,9,0,9,0&fov=60",
+   "tag": "looking-up",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "gui-hua",
+   "query": "species=gui-hua&h=12&post=0&season=0.5&cam=0,6,34,0,5.5,0&fov=45",
+   "tag": "front",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "gui-hua",
+   "query": "species=gui-hua&h=12&post=0&season=0.5&cam=24,9,24,0,5.5,0&fov=45",
+   "tag": "three-quarter",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "gui-hua",
+   "query": "species=gui-hua&h=12&post=0&season=0.5&cam=9,1.2,9,0,9,0&fov=60",
+   "tag": "looking-up",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "he-huan",
+   "query": "species=he-huan&h=12&post=0&season=0.5&cam=0,6,34,0,5.5,0&fov=45",
+   "tag": "front",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "he-huan",
+   "query": "species=he-huan&h=12&post=0&season=0.5&cam=24,9,24,0,5.5,0&fov=45",
+   "tag": "three-quarter",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "he-huan",
+   "query": "species=he-huan&h=12&post=0&season=0.5&cam=9,1.2,9,0,9,0&fov=60",
+   "tag": "looking-up",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "yang-shu",
+   "query": "species=yang-shu&h=12&post=0&season=0.5&cam=0,6,34,0,5.5,0&fov=45",
+   "tag": "front",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "yang-shu",
+   "query": "species=yang-shu&h=12&post=0&season=0.5&cam=24,9,24,0,5.5,0&fov=45",
+   "tag": "three-quarter",
+   "cheap": false
+  },
+  {
+   "group": "trees-single",
+   "page": "tree-harness.html",
+   "name": "yang-shu",
+   "query": "species=yang-shu&h=12&post=0&season=0.5&cam=9,1.2,9,0,9,0&fov=60",
+   "tag": "looking-up",
+   "cheap": false
+  },
+  {
+   "group": "prototypes",
+   "page": "gallery.html",
+   "name": "prototypes",
+   "cam": "14,3,-28,14,0.9,-42,50",
+   "tag": "cars-front",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "prototypes",
+   "page": "gallery.html",
+   "name": "prototypes",
+   "cam": "30,5,-22,14,0.9,-42,50",
+   "tag": "cars-oblique",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "prototypes",
+   "page": "gallery.html",
+   "name": "prototypes",
+   "cam": "75,6,-22,75,3,-42,60",
+   "tag": "furniture-a",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "prototypes",
+   "page": "gallery.html",
+   "name": "prototypes",
+   "cam": "160,7,-22,160,3.5,-42,60",
+   "tag": "furniture-b",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "prototypes",
+   "page": "gallery.html",
+   "name": "prototypes",
+   "cam": "196,2,-30,196,0.8,-42,50",
+   "tag": "hedge-tuft",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "prototypes",
+   "page": "gallery.html",
+   "name": "prototypes",
+   "cam": "245,12,30,245,7,-42,55",
+   "tag": "trees-1",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "prototypes",
+   "page": "gallery.html",
+   "name": "prototypes",
+   "cam": "329,12,30,329,7,-42,55",
+   "tag": "trees-2",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "prototypes",
+   "page": "gallery.html",
+   "name": "prototypes",
+   "cam": "413,12,30,413,7,-42,55",
+   "tag": "trees-3",
+   "scene": "/city-lite.json"
+  },
+  {
+   "group": "prototypes",
+   "page": "gallery.html",
+   "name": "prototypes",
+   "cam": "497,12,30,497,7,-42,55",
+   "tag": "trees-4",
+   "scene": "/city-lite.json"
+  }
+ ]
+}

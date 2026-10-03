@@ -22,6 +22,7 @@ import {
   decodeFloats,
   foliageMaskTexture,
 } from "./cityScene";
+import { framingFromQuery } from "./cameraParam";
 import { createPost } from "./post";
 import { installUniqueTrees } from "../trees/plant";
 import { GrassShells, applyGrassFur } from "./grassFur";
@@ -128,13 +129,7 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
 
     try {
       const base = PRESETS[preset] ?? PRESETS.street;
-      // `?cam=x,y,z,tx,ty,tz[,fov]` overrides the framing, for audits and bug reports.
-      const camParam = new URLSearchParams(window.location.search).get("cam");
-      const cv = camParam ? camParam.split(",").map(Number) : [];
-      const chosen: CameraPreset =
-        cv.length >= 6 && cv.every((n) => Number.isFinite(n))
-          ? { ...base, position: [cv[0], cv[1], cv[2]], target: [cv[3], cv[4], cv[5]], fov: cv[6] ?? base.fov }
-          : base;
+      const chosen: CameraPreset = framingFromQuery(base);
       const extent = aspectOf(scene);
       // `?cheap=1` trades the environment bake and the shadow resolution for
       // speed. The headless audit runs on SwiftShader, where a PMREM bake and a

@@ -22,7 +22,10 @@ import {
 } from "./cityScene";
 
 /** One test quad with metre-unit UVs — the contract every baked tile assumes. */
-function metreQuad(width: number, height: number): THREE.BufferGeometry {
+/** How a test quad's V is measured; see `textureFor` in cityScene.ts. */
+type VMode = "up-metres" | "down-metres" | "down-tiles";
+
+function metreQuad(width: number, height: number, vMode: VMode = "up-metres"): THREE.BufferGeometry {
   const geometry = new THREE.PlaneGeometry(width, height);
   // Tagged, so the gallery's dispose frees only the geometry it built and
   // never the city prototypes it shares.
@@ -30,14 +33,30 @@ function metreQuad(width: number, height: number): THREE.BufferGeometry {
   const uv = geometry.getAttribute("uv") as THREE.BufferAttribute;
   for (let index = 0; index < uv.count; index += 1) {
     // PlaneGeometry UVs are 0..1; the materials' `repeat` expects metres.
-    uv.setXY(index, uv.getX(index) * width, uv.getY(index) * height);
+    // Baked wall tiles keep row 0 at the *top* of the image, so a wall's V counts
+    // down from its head: `facade/NN` in tile heights, `ground/*` in metres. Flat
+    // ground surfaces count metres upward.
+    const down = 1 - uv.getY(index);
+    const v = vMode === "down-tiles" ? down : vMode === "down-metres" ? down * height : uv.getY(index) * height;
+    uv.setXY(index, uv.getX(index) * width, v);
   }
   uv.needsUpdate = true;
+  // Facade materials multiply by a per-building tint in the vertex colour. A
+  // missing colour attribute reads as zero in WebGL, which renders the panel
+  // black, so the gallery supplies the neutral tint a real building would carry.
+  const white = new Float32Array(uv.count * 3).fill(1);
+  geometry.setAttribute("color", new THREE.BufferAttribute(white, 3));
   return geometry;
 }
 
-function wall(width: number, height: number, x: number, material: THREE.Material): THREE.Mesh {
-  const mesh = new THREE.Mesh(metreQuad(width, height), material);
+function wall(
+  width: number,
+  height: number,
+  x: number,
+  material: THREE.Material,
+  vMode: VMode = "up-metres",
+): THREE.Mesh {
+  const mesh = new THREE.Mesh(metreQuad(width, height, vMode), material);
   mesh.position.set(x, height / 2, 0);
   return mesh;
 }
@@ -59,7 +78,7 @@ export function buildGallery(materials: MaterialCatalogue, city: CityHandles): G
   let x = 0;
   for (let index = 0; index < 24; index += 1) {
     const key = `facade/${index.toString().padStart(2, "0")}`;
-    group.add(wall(6, 12.8, x, materials.get(key)));
+    group.add(wall(6, 12.8, x, materials.get(key), "down-tiles"));
     x += 8.5;
   }
 
@@ -69,7 +88,7 @@ export function buildGallery(materials: MaterialCatalogue, city: CityHandles): G
   const groundRow = new THREE.Group();
   x = 0;
   for (const kind of ["shop", "lobby", "home"]) {
-    groundRow.add(wall(33.6, 4.5, x, materials.get(`ground/${kind}`)));
+    groundRow.add(wall(33.6, 4.5, x, materials.get(`ground/${kind}`), "down-metres"));
     x += 36;
   }
   for (const key of ["roof", "asphalt", "sidewalk", "block.ground", "marking.crosswalk"]) {
@@ -93,9 +112,14 @@ export function buildGallery(materials: MaterialCatalogue, city: CityHandles): G
     mesh.name = key;
     mesh.castShadow = city.instanced.get(key)?.castShadow ?? true;
     mesh.frustumCulled = false;
+    // Tree prototypes are authored at unit height and the city scales each
+    // instance to the tree's real size; cars take their paint from the instance
+    // colour. A bare identity instance would be a 1 m dot or a black box.
     slot.position.set(index * 14, 0, 0);
+    slot.scale.setScalar(key.startsWith("tree/") ? 12 : 1);
     slot.updateMatrix();
     mesh.setMatrixAt(0, slot.matrix);
+    mesh.setColorAt(0, new THREE.Color(key === "car/body" ? 0x9b2f26 : 0xffffff));
     prototypeRow.add(mesh);
   });
   prototypeRow.position.z = -42;

@@ -41,6 +41,23 @@ npx tsc --noEmit
 - `src-tauri` 需要 GTK/WebKit 系统库，只在桌面环境构建；所有库 crate 是纯 Rust，CI 里直接检查。
 - 编辑器设置见 `.editorconfig` 与 `rustfmt.toml`。
 
+## 渲染检查
+
+每个部件都要从多个角度看过。清单在 `docs/render-validation/matrix.json`（部件 × 角度，加一行即可新增）：
+
+```bash
+cargo run --release -p city-scene --example dump_scene -- --lite --out public/city-lite.json
+npm run build:wasm            # 树的生长器
+CHROMIUM_PATH=/path/to/chrome node scripts/render-matrix.mjs --only trees   # 或 city / facades / ground / prototypes
+python3 scripts/contact-sheet.py render-out/trees render-out/sheets/trees.jpg
+```
+
+- 任何页面都接受 `?cam=x,y,z,tx,ty,tz[,fov]`，`city-audit.mjs` 用 `--cam` / `--query` 传入。
+- 软件渲染很慢，城市镜头每张约 10 分钟；树和画廊每张几秒到一分钟。先跑后者。
+- 输出在 `render-out/`（已忽略）。脚本会报告缺失材质和过短的 UV 缓冲。
+- 画廊里的测试平面必须满足真实几何的契约，否则会"看起来是渲染坏了"：立面材质需要顶点色；
+  烘焙墙面的 V 自上往下数（`facade/*` 以贴图高度计，`ground/*` 以米计）；树原型是单位高度。
+
 ## 测试的写法
 
 - "任意两个东西不能太像"（调色板、树形轮廓、立面）要一次列出**所有**不合格的对子，而不是遇到第一对就 panic。

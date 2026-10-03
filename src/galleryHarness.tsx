@@ -18,6 +18,7 @@ import {
   foliageMaskTexture,
 } from "./city/cityScene";
 import { buildGallery } from "./city/gallery";
+import { framingFromQuery } from "./city/cameraParam";
 import { createPost } from "./city/post";
 import {
   bakeSkyEnvironment,
@@ -106,14 +107,15 @@ function Gallery() {
     host.appendChild(renderer.domElement);
 
     const world = new THREE.Scene();
+    const framing = framingFromQuery(ROW_CAMERAS[row] ?? ROW_CAMERAS.all);
     const camera = new THREE.PerspectiveCamera(
-      (ROW_CAMERAS[row] ?? ROW_CAMERAS.all).fov,
+      framing.fov,
       (host.clientWidth || 1280) / (host.clientHeight || 800),
       0.5,
       12000,
     );
-    camera.position.set(...(ROW_CAMERAS[row] ?? ROW_CAMERAS.all).position);
-    const lookAt = new THREE.Vector3(...(ROW_CAMERAS[row] ?? ROW_CAMERAS.all).target);
+    camera.position.set(...framing.position);
+    const lookAt = new THREE.Vector3(...framing.target);
     camera.lookAt(lookAt);
     world.fog = createFog(600);
 
@@ -126,7 +128,7 @@ function Gallery() {
       world.environment = bakeSkyEnvironment(renderer, sky.material);
     }
     world.environmentIntensity = 0.75;
-    lighting.focus(lookAt, (ROW_CAMERAS[row] ?? ROW_CAMERAS.all).radius);
+    lighting.focus(lookAt, framing.radius);
 
     const materials = createMaterials(scene.textures);
     const city = buildCityScene(scene, materials);

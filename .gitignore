@@ -25,3 +25,4 @@ public/audit-*.json
 
 # The tree grower compiled to WebAssembly (npm run build:wasm).
 /public/worldgen_trees.wasm
+render-out/

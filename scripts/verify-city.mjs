@@ -11,8 +11,9 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname).slice(1), "..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const quick = process.argv.includes("--quick");
 
 console.log("[1/3] regenerating public/city-scenes.json ...");

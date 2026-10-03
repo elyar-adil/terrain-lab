@@ -24,20 +24,19 @@
 //   node scripts/city-audit.mjs --preset street --out street.png
 //   node scripts/city-audit.mjs --all
 //
-import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { readFile, mkdir, writeFile, stat } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
-// The reference project has Playwright installed but no browsers downloaded, so
-// the system Edge is used via its channel.
-const require = createRequire(
-  "C:/Users/Elyar/Desktop/intersection-generator/package.json",
-);
-const { chromium } = require("playwright");
+import { chromium } from "playwright-core";
+
+// Which browser: `CHROMIUM_PATH` points at an executable (CI and containers),
+// `BROWSER_CHANNEL` names an installed one (`msedge`, `chrome`); with neither,
+// playwright-core uses the browser in PLAYWRIGHT_BROWSERS_PATH.
 
 const argv = process.argv.slice(2);
 const arg = (name, fallback) => {
@@ -46,7 +45,7 @@ const arg = (name, fallback) => {
 };
 const flag = (name) => argv.includes(`--${name}`);
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname).slice(1), "..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = path.resolve(root, arg("out-dir", "docs/render-validation"));
 const width = Number(arg("width", "1440"));
 const height = Number(arg("height", "900"));
@@ -57,6 +56,17 @@ const port = Number(arg("port", "0")) || 4000 + Math.floor(Math.random() * 900);
 
 // Every preset the viewer defines, so `--all` cannot silently skip one.
 const PRESETS = ["street", "junction", "tower", "aerial", "skyline"];
+// `--page city-harness.html` (default) or `gallery.html`: which harness to drive.
+// `--cam x,y,z,tx,ty,tz[,fov]` overrides the preset's framing, and `--tag` is added
+// to the output name so several angles of one preset do not overwrite each other.
+const pageName = arg("page", "city-harness.html");
+const camOverride = arg("cam", "");
+// `--scene /city-lite.json`: which payload the page loads (a file under `public/`).
+const sceneUrl = arg("scene", "");
+// `--query "species=all&h=14"`: the whole query string verbatim, for harnesses
+// (tree-harness.html) whose parameters are not the city's.
+const rawQuery = arg("query", "");
+const tag = arg("tag", "");
 const wanted = flag("all") ? PRESETS : [arg("preset", "street")];
 // `cheap=1` drops the environment bake and the soft shadow filter. Both are large
 // and both are slow on a software rasteriser, and neither changes framing,
@@ -130,7 +140,7 @@ await mkdir(outDir, { recursive: true });
 
 // Rebuild only when asked, or when there is no build to serve. A rebuild is ten
 // seconds; re-deciding whether one is needed every run is worse.
-if (flag("build") || !(await stat(path.join(dist, "city-harness.html")).catch(() => null))) {
+if (flag("build") || !(await stat(path.join(dist, pageName)).catch(() => null))) {
   console.log("building...");
   await run(process.execPath, [path.join(root, "node_modules", "vite", "bin", "vite.js"), "build"]);
 }
@@ -140,8 +150,10 @@ const report = [];
 
 try {
   const browser = await chromium.launch({
-    channel: "msedge",
+    executablePath: process.env.CHROMIUM_PATH || undefined,
+    channel: process.env.BROWSER_CHANNEL || undefined,
     args: [
+      "--no-sandbox",
       "--use-angle=swiftshader",
       "--enable-webgl",
       "--ignore-gpu-blocklist",
@@ -162,10 +174,13 @@ try {
       if (message.type() === "error") problems.push(`console: ${text}`);
     });
 
-    const url =
-      `http://127.0.0.1:${port}/city-harness.html` +
-      `?preset=${preset}&city=${city}&fps=${fps}&cheap=${cheap}` +
-      (arg("hide", "") ? `&hide=${encodeURIComponent(arg("hide", ""))}` : "");
+    const url = rawQuery
+      ? `http://127.0.0.1:${port}/${pageName}?${rawQuery}`
+      : `http://127.0.0.1:${port}/${pageName}` +
+        `?preset=${preset}&city=${city}&fps=${fps}&cheap=${cheap ? 1 : 0}` +
+        (camOverride ? `&cam=${encodeURIComponent(camOverride)}` : "") +
+        (sceneUrl ? `&scene=${encodeURIComponent(sceneUrl)}` : "") +
+        (arg("hide", "") ? `&hide=${encodeURIComponent(arg("hide", ""))}` : "");
     await page.goto(url, { waitUntil: "domcontentloaded" });
 
     let ready = true;
@@ -191,7 +206,7 @@ try {
 
     let domInfo = null;
     const diagnostics = await page.evaluate(() => window.__CITY_DIAGNOSTICS__ ?? null);
-    const out = path.join(outDir, `${preset}${cheap ? "-cheap" : ""}.png`);
+    const out = path.join(outDir, `${preset}${tag ? `-${tag}` : ""}${cheap ? "-cheap" : ""}.png`);
     if (ready) {
       /**
        * Read the pixels out of the canvas rather than screenshotting the page.
