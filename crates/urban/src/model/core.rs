@@ -12,8 +12,9 @@ pub struct Point {
 pub enum CityStyle {
     /// Contemporary mainland Chinese city: hierarchical roads, compact
     /// mixed-use blocks, residential compounds and a planted river corridor.
-    /// Its buildings are the warm plaster, painted and tile-clad slabs and
-    /// towers of the mainland; no brick and little glass outside the CBD.
+    /// Its residential slabs and towers are warm plaster, painted and tile-clad
+    /// (no brick, little glass outside the CBD). Farmsteads keep some brick,
+    /// as rural self-built houses in China do.
     ChineseModern,
     /// The earlier facade vocabulary of the same generator, kept selectable:
     /// brick low-rise stock and a half-glass tower population.  It reads as a
