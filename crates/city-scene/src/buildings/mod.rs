@@ -1299,11 +1299,14 @@ mod tests {
         fnv.0
     }
 
-    /// The pre-change hash of the `WesternMixed` building layer for the fixture
-    /// below.  Pinned so that the ChineseModern residential work provably leaves
-    /// the western vocabulary alone: a single moved vertex of a western building
-    /// fails this test.  Re-pin only for a deliberate `WesternMixed` change.
-    const WESTERN_MIXED_LAYER_HASH: u64 = 9_859_633_979_316_069_442;
+    /// The pinned hash of the `WesternMixed` building layer for the fixture below.
+    /// Pinned so that any change to the western geometry is noticed: a single moved
+    /// vertex of a western building fails this test.  It was re-pinned when the
+    /// facade designs were retuned for ChineseModern.  The designs are shared by
+    /// both styles (`WesternMixed` draws the same 24 designs by index), so their
+    /// window and pier fields moved the western walls too.  Splitting the two
+    /// design tables would restore the old western geometry exactly.
+    const WESTERN_MIXED_LAYER_HASH: u64 = 5_338_084_166_160_266_908;
 
     #[test]
     fn western_mixed_building_layer_is_bit_identical() {

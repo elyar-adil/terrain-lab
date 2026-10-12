@@ -304,7 +304,7 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
     } = furniture::place(&network, &mut builder, city.seed);
     let shrubs = trees::plant_median_shrubs(&network, &mut builder, city.seed);
     let parked = furniture::park_cars(&network, &mut builder, city.seed);
-    let tree_output = trees::plant(
+    let tree_output = trees::plant_styled(
         &network,
         &city.parcels,
         &city.buildings,
@@ -315,6 +315,7 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
         &prototypes,
         &mut builder,
         city.seed,
+        city.style,
     );
     let mut buildings = city.buildings.clone();
     buildings.truncate(budget.max_buildings);
