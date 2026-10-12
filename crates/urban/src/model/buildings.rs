@@ -53,6 +53,9 @@ pub enum BuildingFacade {
     ConcreteGlass,
     StoneCivic,
     BrickResidential,
+    /// Rendered and painted plaster, with tile bands: the mainland's residential
+    /// slab and tower, which is not brick.
+    PlasterResidential,
     MetalIndustrial,
 }
 

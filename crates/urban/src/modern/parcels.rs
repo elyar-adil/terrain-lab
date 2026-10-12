@@ -17,9 +17,10 @@ use super::graph::{QUAY_OFF_M, modern_hash};
 use super::suburb;
 use crate::model::cross_section;
 use crate::{
-    BuildingFacade, ModernBuilding, ModernRoadClass, Parcel, ParcelUse, Point, RoofStyle, SdNode,
-    SdRoad, UrbanBlock,
+    BuildingFacade, CityStyle, ModernBuilding, ModernRoadClass, Parcel, ParcelUse, Point,
+    RoofStyle, SdNode, SdRoad, UrbanBlock,
 };
+use worldgen_core::smoothstep;
 
 pub(super) struct ParcelOutput {
     pub blocks: Vec<UrbanBlock>,
@@ -63,6 +64,9 @@ pub(super) fn build_parcels(
     let density = frame.density;
     let river_half = frame.river_half;
     let seed = frame.spec.seed;
+    // The Chinese vocabulary (plaster slabs, a height that follows the centre)
+    // is only for the Chinese style; `WesternMixed` keeps its brick stock.
+    let chinese = frame.spec.style == CityStyle::ChineseModern;
 
     let pts: Vec<V> = nodes.iter().map(|n| frame.to_local(n.point)).collect();
     let edges: Vec<(usize, usize, ModernRoadClass)> = sd_roads
@@ -563,16 +567,23 @@ pub(super) fn build_parcels(
                     ParcelUse::Residential if !compound => {
                         // A street-wall block: the building fills its lot and
                         // meets the pavement, as in any dense city centre.
-                        let floors = (4.0
-                            + noise(763) * 5.0
-                            + 11.0 * centrality.powf(1.2) * density)
-                            .round() as u16;
+                        let (floors, facade) = if chinese {
+                            (
+                                chinese_residential_storeys(centrality, density, noise(763)),
+                                BuildingFacade::PlasterResidential,
+                            )
+                        } else {
+                            let floors =
+                                (4.0 + noise(763) * 5.0 + 11.0 * centrality.powf(1.2) * density)
+                                    .round() as u16;
+                            (floors.clamp(4, 18), BuildingFacade::BrickResidential)
+                        };
                         emit(
                             rect(bx0, bx1, bz0, bz1, 0.03 + 0.2 * (1.0 - centrality)),
-                            floors.clamp(4, 18),
+                            floors,
                             ParcelUse::Residential,
                             0,
-                            BuildingFacade::BrickResidential,
+                            facade,
                             RoofStyle::Flat,
                             true,
                         );
@@ -598,11 +609,19 @@ pub(super) fn build_parcels(
                                 }
                                 let cx = bx0 + cell_w * (i as f32 + 0.5);
                                 let cz = bz0 + cell_d * (j as f32 + 0.5);
-                                let floors = (6.0
-                                    + (4.0 + 22.0 * centrality) * (0.5 + 0.7 * cn(783)))
-                                .round()
-                                .clamp(6.0, 34.0)
-                                    as u16;
+                                let (floors, facade) = if chinese {
+                                    (
+                                        chinese_residential_storeys(centrality, density, cn(783)),
+                                        BuildingFacade::PlasterResidential,
+                                    )
+                                } else {
+                                    let floors = (6.0
+                                        + (4.0 + 22.0 * centrality) * (0.5 + 0.7 * cn(783)))
+                                    .round()
+                                    .clamp(6.0, 34.0)
+                                        as u16;
+                                    (floors, BuildingFacade::BrickResidential)
+                                };
                                 let (w, d) = if slab_style {
                                     ((cell_w * 0.86).min(72.0), 12.5 + cn(785) * 2.5)
                                 } else {
@@ -622,7 +641,7 @@ pub(super) fn build_parcels(
                                     floors,
                                     ParcelUse::Residential,
                                     0,
-                                    BuildingFacade::BrickResidential,
+                                    facade,
                                     if floors >= 30 {
                                         RoofStyle::SetbackTower
                                     } else {
@@ -696,6 +715,19 @@ fn subdivide(poly: &[V], target: f32, seed: u32, key: i32, depth: u32, out: &mut
     subdivide(&b, target, seed, key * 2 + 1, depth + 1, out);
 }
 
+/// Storeys of a residential building in a Chinese city, from how central its lot
+/// is, the city's density and a draw `u` in 0..1.  The town is a gradient rather
+/// than a zoning map: the centre carries 18–28-storey slabs and point towers, the
+/// planned rows at the edge are 6–11-storey slabs, and the band between is dense
+/// mid-rise that rises towards the core.  Density scales only the tall part, as
+/// it does for the commercial towers.  Storey height and the height cap are
+/// applied by the caller, so a narrow slab still stops short of a needle.
+fn chinese_residential_storeys(centrality: f32, density: f32, u: f32) -> u16 {
+    let tall = 13.0 * (0.7 + 0.3 * density);
+    let median = 8.5 + tall * smoothstep(0.20, 0.42, centrality);
+    (median * (0.7 + 0.6 * u)).round().clamp(6.0, 28.0) as u16
+}
+
 /// Axis-aligned rectangle in a lot's own frame (CCW), optionally shrunk.
 fn rect(x0: f32, x1: f32, z0: f32, z1: f32, shrink: f32) -> Vec<V> {
     let dx = (x1 - x0) * shrink * 0.5;
@@ -706,4 +738,130 @@ fn rect(x0: f32, x1: f32, z0: f32, z1: f32, shrink: f32) -> Vec<V> {
         (x1 - dx, z1 - dz),
         (x0 + dx, z1 - dz),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{CityFrame, generate_modern_chinese_city};
+    use super::chinese_residential_storeys;
+    use crate::{BuildingFacade, CityStyle, ModernChinaSpec, ParcelUse, Point};
+    use std::collections::HashMap;
+
+    /// Centrality, storeys and facade of every building on a residential parcel,
+    /// with centrality read at the building's own footprint centre.
+    fn residential_buildings(spec: ModernChinaSpec) -> Vec<(f32, u16, BuildingFacade)> {
+        let frame = CityFrame::new(spec);
+        let city = generate_modern_chinese_city(spec);
+        let parcels: HashMap<u32, &crate::Parcel> =
+            city.parcels.iter().map(|p| (p.id, p)).collect();
+        city.buildings
+            .iter()
+            .filter_map(|b| {
+                let parcel = parcels.get(&b.parcel_id)?;
+                if parcel.use_type != ParcelUse::Residential {
+                    return None;
+                }
+                let n = b.footprint.len() as f32;
+                let (sx, sy) = b.footprint.iter().fold((0.0_f32, 0.0_f32), |acc, p| {
+                    (acc.0 + p.x_km, acc.1 + p.y_km)
+                });
+                let (x, z) = frame.to_local(Point {
+                    x_km: sx / n,
+                    y_km: sy / n,
+                });
+                Some((frame.core_weight(x, z), b.floors, b.facade))
+            })
+            .collect()
+    }
+
+    fn median(mut values: Vec<u16>) -> f32 {
+        values.sort_unstable();
+        match values.len() {
+            0 => 0.0,
+            n if n % 2 == 1 => f32::from(values[n / 2]),
+            n => (f32::from(values[n / 2 - 1]) + f32::from(values[n / 2])) * 0.5,
+        }
+    }
+
+    #[test]
+    fn chinese_residential_height_follows_the_town_gradient() {
+        for seed in [42_u32, 7] {
+            let rows = residential_buildings(ModernChinaSpec {
+                seed,
+                ..ModernChinaSpec::default()
+            });
+            assert!(
+                rows.len() > 200,
+                "seed {seed}: {} residential buildings",
+                rows.len()
+            );
+            assert!(
+                rows.iter()
+                    .all(|r| r.2 == BuildingFacade::PlasterResidential),
+                "seed {seed}: a Chinese residential parcel is not plaster"
+            );
+
+            let core: Vec<u16> = rows.iter().filter(|r| r.0 >= 0.4).map(|r| r.1).collect();
+            let core_n = core.len();
+            let core_median = median(core.clone());
+            let core_18 = core.iter().filter(|f| **f >= 18).count() as f32 / core_n as f32;
+            assert!(core_n >= 40, "seed {seed}: only {core_n} core buildings");
+            assert!(
+                (18.0..=24.0).contains(&core_median),
+                "seed {seed}: core median {core_median} storeys"
+            );
+            assert!(
+                core_18 >= 0.30,
+                "seed {seed}: core share at 18+ is {core_18}"
+            );
+
+            let outer: Vec<u16> = rows.iter().filter(|r| r.0 < 0.2).map(|r| r.1).collect();
+            let outer_n = outer.len();
+            let outer_median = median(outer.clone());
+            let outer_mid =
+                outer.iter().filter(|f| (7..=12).contains(*f)).count() as f32 / outer_n as f32;
+            assert!(
+                (6.0..=12.0).contains(&outer_median),
+                "seed {seed}: outer median {outer_median} storeys"
+            );
+            assert!(
+                outer_mid >= 0.6,
+                "seed {seed}: outer share at 7-12 is {outer_mid}"
+            );
+        }
+    }
+
+    #[test]
+    fn western_mixed_residential_keeps_brick_and_its_old_heights() {
+        let rows = residential_buildings(ModernChinaSpec {
+            style: CityStyle::WesternMixed,
+            ..ModernChinaSpec::default()
+        });
+        assert!(!rows.is_empty());
+        assert!(rows.iter().all(|r| r.2 == BuildingFacade::BrickResidential));
+        assert!(rows.iter().all(|r| (4..=34).contains(&r.1)));
+    }
+
+    #[test]
+    fn chinese_residential_storeys_is_bounded_and_rises_with_centrality() {
+        for density in [0.0_f32, 0.5, 1.0] {
+            for u in [0.0_f32, 0.25, 0.5, 0.75, 0.999] {
+                let mut last = 0_u16;
+                for step in 0..=50 {
+                    let floors = chinese_residential_storeys(step as f32 / 50.0, density, u);
+                    assert!((6..=28).contains(&floors));
+                    assert!(floors >= last, "storeys fell as centrality rose");
+                    last = floors;
+                }
+            }
+        }
+        // A sparser city is lower at its centre, and its edge is unchanged.
+        assert!(
+            chinese_residential_storeys(1.0, 0.4, 0.5) < chinese_residential_storeys(1.0, 0.9, 0.5)
+        );
+        assert_eq!(
+            chinese_residential_storeys(0.0, 0.4, 0.5),
+            chinese_residential_storeys(0.0, 0.9, 0.5)
+        );
+    }
 }
