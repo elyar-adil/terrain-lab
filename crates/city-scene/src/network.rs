@@ -30,11 +30,22 @@ pub const JUNCTION_Y: f32 = 0.0;
 pub const BRIDGE_DECK: f32 = 1.25;
 /// Pavement thickness for an at-grade road, drawn as the ribbon's skirt.
 pub const ROAD_PAVEMENT: f32 = 0.25;
-/// Vertical clearance an elevated road keeps above the road it crosses.
+/// Vertical clearance an elevated road keeps above the road it crosses.  Only a
+/// grade-separated crossing needs it; a bridge over water does not.
 pub const STRUCTURE_HEIGHT: f32 = 6.4;
-/// Steepest longitudinal grade a road may reach, as a fraction: 6.5 %.  A ramp
-/// steeper than this is reported as a warning.
-const MAX_GRADE: f32 = 0.065;
+/// Steepest longitudinal grade an elevated road may reach: 5 %, the design limit
+/// this crate assumes for urban elevated roads.  A ramp steeper than this is
+/// reported as a warning.
+const MAX_GRADE: f32 = 0.05;
+/// A deck lower than this is a causeway at quay level, not a bridge: 0.3 m.
+pub const MIN_DECK: f32 = 0.3;
+/// Below this height a structure is a girder bridge with no towers or cables.
+pub const LOW_DECK: f32 = 3.0;
+/// Clearance a deck keeps above a road it passes over.
+const CROSSING_CLEARANCE: f32 = 4.5;
+/// Peak slope of `smootherstep`, relative to its average slope.  A ramp that
+/// rises `h` over a run `r` has a steepest point of `SMOOTHSTEP_PEAK * h / r`.
+const SMOOTHSTEP_PEAK: f32 = 1.875;
 
 /// One directed motor lane, in travel direction, addressed by arc length.
 #[derive(Debug, Clone)]
@@ -133,6 +144,10 @@ pub struct Road {
     pub trim_start: f32,
     pub trim_end: f32,
     pub deck_thickness: f32,
+    /// Height of the deck above roadbed at its highest point, in metres.  Zero for
+    /// an at-grade road.  The deck is sized to the ramp the span can carry, so a
+    /// short bridge is a low one.
+    pub deck_height: f32,
     pub max_grade: f32,
     /// `true` when either end is a real crossing (degree ≥ 3), not a bend.
     pub crossing_start: bool,
@@ -389,8 +404,10 @@ pub fn derive(
         let elevated = hd.layer != 0;
         let mut rise_end = full_length * 0.4;
         let mut fall_start = full_length * 0.6;
+        let mut crosses_road = false;
         if elevated {
             let crossings = crossing_stations(sd_roads, &sections, &local, hd.id);
+            crosses_road = !crossings.is_empty();
             if crossings.is_empty() {
                 // A pure river crossing has nothing to attach to, so the plateau
                 // sits at mid-span.  That is the best place for it, but it cannot
@@ -411,9 +428,17 @@ pub fn derive(
         }
         let start_y = ROADBED_Y;
         let end_y = ROADBED_Y;
-        let deck = hd.layer as f32 * STRUCTURE_HEIGHT;
         let rise_len = (rise_end - trim_start - 10.0).max(1.0);
         let fall_len = (full_length - trim_end - 10.0 - fall_start).max(1.0);
+        // The tallest deck whose ramps stay within the grade limit.  A ramp that
+        // rises `h` over `r` peaks at `SMOOTHSTEP_PEAK * h / r`, so the limit gives
+        // `h <= MAX_GRADE * r / SMOOTHSTEP_PEAK` on the shorter of the two ramps.
+        // A span too short for a ramp takes the causeway floor and reports below.
+        let deck = if elevated {
+            (MAX_GRADE * rise_len.min(fall_len) / SMOOTHSTEP_PEAK).clamp(MIN_DECK, STRUCTURE_HEIGHT)
+        } else {
+            0.0
+        };
         // Elevate along each centreline vertex's own station so a bridge ramps
         // up away from the junction, holds a plateau across whatever it
         // crosses, and comes back down before the next one.
@@ -438,22 +463,26 @@ pub fn derive(
         let carriageway = centreline.trim(trim_start, full_length - trim_end);
         let crossing_start = incidence[from_index].len() > 2;
         let crossing_end = incidence[to_index].len() > 2;
+        // A bridge over another road must clear it.  A deck the span cannot lift
+        // to that height would drive through the road below, so say so.
+        if crosses_road && deck < CROSSING_CLEARANCE {
+            network.warn(format!(
+                "road {} crosses a road on a {:.1} m deck, below the {:.1} m clearance it needs; the planner should lengthen the span",
+                hd.id, deck, CROSSING_CLEARANCE
+            ));
+        }
         let max_grade = centreline.max_grade();
         if max_grade > MAX_GRADE {
-            // Reported rather than silently accepted: the source project is
-            // explicit that a short approach does not excuse an impossible ramp.
-            // The deck leaves roadbed at one junction box and must return to it at
-            // the other, so it climbs and falls within the span between them.  Even
-            // a straight ramp at the limit needs `2 * deck / MAX_GRADE` metres of
-            // that span, so the warning states the span the deck would need.
+            // Reported rather than silently accepted.  A span this short cannot
+            // carry even a causeway at the grade limit: the planner should lengthen
+            // the span or not cross the water here.
             network.warn(format!(
-                "road {} reaches {:.1}% grade: a {:.1} m deck needs {:.0} m between its junction boxes at {:.1}%, but only {:.0} m is there; the planner should lengthen this span or stop elevating it",
+                "road {} reaches {:.1}% grade on a {:.1} m deck; its {:.0} m span is too short for a ramp at {:.1}%",
                 hd.id,
                 max_grade * 100.0,
                 deck,
-                2.0 * deck / MAX_GRADE,
-                MAX_GRADE * 100.0,
-                carriageway.length()
+                carriageway.length(),
+                MAX_GRADE * 100.0
             ));
         }
         let id = hd.id;
@@ -470,6 +499,7 @@ pub fn derive(
             trim_start,
             trim_end,
             deck_thickness: if elevated { BRIDGE_DECK } else { ROAD_PAVEMENT },
+            deck_height: deck,
             max_grade,
             crossing_start,
             crossing_end,
@@ -1384,12 +1414,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "open: today's bridges are too short for a 6.4 m deck at 6.5 %; needs the planner"]
     fn elevated_roads_stay_within_the_grade_limit() {
-        // The goal for the bridge geometry.  It fails until urban stops creating
-        // elevated spans shorter than 2 * 6.4 m / 6.5 % = 197 m between their
-        // junction boxes (the shortest in these cities has 57 m); see the warning
-        // text in `derive`.  Run with `--ignored` to see the current gap.
+        // Every deck is sized to the ramp its span can carry, so no elevated road
+        // exceeds the grade limit.  A span too short even for a causeway is
+        // reported by `derive` and fails here.
         for seed in SEEDS {
             let network = derived(seed);
             for road in network.roads.iter().filter(|road| road.layer != 0) {

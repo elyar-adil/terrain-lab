@@ -788,6 +788,7 @@ fn a_waiting_box_straddles_the_junction_edge() {
         trim_start: 14.0,
         trim_end: 14.0,
         deck_thickness: 0.25,
+        deck_height: 0.0,
         max_grade: 0.0,
         crossing_start: true,
         crossing_end: true,

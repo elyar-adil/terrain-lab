@@ -225,7 +225,13 @@ fn river_bridge(road: &Road, surface: &Carriageway, length: f32, builder: &mut M
     let start = surface.path.sample(0.0).0;
     let (ha, hb) = ((start.x * 0.5) as i32, (start.z * 0.5) as i32);
     let lu = length as u32;
-    let kind = choose_kind(length, cell01(0x5B1D, ha, hb, lu));
+    // A low deck cannot carry towers or cables: it is a girder bridge, as a
+    // short span over a narrow channel always is.
+    let kind = if road.deck_height < crate::network::LOW_DECK {
+        Kind::Girder
+    } else {
+        choose_kind(length, cell01(0x5B1D, ha, hb, lu))
+    };
     let paint = PAINTS[(cell01(0x77A1, ha, hb, lu) * PAINTS.len() as f32) as usize % PAINTS.len()];
     let stone_towers = cell01(0x1234, ha, hb, lu) < 0.5;
     let a_frame = cell01(0x9911, ha, hb, lu) < 0.5;
