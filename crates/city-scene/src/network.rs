@@ -32,6 +32,9 @@ pub const BRIDGE_DECK: f32 = 1.25;
 pub const ROAD_PAVEMENT: f32 = 0.25;
 /// Vertical clearance an elevated road keeps above the road it crosses.
 pub const STRUCTURE_HEIGHT: f32 = 6.4;
+/// Steepest longitudinal grade a road may reach, as a fraction: 6.5 %.  A ramp
+/// steeper than this is reported as a warning.
+const MAX_GRADE: f32 = 0.065;
 
 /// One directed motor lane, in travel direction, addressed by arc length.
 #[derive(Debug, Clone)]
@@ -389,9 +392,10 @@ pub fn derive(
         if elevated {
             let crossings = crossing_stations(sd_roads, &sections, &local, hd.id);
             if crossings.is_empty() {
-                // A pure river crossing has nothing to attach to.  Putting the
-                // plateau at mid-span leaves the approaches long enough that the
-                // quintic's 1.875x peak slope stays inside a real gradient.
+                // A pure river crossing has nothing to attach to, so the plateau
+                // sits at mid-span.  That is the best place for it, but it cannot
+                // rescue a span too short for its deck: no plateau position does,
+                // see the bound in the grade warning below.
                 rise_end = full_length * 0.5 - 5.0;
                 fall_start = full_length * 0.5 + 5.0;
             } else {
@@ -435,13 +439,21 @@ pub fn derive(
         let crossing_start = incidence[from_index].len() > 2;
         let crossing_end = incidence[to_index].len() > 2;
         let max_grade = centreline.max_grade();
-        if max_grade > 0.065 {
+        if max_grade > MAX_GRADE {
             // Reported rather than silently accepted: the source project is
             // explicit that a short approach does not excuse an impossible ramp.
+            // The deck leaves roadbed at one junction box and must return to it at
+            // the other, so it climbs and falls within the span between them.  Even
+            // a straight ramp at the limit needs `2 * deck / MAX_GRADE` metres of
+            // that span, so the warning states the span the deck would need.
             network.warn(format!(
-                "road {} reaches {:.1}% grade; extend the approach or lower the structure",
+                "road {} reaches {:.1}% grade: a {:.1} m deck needs {:.0} m between its junction boxes at {:.1}%, but only {:.0} m is there; the planner should lengthen this span or stop elevating it",
                 hd.id,
-                max_grade * 100.0
+                max_grade * 100.0,
+                deck,
+                2.0 * deck / MAX_GRADE,
+                MAX_GRADE * 100.0,
+                carriageway.length()
             ));
         }
         let id = hd.id;
@@ -1286,6 +1298,107 @@ pub mod export {
                 connectors: self.connectors.iter().map(connector_record).collect(),
                 junctions: self.junctions.iter().map(junction_record).collect(),
                 warnings: self.warnings.clone(),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::spec::JunctionSpec;
+    use urban::{ModernChinaSpec, generate_modern_chinese_city};
+
+    /// The default-radius cities the grade report is quoted for.
+    const SEEDS: [u32; 3] = [42, 1, 7];
+
+    fn derived(seed: u32) -> Network {
+        let city = generate_modern_chinese_city(ModernChinaSpec {
+            seed,
+            radius_km: 0.5,
+            block_size_metres: 110.0,
+            ..ModernChinaSpec::default()
+        });
+        derive(
+            &city.nodes,
+            &city.sd_roads,
+            &city.hd_roads,
+            city.frame,
+            JunctionSpec::default(),
+            city.seed,
+        )
+    }
+
+    #[test]
+    fn elevated_roads_meet_the_roadbed_at_both_junction_edges() {
+        // Where an elevated road meets its junction box it must already be at
+        // roadbed level.  The tolerance is 1 mm, well under anything visible.
+        for seed in SEEDS {
+            let network = derived(seed);
+            for road in network.roads.iter().filter(|road| road.layer != 0) {
+                let length = road.centreline.length();
+                for station in [road.trim_start, length - road.trim_end] {
+                    let (point, _) = road.centreline.sample(station);
+                    assert!(
+                        point.y.abs() < 1.0e-3,
+                        "seed {seed}: road {} stands {:.3} m above roadbed where it meets \
+                         its junction box (station {station:.1} m)",
+                        road.id,
+                        point.y
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_grade_over_the_limit_is_reported() {
+        // Nothing may exceed the limit silently: each over-limit road gets exactly
+        // one grade warning, and no warning refers to a road that is within it.
+        for seed in SEEDS {
+            let network = derived(seed);
+            let over: Vec<u32> = network
+                .roads
+                .iter()
+                .filter(|road| road.max_grade > MAX_GRADE)
+                .map(|road| road.id)
+                .collect();
+            for id in &over {
+                let prefix = format!("road {id} reaches ");
+                assert!(
+                    network.warnings.iter().any(|w| w.starts_with(&prefix)),
+                    "seed {seed}: road {id} is over the grade limit with no warning"
+                );
+            }
+            let grade_warnings = network
+                .warnings
+                .iter()
+                .filter(|w| w.contains("% grade:"))
+                .count();
+            assert_eq!(
+                grade_warnings,
+                over.len(),
+                "seed {seed}: grade warnings and over-limit roads disagree"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "open: today's bridges are too short for a 6.4 m deck at 6.5 %; needs the planner"]
+    fn elevated_roads_stay_within_the_grade_limit() {
+        // The goal for the bridge geometry.  It fails until urban stops creating
+        // elevated spans shorter than 2 * 6.4 m / 6.5 % = 197 m between their
+        // junction boxes (the shortest in these cities has 57 m); see the warning
+        // text in `derive`.  Run with `--ignored` to see the current gap.
+        for seed in SEEDS {
+            let network = derived(seed);
+            for road in network.roads.iter().filter(|road| road.layer != 0) {
+                assert!(
+                    road.max_grade <= MAX_GRADE,
+                    "seed {seed}: road {} reaches {:.1}% grade",
+                    road.id,
+                    road.max_grade * 100.0
+                );
             }
         }
     }
