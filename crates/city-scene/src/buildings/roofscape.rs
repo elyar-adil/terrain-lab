@@ -12,6 +12,7 @@
 
 use urban::ModernBuilding;
 
+use super::hash_u32;
 use crate::math::{Rng, Vec2, Vec3, point_in_ring, ring_centroid};
 use crate::mesh::MeshBuilder;
 
@@ -20,7 +21,16 @@ use crate::mesh::MeshBuilder;
 /// `nothing_a_roof_prop_is_placed_off_the_roof` asserts this, because a tank
 /// hanging in the air beside a tower is the single most obvious tell of a
 /// procedural city.
-pub fn roofscape(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &mut MeshBuilder) {
+///
+/// A `residential` roof is a plain deck with one stair/lift core, set at a point
+/// the building id picks, and no second core beside it.
+pub fn roofscape(
+    building: &ModernBuilding,
+    residential: bool,
+    ring: &[Vec2],
+    deck: f32,
+    builder: &mut MeshBuilder,
+) {
     let Some(extent) = ring_extent(ring) else {
         return;
     };
@@ -85,6 +95,24 @@ pub fn roofscape(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &
             rotation,
         )
     };
+    // Whether a box of these half-extents, turned by `rotation`, lies wholly on the
+    // roof when its centre is at `candidate`.  The same corner test as above, for
+    // a point that is chosen rather than sampled.
+    let fits_at = |candidate: Vec2, hw: f32, hd: f32, rotation: f32| -> bool {
+        let (sin, cos) = rotation.sin_cos();
+        point_in_ring(candidate, ring)
+            && [(-hw, -hd), (hw, -hd), (hw, hd), (-hw, hd)]
+                .iter()
+                .all(|(x, z)| {
+                    point_in_ring(
+                        Vec2::new(
+                            candidate.x + x * cos - z * sin,
+                            candidate.y + x * sin + z * cos,
+                        ),
+                        ring,
+                    )
+                })
+    };
 
     // A paved service strip around the stair head and a greening patch: someone
     // walks up here, and the walkway is where the boots wear the membrane.  Both
@@ -94,15 +122,53 @@ pub fn roofscape(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &
     // The stair head house (楼梯间) and the lift overrun beside it.  Two boxes and
     // a dark door: the most reliable way to tell a Chinese roof from a western
     // one at two hundred metres.
-    let rotation = rng.range(-0.35, 0.35);
+    // A residential stair house stands square to its block; elsewhere it is turned.
+    let rotation = if residential {
+        0.0
+    } else {
+        rng.range(-0.35, 0.35)
+    };
     let body_w = 3.2 + rng.unit() * 1.6;
     let body_d = 2.6 + rng.unit() * 0.8;
     let mut stair_house: Option<Vec2> = None;
+    // A residential block's one core is at a point the building id picks: on the
+    // long axis, set off the centreline to one side, so two slabs of an estate do
+    // not put their stair in the same place.  If that point does not fit, the
+    // core is sampled like every other prop.
+    let core_point = residential.then(|| {
+        let t = 0.2 + 0.6 * hash_u32(building.id, 127, 5);
+        let side = if hash_u32(building.id, 131, 5) < 0.5 {
+            -0.22
+        } else {
+            0.22
+        };
+        let mid_x = (extent[0] + extent[2]) * 0.5;
+        let mid_z = (extent[1] + extent[3]) * 0.5;
+        if width >= depth {
+            Vec2::new(extent[0] + width * t, mid_z + depth * side)
+        } else {
+            Vec2::new(mid_x + width * side, extent[1] + depth * t)
+        }
+    });
     // A tower crown is a small roof: if the full-size head house does not fit,
     // a smaller one does — real crowns carry a smaller machine room, not none.
-    let fitted = [1.0_f32, 0.8, 0.65].into_iter().find_map(|k| {
-        place_box(&mut rng, body_w * k + 0.40, body_d * k + 0.40, rotation).map(|p| (p, k))
-    });
+    let fitted = core_point
+        .and_then(|candidate| {
+            [1.0_f32, 0.8, 0.65].into_iter().find_map(|k| {
+                fits_at(
+                    candidate,
+                    (body_w * k + 0.40) * 0.5,
+                    (body_d * k + 0.40) * 0.5,
+                    0.0,
+                )
+                .then_some((candidate, k))
+            })
+        })
+        .or_else(|| {
+            [1.0_f32, 0.8, 0.65].into_iter().find_map(|k| {
+                place_box(&mut rng, body_w * k + 0.40, body_d * k + 0.40, rotation).map(|p| (p, k))
+            })
+        });
     if let Some((point, k)) = fitted {
         let (body_w, body_d) = (body_w * k, body_d * k);
         let (cap_w, cap_d) = (body_w + 0.40, body_d + 0.40);
@@ -144,19 +210,23 @@ pub fn roofscape(building: &ModernBuilding, ring: &[Vec2], deck: f32, builder: &
         );
         stair_house = Some(point);
     }
-    let rotation = rng.range(-0.40, 0.40);
-    if let Some(point) = place_box(&mut rng, 2.0, 1.8, rotation) {
-        let height = 1.7 + rng.unit() * 0.9;
-        crate::mesh::box_at(
-            builder,
-            "trim.light",
-            point,
-            deck + height * 0.5,
-            2.0,
-            height,
-            1.8,
-            rotation,
-        );
+    // The lift overrun beside the stair house: a second core, which a residential
+    // roof does not carry.
+    if !residential {
+        let rotation = rng.range(-0.40, 0.40);
+        if let Some(point) = place_box(&mut rng, 2.0, 1.8, rotation) {
+            let height = 1.7 + rng.unit() * 0.9;
+            crate::mesh::box_at(
+                builder,
+                "trim.light",
+                point,
+                deck + height * 0.5,
+                2.0,
+                height,
+                1.8,
+                rotation,
+            );
+        }
     }
     // Exhaust flues (排烟道): a pair of stubby stacks with caps, usually against
     // the stair house, on most roofs.
@@ -563,6 +633,7 @@ pub(crate) fn ring_extent(ring: &[Vec2]) -> Option<[f32; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::buildings::shell::is_residential;
     use crate::buildings::{level, ring_of};
     use crate::facades::{GROUND_STOREY_M, STOREY_M};
     use crate::math::signed_area;
@@ -624,7 +695,8 @@ mod tests {
             let upper_storeys = (building.floors as f32 - 1.0).max(1.0);
             let deck = level::GROUND + GROUND_STOREY_M + upper_storeys * STOREY_M;
             let mut single = MeshBuilder::new();
-            roofscape(building, &outward, deck, &mut single);
+            let residential = is_residential(building, urban::CityStyle::ChineseModern);
+            roofscape(building, residential, &outward, deck, &mut single);
             for group in single.build().meshes {
                 if let Some(slot) = materials.iter().position(|m| *m == group.material) {
                     above[slot] += group
@@ -666,7 +738,8 @@ mod tests {
             let upper_storeys = (building.floors as f32 - 1.0).max(1.0);
             let deck = level::GROUND + GROUND_STOREY_M + upper_storeys * STOREY_M;
             let mut builder = MeshBuilder::new();
-            roofscape(building, &outward, deck, &mut builder);
+            let residential = is_residential(building, urban::CityStyle::ChineseModern);
+            roofscape(building, residential, &outward, deck, &mut builder);
             for group in builder.build().meshes {
                 for chunk in group.positions.chunks_exact(3) {
                     let point = Vec2::new(chunk[0], chunk[2]);
