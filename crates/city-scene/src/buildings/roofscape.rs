@@ -592,6 +592,7 @@ mod tests {
             &city.compounds,
             &city.fields,
             city.frame,
+            urban::CityStyle::ChineseModern,
             &mut builder,
         );
         let groups = builder.build().meshes;
@@ -719,6 +720,7 @@ mod tests {
             &city.compounds,
             &city.fields,
             city.frame,
+            urban::CityStyle::ChineseModern,
             &mut builder,
         );
         let groups = builder.build().meshes;
