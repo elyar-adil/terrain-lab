@@ -321,6 +321,17 @@ pub(super) fn build_parcels(
                     continue;
                 }
                 let parcel_area = lot_area.min(width * depth * 1.15);
+                // Clear of every dead-end street's right-of-way.
+                let spur_clear = |ring: &[V]| -> bool {
+                    spurs.iter().all(|(a, b, class)| {
+                        let row = right_of_way(*class);
+                        ring.iter().all(|p| point_seg_dist(*p, *a, *b) >= row)
+                            && ring
+                                .iter()
+                                .zip(ring.iter().cycle().skip(1))
+                                .all(|(p, q)| seg_seg_dist(*p, *q, *a, *b) >= row)
+                    })
+                };
 
                 let mut emit = |footprint: Vec<V>,
                                 floors: u16,
@@ -358,15 +369,7 @@ pub(super) fn build_parcels(
                                         )
                                     })
                                     .collect();
-                                let clear_of_spurs = spurs.iter().all(|(a, b, class)| {
-                                    let row = right_of_way(*class);
-                                    ring.iter().all(|p| point_seg_dist(*p, *a, *b) >= row)
-                                        && ring
-                                            .iter()
-                                            .zip(ring.iter().cycle().skip(1))
-                                            .all(|(p, q)| seg_seg_dist(*p, *q, *a, *b) >= row)
-                                });
-                                (clear_of_spurs && ring.iter().all(|p| point_in(lot, *p)))
+                                (spur_clear(&ring) && ring.iter().all(|p| point_in(lot, *p)))
                                     .then_some(ring)
                             })
                         });
@@ -588,6 +591,42 @@ pub(super) fn build_parcels(
                             true,
                         );
                     }
+                    ParcelUse::Residential if chinese => {
+                        // A walled compound of mixed blocks: see `chinese_compound_cells`.
+                        let fits = |ring: &[V]| -> bool {
+                            let world: Vec<V> =
+                                ring.iter().map(|p| ob.to_world(p.0, p.1)).collect();
+                            spur_clear(&world) && world.iter().all(|p| point_in(lot, *p))
+                        };
+                        let site = Site {
+                            x0: bx0,
+                            x1: bx1,
+                            z0: bz0,
+                            z1: bz1,
+                        };
+                        let lot_uv: Vec<V> = lot
+                            .iter()
+                            .map(|p| (p.0 * ob.u.0 + p.1 * ob.u.1, p.0 * ob.v.0 + p.1 * ob.v.1))
+                            .collect();
+                        for (ring, floors) in chinese_compound_cells(
+                            site, &lot_uv, key, seed, centrality, density, &fits,
+                        ) {
+                            let roof = if floors >= 30 {
+                                RoofStyle::SetbackTower
+                            } else {
+                                RoofStyle::Flat
+                            };
+                            emit(
+                                ring,
+                                floors,
+                                ParcelUse::Residential,
+                                0,
+                                BuildingFacade::PlasterResidential,
+                                roof,
+                                true,
+                            );
+                        }
+                    }
                     ParcelUse::Residential => {
                         // A walled compound: the lot is tiled into cells, each
                         // holding a slab or tower, a minority left as garden.
@@ -728,6 +767,278 @@ fn chinese_residential_storeys(centrality: f32, density: f32, u: f32) -> u16 {
     (median * (0.7 + 0.6 * u)).round().clamp(6.0, 28.0) as u16
 }
 
+/// Clear gap kept between two buildings of one compound (metres).
+const CELL_GAP_M: f32 = 4.0;
+/// Two buildings of one compound closer than this (metres) are neighbours, and
+/// neighbours never share a storey count.
+const NEIGHBOUR_M: f32 = 18.0;
+
+/// The buildable rectangle of a lot, in the lot's own frame.
+#[derive(Clone, Copy)]
+struct Site {
+    x0: f32,
+    x1: f32,
+    z0: f32,
+    z1: f32,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum CellKind {
+    /// A long, narrow slab of six or seven storeys: the planned rows at the edge.
+    Slab,
+    /// A longer slab, 11–18 storeys in the core and 11–12 at the edge.
+    Tall,
+    /// A roughly square point tower, 18–33 storeys.
+    Tower,
+    /// A low civic building: a clinic or a kindergarten.
+    Low,
+}
+
+struct CompoundCell {
+    ring: Vec<V>,
+    floors: u16,
+    /// The hash that set `floors`: a neighbour reads it to choose its own step.
+    draw: f32,
+}
+
+/// The buildings of one compound, as footprints in the lot's own frame with
+/// their storeys.
+///
+/// The site is cut into rows, and each row is walked from one end to the other.
+/// Every slot along a row is a cell that draws its own use from a hash: a garden
+/// gap, a slab, a taller slab, a point tower or a low civic building.  Each
+/// building has its own length, depth, position across its row, tilt (in the
+/// core only) and gap to the next, so no two compounds read as one grid.  A
+/// building stays inside the lot `lot_uv` (convex) and clears the others by
+/// `CELL_GAP_M`.  A building that neighbours one with the same storey count
+/// steps off it (see `step_off`).  `centrality` runs from 0 at the planned edge
+/// to 1 at the core.
+fn chinese_compound_cells(
+    site: Site,
+    lot_uv: &[V],
+    key: i32,
+    seed: u32,
+    centrality: f32,
+    density: f32,
+    fits: &dyn Fn(&[V]) -> bool,
+) -> Vec<(Vec<V>, u16)> {
+    let g = smoothstep(0.15, 0.55, centrality);
+    let target_band = if modern_hash(seed, key, 5, 753) < 0.5 {
+        28.0
+    } else {
+        30.0
+    };
+    let rows = ((site.z1 - site.z0) / target_band).floor().max(1.0) as usize;
+    let band = (site.z1 - site.z0) / rows as f32;
+    let garden_p = 0.05 + 0.12 * (1.0 - centrality);
+    let tower_p = 0.02 + 0.40 * g;
+    let tall_p = 0.26 + 0.14 * g;
+    let low_p = 0.04;
+    // Core slabs are turned by up to 8 degrees, towers by half that; the planned
+    // edge is set out square to its streets.
+    let turn_max = 8.0_f32.to_radians() * g;
+
+    let mut cells: Vec<CompoundCell> = Vec::new();
+    for row in 0..rows {
+        let row_c = site.z0 + band * (row as f32 + 0.5);
+        let mut u = site.x0 + 6.0 * modern_hash(seed, key, 16 + row as i32, 801);
+        let mut slot = 0_i32;
+        while u < site.x1 - 14.0 {
+            let ck = key.wrapping_mul(257).wrapping_add(slot * 16 + row as i32);
+            let cn = |salt: i32| modern_hash(seed, ck, 3, salt);
+            slot += 1;
+            let gap = 6.0 + 7.0 * cn(837);
+            if cn(781) < garden_p {
+                u += 16.0 + 14.0 * cn(813);
+                continue;
+            }
+            let r = cn(791);
+            let mut kind = if r < tower_p {
+                CellKind::Tower
+            } else if r < tower_p + tall_p {
+                CellKind::Tall
+            } else if r < tower_p + tall_p + low_p {
+                CellKind::Low
+            } else {
+                CellKind::Slab
+            };
+            let drawn = match kind {
+                CellKind::Slab => 40.0 + 20.0 * cn(821),
+                CellKind::Tall => 44.0 + 22.0 * cn(823),
+                CellKind::Tower => 22.0 + 3.0 * cn(825),
+                CellKind::Low => 14.0 + 4.0 * cn(827),
+            };
+            let tower_ratio = 0.94 + 0.06 * cn(833);
+            let dep_max = match kind {
+                CellKind::Slab => 12.0 + 2.0 * cn(829),
+                CellKind::Tall => 12.5 + 1.5 * cn(831),
+                CellKind::Tower => drawn * tower_ratio,
+                CellKind::Low => 12.0 + 2.0 * cn(835),
+            };
+            let cv = row_c + ((band - dep_max) * 0.4).max(0.0) * (2.0 * cn(839) - 1.0);
+            // Where a rectangle this deep, with its clearance, stays inside the lot.
+            let Some((lo, hi)) = strip_span(
+                lot_uv,
+                cv - dep_max * 0.5 - LOT_MARGIN_M,
+                cv + dep_max * 0.5 + LOT_MARGIN_M,
+            ) else {
+                u += gap;
+                continue;
+            };
+            let start = u.max(lo + LOT_MARGIN_M).max(site.x0);
+            let avail = (hi - LOT_MARGIN_M).min(site.x1) - start;
+            // A slab cut short by a lot's corner keeps at least 30 m.
+            let min_len = match kind {
+                CellKind::Slab | CellKind::Tall => 30.0,
+                CellKind::Tower => 24.0,
+                CellKind::Low => 14.0,
+            };
+            let mut len = drawn.min(avail);
+            if len < min_len {
+                // A hole too short for this building: a low civic building fills
+                // it, or the slot stays open when even that will not fit.
+                if avail < 14.0 {
+                    u = start + gap;
+                    continue;
+                }
+                kind = CellKind::Low;
+                len = avail.min(18.0);
+            }
+            let dep = match kind {
+                CellKind::Tower => len * tower_ratio,
+                CellKind::Low => dep_max.min(14.0),
+                CellKind::Slab | CellKind::Tall => dep_max,
+            };
+            let turn = match kind {
+                CellKind::Slab | CellKind::Tall => turn_max * (2.0 * cn(841) - 1.0),
+                CellKind::Tower => 0.5 * turn_max * (2.0 * cn(841) - 1.0),
+                CellKind::Low => 0.0,
+            };
+            // The building as drawn, then set out square when its corners clip
+            // the lot's edge or a dead-end street.
+            let centre_u = start + len * 0.5;
+            let placed = [turn, 0.0].into_iter().find_map(|t| {
+                let ring = rect_at(centre_u, cv, len, dep, t);
+                let clear = fits(&ring)
+                    && cells
+                        .iter()
+                        .all(|c| convex_separation(&ring, &c.ring) >= CELL_GAP_M);
+                clear.then_some(ring)
+            });
+            if let Some(ring) = placed {
+                let draw = cn(843);
+                let base = match kind {
+                    CellKind::Slab => {
+                        if draw < 0.4 {
+                            6
+                        } else {
+                            7
+                        }
+                    }
+                    CellKind::Tall => 11 + (draw * (2.0 + 6.0 * g)) as u16,
+                    CellKind::Tower => {
+                        (18.0 + draw * 16.0 * (0.6 + 0.4 * density)).min(33.0) as u16
+                    }
+                    CellKind::Low => 3 + (draw * 2.0) as u16,
+                };
+                let neighbours: Vec<(u16, f32)> = cells
+                    .iter()
+                    .filter(|c| convex_separation(&ring, &c.ring) < NEIGHBOUR_M)
+                    .map(|c| (c.floors, c.draw))
+                    .collect();
+                let floors = step_off(base, &neighbours);
+                cells.push(CompoundCell { ring, floors, draw });
+            }
+            u = start + len + gap;
+        }
+    }
+    cells.into_iter().map(|c| (c.ring, c.floors)).collect()
+}
+
+/// The storey count nearest `base` that no neighbour already has.  The side it
+/// steps to is set by the first neighbour that shares `base`: a neighbour whose
+/// own draw is in the lower half sends this building up, the others send it down.
+fn step_off(base: u16, neighbours: &[(u16, f32)]) -> u16 {
+    let Some(&(_, draw)) = neighbours.iter().find(|(floors, _)| *floors == base) else {
+        return base;
+    };
+    let up: i32 = if draw < 0.5 { 1 } else { -1 };
+    for step in 1..=12_i32 {
+        for dir in [up, -up] {
+            let floors = i32::from(base) + dir * step;
+            if (3..=33).contains(&floors) && neighbours.iter().all(|(n, _)| i32::from(*n) != floors)
+            {
+                return floors as u16;
+            }
+        }
+    }
+    base
+}
+
+/// Lower bound on the clear distance between two convex rings, from the widest
+/// gap between their projections on any edge normal.  Negative when the rings
+/// overlap along every normal, which means they intersect.
+fn convex_separation(a: &[V], b: &[V]) -> f32 {
+    let mut best = f32::MIN;
+    for ring in [a, b] {
+        for i in 0..ring.len() {
+            let (p, q) = (ring[i], ring[(i + 1) % ring.len()]);
+            let (dx, dz) = (q.0 - p.0, q.1 - p.1);
+            let len = dx.hypot(dz);
+            if len < 1.0e-6 {
+                continue;
+            }
+            let n = (-dz / len, dx / len);
+            let span = |r: &[V]| -> (f32, f32) {
+                r.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| {
+                    let t = v.0 * n.0 + v.1 * n.1;
+                    (lo.min(t), hi.max(t))
+                })
+            };
+            let (a0, a1) = span(a);
+            let (b0, b1) = span(b);
+            best = best.max((b0 - a1).max(a0 - b1));
+        }
+    }
+    best
+}
+
+/// The u-range along which a strip from `v0` to `v1` lies inside a convex ring
+/// (`None` when the strip misses it).  A convex section is widest at its ends,
+/// so only the two edges of the strip need checking.
+fn strip_span(ring: &[V], v0: f32, v1: f32) -> Option<(f32, f32)> {
+    let section = |v: f32| -> Option<(f32, f32)> {
+        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+        for i in 0..ring.len() {
+            let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+            if (b.1 - a.1).abs() > 1.0e-6 && (a.1 - v) * (b.1 - v) <= 0.0 {
+                let t = (v - a.1) / (b.1 - a.1);
+                let u = a.0 + t * (b.0 - a.0);
+                lo = lo.min(u);
+                hi = hi.max(u);
+            }
+        }
+        (lo <= hi).then_some((lo, hi))
+    };
+    let (a0, a1) = section(v0)?;
+    let (b0, b1) = section(v1)?;
+    let (lo, hi) = (a0.max(b0), a1.min(b1));
+    (hi > lo).then_some((lo, hi))
+}
+
+/// Rectangle `w` by `d` centred on (`cx`, `cz`) and turned by `turn` radians.
+/// Counter-clockwise, like `rect`.
+fn rect_at(cx: f32, cz: f32, w: f32, d: f32, turn: f32) -> Vec<V> {
+    let (s, c) = turn.sin_cos();
+    [(-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)]
+        .iter()
+        .map(|&(x, z)| {
+            let (x, z) = (x * w, z * d);
+            (cx + x * c - z * s, cz + x * s + z * c)
+        })
+        .collect()
+}
+
 /// Axis-aligned rectangle in a lot's own frame (CCW), optionally shrunk.
 fn rect(x0: f32, x1: f32, z0: f32, z1: f32, shrink: f32) -> Vec<V> {
     let dx = (x1 - x0) * shrink * 0.5;
@@ -743,8 +1054,8 @@ fn rect(x0: f32, x1: f32, z0: f32, z1: f32, shrink: f32) -> Vec<V> {
 #[cfg(test)]
 mod tests {
     use super::super::{CityFrame, generate_modern_chinese_city};
-    use super::chinese_residential_storeys;
-    use crate::{BuildingFacade, CityStyle, ModernChinaSpec, ParcelUse, Point};
+    use super::{NEIGHBOUR_M, chinese_residential_storeys, convex_separation, rect_at};
+    use crate::{BuildingFacade, CityStyle, ModernChinaSpec, ModernCity, ParcelUse, Point};
     use std::collections::HashMap;
 
     /// Centrality, storeys and facade of every building on a residential parcel,
@@ -863,5 +1174,135 @@ mod tests {
             chinese_residential_storeys(0.0, 0.4, 0.5),
             chinese_residential_storeys(0.0, 0.9, 0.5)
         );
+    }
+
+    /// A footprint in metres.
+    type Metres = Vec<(f32, f32)>;
+
+    /// The residential buildings on each compound parcel of a city, with their
+    /// storeys and footprints in metres.
+    fn compound_buildings(city: &ModernCity) -> HashMap<u32, Vec<(u16, Metres)>> {
+        let parcels: HashMap<u32, &crate::Parcel> =
+            city.parcels.iter().map(|p| (p.id, p)).collect();
+        let mut out: HashMap<u32, Vec<(u16, Metres)>> = HashMap::new();
+        for b in &city.buildings {
+            let Some(parcel) = parcels.get(&b.parcel_id) else {
+                continue;
+            };
+            if parcel.use_type != ParcelUse::Residential || !parcel.compound {
+                continue;
+            }
+            let metres: Vec<(f32, f32)> = b
+                .footprint
+                .iter()
+                .map(|p| (p.x_km * 1000.0, p.y_km * 1000.0))
+                .collect();
+            out.entry(b.parcel_id).or_default().push((b.floors, metres));
+        }
+        out
+    }
+
+    #[test]
+    fn chinese_compound_storeys_vary_within_one_compound() {
+        for seed in [42_u32, 7] {
+            let city = generate_modern_chinese_city(ModernChinaSpec {
+                seed,
+                ..ModernChinaSpec::default()
+            });
+            let compounds = compound_buildings(&city);
+            let distinct = |b: &Vec<(u16, Metres)>| {
+                let mut floors: Vec<u16> = b.iter().map(|x| x.0).collect();
+                floors.sort_unstable();
+                floors.dedup();
+                floors.len()
+            };
+            let best = compounds.values().map(distinct).max().unwrap_or(0);
+            assert!(
+                best >= 4,
+                "seed {seed}: best compound has {best} storey counts"
+            );
+            // Within one compound the mix runs from six-storey rows to taller slabs.
+            let mixed = compounds
+                .values()
+                .any(|b| b.iter().any(|x| x.0 <= 7) && b.iter().any(|x| x.0 >= 11));
+            assert!(
+                mixed,
+                "seed {seed}: no compound mixes low rows and taller blocks"
+            );
+        }
+    }
+
+    #[test]
+    fn chinese_residential_buildings_do_not_overlap() {
+        for seed in [42_u32, 7] {
+            let city = generate_modern_chinese_city(ModernChinaSpec {
+                seed,
+                ..ModernChinaSpec::default()
+            });
+            let parcels: HashMap<u32, &crate::Parcel> =
+                city.parcels.iter().map(|p| (p.id, p)).collect();
+            let homes: Vec<(u32, Metres)> = city
+                .buildings
+                .iter()
+                .filter(|b| {
+                    parcels
+                        .get(&b.parcel_id)
+                        .is_some_and(|p| p.use_type == ParcelUse::Residential)
+                })
+                .map(|b| {
+                    let metres = b
+                        .footprint
+                        .iter()
+                        .map(|p| (p.x_km * 1000.0, p.y_km * 1000.0))
+                        .collect();
+                    (b.parcel_id, metres)
+                })
+                .collect();
+            assert!(homes.len() > 200, "seed {seed}: {} homes", homes.len());
+            for (i, (pa, a)) in homes.iter().enumerate() {
+                for (pb, b) in &homes[i + 1..] {
+                    let gap = convex_separation(a, b);
+                    assert!(
+                        gap > 0.0,
+                        "seed {seed}: buildings on parcels {pa} and {pb} overlap ({gap} m)"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn chinese_compound_neighbours_never_share_a_storey_count() {
+        for seed in [42_u32, 7] {
+            let city = generate_modern_chinese_city(ModernChinaSpec {
+                seed,
+                ..ModernChinaSpec::default()
+            });
+            for buildings in compound_buildings(&city).values() {
+                for (i, (fa, a)) in buildings.iter().enumerate() {
+                    for (fb, b) in &buildings[i + 1..] {
+                        if convex_separation(a, b) < NEIGHBOUR_M {
+                            assert_ne!(
+                                fa, fb,
+                                "seed {seed}: neighbouring compound buildings both have {fa} storeys"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn convex_separation_reads_gaps_and_overlaps() {
+        let square = |x: f32, z: f32| rect_at(x, z, 10.0, 10.0, 0.0);
+        // Ten metres apart, edge to edge.
+        assert!((convex_separation(&square(0.0, 0.0), &square(20.0, 0.0)) - 10.0).abs() < 1e-4);
+        // Overlapping, and one inside the other.
+        assert!(convex_separation(&square(0.0, 0.0), &square(4.0, 3.0)) < 0.0);
+        assert!(convex_separation(&square(0.0, 0.0), &square(0.0, 0.0)) < 0.0);
+        // A turned square still keeps its clear distance.
+        let turned = rect_at(20.0, 0.0, 10.0, 10.0, std::f32::consts::FRAC_PI_4);
+        assert!(convex_separation(&square(0.0, 0.0), &turned) > 4.0);
     }
 }
