@@ -3,10 +3,14 @@
 //! A planting list is a *designed order*, not a uniform bag. The order is the
 //! conventional one a Chinese landscape bureau plants in — the workhorse
 //! avenue species first, the specials after — so a street reads as designed
-//! rather than as a shuffle. Every list is drawn from the reference set of
-//! sixteen in [`crate::species`].
+//! rather than as a shuffle. Every list is drawn from the palette in
+//! [`crate::species`].
+//!
+//! Only ChineseModern has lists of its own. Every other style plants from the
+//! legacy lists below, exactly as the planting always did, so a WesternMixed
+//! city does not move a tree.
 
-use urban::{CityFrameInfo, Parcel, ParcelUse, Point, TreeSpecies, modern};
+use urban::{CityFrameInfo, CityStyle, Parcel, ParcelUse, Point, TreeSpecies, modern};
 
 use super::{TAU, TREE_BUDGET, TUFT_BUDGET, TreePrototype, two_variant_count};
 use crate::buildings::level;
@@ -41,6 +45,10 @@ pub enum TreeRole {
 pub struct TreeOutput {
     pub instances: usize,
     pub by_role: Vec<(String, usize)>,
+    /// The audit table: `(role, species key, instance count)`, one row per
+    /// species planted in each role. The species and role of every placed tree,
+    /// in a form a report can read without the instance buffers.
+    pub by_role_species: Vec<(String, String, usize)>,
     pub tufts: usize,
 }
 
@@ -119,8 +127,113 @@ const FARM: &[&str] = &[
 /// small trees and the ginkgo.
 const ISLAND: &[&str] = &["tao-shu", "he-huan", "gui-hua", "yin-xing"];
 
-/// Plant every tree a city should have: kerbside avenues, planted medians, park
-/// groves, compound interiors, the river promenade and roundabout islands.
+/// ChineseModern kerbside avenue and its median: the street-tree set a mainland
+/// avenue is actually planted with. The plane (`wu-tong`, whose record is a
+/// London plane, though its Chinese label is 梧桐) and the scholar tree carry
+/// most of it; 香樟 and 银杏 are the evergreen and the gold; 白蜡 and 杨树 are the
+/// hardy trees and the northern poplar. The poplar is planted city-wide because
+/// a plan carries no latitude that would say which districts are north.
+const CN_STREET: &[(&str, u32)] = &[
+    ("huai-shu", 32),
+    ("wu-tong", 28),
+    ("xiang-zhang", 14),
+    ("yin-xing", 9),
+    ("bai-la", 9),
+    ("yang-shu", 8),
+];
+
+/// A ChineseModern motorway verge: the columnar poplar, and the two hardiest
+/// street trees for a hot verge and a sign's clearance.
+const CN_MOTORWAY: &[(&str, u32)] = &[("yang-shu", 4), ("huai-shu", 3), ("bai-la", 3)];
+
+/// ChineseModern parks: the scholar tree, the ginkgo and the camphor. The
+/// magnolia that a Chinese park would also plant is not in the palette, so the
+/// camphor takes its share.
+const CN_PARK: &[(&str, u32)] = &[("huai-shu", 3), ("yin-xing", 3), ("xiang-zhang", 4)];
+
+/// ChineseModern compound courtyards: the deodar and the juniper as the
+/// conifers, the camphor and the osmanthus as the evergreen, and the two
+/// flowering accents. 紫薇 is the crape myrtle; 海棠 has no record of its own,
+/// and the peach is the nearest small spring-blossom tree the palette has.
+const CN_COMPOUND: &[(&str, u32)] = &[
+    ("xue-song", 3),
+    ("long-bai", 3),
+    ("xiang-zhang", 3),
+    ("gui-hua", 4),
+    ("zi-wei", 2),
+    ("tao-shu", 2),
+];
+
+/// ChineseModern roundabout islands: the showy small trees and the ginkgo, with
+/// the crape myrtle for the summer where the silk tree used to stand.
+const CN_ISLAND: &[(&str, u32)] = &[
+    ("gui-hua", 3),
+    ("tao-shu", 2),
+    ("yin-xing", 2),
+    ("zi-wei", 2),
+];
+
+/// What a role plants from. The legacy lists are ordered, so the front of a list
+/// is planted most. The ChineseModern lists are weighted: a real avenue is an
+/// allocation, with its planes and scholar trees as shares of the whole, not a
+/// ranking.
+#[derive(Clone, Copy)]
+enum Planting {
+    Ordered(&'static [&'static str]),
+    Weighted(&'static [(&'static str, u32)]),
+}
+
+/// Every list a city's trees are planted from, for one vocabulary.
+#[derive(Clone, Copy)]
+struct Lists {
+    street: Planting,
+    motorway: Planting,
+    median: Planting,
+    park: Planting,
+    compound: Planting,
+    waterfront: Planting,
+    orchard: Planting,
+    farm: Planting,
+    island: Planting,
+}
+
+impl Lists {
+    /// The lists every style planted from before ChineseModern had its own.
+    /// WesternMixed keeps them exactly, and so does any style without lists of
+    /// its own.
+    const LEGACY: Lists = Lists {
+        street: Planting::Ordered(AVENUE),
+        motorway: Planting::Ordered(MOTORWAY),
+        median: Planting::Ordered(MEDIAN),
+        park: Planting::Ordered(PARK),
+        compound: Planting::Ordered(COMPOUND),
+        waterfront: Planting::Ordered(WATERFRONT),
+        orchard: Planting::Ordered(ORCHARD),
+        farm: Planting::Ordered(FARM),
+        island: Planting::Ordered(ISLAND),
+    };
+
+    fn for_style(style: CityStyle) -> Lists {
+        match style {
+            CityStyle::ChineseModern => Lists {
+                street: Planting::Weighted(CN_STREET),
+                motorway: Planting::Weighted(CN_MOTORWAY),
+                median: Planting::Weighted(CN_STREET),
+                park: Planting::Weighted(CN_PARK),
+                compound: Planting::Weighted(CN_COMPOUND),
+                island: Planting::Weighted(CN_ISLAND),
+                ..Lists::LEGACY
+            },
+            _ => Lists::LEGACY,
+        }
+    }
+}
+
+/// Plant every tree a city should have, from the legacy lists.
+///
+/// Kept for callers that do not carry the city's style. A caller that has the
+/// style should use [`plant_styled`], which is the only way a ChineseModern
+/// city gets its own species.
 pub fn plant(
     network: &Network,
     parcels: &[Parcel],
@@ -133,31 +246,117 @@ pub fn plant(
     builder: &mut MeshBuilder,
     seed: u32,
 ) -> TreeOutput {
+    plant_with(
+        network,
+        parcels,
+        buildings,
+        fields,
+        river,
+        river_width,
+        frame,
+        prototypes,
+        builder,
+        seed,
+        Lists::LEGACY,
+    )
+}
+
+/// Plant every tree a city should have, from the lists of its style.
+///
+/// ChineseModern plants the street-tree set on its avenues and medians, the
+/// scholar tree and the camphor in its parks, and the conifers and flowering
+/// trees of a courtyard in its compounds. Every other style plants exactly what
+/// [`plant`] plants.
+pub fn plant_styled(
+    network: &Network,
+    parcels: &[Parcel],
+    buildings: &[urban::ModernBuilding],
+    fields: &[urban::Field],
+    river: Option<&[Point]>,
+    river_width: f32,
+    frame: CityFrameInfo,
+    prototypes: &[TreePrototype],
+    builder: &mut MeshBuilder,
+    seed: u32,
+    style: CityStyle,
+) -> TreeOutput {
+    plant_with(
+        network,
+        parcels,
+        buildings,
+        fields,
+        river,
+        river_width,
+        frame,
+        prototypes,
+        builder,
+        seed,
+        Lists::for_style(style),
+    )
+}
+
+/// Pick one species from a planting list.
+fn pick(list: Planting, rng: &mut Rng) -> &'static str {
+    match list {
+        Planting::Ordered(keys) => {
+            // A planting list is a designed order, not a uniform bag: the front of
+            // the list is what the city actually plants, and `u^1.35` is a gentle
+            // enough skew that the rest still turns up.
+            let roll = rng.unit().powf(1.35) * keys.len() as f32;
+            keys[(roll as usize).min(keys.len() - 1)]
+        }
+        Planting::Weighted(entries) => {
+            let total: u32 = entries.iter().map(|&(_, weight)| weight).sum();
+            let mut edge = rng.unit() * total as f32;
+            for &(key, weight) in entries {
+                if edge < weight as f32 {
+                    return key;
+                }
+                edge -= weight as f32;
+            }
+            entries[entries.len() - 1].0
+        }
+    }
+}
+
+fn role_name(role: TreeRole) -> String {
+    format!("{role:?}").to_lowercase()
+}
+
+fn plant_with(
+    network: &Network,
+    parcels: &[Parcel],
+    buildings: &[urban::ModernBuilding],
+    fields: &[urban::Field],
+    river: Option<&[Point]>,
+    river_width: f32,
+    frame: CityFrameInfo,
+    prototypes: &[TreePrototype],
+    builder: &mut MeshBuilder,
+    seed: u32,
+    lists: Lists,
+) -> TreeOutput {
     super::declare(builder);
     let mut rng = Rng::new(seed ^ 0x74ee);
     let mut output = TreeOutput::default();
-    let mut counts: Vec<(TreeRole, usize)> = Vec::new();
+    let mut counts: Vec<(TreeRole, &'static str, usize)> = Vec::new();
     // A free function rather than a closure: the planting loops need the same
     // stream for their own jitter, and a closure capturing it would force those
     // draws through `place` instead.
     fn place(
         role: TreeRole,
         point: Vec2,
-        list: &'static [&'static str],
+        list: Planting,
         prototypes: &[TreePrototype],
         rng: &mut Rng,
         builder: &mut MeshBuilder,
         output: &mut TreeOutput,
-        counts: &mut Vec<(TreeRole, usize)>,
+        counts: &mut Vec<(TreeRole, &'static str, usize)>,
     ) {
         if output.instances >= TREE_BUDGET {
             return;
         }
-        // A planting list is a designed order, not a uniform bag: the front of
-        // the list is what the city actually plants, and `u^1.35` is a gentle
-        // enough skew that the rest still turns up.
-        let roll = rng.unit().powf(1.35) * list.len() as f32;
-        let key = list[(roll as usize).min(list.len() - 1)];
+        let key = pick(list, rng);
         let Some(species) = by_key(key) else {
             return;
         };
@@ -195,9 +394,12 @@ pub fn plant(
             },
         );
         output.instances += 1;
-        match counts.iter_mut().find(|(existing, _)| *existing == role) {
-            Some(entry) => entry.1 += 1,
-            None => counts.push((role, 1)),
+        match counts
+            .iter_mut()
+            .find(|(existing, existing_key, _)| *existing == role && *existing_key == species.key)
+        {
+            Some(entry) => entry.2 += 1,
+            None => counts.push((role, species.key, 1)),
         }
     }
 
@@ -221,7 +423,11 @@ pub fn plant(
         );
         let spacing = if road.is_motorway() { 22.0 } else { 15.0 };
         let lateral = half + section.sidewalk_metres * 0.6;
-        let list = if road.is_motorway() { MOTORWAY } else { AVENUE };
+        let list = if road.is_motorway() {
+            lists.motorway
+        } else {
+            lists.street
+        };
         let mut station = 12.0;
         let mut side = 1.0_f32;
         while station < length - 12.0 {
@@ -262,7 +468,7 @@ pub fn plant(
                 place(
                     TreeRole::Median,
                     Vec2::new(point.x, point.z),
-                    MEDIAN,
+                    lists.median,
                     prototypes,
                     &mut rng,
                     builder,
@@ -309,11 +515,15 @@ pub fn plant(
         }
         let bounds = bounds_of(&interior);
         let (role, count, list) = match parcel.use_type {
-            ParcelUse::Park => (TreeRole::Park, 10, PARK),
-            ParcelUse::Residential if parcel.compound => (TreeRole::Compound, 8, COMPOUND),
-            ParcelUse::Civic => (TreeRole::Park, 5, PARK),
-            ParcelUse::Villa => (TreeRole::Compound, 3 + (parcel.id % 4) as usize, COMPOUND),
-            ParcelUse::Farmstead => (TreeRole::Compound, 2 + (parcel.id % 5) as usize, FARM),
+            ParcelUse::Park => (TreeRole::Park, 10, lists.park),
+            ParcelUse::Residential if parcel.compound => (TreeRole::Compound, 8, lists.compound),
+            ParcelUse::Civic => (TreeRole::Park, 5, lists.park),
+            ParcelUse::Villa => (
+                TreeRole::Compound,
+                3 + (parcel.id % 4) as usize,
+                lists.compound,
+            ),
+            ParcelUse::Farmstead => (TreeRole::Compound, 2 + (parcel.id % 5) as usize, lists.farm),
             _ => continue,
         };
         let houses = footprints.get(&parcel.id);
@@ -387,7 +597,7 @@ pub fn plant(
                     place(
                         TreeRole::Orchard,
                         spot,
-                        ORCHARD,
+                        lists.orchard,
                         prototypes,
                         &mut rng,
                         builder,
@@ -425,7 +635,7 @@ pub fn plant(
                 place(
                     TreeRole::Waterfront,
                     Vec2::new(point.x, point.z),
-                    WATERFRONT,
+                    lists.waterfront,
                     prototypes,
                     &mut rng,
                     builder,
@@ -449,7 +659,7 @@ pub fn plant(
             place(
                 TreeRole::Island,
                 junction.centre + Vec2::new(angle.cos(), angle.sin()) * radius,
-                ISLAND,
+                lists.island,
                 prototypes,
                 &mut rng,
                 builder,
@@ -511,9 +721,21 @@ pub fn plant(
         }
     }
     output.tufts = tufts;
-    output.by_role = counts
+    // Roles in the order they were first planted, as they always were.
+    let mut by_role: Vec<(TreeRole, usize)> = Vec::new();
+    for (role, _, count) in &counts {
+        match by_role.iter_mut().find(|(existing, _)| existing == role) {
+            Some(entry) => entry.1 += count,
+            None => by_role.push((*role, *count)),
+        }
+    }
+    output.by_role = by_role
         .into_iter()
-        .map(|(role, count)| (format!("{role:?}").to_lowercase(), count))
+        .map(|(role, count)| (role_name(role), count))
+        .collect();
+    output.by_role_species = counts
+        .into_iter()
+        .map(|(role, key, count)| (role_name(role), key.to_string(), count))
         .collect();
     output
 }

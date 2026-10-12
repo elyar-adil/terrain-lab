@@ -16,16 +16,90 @@ use crate::mesh::{GroupStyle, MeshBuilder, MeshGroup};
 use crate::network::derive;
 use crate::spec::JunctionSpec;
 use crate::species::{Bark, Bloom, Canopy, LeafForm, SPECIES, Species};
-use urban::{ModernChinaSpec, generate_modern_chinese_city};
+use urban::{CityStyle, ModernChinaSpec, generate_modern_chinese_city};
 
 fn city() -> urban::ModernCity {
+    city_in(CityStyle::ChineseModern)
+}
+
+/// The fixture city in a given style. Seed and size are the tree tests' own.
+fn city_in(style: CityStyle) -> urban::ModernCity {
     generate_modern_chinese_city(ModernChinaSpec {
         seed: 42,
         radius_km: 0.5,
         block_size_metres: 110.0,
+        style,
         ..ModernChinaSpec::default()
     })
 }
+
+/// Plant a city from the legacy lists (`None`) or from a style's lists, and
+/// return the planting report and the tree instance lists.
+fn planted(
+    city: &urban::ModernCity,
+    style: Option<CityStyle>,
+) -> (super::TreeOutput, Vec<crate::mesh::InstanceGroup>) {
+    let network = derive(
+        &city.nodes,
+        &city.sd_roads,
+        &city.hd_roads,
+        city.frame,
+        JunctionSpec::default(),
+        city.seed,
+    );
+    let prototypes = prototype_set();
+    let mut builder = MeshBuilder::new();
+    build_prototypes(&prototypes, &mut builder);
+    let output = match style {
+        None => super::plant(
+            &network,
+            &city.parcels,
+            &city.buildings,
+            &city.fields,
+            city.river.as_deref(),
+            city.river_width_metres,
+            city.frame,
+            &prototypes,
+            &mut builder,
+            city.seed,
+        ),
+        Some(style) => super::plant_styled(
+            &network,
+            &city.parcels,
+            &city.buildings,
+            &city.fields,
+            city.river.as_deref(),
+            city.river_width_metres,
+            city.frame,
+            &prototypes,
+            &mut builder,
+            city.seed,
+            style,
+        ),
+    };
+    let lists = builder
+        .build()
+        .instances
+        .into_iter()
+        .filter(|list| list.key.starts_with("tree/"))
+        .collect();
+    (output, lists)
+}
+
+/// The palm-like species: a flat umbrella of pinnate fronds on a bare, clear
+/// leg, which is what a palm's crown reads as at street distance. The palette
+/// has no true palm (棕榈, 蒲葵), so this is the nearest silhouette it has.
+const PALM_LIKE: [&str; 1] = ["he-huan"];
+
+/// The street-tree set a ChineseModern avenue is planted from.
+const STREET_SET: [&str; 6] = [
+    "huai-shu",
+    "wu-tong",
+    "xiang-zhang",
+    "yin-xing",
+    "bai-la",
+    "yang-shu",
+];
 
 fn built() -> (Vec<TreePrototype>, Vec<MeshGroup>) {
     let prototypes = prototype_set();
@@ -937,6 +1011,69 @@ fn a_city_is_thousands_of_trees_on_a_few_prototypes() {
         .filter(|list| !list.instances.is_empty())
         .count();
     assert!(used >= 16, "only {used} prototypes are actually planted");
+}
+
+/// ChineseModern plants no palm-like tree in any role, and its streets are the
+/// street-tree set: the plane and the scholar tree carry most of them, and at
+/// least four species show along a street.
+#[test]
+fn chinese_modern_streets_are_the_street_set_and_never_palm_like() {
+    let (output, _) = planted(&city(), Some(CityStyle::ChineseModern));
+    for (role, key, count) in &output.by_role_species {
+        assert!(
+            !PALM_LIKE.contains(&key.as_str()),
+            "a ChineseModern {role} planted {count} {key}, a palm-like tree"
+        );
+    }
+    let streets: Vec<(&str, usize)> = output
+        .by_role_species
+        .iter()
+        .filter(|(role, _, _)| role == "street")
+        .map(|(_, key, count)| (key.as_str(), *count))
+        .collect();
+    let total: usize = streets.iter().map(|(_, count)| count).sum();
+    assert!(total > 100, "only {total} street trees in the fixture city");
+    for (key, _) in &streets {
+        assert!(
+            STREET_SET.contains(key),
+            "{key} is on a ChineseModern street, outside the street-tree set"
+        );
+    }
+    let species: std::collections::HashSet<&str> = streets.iter().map(|(key, _)| *key).collect();
+    assert!(
+        species.len() >= 4,
+        "only {} species line the ChineseModern streets: {species:?}",
+        species.len()
+    );
+    let plane_and_scholar: usize = streets
+        .iter()
+        .filter(|(key, _)| *key == "wu-tong" || *key == "huai-shu")
+        .map(|(_, count)| count)
+        .sum();
+    assert!(
+        plane_and_scholar * 2 > total,
+        "the plane and the scholar tree are {plane_and_scholar} of {total} street trees; \
+         they should carry most of the avenue"
+    );
+}
+
+/// WesternMixed plants exactly what the legacy path plants, tree for tree, and
+/// the ChineseModern path is the one that differs from it.
+#[test]
+fn western_mixed_plants_the_legacy_selection_tree_for_tree() {
+    let western = city_in(CityStyle::WesternMixed);
+    let (legacy, legacy_lists) = planted(&western, None);
+    let (styled, styled_lists) = planted(&western, Some(CityStyle::WesternMixed));
+    assert!(legacy.instances > 500, "only {} trees", legacy.instances);
+    assert_eq!(legacy.by_role, styled.by_role);
+    assert_eq!(legacy.by_role_species, styled.by_role_species);
+    assert_eq!(format!("{legacy_lists:?}"), format!("{styled_lists:?}"));
+    let (china, _) = planted(&city(), Some(CityStyle::ChineseModern));
+    let (china_legacy, _) = planted(&city(), None);
+    assert_ne!(
+        china.by_role_species, china_legacy.by_role_species,
+        "ChineseModern planted exactly the legacy species"
+    );
 }
 
 /// No tree in a tree, and no tree outside the city.

@@ -1,4 +1,5 @@
-//! The sixteen common street trees of a Chinese city.
+//! The common trees of a Chinese city: the sixteen reference trees, and the
+//! three the ChineseModern planting lists need that the sixteen lack.
 //!
 //! # Why a species table and not a shape enum
 //!
@@ -32,6 +33,13 @@
 //! | `sha-shu` | 杉树 | dense bluish cone |
 //! | `he-huan` | 合欢 | flat-topped umbrella of pinnate feather, pink powder-puffs |
 //! | `yang-shu` | 杨树 | fastigiate column, branches sweeping steeply up |
+//! | `bai-la` | 白蜡 | pinnate, rounded crown, fissured grey bark, yellow-bronze in autumn |
+//! | `long-bai` | 龙柏 | dense blue-green column of scale foliage, a garden conifer |
+//! | `zi-wei` | 紫薇 | small vase on smooth bark, pink-purple panicles through summer |
+//!
+//! The last three sit at the end of the table on purpose. A prototype is seeded
+//! by its index here, so a species inserted earlier would move the geometry of
+//! every species after it, and every city that plants them.
 //!
 //! So a species is a record: the botanical identity, the mature dimensions, the
 //! canopy architecture, the bark, the leaf shape and colour through the year,
@@ -201,7 +209,8 @@ const fn bark(colour: [f32; 3], fissure: f32, weathering: f32) -> Bark {
     }
 }
 
-/// The palette: the sixteen reference trees, in the order of the planting sheet.
+/// The palette: the sixteen reference trees in the order of the planting sheet,
+/// then the three the ChineseModern lists add. New species go at the end only.
 pub const SPECIES: &[Species] = &[
     Species {
         key: "xiang-zhang",
@@ -565,6 +574,76 @@ pub const SPECIES: &[Species] = &[
         evergreen: false,
         street_tolerant: true,
     },
+    Species {
+        key: "bai-la",
+        name_zh: "白蜡",
+        name_en: "Chinese ash",
+        canopy: Canopy::Rounded,
+        leaf: LeafForm::Pinnate,
+        bark: bark([0.170, 0.160, 0.148], 0.55, 1.0),
+        // A bright, fresh green with a cool edge: the ash is the lightest
+        // pinnate tree on the avenue, and the pinnate leaf keeps it matte.
+        foliage: [0.100, 0.190, 0.080],
+        // A clear yellow-bronze, warmer and browner than the elm's butter.
+        autumn: Some([0.340, 0.195, 0.035]),
+        bloom: Bloom::NONE,
+        height_m: (12.0, 18.0),
+        crown_m: (5.0, 7.0),
+        trunk_m: (0.26, 0.38),
+        clear_stem: 0.36,
+        density: 0.66,
+        leaf_scale: 0.28,
+        evergreen: false,
+        street_tolerant: true,
+    },
+    Species {
+        key: "long-bai",
+        name_zh: "龙柏",
+        name_en: "Chinese juniper",
+        canopy: Canopy::Fastigiate,
+        leaf: LeafForm::Needle,
+        bark: bark([0.150, 0.128, 0.112], 0.60, 0.95),
+        // A blue-green scale foliage, colder and darker than the deodar's silver.
+        // It is the compound's clipped column, not a street tree.
+        foliage: [0.060, 0.150, 0.118],
+        autumn: None,
+        bloom: Bloom::NONE,
+        // A garden column: its crown is narrow and its height is that of a
+        // courtyard's tallest clipped tree.
+        height_m: (8.0, 12.0),
+        crown_m: (1.6, 1.9),
+        trunk_m: (0.14, 0.22),
+        clear_stem: 0.14,
+        density: 0.86,
+        leaf_scale: 0.20,
+        evergreen: true,
+        street_tolerant: false,
+    },
+    Species {
+        key: "zi-wei",
+        name_zh: "紫薇",
+        name_en: "Crape myrtle",
+        canopy: Canopy::Vase,
+        leaf: LeafForm::Elliptic,
+        bark: bark([0.170, 0.152, 0.138], 0.15, 0.95),
+        // A dull olive-green: darker than the peach and the ash, and warmer than
+        // the osmanthus's glossy near-black.
+        foliage: [0.075, 0.125, 0.045],
+        // The reddest autumn in the palette: where the others go gold or bronze,
+        // a crape myrtle's leaves go orange-red.
+        autumn: Some([0.320, 0.090, 0.040]),
+        // Pink-purple panicles over the summer months: a real cloud, but on a
+        // small tree, so it is a garden's flower and not an avenue's.
+        bloom: Bloom::of([0.560, 0.230, 0.420], 0.60, 0.55),
+        height_m: (4.0, 7.0),
+        crown_m: (2.2, 3.4),
+        trunk_m: (0.10, 0.18),
+        clear_stem: 0.20,
+        density: 0.70,
+        leaf_scale: 0.30,
+        evergreen: false,
+        street_tolerant: false,
+    },
 ];
 
 /// Look a species up by its stable key.
@@ -680,8 +759,12 @@ mod tests {
                 species.key
             );
         }
-        // The reference sheet is sixteen trees and the palette is the sheet.
-        assert_eq!(SPECIES.len(), 16, "the reference set is sixteen species");
+        // The reference sheet is sixteen trees; the palette adds three to them.
+        assert_eq!(
+            SPECIES.len(),
+            19,
+            "the palette is the sixteen reference species and the three added after them"
+        );
     }
 
     #[test]
@@ -892,7 +975,8 @@ mod tests {
         );
         // And a palette of evergreens would be a temperate conifer forest, not
         // a Chinese city, which is roughly two-thirds evergreen. The reference
-        // sheet has six: camphor, osmanthus, deodar, pine, banyan, fir.
+        // sheet has six: camphor, osmanthus, deodar, pine, banyan, fir; the
+        // juniper makes seven.
         let evergreen = SPECIES.iter().filter(|s| s.evergreen).count();
         assert!(
             (4..=7).contains(&evergreen),
@@ -935,15 +1019,22 @@ mod tests {
             locust.density < 0.50,
             "a locust's bloom is a dress, not a cloud"
         );
-        // And nobody else is showy: thirteen of the sixteen are foliage trees.
+        // Crape myrtle: pink-purple panicles through the summer, a garden's flower.
+        let crape = bloom_of("zi-wei");
+        assert!(
+            crape.density > 0.45,
+            "a crape myrtle's panicles must be visible"
+        );
+        // And nobody else is showy: the foliage trees carry no flower worth the
+        // name. Three are, and they are the three planted for their flowers.
         let blossoming = SPECIES
             .iter()
             .filter(|species| species.bloom.density > 0.5)
             .count();
         assert!(
-            blossoming == 2,
-            "{blossoming} species are showy in flower; the reference sheet has \
-             exactly two (peach, silk tree)"
+            blossoming == 3,
+            "{blossoming} species are showy in flower; the palette has exactly three \
+             (peach, silk tree, crape myrtle)"
         );
         for species in SPECIES {
             if species.bloom.colour.is_some() {
