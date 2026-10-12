@@ -450,7 +450,7 @@ pub fn build(
         }
         builder.ambient_tint = Some(building_tint(building.id));
         if matches!(building.use_type, ParcelUse::Villa | ParcelUse::Farmstead) {
-            house::house_volume(building, &ring, builder);
+            house::house_volume(building, &ring, style, builder);
             builder.ambient_tint = None;
             continue;
         }

@@ -10,19 +10,45 @@
 //! is made from the *parcel's* hash, so the volumes of one house agree with each
 //! other and two houses do not.
 
-use urban::{ModernBuilding, ParcelUse, RoofStyle};
+use urban::{CityStyle, ModernBuilding, ParcelUse, RoofStyle};
 
 use super::{facade_wall, hash_u32, level};
 use crate::facades::{RoofCovering, design};
 use crate::math::{Vec2, Vec3, signed_area};
 use crate::mesh::MeshBuilder;
 
-/// Wall tiles a house may wear: render in the warm family, cream, brick.
+/// Wall tiles a house may wear in the western vocabulary: render in the warm
+/// family, cream, brick.  `WesternMixed` keeps these lists exactly.
 const VILLA_WALLS: [usize; 9] = [0, 1, 2, 4, 5, 6, 18, 17, 22];
 const FARM_WALLS: [usize; 7] = [1, 4, 5, 6, 22, 23, 18];
 
+/// Chinese 别墅 walls: render and paint only, in cream, pale yellow, light grey
+/// and greige.  A new suburban villa is not brick, so no brick tile is listed.
+const CHINA_VILLA_WALLS: [usize; 5] = [6, 0, 1, 5, 18];
+/// Chinese 农房 walls: plain and painted render, fresh and weathered, with red
+/// brick as one option among several and not the only one.
+const CHINA_FARM_WALLS: [usize; 9] = [0, 1, 2, 4, 5, 6, 18, 22, 23];
+
 fn roll(building: &ModernBuilding, salt: u32) -> f32 {
     hash_u32(building.parcel_id, salt as i32, 0x4801)
+}
+
+/// The wall list a house draws from.  Only `ChineseModern` has its own lists;
+/// every other style keeps the western ones, as the facade path does.
+fn wall_tiles(building: &ModernBuilding, style: CityStyle) -> &'static [usize] {
+    let villa = building.use_type == ParcelUse::Villa;
+    match (style == CityStyle::ChineseModern, villa) {
+        (true, true) => &CHINA_VILLA_WALLS,
+        (true, false) => &CHINA_FARM_WALLS,
+        (false, true) => &VILLA_WALLS,
+        (false, false) => &FARM_WALLS,
+    }
+}
+
+/// The wall tile of a house: one pick from its list, made from the parcel's hash.
+fn wall_tile(building: &ModernBuilding, style: CityStyle) -> usize {
+    let tiles = wall_tiles(building, style);
+    tiles[(roll(building, 3) * tiles.len() as f32) as usize % tiles.len()]
 }
 
 /// The covering of this house's main roof; sheds may differ.
@@ -114,16 +140,16 @@ fn quad_away(
 }
 
 /// Build one volume of a house.
-pub(crate) fn house_volume(building: &ModernBuilding, ring: &[Vec2], builder: &mut MeshBuilder) {
+pub(crate) fn house_volume(
+    building: &ModernBuilding,
+    ring: &[Vec2],
+    style: CityStyle,
+    builder: &mut MeshBuilder,
+) {
     if ring.len() != 4 {
         return;
     }
-    let tiles: &[usize] = if building.use_type == ParcelUse::Villa {
-        &VILLA_WALLS
-    } else {
-        &FARM_WALLS
-    };
-    let tile = tiles[(roll(building, 3) * tiles.len() as f32) as usize % tiles.len()];
+    let tile = wall_tile(building, style);
     let storey = design(tile).storey_m;
     let floors = building.floors.max(1) as f32;
     let top = level::GROUND + floors * storey;
@@ -465,5 +491,130 @@ fn pitched(
         let (b0, b1) = (mid - half * 0.70, mid - half * 0.26);
         let y_at = |bb: f32| y_ridge - (mid - bb) * pitch;
         solar(r, building, b0, b1, y_at(b0), y_at(b1), builder);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use urban::BuildingFacade;
+
+    use super::*;
+    use crate::facades::Cladding;
+
+    fn house(parcel_id: u32, use_type: ParcelUse) -> ModernBuilding {
+        ModernBuilding {
+            id: parcel_id,
+            parcel_id,
+            footprint: Vec::new(),
+            height_metres: 6.0,
+            floors: 2,
+            use_type,
+            roof: RoofStyle::Gable,
+            facade: BuildingFacade::PlasterResidential,
+            podium_height_metres: 0.0,
+            window_bays: 0,
+            balcony_bays: 0,
+            entrance_count: 1,
+        }
+    }
+
+    /// The tiles a house of `use_type` draws over the first `n` parcels.
+    fn drawn(use_type: ParcelUse, style: CityStyle, n: u32) -> BTreeSet<usize> {
+        (0..n)
+            .map(|id| wall_tile(&house(id, use_type), style))
+            .collect()
+    }
+
+    /// `WesternMixed` must not move a single house: the lists and the selection
+    /// are the ones from before `style` reached this module, copied here.
+    #[test]
+    fn western_mixed_house_selection_is_unchanged() {
+        const OLD_VILLA: [usize; 9] = [0, 1, 2, 4, 5, 6, 18, 17, 22];
+        const OLD_FARM: [usize; 7] = [1, 4, 5, 6, 22, 23, 18];
+        for id in 0..4_000_u32 {
+            for (use_type, old) in [
+                (ParcelUse::Villa, &OLD_VILLA[..]),
+                (ParcelUse::Farmstead, &OLD_FARM[..]),
+            ] {
+                let building = house(id, use_type);
+                let roll = hash_u32(id, 3, 0x4801);
+                let expected = old[(roll * old.len() as f32) as usize % old.len()];
+                assert_eq!(wall_tiles(&building, CityStyle::WesternMixed), old);
+                assert_eq!(
+                    wall_tile(&building, CityStyle::WesternMixed),
+                    expected,
+                    "parcel {id} changed its wall under WesternMixed"
+                );
+            }
+        }
+    }
+
+    /// The Chinese lists are named, so an index that drifts from its design is
+    /// caught by name rather than by a wall that quietly changes colour.
+    #[test]
+    fn chinese_house_walls_are_the_named_designs() {
+        let names = |tiles: &[usize]| tiles.iter().map(|&t| design(t).name).collect::<Vec<_>>();
+        assert_eq!(
+            names(&CHINA_VILLA_WALLS[..]),
+            [
+                "plaster-cream",
+                "ban-plaster-tan",
+                "plaster-sand",
+                "plaster-taupe",
+                "plaster-cool-grey"
+            ]
+        );
+        assert_eq!(
+            names(&CHINA_FARM_WALLS[..]),
+            [
+                "ban-plaster-tan",
+                "plaster-sand",
+                "ban-plaster-ochre",
+                "plaster-khaki",
+                "plaster-taupe",
+                "plaster-cream",
+                "plaster-cool-grey",
+                "brick-clay",
+                "brick-maroon"
+            ]
+        );
+    }
+
+    /// A new 别墅 is rendered or painted, never brick, for every parcel.
+    #[test]
+    fn chinese_villa_walls_contain_no_brick() {
+        for &tile in &CHINA_VILLA_WALLS {
+            assert_eq!(design(tile).cladding, Cladding::Render, "tile {tile}");
+        }
+        for tile in drawn(ParcelUse::Villa, CityStyle::ChineseModern, 2_000) {
+            assert_ne!(design(tile).cladding, Cladding::Brick, "tile {tile}");
+        }
+    }
+
+    /// A 农房 may be brick, but brick is one option among render and paint, and
+    /// both turn up across the parcels.
+    #[test]
+    fn chinese_farmstead_walls_offer_brick_among_render() {
+        let brick = CHINA_FARM_WALLS
+            .iter()
+            .filter(|&&t| design(t).cladding == Cladding::Brick)
+            .count();
+        let render = CHINA_FARM_WALLS
+            .iter()
+            .filter(|&&t| design(t).cladding == Cladding::Render)
+            .count();
+        assert!(brick >= 1, "no brick in the Chinese farmstead list");
+        assert!(render > brick, "brick is not one option among several");
+        assert_eq!(brick + render, CHINA_FARM_WALLS.len());
+
+        let tiles = drawn(ParcelUse::Farmstead, CityStyle::ChineseModern, 2_000);
+        assert!(tiles.iter().any(|&t| design(t).cladding == Cladding::Brick));
+        assert!(
+            tiles
+                .iter()
+                .any(|&t| design(t).cladding == Cladding::Render)
+        );
     }
 }
