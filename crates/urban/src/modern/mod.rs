@@ -11,7 +11,7 @@ use graph::{GraphOutput, build_graph, legacy_hash, modern_hash, modern_phase};
 use landscape::derive_compounds_and_trees;
 use parcels::{ParcelOutput, build_parcels};
 
-use crate::{CityStyle, ModernChinaSpec, ModernCity, Point};
+use crate::{ModernChinaSpec, ModernCity, Point};
 
 /// Deterministic `0..1` hash for any pair of integer coordinates.
 ///
