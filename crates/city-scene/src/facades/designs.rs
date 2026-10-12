@@ -257,16 +257,19 @@ pub static DESIGNS: [FacadeDesign; 24] = [
     // -- masonry, warm: the sound of a residential district -----------------
     FacadeDesign {
         name: "ban-plaster-tan",
-        // The signature 板楼 wall: warm beige cement render, a 560 mm pale
-        // concrete pier on every 3.6 m structural bay, and a single punched
-        // window per bay.  Most of a Chinese residential district is made of
-        // this building.  层高 2.9, 窗台 0.9, 窗高 1.5.
-        wall: [0.480, 0.400, 0.290],
+        // The signature 板楼 wall: pale warm cement render on a 3.6 m 开间, with
+        // two flats per bay — a 400 mm pale concrete pier between them and the
+        // 560 mm pier on the tile seam.  Most of a Chinese residential district is
+        // made of this building.  层高 2.9, 窗台 0.9, 窗高 1.5.
+        wall: [0.520, 0.440, 0.320],
         pier: [0.575, 0.562, 0.530],
+        pier_w: 0.40,
+        major_pier_w: 0.56,
+        bays: 2,
         band: [0.330, 0.292, 0.230],
         glass: [0.052, 0.058, 0.068],
         frame: [0.690, 0.680, 0.655],
-        open_w: 1.55,
+        open_w: 0.95,
         open_h: 1.50,
         blind: 0.34,
         grille: 0.05,
@@ -274,36 +277,43 @@ pub static DESIGNS: [FacadeDesign; 24] = [
     },
     FacadeDesign {
         name: "plaster-sand",
-        // Warm sand render with a heavier string course: the 1990s block.
-        wall: [0.395, 0.335, 0.230],
+        // Warm sand render with a heavier string course: the 1990s block.  Two
+        // columns in a 3.3 m 开间, a narrow pier between them and a wide one on
+        // the tile seam.
+        wall: [0.440, 0.385, 0.290],
         grain: 0.022,
         pier: [0.520, 0.508, 0.478],
-        pier_w: 0.62,
+        pier_w: 0.40,
+        major_pier_w: 0.56,
         bay_m: 3.3,
+        bays: 2,
         band: [0.270, 0.240, 0.185],
         band_h: 0.46,
-        open_w: 1.45,
+        open_w: 0.95,
         open_h: 1.40,
         blind: 0.28,
         ..MASONRY
     },
     FacadeDesign {
         name: "ban-plaster-ochre",
-        // The same building forty years weathers darker and browner.  Not a
+        // The same building forty years on, weathered darker and browner.  Not a
         // tint of the tile above: a third of a stop darker with the hue pushed
-        // towards olive, which is what water staining does to a render.
-        // 1980s stock: 层高 2.8, 3.3 m 开间.
-        wall: [0.300, 0.240, 0.135],
+        // towards olive, which is what water staining does to a render.  Still a
+        // pale render, not a dark one.  1980s stock: 层高 2.8, 3.3 m 开间 in two
+        // columns.
+        wall: [0.400, 0.360, 0.270],
         grain: 0.026,
         pier: [0.470, 0.455, 0.420],
-        pier_w: 0.66,
+        pier_w: 0.44,
+        major_pier_w: 0.60,
         storey_m: 2.8,
         bay_m: 3.3,
+        bays: 2,
         band: [0.205, 0.172, 0.115],
         band_h: 0.38,
         glass: [0.048, 0.052, 0.058],
         frame: [0.600, 0.592, 0.570],
-        open_w: 1.40,
+        open_w: 0.92,
         open_h: 1.40,
         blind: 0.46,
         grille: 0.24,
@@ -400,20 +410,20 @@ pub static DESIGNS: [FacadeDesign; 24] = [
     },
     FacadeDesign {
         name: "tile-dark-warm",
-        // Dark warm glazed wall tile with pale joints and a pale sill band — the
-        // 深色瓷砖 slab, and the darkest masonry wall in the city.  Its piers and
-        // frames are the *only* light on the tile, which is exactly the look.
-        // A 2000s tile-clad block, so it carries the 飘窗 band.
+        // A light warm glazed wall tile: a buff close in value to the render beside
+        // it, with pale piers and a darker storey joint, so the tile reads as glazed
+        // and not as a black slab.  The name is the table's and is kept.  A 2000s
+        // tile-clad block, so it carries the 飘窗 band.
         cladding: Cladding::Mosaic,
-        wall: [0.108, 0.098, 0.085],
+        wall: [0.470, 0.430, 0.370],
         grain: 0.014,
-        pier: [0.470, 0.462, 0.448],
+        pier: [0.600, 0.588, 0.565],
         pier_w: 0.28,
         major_pier_w: 0.48,
         bay_m: 3.6,
         bays: 2,
         bay_band: true,
-        band: [0.076, 0.072, 0.066],
+        band: [0.250, 0.236, 0.215],
         band_h: 0.34,
         glass: [0.044, 0.048, 0.052],
         frame: [0.600, 0.594, 0.580],
@@ -622,15 +632,15 @@ pub static DESIGNS: [FacadeDesign; 24] = [
     // -- masonry, grey and tile ---------------------------------------------
     FacadeDesign {
         name: "plaster-cool-grey",
-        // Cool blue-grey render: a northern city, or a block next to a viaduct.
-        wall: [0.280, 0.305, 0.335],
+        // Light cool grey render: a northern city, or a block next to a viaduct.
+        wall: [0.360, 0.385, 0.410],
         grain: 0.018,
-        pier: [0.390, 0.415, 0.442],
+        pier: [0.500, 0.520, 0.540],
         pier_w: 0.32,
         major_pier_w: 0.50,
         bay_m: 3.6,
         bays: 2,
-        band: [0.192, 0.208, 0.228],
+        band: [0.250, 0.265, 0.285],
         band_h: 0.36,
         glass: [0.048, 0.052, 0.060],
         frame: [0.520, 0.535, 0.552],
@@ -667,20 +677,20 @@ pub static DESIGNS: [FacadeDesign; 24] = [
     },
     FacadeDesign {
         name: "panel-concrete-mid",
-        // Mid grey concrete, and a narrow window column: the value most of a
-        // city is actually made of.  The small openings are stair and bathroom
+        // Light grey cast concrete, and a narrow window column: the value most of a
+        // city's blocks are finished in.  The small openings are stair and bathroom
         // windows (楼梯间/卫生间), which is why they sit below the habitable
         // 窗高 band.
         cladding: Cladding::Panel,
         storey_m: 2.8,
-        wall: [0.215, 0.226, 0.230],
+        wall: [0.350, 0.360, 0.346],
         grain: 0.015,
-        pier: [0.330, 0.342, 0.348],
+        pier: [0.470, 0.480, 0.470],
         pier_w: 0.20,
         major_pier_w: 0.32,
         bay_m: 3.3,
         bays: 3,
-        band: [0.148, 0.156, 0.160],
+        band: [0.230, 0.238, 0.245],
         band_h: 0.38,
         glass: [0.044, 0.048, 0.052],
         frame: [0.440, 0.450, 0.458],
@@ -693,11 +703,11 @@ pub static DESIGNS: [FacadeDesign; 24] = [
     },
     FacadeDesign {
         name: "tile-mosaic-grey",
-        // The greenish-grey mosaic of the older stock.  A different *material*
-        // from the cream above, at a value a fifth of a stop lower.
+        // The greenish-grey mosaic of the older stock, in its light glaze.  A
+        // different *material* from the cream above, a shade greener and cooler.
         cladding: Cladding::Mosaic,
         storey_m: 2.8,
-        wall: [0.350, 0.368, 0.338],
+        wall: [0.410, 0.430, 0.405],
         grain: 0.018,
         pier: [0.452, 0.468, 0.442],
         pier_w: 0.30,

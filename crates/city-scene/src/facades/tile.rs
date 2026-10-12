@@ -91,6 +91,15 @@ struct Opening {
     grille: bool,
     /// Rain-washing streaked down the render below this opening, 0 – 1.
     wash: f32,
+    /// An air-conditioner ledge (空调板) under this opening.
+    ac: bool,
+}
+
+/// Whether a masonry design is a residential wall that reads as units.  Brick is
+/// not a residential cladding in China (its one Chinese use is a farmhouse
+/// option), so brick keeps its bake exactly as it was.
+fn units_read(design: &FacadeDesign) -> bool {
+    design.cladding != Cladding::Brick
 }
 
 /// Half-width of the pier on bay boundary `k`, in metres.
@@ -141,18 +150,62 @@ fn opening_for(
     let c = hash(key.wrapping_add(47), bay, storey);
     let d = hash(key.wrapping_add(71), bay, storey);
     let e = hash(key.wrapping_add(97), bay, storey);
-    let w = design.open_w.min(clear);
+    // A unit is one bay column.  Its window width and whether it is a service
+    // window are chosen once per column, so the storeys of a column are one flat's
+    // windows, and the next column is another flat.  That is what makes a tile read
+    // as several dwellings and not as one repeated opening.  Column spacing is *not*
+    // varied: `details::wall_relief` puts the pier relief on the nominal
+    // `bay_m / bays` grid, and a painted pier that moved off it would stand away
+    // from its own relief strip.
+    let unit = units_read(design);
+    let column = if unit {
+        0.80 + 0.20 * hash(key.wrapping_add(223), bay, 0)
+    } else {
+        1.0
+    };
+    // A bathroom or stair window: a small, high opening in one column of about
+    // half the habitable tiles, so the wall carries a second size of hole beside a
+    // flat's own window.  At most one column per tile, so no tile has two small
+    // windows that match.
+    let column_count = design.bays.max(1) as i32;
+    let service_bay =
+        ((hash(key.wrapping_add(239), 0, 0) * column_count as f32) as i32).min(column_count - 1);
+    let service = unit
+        && design.open_w >= 0.85
+        && hash(key.wrapping_add(227), 0, 0) < 0.50
+        && bay == service_bay;
+    let (w, sill, height) = if service {
+        (
+            (design.open_w * 0.60).min(clear),
+            design.sill_m + 0.50,
+            0.80,
+        )
+    } else {
+        (
+            (design.open_w * column).min(clear),
+            design.sill_m,
+            design.open_h,
+        )
+    };
     // Exactly centred between the two piers that bound the bay: a window that sits
     // off-centre in its cell is the first thing the eye catches on a facade.
     let _ = (a, clear);
     let cx = left + (bay_w - left - right) * 0.5;
     // ±50 mm around the code sill: construction tolerance, not design intent.
-    let y0 = design.sill_m + (b - 0.5) * 0.10;
+    let y0 = sill + (b - 0.5) * 0.10;
+    // An air-conditioner ledge under a habitable window, on about three columns in
+    // five and on most storeys of those.
+    let ac = unit
+        && !service
+        && design.open_w >= 0.85
+        && hash(key.wrapping_add(229), bay, 0) < 0.60
+        && hash(key.wrapping_add(231), bay, storey) < 0.80;
     Opening {
         cx,
         w,
         y0,
-        y1: y0 + design.open_h,
+        y1: y0 + height,
+        ac,
         blind: c < design.blind,
         tone: 0.70 + d * 0.70,
         curtain: if e < 0.34 {
@@ -384,6 +437,11 @@ fn masonry_sample(
         return shade(design.pier, 0.98);
     }
 
+    // --- 2b. the air-conditioner ledge, and the unit standing on it ---------
+    if let Some(rgb) = ac_ledge(design, &opening, bx, ml, left, bay_w - right) {
+        return rgb;
+    }
+
     // --- 3. the painted surround above the opening -------------------------
     if design.lintel_h > 0.0
         && bx > x0 - 0.14
@@ -446,6 +504,50 @@ fn masonry_sample(
     wall_field(design, key, um, m, ml, px, px_per_m, hairline)
 }
 
+/// The air-conditioner ledge (空调板) under a habitable window: a concrete slab
+/// projecting from the wall, a little wider than its window, with its soffit in
+/// shadow.  It is the detail that says "flat" on a Chinese elevation, and it
+/// changes from one column to the next.  The slab is clamped to the clear wall, so
+/// it never runs over a pier, and it is kept above the floor band, which it never
+/// overwrites.
+fn ac_ledge(
+    design: &FacadeDesign,
+    opening: &Opening,
+    bx: f32,
+    ml: f32,
+    left: f32,
+    right_edge: f32,
+) -> Option<[f32; 3]> {
+    if !opening.ac {
+        return None;
+    }
+    // The floor band and its drip lip take the storey line, whatever the ledge.
+    let band_top = design.band_h + 0.12;
+    if ml < band_top {
+        return None;
+    }
+    // About 0.3 m under the sill.  On a low sill with a deep band the slab is lifted
+    // to clear the band, rather than being cut by it.
+    let top = (opening.y0 - 0.30).max(band_top + 0.12);
+    let bottom = top - 0.10;
+    let half = opening.w * 0.5 + 0.20;
+    let x_lo = (opening.cx - half).max(left + 0.02);
+    let x_hi = (opening.cx + half).min(right_edge - 0.02);
+    if bx < x_lo || bx > x_hi {
+        return None;
+    }
+    if (bottom..=top).contains(&ml) {
+        // The slab's front face: a shade under the wall, since it is an edge in
+        // the shadow of the window above.
+        return Some(shade(design.wall, 0.94));
+    }
+    if ml < bottom && ml > bottom - 0.05 {
+        // The soffit.  The wall under a projecting slab is in its shadow.
+        return Some(shade(design.wall, 0.42));
+    }
+    None
+}
+
 /// The wall itself: cladding module, grain and patch repairs.  This is the
 /// largest area of every masonry tile, so it is also the part that decides
 /// whether the tile reads as a material or as a colour.
@@ -473,6 +575,20 @@ fn wall_field(
         design.wall[1] + grain + blotch + patch,
         design.wall[2] + grain + blotch + patch,
     ];
+
+    if units_read(design) {
+        // One low-frequency tone across the wall, the way a repainted block is a
+        // different batch of paint in each stretch.  Restrained: the tone is
+        // within 6 % either way, and the warm-cool drift is about 1 point of
+        // reflectance, so no patch reads as a stain.
+        let tone = 1.0 + (value_noise(key.wrapping_add(509), um * 0.30, m * 0.26) - 0.5) * 0.12;
+        let warm = (value_noise(key.wrapping_add(521), um * 0.22, m * 0.30) - 0.5) * 0.024;
+        colour = [
+            colour[0] * tone + warm,
+            colour[1] * tone,
+            colour[2] * tone - warm,
+        ];
+    }
 
     match design.cladding {
         Cladding::Brick => {
@@ -1116,6 +1232,80 @@ mod tests {
         assert!(
             (0.12..=0.30).contains(&median),
             "the roof's median reflectance is {median:.3}"
+        );
+    }
+
+    /// The ChineseModern residential masonry: the tiles the Chinese table draws for
+    /// its slabs, towers and low-rise blocks.  Curtain wall (the glass towers and
+    /// their crowns) and brick (not a residential cladding in China) are left out.
+    /// Keep this in step with `buildings::facade_tile_for`.
+    const CHINA_RESIDENTIAL: [usize; 12] = [0, 1, 2, 4, 5, 6, 7, 16, 17, 18, 20, 21];
+
+    /// Every residential tile is its own bake.  Each design has its own key, so its
+    /// noise, its tone and its column choices differ; this guards against an edit
+    /// that makes two of them the same picture.
+    #[test]
+    fn no_two_chinese_residential_tiles_are_identical() {
+        let textures = facade_textures(96);
+        for (i, &a) in CHINA_RESIDENTIAL.iter().enumerate() {
+            for &b in &CHINA_RESIDENTIAL[i + 1..] {
+                assert_ne!(
+                    textures[a].rgba, textures[b].rgba,
+                    "{} and {} bake to the same pixels",
+                    textures[a].name, textures[b].name
+                );
+            }
+        }
+    }
+
+    /// A residential tile reads as units: its bay columns do not all carry the same
+    /// window.  Read from the opening decisions the bake draws from, on the first
+    /// storey of each column, so a tile of two identical bays fails here.
+    #[test]
+    fn chinese_residential_columns_are_different_units() {
+        for &index in &CHINA_RESIDENTIAL {
+            let design = design(index);
+            let bays = design.bays.max(1) as i32;
+            assert!(bays >= 2, "{}: one column is one repeated bay", design.name);
+            let bay_w = design.bay_m / bays as f32;
+            let key = (index as u32).wrapping_mul(2_654_435_761);
+            let widths: Vec<i32> = (0..bays)
+                .map(|bay| {
+                    let (left, right, clear) = bay_clearance(design, bays, bay, bay_w);
+                    let opening = opening_for(design, key, bay, 0, left, right, bay_w, clear);
+                    (opening.w * 1000.0).round() as i32
+                })
+                .collect();
+            assert!(
+                widths.iter().any(|w| *w != widths[0]),
+                "{}: every column is a {} mm window",
+                design.name,
+                widths[0]
+            );
+        }
+    }
+
+    /// ChineseModern residential tiles are pale: plaster, cream and light tile.  The
+    /// mean of their baked median luminance must clear 0.40 linear (about 0.67 in
+    /// sRGB).  The table at the top of `designs.rs` puts fair-faced grey concrete at
+    /// 0.22-0.35 and weathered warm render at 0.40-0.60, so 0.40 is the line between
+    /// the grey slab and the render.  Before the palette pass this set averaged 0.36,
+    /// which is the grey slab's territory.  The baked median tracks the wall's own
+    /// reflectance closely (piers and bands and glass roughly balance), so the
+    /// threshold is on the thing the eye sees.
+    #[test]
+    fn chinese_residential_tiles_are_pale() {
+        const PALE: f32 = 0.40;
+        let textures = facade_textures(96);
+        let medians: Vec<f32> = CHINA_RESIDENTIAL
+            .iter()
+            .map(|&index| median_luma(&textures[index]))
+            .collect();
+        let mean = medians.iter().sum::<f32>() / medians.len() as f32;
+        assert!(
+            mean > PALE,
+            "the ChineseModern residential tiles average {mean:.3} linear luminance; \
+             the pale plaster and tile set must be above {PALE}"
         );
     }
 }
