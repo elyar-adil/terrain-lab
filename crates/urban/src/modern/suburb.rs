@@ -19,7 +19,8 @@ use super::geom::{V, centroid, point_in, point_seg_dist, signed_area};
 use super::graph::modern_hash;
 use super::parcels::right_of_way;
 use crate::{
-    BuildingFacade, CropKind, Field, ModernBuilding, ModernRoadClass, Parcel, ParcelUse, RoofStyle,
+    BuildingFacade, CityStyle, CropKind, Field, ModernBuilding, ModernRoadClass, Parcel, ParcelUse,
+    RoofStyle,
 };
 use worldgen_core::smoothstep;
 
@@ -446,6 +447,18 @@ fn farmhouse(noise: &dyn Fn(i32) -> f32) -> Plan {
     }
 }
 
+/// The facade of a suburban house. A Chinese dwelling is rendered and painted, not
+/// brick; a farmhouse keeps the brick it was built of.  `WesternMixed` stays brick.
+fn suburb_facade(frame: &CityFrame, use_type: ParcelUse) -> BuildingFacade {
+    let plaster = frame.spec.style == CityStyle::ChineseModern
+        && matches!(use_type, ParcelUse::Residential | ParcelUse::Villa);
+    if plaster {
+        BuildingFacade::PlasterResidential
+    } else {
+        BuildingFacade::BrickResidential
+    }
+}
+
 /// Add one volume as a building.
 fn push_building(
     frame: &CityFrame,
@@ -472,7 +485,7 @@ fn push_building(
         floors,
         use_type,
         roof: part.roof,
-        facade: BuildingFacade::BrickResidential,
+        facade: suburb_facade(frame, use_type),
         podium_height_metres: 0.0,
         window_bays: ((long / 3.4).round() as u16).clamp(2, 12),
         balcony_bays: if floors >= 2 && use_type == ParcelUse::Villa {
@@ -718,5 +731,40 @@ pub(super) fn roadside_fields(
                 off += width + 1.6;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ModernChinaSpec;
+
+    fn frame(style: CityStyle) -> CityFrame {
+        CityFrame::new(ModernChinaSpec {
+            style,
+            ..ModernChinaSpec::default()
+        })
+    }
+
+    #[test]
+    fn suburban_houses_are_plaster_in_china_and_brick_in_the_western_style() {
+        let china = frame(CityStyle::ChineseModern);
+        assert_eq!(
+            suburb_facade(&china, ParcelUse::Residential),
+            BuildingFacade::PlasterResidential
+        );
+        assert_eq!(
+            suburb_facade(&china, ParcelUse::Villa),
+            BuildingFacade::PlasterResidential
+        );
+        assert_eq!(
+            suburb_facade(&china, ParcelUse::Farmstead),
+            BuildingFacade::BrickResidential
+        );
+        let western = frame(CityStyle::WesternMixed);
+        assert_eq!(
+            suburb_facade(&western, ParcelUse::Residential),
+            BuildingFacade::BrickResidential
+        );
     }
 }
