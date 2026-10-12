@@ -12,7 +12,13 @@ pub struct Point {
 pub enum CityStyle {
     /// Contemporary mainland Chinese city: hierarchical roads, compact
     /// mixed-use blocks, residential compounds and a planted river corridor.
+    /// Its buildings are the warm plaster, painted and tile-clad slabs and
+    /// towers of the mainland; no brick and little glass outside the CBD.
     ChineseModern,
+    /// The earlier facade vocabulary of the same generator, kept selectable:
+    /// brick low-rise stock and a half-glass tower population.  It reads as a
+    /// Western downtown and is not a Chinese city.
+    WesternMixed,
     Parisian,
     BarcelonaEixample,
     Manhattan,
@@ -85,6 +91,10 @@ pub struct CitySpec {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModernChinaSpec {
+    /// The regional style the city is built in.  It decides the building
+    /// vocabulary (facade palette, massing mix) downstream, so it is part of the
+    /// plan rather than a renderer setting.
+    pub style: CityStyle,
     pub centre: Point,
     pub radius_km: f32,
     pub rotation_radians: f32,
@@ -98,6 +108,7 @@ pub struct ModernChinaSpec {
 impl Default for ModernChinaSpec {
     fn default() -> Self {
         Self {
+            style: CityStyle::ChineseModern,
             centre: Point {
                 x_km: 0.0,
                 y_km: 0.0,

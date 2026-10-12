@@ -8,6 +8,7 @@ use urban::{ModernChinaSpec, Point, generate_modern_chinese_city, measure};
 
 fn main() {
     let city = generate_modern_chinese_city(ModernChinaSpec {
+        style: urban::CityStyle::ChineseModern,
         centre: Point {
             x_km: 5.0,
             y_km: 4.0,

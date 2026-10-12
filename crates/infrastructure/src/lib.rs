@@ -276,6 +276,7 @@ pub fn generate_infrastructure_with(
         let approaches = road_approaches(&roads, grid, centre, radius_km);
         generate_modern_chinese_city_with_options(
             ModernChinaSpec {
+                style: urban::CityStyle::ChineseModern,
                 centre,
                 radius_km,
                 rotation_radians: (config.seed ^ settlement.id.wrapping_mul(7919)) as f32
@@ -312,6 +313,7 @@ pub fn generate_infrastructure_with(
                             settlement_radius_km(settlement.class) * 1.35 + WINDOW_TAIL_KM;
                         urban::generate_modern_chinese_city_from_streets(
                             ModernChinaSpec {
+                                style: urban::CityStyle::ChineseModern,
                                 centre: settlement_centre_km(grid, settlement),
                                 radius_km,
                                 rotation_radians: 0.0,

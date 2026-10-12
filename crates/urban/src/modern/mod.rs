@@ -311,7 +311,7 @@ pub fn generate_modern_chinese_city_with_options(
     ModernCity {
         version: 3,
         jurisdiction: "ChinaMainland".into(),
-        style: CityStyle::ChineseModern,
+        style: spec.style,
         seed: spec.seed,
         frame: crate::model::scene::CityFrameInfo {
             origin: spec.centre,
@@ -488,7 +488,7 @@ pub fn generate_modern_chinese_city_from_streets(
     ModernCity {
         version: 3,
         jurisdiction: "ChinaMainland".into(),
-        style: CityStyle::ChineseModern,
+        style: spec.style,
         seed: spec.seed,
         frame: crate::model::scene::CityFrameInfo {
             origin: spec.centre,

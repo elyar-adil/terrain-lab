@@ -10,6 +10,7 @@ fn main() {
             ..ModernChinaSpec::default()
         },
         _ => ModernChinaSpec {
+            style: urban::CityStyle::ChineseModern,
             centre: Point {
                 x_km: 5.0,
                 y_km: 4.0,

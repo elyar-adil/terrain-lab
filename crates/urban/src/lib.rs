@@ -27,15 +27,18 @@ pub use modern::{
 /// knows both families exist.
 pub fn generate_city(style: CityStyle, spec: CitySpec) -> UrbanModel {
     match style {
-        CityStyle::ChineseModern => generate_modern_chinese_city(ModernChinaSpec {
-            centre: spec.centre,
-            radius_km: spec.radius_km,
-            rotation_radians: spec.rotation_radians,
-            seed: spec.seed,
-            density: spec.density,
-            ..ModernChinaSpec::default()
-        })
-        .urban_model(),
+        CityStyle::ChineseModern | CityStyle::WesternMixed => {
+            generate_modern_chinese_city(ModernChinaSpec {
+                style,
+                centre: spec.centre,
+                radius_km: spec.radius_km,
+                rotation_radians: spec.rotation_radians,
+                seed: spec.seed,
+                density: spec.density,
+                ..ModernChinaSpec::default()
+            })
+            .urban_model()
+        }
         CityStyle::Parisian => ParisianGenerator.generate(spec),
         CityStyle::BarcelonaEixample => BarcelonaGenerator.generate(spec),
         CityStyle::Manhattan => ManhattanGenerator.generate(spec),
@@ -134,6 +137,7 @@ mod tests {
     #[test]
     fn modern_chinese_city_keeps_sd_hd_and_parcel_identity() {
         let city = generate_modern_chinese_city(ModernChinaSpec {
+            style: CityStyle::ChineseModern,
             centre: Point {
                 x_km: 5.0,
                 y_km: 4.0,
