@@ -16,7 +16,7 @@
 //!   a textured group desyncs the optional UV layer from the vertex count and
 //!   the payload fails to load.
 
-use urban::{CityStyle, ModernBuilding, RoofStyle};
+use urban::{CityStyle, ModernBuilding, ParcelUse, RoofStyle};
 
 use super::details;
 use super::roofscape::{self, ring_extent};
@@ -45,6 +45,15 @@ pub(crate) enum SlabVariant {
     /// The rectangle kept, but the last bays rise two to three extra storeys —
     /// 板塔结合, a point block grown out of the slab's end.
     Stepped,
+}
+
+/// Whether a building is a Chinese residential block: a 板楼 or a 点式 tower of a
+/// compound or a street wall.  Its silhouette is plain, a flat roof with a low
+/// parapet and one stair/lift core, so it carries none of the stepped crown,
+/// cornice, string course or core bump that the western vocabulary builds.
+/// Commercial and civic towers are not residential and keep theirs.
+pub(crate) fn is_residential(building: &ModernBuilding, style: CityStyle) -> bool {
+    style == CityStyle::ChineseModern && building.use_type == ParcelUse::Residential
 }
 
 /// The slab variant for a building id.  Roughly 60% of slabs depart from the
@@ -119,7 +128,44 @@ fn carved_ring(ring: &[Vec2], notches: &[(f32, f32, f32)]) -> Vec<Vec2> {
     out
 }
 
-fn carve_for(variant: SlabVariant, ring: &[Vec2]) -> Vec<Vec2> {
+/// The plan a building's shell is built on, clockwise in plan.  That is its
+/// footprint, or for a slab the footprint after its plan variant is carved: a
+/// carved slab builds everything (plinth, ground band, shaft, parapet, roofscape,
+/// balconies) on the carved ring, so the notch is a real notch and not a decal.
+///
+/// The ring is clockwise because every wall primitive emits `(a, b)` as a quad
+/// whose face normal is the *left* of travel, and in plan `(x, z)` the left of a
+/// counter-clockwise ring is its interior.  A counter-clockwise ring renders as a
+/// hollow building whose near walls are culled.  `inset_ring` accepts either.
+pub(crate) fn shell_outline(
+    building: &ModernBuilding,
+    ring: &[Vec2],
+    style: CityStyle,
+) -> Vec<Vec2> {
+    let mut outward = ring.to_vec();
+    if signed_area(&outward) > 0.0 {
+        outward.reverse();
+    }
+    if massing_of(building, ring, signed_area(ring).abs(), style) == Massing::Slab {
+        let residential = is_residential(building, style);
+        let carved = carve_for(
+            slab_variant(building.id),
+            &outward,
+            building.id,
+            residential,
+        );
+        if carved.len() != outward.len() {
+            outward = carved;
+            // The carve is emitted counter-clockwise; walls need clockwise.
+            if signed_area(&outward) > 0.0 {
+                outward.reverse();
+            }
+        }
+    }
+    outward
+}
+
+fn carve_for(variant: SlabVariant, ring: &[Vec2], id: u32, residential: bool) -> Vec<Vec2> {
     // A notch needs a long side to cut into and enough depth to remain a slab
     // on both sides of the cut; small or awkward plans stay rectangles.
     let Some([min_x, min_y, max_x, max_y]) = ring_extent(ring) else {
@@ -134,16 +180,28 @@ fn carve_for(variant: SlabVariant, ring: &[Vec2]) -> Vec<Vec2> {
         SlabVariant::CarvedH if carvable => {
             carved_ring(ring, &[(0.05, 0.27, 0.50), (0.73, 0.95, 0.50)])
         }
+        // A residential slab's stepped variant is a recess at one end rather than a
+        // crown: the end bay steps back on one side, which takes a bay off that end.
+        SlabVariant::Stepped if residential && carvable => {
+            let (t0, t1) = if id.is_multiple_of(2) {
+                (0.0, 0.16)
+            } else {
+                (0.84, 1.0)
+            };
+            carved_ring(ring, &[(t0, t1, 0.30)])
+        }
         _ => ring.to_vec(),
     }
 }
 
+/// Build the shell of one building and return the height of its top floor, which
+/// is the deck its roof sits on.  Nothing of a residential shell stands above it.
 pub(crate) fn building_shell(
     building: &ModernBuilding,
     ring: &[Vec2],
     style: CityStyle,
     builder: &mut MeshBuilder,
-) {
+) -> f32 {
     let centre = ring_centroid(ring);
     let area = signed_area(ring).abs();
     let perimeter: f32 = ring
@@ -160,22 +218,14 @@ pub(crate) fn building_shell(
     // the note on vertex tints in `super` for why this layer writes no colours.
     let tint: Option<[f32; 3]> = None;
 
-    // Outward-facing ring.  Every wall primitive emits `(a, b)` as a quad whose
-    // face normal is the *left* of travel, and in plan `(x, z)` the left of a
-    // counter-clockwise ring is its interior.  So the ring the shell builds walls
-    // from must be clockwise (negative area) for walls to face outward; a
-    // counter-clockwise ring renders as a hollow building whose near walls are
-    // culled.  `inset_ring` accepts either winding.
-    let mut outward = ring.to_vec();
-    if signed_area(&outward) > 0.0 {
-        outward.reverse();
-    }
+    let outward = shell_outline(building, ring, style);
 
     let shaft_index = facade_tile_for(building, massing, style);
     let shaft_material = format!("facade/{shaft_index:02}");
     let shaft_design = design(shaft_index);
     let storey = shaft_design.storey_m;
     let glass = shaft_design.cladding.is_glass();
+    let residential = is_residential(building, style);
     if glass && massing == Massing::Tower {
         massing = Massing::CurtainTower;
     }
@@ -188,20 +238,6 @@ pub(crate) fn building_shell(
     let upper_storeys = (building.floors as f32 - 1.0).max(1.0);
     let shaft_base = level::GROUND + GROUND_STOREY_M;
     let mut top = shaft_base + upper_storeys * storey;
-
-    // Slab plan variants.  A carved slab builds everything — plinth, ground
-    // band, shaft, parapet, roofscape — on the carved ring, so the notch is a
-    // real notch and not a decal.
-    if massing == Massing::Slab {
-        let carved = carve_for(slab_variant(building.id), &outward);
-        if carved.len() != outward.len() {
-            outward = carved;
-            // The carve is emitted counter-clockwise; walls need clockwise.
-            if signed_area(&outward) > 0.0 {
-                outward.reverse();
-            }
-        }
-    }
 
     // Plinth: a skirt below the ground floor so the building meets the terrain
     // on a slope instead of hovering over it.
@@ -261,6 +297,7 @@ pub(crate) fn building_shell(
     // silhouette from a box and catches a second face of light.
     if tower
         && glass
+        && !residential
         && hash_u32(building.id, 71, 5) < 0.35
         && let Some(cut) = chamfer_ring(&shaft_ring, 1.8 + hash_u32(building.id, 73, 5) * 1.6)
     {
@@ -281,6 +318,8 @@ pub(crate) fn building_shell(
         }
     };
     let crown_stages = match crown_kind {
+        // A residential tower has no crown: its shaft runs to the roof.
+        _ if residential => 0.0,
         0 => {
             if tower && building.floors >= 30 {
                 3.0_f32
@@ -365,6 +404,7 @@ pub(crate) fn building_shell(
     let mut sections: Vec<(Vec<Vec2>, f32, f32, f32)> = Vec::new();
     let mut stepped_shaft = false;
     if tower
+        && !residential
         && shaft_storeys >= 14.0
         && (glass || perimeter >= 150.0)
         && hash_u32(building.id, 79, 5) < 0.55
@@ -424,7 +464,7 @@ pub(crate) fn building_shell(
             );
             details::sill_courses(builder, ring_s, *y0, *y1, shaft_design);
         }
-        if massing != Massing::LowRise && *n >= 8.0 {
+        if massing != Massing::LowRise && *n >= 8.0 && !residential {
             string_courses(ring_s, *y0, *y1, 4.0, storey, builder);
         }
     }
@@ -437,14 +477,18 @@ pub(crate) fn building_shell(
     // Cornice and plinth course on masonry: the two horizontals that make a
     // wall a composed elevation instead of an extrusion.
     if !glass && !pitched {
-        cornice(&top_ring, shaft_top, builder);
+        if !residential {
+            cornice(&top_ring, shaft_top, builder);
+        }
         if !tower {
             plinth_course(&outward, shaft_base, builder);
         }
     }
-    // Stair/lift core bump on the back of a slab or walk-up.
+    // Stair/lift core bump on the back of a slab or walk-up.  A residential block
+    // takes its one core on the roof instead, in the roofscape.
     if matches!(massing, Massing::Slab | Massing::LowRise)
         && !pitched
+        && !residential
         && hash_u32(building.id, 97, 5) < 0.65
     {
         core_bump(
@@ -462,13 +506,22 @@ pub(crate) fn building_shell(
     // --- the roof ----------------------------------------------------------
     let cap_ring = top_ring.clone();
     builder.ground_uv("roof", &cap_ring, shaft_top, None);
-    parapet(&cap_ring, shaft_top, 0.55 + jitter_value * 0.2, builder);
+    // A residential parapet is low and varies from building to building (0.42 to
+    // 0.90 m), where the western one is a fixed course.
+    let parapet_height = if residential {
+        0.42 + hash_u32(building.id, 109, 5) * 0.48
+    } else {
+        0.55 + jitter_value * 0.2
+    };
+    parapet(&cap_ring, shaft_top, parapet_height, builder);
     if area > 90.0 {
-        roofscape::roofscape(building, &cap_ring, shaft_top, builder);
+        roofscape::roofscape(building, residential, &cap_ring, shaft_top, builder);
     }
 
     // --- the crown ---------------------------------------------------------
-    if tower {
+    // A residential tower is a prism to its roof, so there is no crown to build:
+    // its roof props were placed on the cap above.
+    if tower && !residential {
         // Setbacks and a crown in its own material.  A tower with one flat
         // top is a box; a tower with a stepped top is a skyline.
         let crown_material = format!("facade/{crown_index:02}");
@@ -515,12 +568,15 @@ pub(crate) fn building_shell(
             // rather than a full roofscape.
             roofscape::crown_mast(building.id, &stage, stage_deck, builder);
         } else {
-            roofscape::roofscape(building, &stage, stage_deck, builder);
+            roofscape::roofscape(building, residential, &stage, stage_deck, builder);
         }
     }
 
     // --- the stepped slab end ----------------------------------------------
-    if massing == Massing::Slab && slab_variant(building.id) == SlabVariant::Stepped {
+    // A residential slab's stepped variant is a plan recess (see `carve_for`), so
+    // no block is grown above the roofline for it.
+    if massing == Massing::Slab && !residential && slab_variant(building.id) == SlabVariant::Stepped
+    {
         stepped_end(
             building,
             &outward,
@@ -540,7 +596,30 @@ pub(crate) fn building_shell(
     };
     let balcony_base = shaft_base_local;
     let has_balconies = rule::has_balconies(massing, glass) && !pitched;
-    if has_balconies && perimeter < 150.0 {
+    if has_balconies && perimeter < 150.0 && residential {
+        // A residential block gives both long faces, the street and the courtyard,
+        // to balconies, one per bay.  The condensers and the laundry are placed
+        // per balcony inside that pass; the blank wall ends take the wall units.
+        let fronts = front_edges(&balcony_ring, 2);
+        details::residential_balconies(
+            &balcony_ring,
+            &fronts,
+            building,
+            balcony_base,
+            shaft_top,
+            storey,
+            builder,
+        );
+        details::wall_ac_units(
+            &balcony_ring,
+            &fronts,
+            building,
+            balcony_base,
+            shaft_top,
+            storey,
+            builder,
+        );
+    } else if has_balconies && perimeter < 150.0 {
         // **One** frontage on a slab, two on a compact tower.  A 板楼 gives its
         // whole south face over to balconies and leaves its ends blank, which is
         // both what it looks like and half the geometry: the balcony stack is
@@ -616,6 +695,7 @@ pub(crate) fn building_shell(
     if pitched {
         pitched_roof(&outward, top, builder);
     }
+    shaft_top
 }
 
 /// The two longest edges of a ring, which is where a Chinese block puts its
@@ -854,7 +934,9 @@ fn stepped_end(
     }
     builder.ground_uv("roof", &block, top, None);
     parapet(&block, top, 0.6, builder);
-    roofscape::roofscape(building, &block, top, builder);
+    // A stepped slab end is only ever built for a building that is not residential
+    // (see the caller), so its roof is not a residential one.
+    roofscape::roofscape(building, false, &block, top, builder);
 }
 
 /// A stone portal at a lobby entrance: two piers and a head, placed on the
@@ -1055,4 +1137,127 @@ fn core_bump(
         builder.wall("wall.render", u, v, top, head, None);
     }
     builder.ground_uv("roof", &[e0, p0, p1, e1], head, None);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+    use crate::buildings::ring_of;
+    use crate::mesh::{MeshBuilder, MeshGroup};
+    use urban::{ModernChinaSpec, generate_modern_chinese_city};
+
+    fn city() -> urban::ModernCity {
+        generate_modern_chinese_city(ModernChinaSpec {
+            seed: 42,
+            radius_km: 1.0,
+            block_size_metres: 110.0,
+            ..ModernChinaSpec::default()
+        })
+    }
+
+    /// Each building of the given kind, built on its own: its id, the top floor
+    /// `building_shell` returned, and the groups it emitted.
+    fn shells(
+        city: &urban::ModernCity,
+        keep: impl Fn(&ModernBuilding) -> bool,
+    ) -> Vec<(u32, f32, Vec<MeshGroup>)> {
+        let mut out = Vec::new();
+        for building in &city.buildings {
+            if !keep(building) {
+                continue;
+            }
+            let ring = ring_of(&building.footprint, city.frame);
+            if ring.len() < 3 {
+                continue;
+            }
+            let mut builder = MeshBuilder::new();
+            let top = building_shell(building, &ring, CityStyle::ChineseModern, &mut builder);
+            out.push((building.id, top, builder.build().meshes));
+        }
+        out
+    }
+
+    /// A residential block has no stepped crown.  Crown walls are facade material
+    /// set back above the shaft, so any facade vertex above the top floor the shell
+    /// returns is a crown, a stepped slab end or a setback.
+    #[test]
+    fn residential_blocks_have_no_crown_above_their_top_floor() {
+        let city = city();
+        let blocks = shells(&city, |b| is_residential(b, CityStyle::ChineseModern));
+        assert!(
+            blocks.len() > 100,
+            "only {} residential blocks",
+            blocks.len()
+        );
+        for (id, top, groups) in &blocks {
+            for group in groups.iter().filter(|g| g.material.starts_with("facade/")) {
+                for chunk in group.positions.chunks_exact(3) {
+                    assert!(
+                        chunk[1] <= top + 1.0e-3,
+                        "building {id} has a {} vertex {:.2} m above its top floor",
+                        group.material,
+                        chunk[1] - top
+                    );
+                }
+            }
+        }
+    }
+
+    /// The gate is residential only.  A commercial tower keeps its stepped crown,
+    /// so a facade vertex does stand above the top floor the shell returns for at
+    /// least one of them.
+    #[test]
+    fn commercial_towers_keep_their_crowns() {
+        let city = city();
+        let towers = shells(&city, |b| {
+            b.use_type == ParcelUse::Commercial && b.floors >= 20
+        });
+        assert!(!towers.is_empty(), "no commercial towers in the fixture");
+        let crowned = towers.iter().any(|(_, top, groups)| {
+            groups
+                .iter()
+                .filter(|g| g.material.starts_with("facade/"))
+                .any(|g| {
+                    g.positions
+                        .chunks_exact(3)
+                        .any(|chunk| chunk[1] > top + 0.5)
+                })
+        });
+        assert!(crowned, "no commercial tower kept a crown");
+    }
+
+    /// A residential roof is a flat deck with a low parapet, and the parapets
+    /// vary: the crest of each roof stands 0.42 to 0.90 m above the deck, and the
+    /// fixture shows many heights rather than one course.
+    #[test]
+    fn residential_roofs_are_flat_with_a_low_and_varied_parapet() {
+        let city = city();
+        let blocks = shells(&city, |b| is_residential(b, CityStyle::ChineseModern));
+        let mut heights = BTreeSet::new();
+        for (id, top, groups) in &blocks {
+            let crest = groups
+                .iter()
+                .filter(|g| g.material == "roof")
+                .flat_map(|g| g.positions.chunks_exact(3).map(|c| c[1]))
+                .filter(|y| *y > top + 0.01)
+                .fold(f32::MIN, f32::max);
+            assert!(
+                crest > f32::MIN,
+                "building {id} has no parapet above its deck"
+            );
+            let height = crest - top;
+            assert!(
+                (0.42 - 1.0e-3..=0.90 + 1.0e-3).contains(&height),
+                "building {id} has a {height:.3} m parapet"
+            );
+            heights.insert((height * 100.0).round() as i32);
+        }
+        assert!(
+            heights.len() >= 5,
+            "only {} distinct parapet heights: {heights:?}",
+            heights.len()
+        );
+    }
 }

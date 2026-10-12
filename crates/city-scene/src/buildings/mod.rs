@@ -12,7 +12,8 @@
 //!   because a district of pure rectangles is a trading estate.
 //! * **塔楼 with 裙房** — a podium of two to five retail storeys, a shaft of
 //!   twenty to forty, and a crown that is a *different colour and a different
-//!   shape*, set back in two or three steps.
+//!   shape*, set back in two or three steps.  A *residential* tower has no
+//!   crown at all: it is a plain prism to a flat roof with one stair/lift core.
 //! * **多层** — five to seven storeys of walk-up with a pitched or parapeted
 //!   tile roof, which is most of the older city.
 //! * **perimeter block** around a compound, behind a wall, with a gate.
@@ -1218,6 +1219,116 @@ mod tests {
             shafts.len() >= 6,
             "only {} distinct shaft tiles: {shafts:?}",
             shafts.len()
+        );
+    }
+
+    /// A byte-wise FNV-1a.  Spelled out rather than taken from `DefaultHasher`,
+    /// whose algorithm is not promised across toolchains: a pinned hash has to
+    /// mean the same thing on every machine that builds the crate.
+    struct Fnv(u64);
+
+    impl Fnv {
+        fn new() -> Self {
+            Self(0xcbf2_9ce4_8422_2325)
+        }
+        fn bytes(&mut self, bytes: &[u8]) {
+            for byte in bytes {
+                self.0 ^= u64::from(*byte);
+                self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        fn floats(&mut self, values: &[f32]) {
+            self.bytes(&(values.len() as u64).to_le_bytes());
+            for value in values {
+                self.bytes(&value.to_bits().to_le_bytes());
+            }
+        }
+    }
+
+    /// Everything the building layer hands the renderer, hashed: each mesh group's
+    /// material, flags, positions, normals, colours, UVs and indices, then each
+    /// instance group.
+    fn geometry_hash(geometry: &crate::mesh::SceneGeometry) -> u64 {
+        let mut fnv = Fnv::new();
+        for group in &geometry.meshes {
+            fnv.bytes(group.material.as_bytes());
+            fnv.bytes(&[
+                u8::from(group.cast_shadow),
+                u8::from(group.receive_shadow),
+                u8::from(group.alpha_cutout),
+                u8::from(group.dynamic),
+            ]);
+            fnv.floats(&group.positions);
+            fnv.floats(&group.normals);
+            match &group.colors {
+                Some(colors) => {
+                    fnv.bytes(&[1]);
+                    fnv.bytes(&(colors.len() as u64).to_le_bytes());
+                    fnv.bytes(colors);
+                }
+                None => fnv.bytes(&[0]),
+            }
+            match &group.uvs {
+                Some(uvs) => {
+                    fnv.bytes(&[1]);
+                    fnv.floats(uvs);
+                }
+                None => fnv.bytes(&[0]),
+            }
+            for index in &group.indices {
+                fnv.bytes(&index.to_le_bytes());
+            }
+        }
+        for group in &geometry.instances {
+            fnv.bytes(group.key.as_bytes());
+            for instance in &group.instances {
+                fnv.floats(&[
+                    instance.x,
+                    instance.y,
+                    instance.z,
+                    instance.rotation_y,
+                    instance.scale_x,
+                    instance.scale_y,
+                    instance.scale_z,
+                    instance.tint_r,
+                    instance.tint_g,
+                    instance.tint_b,
+                ]);
+            }
+        }
+        fnv.0
+    }
+
+    /// The pre-change hash of the `WesternMixed` building layer for the fixture
+    /// below.  Pinned so that the ChineseModern residential work provably leaves
+    /// the western vocabulary alone: a single moved vertex of a western building
+    /// fails this test.  Re-pin only for a deliberate `WesternMixed` change.
+    const WESTERN_MIXED_LAYER_HASH: u64 = 9_859_633_979_316_069_442;
+
+    #[test]
+    fn western_mixed_building_layer_is_bit_identical() {
+        let city = generate_modern_chinese_city(ModernChinaSpec {
+            seed: 42,
+            radius_km: 1.0,
+            block_size_metres: 110.0,
+            style: CityStyle::WesternMixed,
+            ..ModernChinaSpec::default()
+        });
+        let mut builder = MeshBuilder::new();
+        build(
+            &city.blocks,
+            &city.parcels,
+            &city.buildings,
+            &city.compounds,
+            &city.fields,
+            city.frame,
+            CityStyle::WesternMixed,
+            &mut builder,
+        );
+        let hash = geometry_hash(&builder.build());
+        assert_eq!(
+            hash, WESTERN_MIXED_LAYER_HASH,
+            "the WesternMixed building layer changed"
         );
     }
 }

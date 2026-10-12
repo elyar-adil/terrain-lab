@@ -9,7 +9,7 @@
 
 use urban::ModernBuilding;
 
-use super::rule;
+use super::{hash_u32, rule};
 use crate::facades::FacadeDesign;
 use crate::math::{Vec2, Vec3, ring_centroid};
 use crate::mesh::MeshBuilder;
@@ -55,37 +55,180 @@ pub(crate) fn balconies(
                 continue;
             }
             let outward = ((a + b) * 0.5 - centre).normalize();
-            // The slab projects the code depth and is 150 mm thick, which is a
-            // real 生活阳台 and not a ledge.
-            let depth = rule::BALCONY_DEPTH_M;
-            let a_out = a + outward * depth;
-            let b_out = b + outward * depth;
-            // Slab top.
-            builder.quad(
-                "balcony.slab",
-                Vec3::from_plan(a, y),
-                Vec3::from_plan(b, y),
-                Vec3::from_plan(b_out, y),
-                Vec3::from_plan(a_out, y),
-                None,
-            );
-            // The dark fascia.  This single face is why the element is here: from
-            // a distance a balcony reads as a dark horizontal line at every
-            // storey, and that is the value rhythm a slab needs.
-            builder.wall("trim.dark", b_out, a_out, y - 0.20, y, None);
-            // The railing: a solid pale parapet at the code height, with a coping.
-            builder.wall("trim.light", a_out, b_out, y, y + rail, None);
-            builder.wall(
-                "balcony.slab",
-                b_out,
-                a_out,
-                y + rail,
-                y + rail + 0.09,
-                None,
-            );
-            // One return, so the balcony is an object and not a floating plane.
-            // Both returns would be correct and cost another quad a storey.
-            builder.wall("balcony.slab", a, a_out, y, y + rail + 0.09, None);
+            balcony_slab(builder, a, b, outward, y, rail);
+        }
+        floor += 1;
+    }
+}
+
+/// One balcony on a span of wall: the slab, its dark fascia, the solid pale rail
+/// with its coping, and a return at the `a` end.
+fn balcony_slab(builder: &mut MeshBuilder, a: Vec2, b: Vec2, outward: Vec2, y: f32, rail: f32) {
+    // The slab projects the code depth and is 150 mm thick, which is a
+    // real 生活阳台 and not a ledge.
+    let depth = rule::BALCONY_DEPTH_M;
+    let a_out = a + outward * depth;
+    let b_out = b + outward * depth;
+    // Slab top.
+    builder.quad(
+        "balcony.slab",
+        Vec3::from_plan(a, y),
+        Vec3::from_plan(b, y),
+        Vec3::from_plan(b_out, y),
+        Vec3::from_plan(a_out, y),
+        None,
+    );
+    // The dark fascia.  This single face is why the element is here: from
+    // a distance a balcony reads as a dark horizontal line at every
+    // storey, and that is the value rhythm a slab needs.
+    builder.wall("trim.dark", b_out, a_out, y - 0.20, y, None);
+    // The railing: a solid pale parapet at the code height, with a coping.
+    builder.wall("trim.light", a_out, b_out, y, y + rail, None);
+    builder.wall(
+        "balcony.slab",
+        b_out,
+        a_out,
+        y + rail,
+        y + rail + 0.09,
+        None,
+    );
+    // One return, so the balcony is an object and not a floating plane.
+    // Both returns would be correct and cost another quad a storey.
+    builder.wall("balcony.slab", a, a_out, y, y + rail + 0.09, None);
+}
+
+/// The balcony rhythm of one residential building: three numbers, all from the
+/// building id, so that no two neighbouring slabs carry the same wall.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct BalconyRhythm {
+    /// The 开间 module the front is divided at, in centimetres: 3.3, 3.6 or 3.9 m.
+    pub pitch_cm: u32,
+    /// A blank bay in every `period` bays: three, four or five.
+    pub period: u32,
+    /// Which bay of each period is the blank one.
+    pub phase: u32,
+}
+
+pub(crate) fn balcony_rhythm(id: u32) -> BalconyRhythm {
+    let pitch_cm = [330_u32, 360, 390][((hash_u32(id, 301, 11) * 3.0) as usize).min(2)];
+    let period = 3 + ((hash_u32(id, 303, 11) * 3.0) as u32).min(2);
+    let phase = ((hash_u32(id, 305, 11) * period as f32) as u32).min(period - 1);
+    BalconyRhythm {
+        pitch_cm,
+        period,
+        phase,
+    }
+}
+
+/// One bay of a front: the span `t0..t1` of its edge, as fractions of the edge's
+/// length, and whether a balcony stands on it on the storey asked for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Bay {
+    pub t0: f32,
+    pub t1: f32,
+    pub balcony: bool,
+}
+
+/// The bays of each front on one storey.
+///
+/// A front is divided at the building's pitch into a whole number of bays, so the
+/// bay count is part of what varies (a 46 m slab shows twelve or fourteen, a 30 m
+/// one shows eight or nine).  A bay carries a balcony unless it falls on the blank
+/// column of the rhythm, or it is one of the roughly one in twelve bay-storeys that
+/// the id hash leaves bare, so that no two flats in a column are alike.
+pub(crate) fn front_bays(
+    ring: &[Vec2],
+    fronts: &[usize],
+    building: &ModernBuilding,
+    floor: u32,
+) -> Vec<Vec<Bay>> {
+    let rhythm = balcony_rhythm(building.id);
+    let pitch = rhythm.pitch_cm as f32 / 100.0;
+    fronts
+        .iter()
+        .map(|&edge| {
+            let a = ring[edge];
+            let b = ring[(edge + 1) % ring.len()];
+            let length = a.distance(b);
+            if length < 3.4 {
+                return Vec::new();
+            }
+            let count = ((length / pitch).round() as u32).max(1);
+            // Each front starts its column at its own phase, so the two faces of
+            // one slab do not march in step.
+            let front_phase =
+                ((hash_u32(building.id, 307 + edge as i32, 13) * rhythm.period as f32) as u32)
+                    .min(rhythm.period - 1);
+            (0..count)
+                .map(|index| {
+                    let column =
+                        !(index + rhythm.phase + front_phase).is_multiple_of(rhythm.period);
+                    let unit_gap = hash_u32(
+                        building.id,
+                        311 + (edge * 64 + index as usize) as i32,
+                        floor as i32,
+                    ) < 0.08;
+                    Bay {
+                        t0: index as f32 / count as f32,
+                        t1: (index + 1) as f32 / count as f32,
+                        balcony: column && !unit_gap,
+                    }
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// The balconies of a residential block: one slab per bay, on each long face, not
+/// one slab the length of the front.  A 板楼 balcony belongs to one flat, so the
+/// rail breaks at every party wall and the rhythm is the bay module.  A balcony
+/// may carry its split-unit condenser or a 晾衣杆.
+pub(crate) fn residential_balconies(
+    ring: &[Vec2],
+    fronts: &[usize],
+    building: &ModernBuilding,
+    base: f32,
+    top: f32,
+    storey: f32,
+    builder: &mut MeshBuilder,
+) {
+    if fronts.is_empty() {
+        return;
+    }
+    let centre = ring_centroid(ring);
+    let rail = rule::balcony_rail_m(building.floors);
+    let mut serial = building.id.wrapping_mul(2_654_435_761) ^ 0x2c1b_3c6d;
+    let mut floor = 1_u32;
+    while floor < building.floors as u32 {
+        let y = base + floor as f32 * storey;
+        if y > top - 1.2 {
+            break;
+        }
+        for (edge, bays) in fronts.iter().zip(front_bays(ring, fronts, building, floor)) {
+            if !bays.iter().any(|bay| bay.balcony) {
+                continue;
+            }
+            let a = ring[*edge];
+            let b = ring[(*edge + 1) % ring.len()];
+            let along = (b - a).normalize();
+            let outward = ((a + b) * 0.5 - centre).normalize();
+            let at = |t: f32| a + (b - a) * t;
+            for bay in bays.iter().filter(|bay| bay.balcony) {
+                // Inset 0.15 m from each end of the bay, so that two adjacent
+                // balconies never share a corner.
+                let (p0, p1) = (at(bay.t0) + along * 0.15, at(bay.t1) - along * 0.15);
+                balcony_slab(builder, p0, p1, outward, y, rail);
+                serial = serial.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let roll = (serial >> 10) % 100;
+                let mid = at((bay.t0 + bay.t1) * 0.5);
+                if roll < 27 {
+                    // The split unit, on about a quarter of the balconies.
+                    condenser_unit(builder, mid, centre, y - 0.42);
+                } else if roll < 40 {
+                    // 晾衣杆 on the rail of about one balcony in eight.
+                    clothes_pole(builder, mid, along, outward, y + rail);
+                }
+            }
         }
         floor += 1;
     }
@@ -222,6 +365,34 @@ fn condenser_unit(builder: &mut MeshBuilder, anchor: Vec2, centre: Vec2, y: f32)
     );
 }
 
+/// 晾衣杆: two uprights standing on the balcony guard and a rail across them, over
+/// the balcony.  Used by both the drying cage pass and the residential balconies.
+fn clothes_pole(builder: &mut MeshBuilder, anchor: Vec2, along: Vec2, outward: Vec2, rail_y: f32) {
+    for offset in [-0.55_f32, 0.55] {
+        let foot = anchor + along * offset;
+        builder.tube(
+            "trim.dark",
+            Vec3::new(foot.x, rail_y, foot.y),
+            Vec3::new(foot.x, rail_y + 0.75, foot.y),
+            0.022,
+            0.020,
+            4,
+            None,
+        );
+    }
+    let r0 = anchor - along * 0.55 + outward * (rule::BALCONY_DEPTH_M * 0.55);
+    let r1 = anchor + along * 0.55 + outward * (rule::BALCONY_DEPTH_M * 0.55);
+    builder.tube(
+        "trim.dark",
+        Vec3::new(r0.x, rail_y + 0.75, r0.y),
+        Vec3::new(r1.x, rail_y + 0.75, r1.y),
+        0.018,
+        0.018,
+        4,
+        None,
+    );
+}
+
 /// 晾衣杆 and drying cages on the balcony line: a pole pair over a third of the
 /// balconies and a wire cage on the rarer ones.  Half the year the balcony is a
 /// laundry, and a facade without laundry gear reads as an office.
@@ -264,30 +435,7 @@ pub(crate) fn drying_cages(
             let anchor = a + along * (length * (0.3 + ((serial >> 18) % 100) as f32 / 250.0));
             let rail_y = y + rail;
             if roll < 33 {
-                // Two uprights and a rail above the balcony guard.
-                for offset in [-0.55_f32, 0.55] {
-                    let foot = anchor + along * offset;
-                    builder.tube(
-                        "trim.dark",
-                        Vec3::new(foot.x, rail_y, foot.y),
-                        Vec3::new(foot.x, rail_y + 0.75, foot.y),
-                        0.022,
-                        0.020,
-                        4,
-                        None,
-                    );
-                }
-                let r0 = anchor - along * 0.55 + outward * (rule::BALCONY_DEPTH_M * 0.55);
-                let r1 = anchor + along * 0.55 + outward * (rule::BALCONY_DEPTH_M * 0.55);
-                builder.tube(
-                    "trim.dark",
-                    Vec3::new(r0.x, rail_y + 0.75, r0.y),
-                    Vec3::new(r1.x, rail_y + 0.75, r1.y),
-                    0.018,
-                    0.018,
-                    4,
-                    None,
-                );
+                clothes_pole(builder, anchor, along, outward, rail_y);
             } else {
                 // The drying cage: a stainless box frame on the balcony, the
                 // 封阳台 that half the blocks have welded on.
@@ -1145,5 +1293,110 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Residential balconies stand off their own wall by no more than the code
+    /// depth and on the outside of it, the same invariant the western balconies
+    /// are held to.
+    #[test]
+    fn a_residential_balcony_never_projects_into_its_own_building() {
+        let city = city();
+        let mut checked = 0;
+        for building in &city.buildings {
+            if !super::super::shell::is_residential(building, urban::CityStyle::ChineseModern) {
+                continue;
+            }
+            let ring = ring_of(&building.footprint, city.frame);
+            if ring.len() < 3 || signed_area(&ring).abs() < 120.0 {
+                continue;
+            }
+            // The plan the shell builds on, carved where the slab is carved.
+            let outward = super::super::shell::shell_outline(
+                building,
+                &ring,
+                urban::CityStyle::ChineseModern,
+            );
+            let fronts = super::super::shell::front_edges(&outward, 2);
+            let base = level::GROUND + GROUND_STOREY_M;
+            let top = base + (building.floors as f32 - 1.0).max(1.0) * STOREY_M;
+            let mut builder = MeshBuilder::new();
+            residential_balconies(
+                &outward,
+                &fronts,
+                building,
+                base,
+                top,
+                STOREY_M,
+                &mut builder,
+            );
+            // `distance_to_polyline` walks an open chain, so the closing edge of the
+            // ring is measured by repeating the first vertex at the end.
+            let closed: Vec<Vec2> = outward.iter().chain(outward.first()).copied().collect();
+            for group in builder.build().meshes {
+                for chunk in group.positions.chunks_exact(3) {
+                    let point = Vec2::new(chunk[0], chunk[2]);
+                    if point_in_ring(point, &outward) {
+                        continue;
+                    }
+                    let distance = crate::math::distance_to_polyline(point, &closed);
+                    assert!(
+                        distance < rule::BALCONY_DEPTH_M + 0.15,
+                        "building {} has a residential balcony vertex {distance:.2} m outside its wall",
+                        building.id
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(
+            checked > 200,
+            "only {checked} residential balcony vertices were checked"
+        );
+    }
+
+    /// The bay patterns of the fixture's residential slabs differ from building
+    /// to building: at least eight distinct patterns of balcony and blank bay on
+    /// the first balcony storey, or the estate reads as one wall repeated.
+    #[test]
+    fn residential_bay_patterns_differ_from_building_to_building() {
+        // A downtown fixture: the bay patterns are counted over a few hundred blocks.
+        let city = generate_modern_chinese_city(ModernChinaSpec {
+            seed: 42,
+            radius_km: 1.0,
+            block_size_metres: 110.0,
+            ..ModernChinaSpec::default()
+        });
+        let mut patterns = std::collections::BTreeSet::new();
+        let mut residential = 0;
+        for building in &city.buildings {
+            if !super::super::shell::is_residential(building, urban::CityStyle::ChineseModern) {
+                continue;
+            }
+            let ring = ring_of(&building.footprint, city.frame);
+            if ring.len() < 3 {
+                continue;
+            }
+            residential += 1;
+            let outline = super::super::shell::shell_outline(
+                building,
+                &ring,
+                urban::CityStyle::ChineseModern,
+            );
+            let fronts = super::super::shell::front_edges(&outline, 2);
+            let pattern: Vec<Vec<bool>> = front_bays(&outline, &fronts, building, 1)
+                .iter()
+                .map(|bays| bays.iter().map(|bay| bay.balcony).collect())
+                .collect();
+            patterns.insert(pattern);
+        }
+        assert!(
+            residential > 100,
+            "only {residential} residential buildings in the fixture"
+        );
+        assert!(
+            patterns.len() >= 8,
+            "only {} distinct residential bay patterns",
+            patterns.len()
+        );
     }
 }
