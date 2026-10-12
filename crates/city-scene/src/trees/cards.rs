@@ -1314,14 +1314,14 @@ mod tests {
         );
     }
 
-    /// Bake cost.  Sixteen cards at the payload's real resolution, in debug,
-    /// inside a test — this is the number that decides whether leaf detail is
-    /// affordable at all.
+    /// Bake cost.  One card per species at the payload's real resolution, in
+    /// debug, inside a test — this is the number that decides whether leaf detail
+    /// is affordable at all.
     #[test]
-    fn the_sixteen_card_bake_is_affordable() {
+    fn the_palette_card_bake_is_affordable() {
         let start = std::time::Instant::now();
         let set = leaf_card_textures(256);
-        assert_eq!(set.len(), 16);
+        assert_eq!(set.len(), crate::species::SPECIES.len());
         let elapsed = start.elapsed();
         assert!(
             elapsed.as_secs() < 20,
