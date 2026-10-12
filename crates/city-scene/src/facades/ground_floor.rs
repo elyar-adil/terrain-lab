@@ -31,12 +31,12 @@ pub fn ground_floor_textures(size: usize) -> Vec<BakedTexture> {
 /// switched on, and the renderer owns lighting, so the albedo stays at painted
 /// metal and acrylic sheet values (0.04 – 0.35).
 const SIGN_BOARDS: [[f32; 3]; 6] = [
-    [0.062, 0.094, 0.160], // deep blue, the default sign colour of the nation
-    [0.048, 0.105, 0.070], // pharmacy green
-    [0.135, 0.048, 0.042], // restaurant maroon
-    [0.320, 0.312, 0.286], // ivory plate
-    [0.078, 0.082, 0.088], // charcoal, the upscale one
-    [0.185, 0.132, 0.048], // bakery gold on brown
+    [0.52, 0.08, 0.06], // red, the shop sign of most of the country
+    [0.66, 0.46, 0.10], // gold on red
+    [0.08, 0.24, 0.56], // blue
+    [0.10, 0.40, 0.22], // green pharmacy
+    [0.80, 0.79, 0.76], // white plate with black letters
+    [0.70, 0.34, 0.08], // orange
 ];
 
 /// The sign board of one bay.  Neighbouring shops never share a board: each bay
@@ -56,6 +56,12 @@ fn sign_board(key: u32, bay: i32) -> usize {
 /// every four bays, a fascia, and the projecting sign boxes the geometry adds in
 /// front of it.  That rhythm — not the door — is what makes a street read as
 /// retail.
+/// Fraction of a `pitch`-spaced cell that `x` has passed through: 0 at a bar's
+/// centre line, so `< w` is a bar of width `w` in metres.
+fn bx_pitch(x: f32, pitch: f32) -> f32 {
+    (x / pitch).fract()
+}
+
 fn ground_floor(kind: &str, size: usize) -> BakedTexture {
     let n = size.max(16);
     // One storey tall, `GROUND_FLOOR_BAYS` bays wide, at the same texel density
@@ -75,17 +81,22 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
     // fascia, the piers and the serving hatch catching any light at all.  The
     // previous bake put a 0.68 stone pier over half the tile, which is why a
     // ground floor read as a bright door instead of as a shop.
-    const RISER: [f32; 3] = [0.098, 0.100, 0.104];
-    // A reflectance triple; the 0.318 is not 1/pi.
-    #[allow(clippy::approx_constant)]
-    const PIER: [f32; 3] = [0.330, 0.318, 0.296];
-    const PIER_LIGHT: [f32; 3] = [0.405, 0.398, 0.380];
-    const FRAME: [f32; 3] = [0.062, 0.065, 0.068];
-    const GLASS: [f32; 3] = [0.052, 0.058, 0.066];
-    const FASCIA: [f32; 3] = [0.265, 0.258, 0.244];
-    const FASCIA_TOP: [f32; 3] = [0.360, 0.353, 0.336];
-    const RENDER: [f32; 3] = [0.470, 0.442, 0.390];
-    const DOOR: [f32; 3] = [0.115, 0.090, 0.070];
+    // Chinese ground floors are light: cream and grey stone, white aluminium
+    // frames, bright glass with a blue-grey tint, and painted signs.
+    const RISER: [f32; 3] = [0.36, 0.35, 0.33];
+    const PIER: [f32; 3] = [0.60, 0.58, 0.55];
+    const PIER_LIGHT: [f32; 3] = [0.68, 0.66, 0.63];
+    const FRAME: [f32; 3] = [0.74, 0.74, 0.72];
+    const GLASS_SHOP: [f32; 3] = [0.20, 0.27, 0.32];
+    const GLASS_HOME: [f32; 3] = [0.24, 0.31, 0.36];
+    const FASCIA: [f32; 3] = [0.66, 0.65, 0.62];
+    const FASCIA_TOP: [f32; 3] = [0.72, 0.71, 0.68];
+    const AWNING_RED: [f32; 3] = [0.50, 0.10, 0.08];
+    const AWNING_WHITE: [f32; 3] = [0.78, 0.77, 0.74];
+    const SHUTTER: [f32; 3] = [0.50, 0.50, 0.48];
+    const RENDER: [f32; 3] = [0.66, 0.63, 0.57];
+    const GRANITE: [f32; 3] = [0.40, 0.40, 0.38];
+    const DOOR: [f32; 3] = [0.34, 0.26, 0.19];
 
     for y in 0..n {
         for x in 0..w {
@@ -133,31 +144,34 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
                 )
             };
 
+            let awning_pick = avalanche01(key, bay, 0, 811);
             let mut colour = match kind {
                 "shop" => {
                     if h < 0.42 {
-                        // Stall riser: a dark stone kick plate, grooved, scuffed
-                        // by a thousand trolleys.
+                        // Stall riser: light granite, grooved.
                         let groove = (u / 0.42) - (u / 0.42).floor() < 0.06;
-                        shade(RISER, if groove { 0.72 } else { 1.0 })
+                        shade(RISER, if groove { 0.80 } else { 1.0 })
                     } else if h > 3.55 {
-                        // Fascia: the sign band, with a soffit shadow under the
-                        // canopy lip and a pale top rail.  The board itself is
-                        // one coloured sign per bay — see `fascia` above — and
-                        // the geometry adds the projecting sign boxes in front.
+                        // Fascia: a painted sign board per bay.  Its lettering is a
+                        // row of lighter blocks, so it reads as a sign at street
+                        // distance rather than as a flat band of paint.
                         if h > 4.32 {
                             FASCIA_TOP
                         } else if h > 4.20 {
-                            [0.055, 0.058, 0.060]
+                            FRAME
                         } else if h < 3.68 {
-                            shade(fascia, 0.60)
+                            shade(fascia, 0.85)
                         } else {
-                            fascia
+                            let block_u = ((u * 2.6).fract()) < 0.62;
+                            let block_h = ((h - 3.72) / 0.16).fract() < 0.55;
+                            if (3.80..4.08).contains(&h) && block_u && block_h {
+                                [0.86, 0.85, 0.82]
+                            } else {
+                                fascia
+                            }
                         }
                     } else if u < pier_a || u >= flank {
-                        // The structural pier, and the flank wall beyond it.
-                        // Fair-faced stone, and the brightest thing at street
-                        // level apart from the signs.
+                        // Light stone pier, fluted.
                         let flute = ((u / 0.31) - (u / 0.31).floor() - 0.5).abs();
                         shade(
                             if block.rem_euclid(2) == 0 {
@@ -165,106 +179,72 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
                             } else {
                                 PIER
                             },
-                            0.84 + flute * 0.26,
+                            0.92 + flute * 0.16,
                         )
                     } else if (mullion - 0.30..mullion).contains(&u) {
                         FRAME
                     } else if (mullion..door).contains(&u) {
-                        // The entrance: a pair of glass doors with a dark frame
-                        // and a bronze pull rail, and a mat behind the glass.
+                        // Entrance: an aluminium double door in glass.
                         if h > 3.02 {
                             FRAME
                         } else if (u - mullion - 0.22).abs() < 0.030 && h > 1.00 && h < 1.95 {
-                            [0.320, 0.272, 0.170]
+                            [0.42, 0.36, 0.24]
                         } else if u < mullion + 0.06 || u > door - 0.06 {
                             FRAME
                         } else {
-                            let depth = 0.42 + 0.70 * (1.0 - (h / 3.0).clamp(0.0, 1.0));
-                            shade(GLASS, depth * 1.5)
+                            shade(GLASS_SHOP, 1.25)
                         }
-                    } else if (glazed..glazed + 0.10).contains(&u) {
+                    } else if (glazed..glazed + 0.10).contains(&u) || (2.95..3.07).contains(&h) {
                         FRAME
-                    } else if (2.95..3.07).contains(&h) {
-                        // The head rail over the whole shopfront.
-                        shade(FRAME, 1.3)
-                    } else if h < 2.30 && decide(29) < 0.55 {
-                        // A roller shutter, down over the lower two thirds of the
-                        // shopfront.  Its ribs are the only repeating
-                        // high-frequency line on a Chinese shopfront and they
-                        // catch raking light; a 60 mm slat at 30 px/m is two
-                        // pixels, so the rib is resolution-aware.
-                        if ((h / 0.09) - (h / 0.09).floor()) < 0.45 {
-                            shade([0.250, 0.254, 0.250], 0.80)
+                    } else if (2.74..2.95).contains(&h) && awning_pick < 0.45 {
+                        // Striped awning over the shop bay.
+                        if ((u * 3.2).fract()) < 0.5 {
+                            AWNING_RED
                         } else {
-                            shade([0.250, 0.254, 0.250], 1.10)
+                            AWNING_WHITE
+                        }
+                    } else if h < 2.30 && decide(29) < 0.45 {
+                        // Roller shutter, half down, light grey steel with ribs.
+                        if ((h / 0.09) - (h / 0.09).floor()) < 0.45 {
+                            shade(SHUTTER, 0.92)
+                        } else {
+                            shade(SHUTTER, 1.06)
                         }
                     } else if h < 2.30 {
-                        // The serving hatch (取货口), lit from inside.  The one warm
-                        // thing at street level, and the reason a Chinese
-                        // shopfront reads as a shop rather than as a mirror.  It
-                        // has a counter, a roller box and a stack of goods behind
-                        // it, because a bare bright rectangle is just a light.
-                        if h < 0.95 {
-                            // The counter, and its front panel.
-                            if h < 0.86 {
-                                shade([0.180, 0.172, 0.158], 0.90)
-                            } else {
-                                [0.045, 0.046, 0.048]
-                            }
-                        } else if h < 1.10 {
-                            // The roller box the hatch shutter rolls into.
-                            shade([0.230, 0.226, 0.216], 0.86)
-                        } else {
-                            let lit = 0.45 + 0.75 * decide(31);
-                            // Warm, and falling off towards the back of the shop.
-                            let fall = 1.0 - 0.35 * ((h - 1.10) / 1.20).clamp(0.0, 1.0);
-                            let goods = if ((u * 3.4) - (u * 3.4).floor()) < 0.5
-                                && ((h * 5.0) - (h * 5.0).floor()) < 0.55
-                            {
-                                0.55
-                            } else {
-                                1.0
-                            };
-                            [
-                                0.235 * lit * fall * goods,
-                                0.205 * lit * fall * goods,
-                                0.160 * lit * fall * goods,
-                            ]
-                        }
+                        // Shop interior, lit warm at the counter.
+                        let lit = 0.50 + 0.60 * decide(31);
+                        [0.30 * lit, 0.25 * lit, 0.17 * lit]
                     } else {
-                        // Shopfront glass above the hatch: dark, with the
-                        // interior's own reflections as broad soft bands.
+                        // Glass above the shop front: a bright blue-grey pane with
+                        // diagonal reflections across it.
+                        let reflection = ((u * 0.9 + h * 0.35).fract()) < 0.07;
                         let band =
-                            0.82 + 0.30 * value_noise(key.wrapping_add(601), u * 1.6, h * 0.9);
-                        shade(GLASS, band)
+                            0.90 + 0.22 * value_noise(key.wrapping_add(601), u * 1.6, h * 0.9);
+                        let g = shade(GLASS_SHOP, band);
+                        if reflection { shade(g, 2.4) } else { g }
                     }
                 }
                 "lobby" => {
                     if h < 0.50 {
-                        // Dark granite base, and every lobby in a Chinese city
-                        // has one because the first forty centimetres get hit.
                         let groove = (u / 0.90) - (u / 0.90).floor() < 0.05;
-                        shade([0.082, 0.086, 0.092], if groove { 0.74 } else { 1.0 })
+                        shade(GRANITE, if groove { 0.84 } else { 1.0 })
                     } else if h > 3.55 {
                         if h > 4.24 {
-                            [0.440, 0.432, 0.412]
+                            FASCIA_TOP
                         } else if h > 4.14 {
-                            [0.050, 0.053, 0.056]
-                        } else if h < 3.68 {
-                            shade([0.320, 0.312, 0.296], 0.58)
+                            FRAME
                         } else {
-                            [0.320, 0.312, 0.296]
+                            shade(fascia, 0.92)
                         }
                     } else if !(0.70..=3.50).contains(&u) {
-                        // A stone portal: two piers and a deep head, which is
-                        // what throws the shadow across the doors.
+                        // Light stone portal.
                         let flute = ((u / 0.35) - (u / 0.35).floor() - 0.5).abs();
-                        shade(PIER_LIGHT, 0.78 + flute * 0.30)
+                        shade(PIER_LIGHT, 0.92 + flute * 0.16)
                     } else if h > 3.02 {
-                        shade(PIER_LIGHT, 0.92)
+                        shade(PIER_LIGHT, 0.96)
                     } else {
-                        // Full-height entrance glazing, with a pair of doors in
-                        // the middle and a bronze pull rail on each.
+                        // Full-height glass doors in aluminium frames, with the
+                        // lobby lit warm behind the sidelights.
                         let door = (1.42..2.78).contains(&u);
                         let stile = (u / 0.735) - (u / 0.735).floor() < 0.028;
                         let rail = door
@@ -272,83 +252,81 @@ fn ground_floor(kind: &str, size: usize) -> BakedTexture {
                             && h > 1.05
                             && h < 1.95;
                         if rail {
-                            [0.330, 0.282, 0.176]
+                            [0.46, 0.40, 0.28]
                         } else if stile || h > 2.94 {
                             FRAME
+                        } else if door {
+                            shade(GLASS_SHOP, 1.25)
                         } else {
-                            let depth = 0.45 + 0.80 * (1.0 - (h / 3.0).clamp(0.0, 1.0));
-                            if door {
-                                shade(GLASS, depth * 1.35)
-                            } else {
-                                // A lit lobby behind the sidelights, which is
-                                // what a tower entrance looks like at dusk.
-                                let lit = 0.35 + 0.55 * decide(31);
-                                [0.085 * lit, 0.092 * lit, 0.100 * lit]
-                            }
+                            let lit = 0.45 + 0.55 * decide(31);
+                            [0.40 * lit, 0.34 * lit, 0.24 * lit]
                         }
                     }
                 }
                 _ => {
-                    // A residential entrance.  Render, a panelled door, and a
-                    // barred window either side — the 防盗窗 is not optional on
-                    // the ground floor of a Chinese apartment block.
+                    // A residential entrance: a light render wall, a brown door, and
+                    // windows with white frames.  The steel grille is only on the
+                    // lower openings, and it is a fine light grille, not a dark grid.
                     if h < 0.45 {
                         let groove = (u / 0.50) - (u / 0.50).floor() < 0.06;
-                        shade([0.120, 0.116, 0.110], if groove { 0.72 } else { 1.0 })
+                        shade(GRANITE, if groove { 0.84 } else { 1.0 })
                     } else if h > 3.50 {
                         if h > 4.22 {
-                            [0.500, 0.486, 0.452]
+                            FASCIA_TOP
                         } else if h > 4.12 {
-                            [0.058, 0.060, 0.062]
+                            FRAME
                         } else if h < 3.64 {
-                            shade(RENDER, 0.58)
+                            shade(RENDER, 0.94)
                         } else {
-                            shade(RENDER, 1.10)
+                            shade(RENDER, 1.04)
                         }
                     } else if (1.78..2.62).contains(&u) {
-                        // The door: an 0.84 m leaf, panelled, with a frame and a
-                        // step.  Dark, because a steel security door is.
+                        // Entrance door: a panelled leaf in a white frame.
                         if h > 3.05 {
-                            shade(RENDER, 1.08)
+                            shade(RENDER, 1.05)
                         } else if !(1.86..=2.54).contains(&u) || h < 0.62 {
-                            [0.068, 0.070, 0.072]
+                            FRAME
                         } else if (u - 2.40).abs() < 0.030 && h > 1.05 && h < 1.95 {
-                            [0.320, 0.280, 0.180]
+                            [0.46, 0.40, 0.28]
                         } else {
                             let panel = (h - 0.72) / 0.78;
                             let recess = if (panel - 0.5).abs() < 0.34 {
-                                0.72
+                                0.84
                             } else {
                                 1.0
                             };
                             shade(DOOR, recess)
                         }
                     } else if (0.42..1.46).contains(&u) || (2.94..3.98).contains(&u) {
-                        // The barred window, with a projecting cill.  The bars
-                        // are a 115 mm grid, which is what a welded security
-                        // grille actually is, and they are the brightest thing on
-                        // the wall because they are galvanised steel in sun.
+                        // Window: sill, white frame, glass, and a sash bar.
                         if h < 0.92 {
-                            [0.330, 0.320, 0.302]
+                            shade(FRAME, 0.94)
                         } else if h < 1.02 {
-                            shade(RENDER, 0.32)
+                            shade(RENDER, 0.80)
                         } else {
-                            let vertical = (u / 0.115) - (u / 0.115).floor() < 0.26;
-                            let horizontal = (h / 0.26) - (h / 0.26).floor() < 0.20;
-                            if vertical || horizontal {
-                                [0.520, 0.512, 0.494]
+                            let edge = (u - 0.42).min(1.46 - u).min((u - 2.94).abs()).min(3.98 - u);
+                            if edge < 0.05 || (h > 2.20 && h < 2.28) {
+                                FRAME
                             } else {
-                                let depth =
-                                    0.40 + 0.75 * (1.0 - ((h - 1.02) / 2.1).clamp(0.0, 1.0));
-                                shade(GLASS, depth * 1.4)
+                                let grille = h < 3.0
+                                    && ((bx_pitch(u, 0.40) < 0.10)
+                                        || (((h / 0.60).fract()) < 0.07));
+                                if grille {
+                                    shade(FRAME, 0.80)
+                                } else {
+                                    let reflection = ((u * 1.3 + h * 0.5).fract()) < 0.08;
+                                    let g = shade(
+                                        GLASS_HOME,
+                                        0.95 + 0.15
+                                            * value_noise(key.wrapping_add(603), u * 1.2, h * 0.8),
+                                    );
+                                    if reflection { shade(g, 2.2) } else { g }
+                                }
                             }
                         }
                     } else {
-                        // Render, with a downpipe in the corner and the stain
-                        // that runs from it.
+                        // Render with a downpipe in the corner.
                         if !(0.30..=3.90).contains(&u) && h < 3.30 {
-                            [0.205, 0.200, 0.192]
-                        } else if u > 3.90 {
                             shade(RENDER, 0.70)
                         } else {
                             RENDER
@@ -434,12 +412,19 @@ mod tests {
                 "{} has a hole",
                 texture.name
             );
-            // A shopfront is the darkest thing on a street, so its median has to
-            // be dark.  The old bake put a 176/255 stone pier over half of it.
+            // A shopfront is a bright, glazed front: light stone piers, a pale
+            // aluminium frame and blue-grey glass, so its median is well below a
+            // sunlit render wall.  A residential entrance is a render wall and is
+            // allowed to be one (about 0.6); its band is the wall's own range.
             let median = luma(median_albedo(texture));
+            let band = if texture.name == "ground/shop" {
+                0.10..=0.40
+            } else {
+                0.10..=0.70
+            };
             assert!(
-                (0.04..=0.26).contains(&median),
-                "{}: a median reflectance of {median:.3} is not a shopfront",
+                band.contains(&median),
+                "{}: a median reflectance of {median:.3} is outside its band",
                 texture.name
             );
         }
@@ -453,8 +438,10 @@ mod tests {
         let texture = ground_floor("shop", 256);
         let n = texture.height;
         let px_per_m = texture.width as f32 / GROUND_FLOOR_TILE_W;
-        // Sample the middle of the fascia band (h ≈ 3.9 m) per bay.
-        let row = (((GROUND_FLOOR_TILE_H - 3.9) / GROUND_FLOOR_TILE_H) * n as f32) as usize;
+        // Sample the plain lower margin of the sign board (h ≈ 3.62 m).  The
+        // lettering is a pattern laid over the board, and the bay-local pattern
+        // repeats in every bay, so the board colour is only visible off it.
+        let row = (((GROUND_FLOOR_TILE_H - 3.62) / GROUND_FLOOR_TILE_H) * n as f32) as usize;
         let mut bay_colours: Vec<[f32; 3]> = Vec::new();
         for bay in 0..8 {
             let x = (((bay as f32 + 0.5) * GROUND_FLOOR_BAY_W * px_per_m) as usize)
@@ -469,8 +456,10 @@ mod tests {
         // No board is a lit surface.
         for (bay, colour) in bay_colours.iter().enumerate() {
             assert!(
-                luma(*colour) < 0.40,
-                "bay {bay}: a fascia of {:.3} luma is a light box pretending to be paint",
+                // A white sign plate is painted at about 0.8, so the bound is the
+                // albedo of the lightest painted board, not a dark-only rule.
+                luma(*colour) < 0.90,
+                "bay {bay}: a fascia of {:.3} luma is brighter than any painted board",
                 luma(*colour)
             );
         }

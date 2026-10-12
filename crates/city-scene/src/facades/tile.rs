@@ -214,7 +214,8 @@ fn opening_for(
             0.0
         },
         curtain_hue: hash(key.wrapping_add(131), bay, storey),
-        grille: hash(key.wrapping_add(151), bay, storey) < design.grille,
+        // Steel grilles are a ground-floor fitting; the floors above have none.
+        grille: storey == 0 && hash(key.wrapping_add(151), bay, storey) < design.grille,
         wash: if hash(key.wrapping_add(173), bay, storey) < 0.45 {
             0.35 + hash(key.wrapping_add(191), bay, storey) * 0.5
         } else {
