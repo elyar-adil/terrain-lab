@@ -46,7 +46,9 @@ pub(crate) mod house;
 pub(crate) mod roofscape;
 mod shell;
 
-use urban::{CityFrameInfo, Compound, ModernBuilding, Parcel, ParcelUse, Point, UrbanBlock};
+use urban::{
+    CityFrameInfo, CityStyle, Compound, ModernBuilding, Parcel, ParcelUse, Point, UrbanBlock,
+};
 
 use crate::facades::{GROUND_STOREY_M, design};
 use crate::math::{Vec2, Vec3, signed_area};
@@ -191,12 +193,17 @@ fn is_slab(ring: &[Vec2]) -> bool {
     longest > shortest * 2.4 && longest > 24.0 && shortest < 22.0
 }
 
-pub(crate) fn massing_of(building: &ModernBuilding, ring: &[Vec2], area: f32) -> Massing {
+pub(crate) fn massing_of(
+    building: &ModernBuilding,
+    ring: &[Vec2],
+    area: f32,
+    style: CityStyle,
+) -> Massing {
     // A tower is twenty storeys and up, whatever the plan says about its podium:
     // a thirty-storey building with a two-storey base is still a 塔楼, and
     // classifying it as a slab is how a skyline ends up without one.
     if building.floors >= 20 {
-        let shaft = facade_tile_for(building, Massing::Tower);
+        let shaft = facade_tile_for(building, Massing::Tower, style);
         if design(shaft).cladding.is_glass() {
             return Massing::CurtainTower;
         }
@@ -252,8 +259,23 @@ fn podium_storeys(building: &ModernBuilding) -> f32 {
 /// panel, and four glass.  A 4 000-building city reaches every tile anyway
 /// because the podium and crown functions compose new combinations; a 136-building
 /// one does not, and it should not pay for tiles it never draws.
-fn facade_tile_for(building: &ModernBuilding, massing: Massing) -> usize {
+///
+/// **`ChineseModern` has its own table** and the arms below it are the
+/// `WesternMixed` vocabulary, unchanged, so that style's output is bit-identical.
+/// The Chinese table draws no brick (22, 23) and almost no glass: a 塔楼 is pale
+/// plaster and tile, and about one in eight is the pale commercial glass tile.
+fn facade_tile_for(building: &ModernBuilding, massing: Massing, style: CityStyle) -> usize {
     let id = building.id as usize;
+    if style == CityStyle::ChineseModern {
+        return match massing {
+            // Slot 7 is the one glass tile in eight: `curtain-pale-fins`, the
+            // pale commercial tower.  Its crown is 13 or 14, never itself.
+            Massing::CurtainTower | Massing::Tower => [6usize, 16, 17, 6, 18, 17, 0, 9][id % 8],
+            // Warm plaster, cream, tile and concrete panel.
+            Massing::Slab => [0usize, 0, 1, 2, 4, 6, 0, 5, 16, 17, 18, 20][id % 12],
+            Massing::LowRise => [0usize, 4, 5, 7, 18, 21, 6, 0][id % 8],
+        };
+    }
     match massing {
         Massing::CurtainTower | Massing::Tower => {
             // 8..12 is the first half of the curtain-wall block; the second half
@@ -380,6 +402,7 @@ pub fn build(
     compounds: &[Compound],
     fields: &[urban::Field],
     frame: CityFrameInfo,
+    style: CityStyle,
     builder: &mut MeshBuilder,
 ) {
     declare(builder);
@@ -431,7 +454,7 @@ pub fn build(
             builder.ambient_tint = None;
             continue;
         }
-        building_shell(building, &ring, builder);
+        building_shell(building, &ring, style, builder);
         builder.ambient_tint = None;
     }
     for compound in compounds {
@@ -716,7 +739,12 @@ mod tests {
             }
             let centre = ring_centroid(&ring);
             let mut builder = MeshBuilder::new();
-            shell::building_shell(building, &ring, &mut builder);
+            shell::building_shell(
+                building,
+                &ring,
+                urban::CityStyle::ChineseModern,
+                &mut builder,
+            );
             for group in builder
                 .build()
                 .meshes
@@ -767,6 +795,7 @@ mod tests {
             &city.compounds,
             &city.fields,
             city.frame,
+            urban::CityStyle::ChineseModern,
             &mut builder,
         );
         builder.build()
@@ -1024,7 +1053,7 @@ mod tests {
                 continue;
             }
             let area = signed_area(&ring).abs();
-            if massing_of(building, &ring, area) != Massing::Slab {
+            if massing_of(building, &ring, area, urban::CityStyle::ChineseModern) != Massing::Slab {
                 continue;
             }
             slabs += 1;
@@ -1085,6 +1114,7 @@ mod tests {
             &city.compounds,
             &city.fields,
             city.frame,
+            urban::CityStyle::ChineseModern,
             &mut builder,
         );
         let groups = builder.build().meshes;
@@ -1146,7 +1176,7 @@ mod tests {
                 continue;
             }
             let area = signed_area(&ring).abs();
-            match massing_of(building, &ring, area) {
+            match massing_of(building, &ring, area, urban::CityStyle::ChineseModern) {
                 Massing::CurtainTower | Massing::Tower => tall += 1,
                 Massing::Slab => slabs += 1,
                 Massing::LowRise => low += 1,
@@ -1156,5 +1186,38 @@ mod tests {
         assert!(slabs > 0, "no 板楼 in a Chinese city");
         assert!(low > 0, "no 多层 in a Chinese city");
         assert!(tall + slabs + low == city.buildings.len());
+    }
+
+    /// The Chinese shaft table draws no brick and a real palette: no building
+    /// shaft in the fixture city is brick, and at least six distinct shaft tiles
+    /// appear.  House walls are a separate path (`house.rs`), not a shaft.
+    #[test]
+    fn chinese_modern_shafts_are_never_brick_and_are_varied() {
+        let style = urban::CityStyle::ChineseModern;
+        let city = city();
+        let mut shafts = std::collections::BTreeSet::new();
+        for building in &city.buildings {
+            if matches!(building.use_type, ParcelUse::Villa | ParcelUse::Farmstead) {
+                continue;
+            }
+            let ring = ring_of(&building.footprint, city.frame);
+            if ring.len() < 3 {
+                continue;
+            }
+            let area = signed_area(&ring).abs();
+            let massing = massing_of(building, &ring, area, style);
+            let shaft = facade_tile_for(building, massing, style);
+            assert!(
+                !matches!(shaft, 22 | 23),
+                "building {} has a brick shaft (tile {shaft})",
+                building.id
+            );
+            shafts.insert(shaft);
+        }
+        assert!(
+            shafts.len() >= 6,
+            "only {} distinct shaft tiles: {shafts:?}",
+            shafts.len()
+        );
     }
 }

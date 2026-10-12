@@ -16,7 +16,7 @@
 //!   a textured group desyncs the optional UV layer from the vertex count and
 //!   the payload fails to load.
 
-use urban::{ModernBuilding, RoofStyle};
+use urban::{CityStyle, ModernBuilding, RoofStyle};
 
 use super::details;
 use super::roofscape::{self, ring_extent};
@@ -138,7 +138,12 @@ fn carve_for(variant: SlabVariant, ring: &[Vec2]) -> Vec<Vec2> {
     }
 }
 
-pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: &mut MeshBuilder) {
+pub(crate) fn building_shell(
+    building: &ModernBuilding,
+    ring: &[Vec2],
+    style: CityStyle,
+    builder: &mut MeshBuilder,
+) {
     let centre = ring_centroid(ring);
     let area = signed_area(ring).abs();
     let perimeter: f32 = ring
@@ -146,7 +151,7 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         .enumerate()
         .map(|(index, point)| point.distance(ring[(index + 1) % ring.len()]))
         .sum();
-    let mut massing = massing_of(building, ring, area);
+    let mut massing = massing_of(building, ring, area, style);
     let Jitter {
         mirror,
         value: jitter_value,
@@ -166,7 +171,7 @@ pub(crate) fn building_shell(building: &ModernBuilding, ring: &[Vec2], builder: 
         outward.reverse();
     }
 
-    let shaft_index = facade_tile_for(building, massing);
+    let shaft_index = facade_tile_for(building, massing, style);
     let shaft_material = format!("facade/{shaft_index:02}");
     let shaft_design = design(shaft_index);
     let storey = shaft_design.storey_m;

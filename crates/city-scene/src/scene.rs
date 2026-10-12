@@ -325,6 +325,7 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
         &city.compounds,
         &city.fields,
         city.frame,
+        city.style,
         &mut builder,
     );
 
