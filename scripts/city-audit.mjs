@@ -164,12 +164,18 @@ try {
   });
 
   for (const preset of wanted) {
+    const started = Date.now();
     const page = await browser.newPage({ viewport: { width, height } });
     const problems = [];
     const trace = [];
     page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
     page.on("console", (message) => {
       const text = message.text();
+      // `--live`: stream the page's console as it happens, so a stall shows
+      // where it stalled while the run is still going.
+      if (flag("live")) {
+        console.log(`  [${((Date.now() - started) / 1000).toFixed(0)}s ${message.type()}] ${text.slice(0, 400)}`);
+      }
       // The viewer logs a stage marker per phase when `cheap` is set. Without
       // these, a hang looks identical to a slow frame.
       if (message.type() === "log" && text.startsWith("[city]")) trace.push(text.slice(7));

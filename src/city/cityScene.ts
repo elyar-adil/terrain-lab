@@ -19,6 +19,7 @@ import * as THREE from "three";
 
 import { applyAntiTiling } from "./antiTile";
 import { patchElevationMaterial } from "./elevation";
+import { createFacadeMaterial, facadeTableTexture } from "./facade";
 import { applyGrassFur } from "./grassFur";
 
 /** One vertex buffer group from the payload. */
@@ -285,12 +286,8 @@ export function createMaterials(
     // that floor lines land on multiples of a quarter tile). Dividing that V by the
     // tile's height again stretched each window column ~11x, which is the
     // "striped building" defect.
-    const elevation = name.startsWith("cnres/") || name.startsWith("cncom/");
-    const vInTiles = name.startsWith("facade/") || elevation || name.startsWith("cnshop/");
+    const vInTiles = name.startsWith("facade/") || name.startsWith("cnshop/");
     texture.repeat.set(1 / source.tileWidthM, vInTiles ? 1 : 1 / source.tileHeightM);
-    // A Chinese residential elevation is one flat wide, and the flat next door
-    // is its mirror image across the party wall.
-    if (elevation) texture.wrapS = THREE.MirroredRepeatWrapping;
     texture.needsUpdate = true;
     cache.set(name, texture);
     builtTextures.push(texture);
@@ -669,38 +666,34 @@ export function createMaterials(
       material.needsUpdate = true;
     }
   }
-  // Chinese residential and commercial elevations: paint, trim and glass
-  // classes in one tile; see `elevation.ts`.
+  // The Chinese buildings: one procedural facade drawn from the elevation
+  // table (see `facade.ts`), and the shop storey's baked run (`elevation.ts`).
+  const facadeTable = sources.get("cnfacade/table");
+  if (facadeTable) {
+    const texture = facadeTableTexture(
+      base64ToBytes(facadeTable.data),
+      facadeTable.width,
+      facadeTable.height,
+    );
+    builtTextures.push(texture);
+    register("cnfacade", createFacadeMaterial(texture));
+  }
   for (const source of textures) {
-    const residential = source.name.startsWith("cnres/");
-    const shop = source.name.startsWith("cnshop/");
-    if (!residential && !shop && !source.name.startsWith("cncom/")) continue;
+    if (!source.name.startsWith("cnshop/")) continue;
     const material = standard(
       source.name,
-      {
-        map: textureFor(source.name) ?? undefined,
-        roughness: 0.85,
-        metalness: 0,
-        envMapIntensity: 1.0,
-        vertexColors: true,
-      },
+      { map: textureFor(source.name) ?? undefined, roughness: 0.85, metalness: 0, vertexColors: true },
       0xffffff,
     );
-    patchElevationMaterial(
-      material,
-      residential
-        ? "residential"
-        : shop
-          ? "shop"
-          : source.name === "cncom/curtain"
-            ? "curtain"
-            : "office",
-      source.tileWidthM,
-    );
+    patchElevationMaterial(material, "shop", source.tileWidthM);
   }
   // The render a residential block is painted in arrives as a vertex colour.
   standard("cnres.paint", { roughness: 0.9, vertexColors: true }, 0xffffff);
   standard("cnres.trim", { roughness: 0.6 }, 0xdadad5);
+  // Laminated balcony glass: dark and smooth, so it reads by what it reflects.
+  standard("cnres.glass", { roughness: 0.05, metalness: 0, envMapIntensity: 1.2 }, 0x1d2a30);
+  // Evacuated-tube solar collectors: blue-black glass tubes in a row.
+  standard("solar.tubes", { roughness: 0.18, metalness: 0.2, envMapIntensity: 1.0 }, 0x1a2330);
   for (const kind of ["shop", "lobby", "home"]) {
     standard(`ground/${kind}`, { map: textureFor(`ground/${kind}`) ?? undefined, roughness: 0.72 }, 0xffffff);
   }

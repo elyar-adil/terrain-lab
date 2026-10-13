@@ -319,7 +319,7 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
     );
     let mut buildings = city.buildings.clone();
     buildings.truncate(budget.max_buildings);
-    buildings::build(
+    let facade_table = buildings::build(
         &city.blocks,
         &city.parcels,
         &buildings,
@@ -378,10 +378,12 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
         .sum();
     let draw_calls = geometry.meshes.len();
     let (meshes, instances) = encode_geometry(geometry);
-    let textures = encode_textures(&crate::bake::standard_set(
-        budget.facade_texture_size,
-        budget.ground_texture_size,
-    ));
+    let mut texture_set =
+        crate::bake::standard_set(budget.facade_texture_size, budget.ground_texture_size);
+    // The procedural facade's elevation table, which only exists once the
+    // buildings have drawn their designs.
+    texture_set.push(facade_table.bake());
+    let textures = encode_textures(&texture_set);
 
     let traffic = traffic::simulate(&network, signals.clone(), city.seed, budget.vehicles);
     let traffic_state = match &traffic {

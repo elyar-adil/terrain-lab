@@ -45,13 +45,12 @@
 //!   under a window, a blind down in one opening and not the next. A facade
 //!   where every window is identical reads as a texture, not a building.
 
-pub(crate) mod cn_elevation;
+pub(crate) mod cn_grammar;
 pub(crate) mod cn_shopfront;
 pub(crate) mod designs;
 pub(crate) mod ground_floor;
 pub(crate) mod tile;
 
-pub use cn_elevation::cn_elevation_textures;
 pub use cn_shopfront::cn_shopfront_texture;
 pub use designs::{Cladding, DESIGNS, FacadeDesign, design, tile_height_m};
 pub use ground_floor::ground_floor_textures;

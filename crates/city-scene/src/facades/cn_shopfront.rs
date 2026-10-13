@@ -7,9 +7,9 @@
 //! lit shop behind.  The previous ground-floor bake painted the whole shopfront
 //! in the sign colour, which reads as a row of shipping containers.
 //!
-//! The tile follows the elevation contract of [`super::cn_elevation`] (alpha is
-//! a surface class: fixed or glass), so the renderer draws the storefront glass
-//! with a reflection and a lit interior.  It is 8 bays of 4.2 m and one 4.5 m
+//! The tile's alpha channel is a surface class (fixed colour, or glass with a
+//! shop id), so the renderer draws the storefront glass with a reflection and
+//! a lit interior.  It is 8 bays of 4.2 m and one 4.5 m
 //! storey, and a shop is one or two bays.  The geometry layer builds each
 //! signboard as a box standing 250 mm proud of the wall whose face samples
 //! [`SIGN_Y0`]..[`SIGN_Y1`] of this tile, so the lettering is on a real board.
@@ -17,9 +17,13 @@
 use crate::textures::BakedTexture;
 use worldgen_core::hash::avalanche01;
 
-use super::cn_elevation::{ALPHA_FIXED, ALPHA_GLASS_MAX};
 use super::tile::{srgb8, value_noise};
 use super::{GROUND_FLOOR_BAY_W, GROUND_FLOOR_BAYS, GROUND_STOREY_M};
+
+/// Alpha of baked colour drawn as is.
+const ALPHA_FIXED: u8 = 192;
+/// Glazing carries a shop id in `0 ..= ALPHA_GLASS_MAX`.
+const ALPHA_GLASS_MAX: u8 = 120;
 
 /// The material key.
 pub const SHOPFRONT: &str = "cnshop/street";

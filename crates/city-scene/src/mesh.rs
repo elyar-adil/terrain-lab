@@ -138,6 +138,10 @@ pub struct MeshBuilder {
     /// A tint applied to every untinted write into a `facade/*` group, so a whole
     /// building can be shifted in colour without every wall primitive knowing.
     pub ambient_tint: Option<[f32; 3]>,
+    /// The vertex-colour alpha of every tinted write into the procedural
+    /// facade group (`cnfacade`): the row of the elevation table the wall is
+    /// drawn from.  Other groups keep an opaque alpha.
+    pub facade_row: Option<u8>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -463,6 +467,11 @@ impl MeshBuilder {
         } else {
             None
         };
+        let row = if material == crate::facades::cn_grammar::FACADE {
+            self.facade_row
+        } else {
+            None
+        };
         let buffers = self.buffers(material);
         let base = (buffers.positions.len() / 3) as u32;
         for (position, normal) in corners {
@@ -523,7 +532,10 @@ impl MeshBuilder {
                 buffers.with_colors = true;
                 Vec::with_capacity(INITIAL_VERTS * 3)
             });
-            let packed = pack_tint(&tint);
+            let mut packed = pack_tint(&tint);
+            if let Some(row) = row {
+                packed[3] = row;
+            }
             for _ in 0..4 {
                 store.extend_from_slice(&packed);
             }
