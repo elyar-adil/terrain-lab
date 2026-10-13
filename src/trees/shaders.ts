@@ -23,7 +23,11 @@ export const TABLE_PER_ROW = 256;
 const NOBUMP = typeof location !== "undefined" && new URLSearchParams(location.search).get("treedebug") === "nobump" ? "true" : "false";
 const NODISP = typeof location !== "undefined" && new URLSearchParams(location.search).get("treedebug") === "nodisp" ? "0.0" : "1.0";
 
+// Trees are plain meshes, never instanced, so instanced programs (which spend
+// four attribute slots on the instance matrix) compile the tree path out and
+// stay under WebGL's sixteen vertex attributes.
 const VERTEX_COMMON = /* glsl */ `
+#ifndef USE_INSTANCING
 attribute float aTreeKind;
 attribute vec4 aSegA;
 attribute vec4 aSegB;
@@ -33,6 +37,7 @@ attribute vec4 aLeafNor;
 attribute vec4 aLeafShape;
 attribute vec4 aLeafTint;
 attribute float aTreeId;
+#endif
 uniform sampler2D uTreeTable;
 varying float vTreeKind;
 varying vec4 vTreeColour;
@@ -41,6 +46,7 @@ varying vec4 vTreeB;
 varying vec2 vBarkAR;
 varying float vAbove;
 
+#ifndef USE_INSTANCING
 vec4 treeRow(float id, int k) {
   int i = int(id + 0.5);
   return texelFetch(uTreeTable, ivec2((i & ${TABLE_PER_ROW - 1}) * ${TABLE_TEXELS} + k, i >> 8), 0);
@@ -157,15 +163,19 @@ void treeShape(out vec3 pos, out vec3 nor) {
     vAbove = 99.0;
   }
 }
+#endif
 `;
 
 const VERTEX_NORMAL = /* glsl */ `
 vec3 objectNormal;
 {
+#ifndef USE_INSTANCING
   if (aTreeKind > 0.5) {
     vec3 tp;
     treeShape(tp, objectNormal);
-  } else {
+  } else
+#endif
+  {
     vTreeKind = 0.0;
     vTreeColour = vec4(0.0);
     vTreeA = vec4(0.0);
@@ -181,10 +191,13 @@ vec3 objectNormal;
 const VERTEX_POSITION = /* glsl */ `
 vec3 transformed;
 {
+#ifndef USE_INSTANCING
   if (aTreeKind > 0.5) {
     vec3 tn;
     treeShape(transformed, tn);
-  } else {
+  } else
+#endif
+  {
     vTreeKind = 0.0;
     vTreeColour = vec4(0.0);
     vTreeA = vec4(0.0);

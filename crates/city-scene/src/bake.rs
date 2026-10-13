@@ -27,6 +27,11 @@ use crate::textures::BakedTexture;
 /// and its siblings assert both directions.
 pub fn standard_set(facade_size: usize, ground_size: usize) -> Vec<BakedTexture> {
     let mut set = facade_textures(facade_size);
+    // The Chinese residential elevations cover a whole flat (~12 m) per tile,
+    // so they bake at twice the bay tiles' resolution to keep the same texel
+    // size on the wall.
+    set.extend(crate::facades::cn_elevation_textures(facade_size * 2));
+    set.push(crate::facades::cn_shopfront_texture(ground_size));
     set.extend(ground_floor_textures(ground_size));
     set.push(roof_texture(ground_size));
     for covering in crate::facades::RoofCovering::ALL {

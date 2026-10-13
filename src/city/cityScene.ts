@@ -18,6 +18,7 @@
 import * as THREE from "three";
 
 import { applyAntiTiling } from "./antiTile";
+import { patchElevationMaterial } from "./elevation";
 import { applyGrassFur } from "./grassFur";
 
 /** One vertex buffer group from the payload. */
@@ -284,8 +285,12 @@ export function createMaterials(
     // that floor lines land on multiples of a quarter tile). Dividing that V by the
     // tile's height again stretched each window column ~11x, which is the
     // "striped building" defect.
-    const vInTiles = name.startsWith("facade/");
+    const elevation = name.startsWith("cnres/") || name.startsWith("cncom/");
+    const vInTiles = name.startsWith("facade/") || elevation || name.startsWith("cnshop/");
     texture.repeat.set(1 / source.tileWidthM, vInTiles ? 1 : 1 / source.tileHeightM);
+    // A Chinese residential elevation is one flat wide, and the flat next door
+    // is its mirror image across the party wall.
+    if (elevation) texture.wrapS = THREE.MirroredRepeatWrapping;
     texture.needsUpdate = true;
     cache.set(name, texture);
     builtTextures.push(texture);
@@ -664,6 +669,37 @@ export function createMaterials(
       material.needsUpdate = true;
     }
   }
+  // Chinese residential and commercial elevations: paint, trim and glass
+  // classes in one tile; see `elevation.ts`.
+  for (const source of textures) {
+    const residential = source.name.startsWith("cnres/");
+    const shop = source.name.startsWith("cnshop/");
+    if (!residential && !shop && !source.name.startsWith("cncom/")) continue;
+    const material = standard(
+      source.name,
+      {
+        map: textureFor(source.name) ?? undefined,
+        roughness: 0.85,
+        metalness: 0,
+        envMapIntensity: 1.0,
+        vertexColors: true,
+      },
+      0xffffff,
+    );
+    patchElevationMaterial(
+      material,
+      residential
+        ? "residential"
+        : shop
+          ? "shop"
+          : source.name === "cncom/curtain"
+            ? "curtain"
+            : "office",
+    );
+  }
+  // The render a residential block is painted in arrives as a vertex colour.
+  standard("cnres.paint", { roughness: 0.9, vertexColors: true }, 0xffffff);
+  standard("cnres.trim", { roughness: 0.6 }, 0xdadad5);
   for (const kind of ["shop", "lobby", "home"]) {
     standard(`ground/${kind}`, { map: textureFor(`ground/${kind}`) ?? undefined, roughness: 0.72 }, 0xffffff);
   }

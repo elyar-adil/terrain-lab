@@ -79,7 +79,9 @@ const wanted = flag("all") ? PRESETS : [arg("preset", "street")];
 const cheap = flag("cheap");
 const readyTimeout = Number(arg("ready-timeout", "240")) * 1000;
 
-const dist = path.join(root, "dist");
+// `--dist <dir>`: serve another build directory, so a second build can be
+// rendered while a long run is still being served from `dist/`.
+const dist = path.resolve(root, arg("dist", "dist"));
 
 const MIME = {
   ".html": "text/html; charset=utf-8",

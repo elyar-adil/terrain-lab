@@ -42,6 +42,8 @@
 //!    the occasional PV array.  A city of boxes with blank lids reads as a
 //!    blockout no matter how good the walls are.
 
+pub(crate) mod cn_commercial;
+pub(crate) mod cn_residential;
 pub(crate) mod details;
 pub(crate) mod house;
 pub(crate) mod roofscape;
@@ -373,6 +375,12 @@ fn declare(builder: &mut MeshBuilder) {
     builder.style("metal.ac", wall);
     builder.style("awning", wall);
     builder.style("wall.render", wall);
+    for layout in crate::facades::cn_elevation::all_layouts() {
+        builder.style(layout.key, wall);
+    }
+    builder.style(crate::facades::cn_shopfront::SHOPFRONT, wall);
+    builder.style(cn_residential::PAINT, wall);
+    builder.style(cn_residential::TRIM, wall);
     for crop in crate::crops::ALL_CROPS {
         for variant in 0..3 {
             builder.style(&crate::crops::crop_key(crop, variant), ground);
@@ -444,7 +452,8 @@ pub fn build(
         }
         draw_field(field, &ring, builder);
     }
-    for building in buildings {
+    let podiums = podiums_of(buildings, frame, style);
+    for (building, podium) in buildings.iter().zip(podiums) {
         let ring = ring_of(&building.footprint, frame);
         if ring.len() < 3 {
             continue;
@@ -455,7 +464,13 @@ pub fn build(
             builder.ambient_tint = None;
             continue;
         }
-        building_shell(building, &ring, style, builder);
+        if style == CityStyle::ChineseModern && cn_residential::applies(building) {
+            cn_residential::shell(building, &ring, podium, builder);
+        } else if style == CityStyle::ChineseModern && cn_commercial::applies(building) {
+            cn_commercial::shell(building, &ring, podium, builder);
+        } else {
+            building_shell(building, &ring, style, builder);
+        }
         builder.ambient_tint = None;
     }
     for compound in compounds {
@@ -465,6 +480,69 @@ pub fn build(
         }
         compound_shell(compound, &ring, frame, builder);
     }
+}
+
+/// For each building, the podium it stands on: the roof height and storey
+/// count of a larger, lower building whose footprint contains its centre.
+///
+/// The plan emits a 商住楼 as two buildings on one plot — the shop podium and
+/// the tower over it — and a shell that started the tower at the pavement
+/// buried its ground floor, its entrances and its lowest balconies inside the
+/// podium.  Only the Chinese shells read this; a podium they cannot measure (one
+/// the generic shell builds) is ignored.
+fn podiums_of(
+    buildings: &[ModernBuilding],
+    frame: CityFrameInfo,
+    style: CityStyle,
+) -> Vec<Option<(f32, u16)>> {
+    if style != CityStyle::ChineseModern {
+        return vec![None; buildings.len()];
+    }
+    let rings: Vec<Vec<Vec2>> = buildings
+        .iter()
+        .map(|building| ring_of(&building.footprint, frame))
+        .collect();
+    let extents: Vec<Option<[f32; 4]>> = rings
+        .iter()
+        .map(|ring| roofscape::ring_extent(ring))
+        .collect();
+    let areas: Vec<f32> = rings.iter().map(|ring| signed_area(ring).abs()).collect();
+    buildings
+        .iter()
+        .enumerate()
+        .map(|(index, building)| {
+            if rings[index].len() < 3 {
+                return None;
+            }
+            let centre = crate::math::ring_centroid(&rings[index]);
+            buildings
+                .iter()
+                .enumerate()
+                .filter(|(other, below)| {
+                    *other != index
+                        && below.floors < building.floors
+                        && areas[*other] > areas[index] * 1.15
+                        && extents[*other].is_some_and(|e| {
+                            centre.x >= e[0]
+                                && centre.x <= e[2]
+                                && centre.y >= e[1]
+                                && centre.y <= e[3]
+                        })
+                        && crate::math::point_in_ring(centre, &rings[*other])
+                })
+                .filter_map(|(other, below)| {
+                    let top = if cn_residential::applies(below) {
+                        cn_residential::roof_height(below)
+                    } else if cn_commercial::applies(below) {
+                        cn_commercial::roof_height(below, &rings[other])
+                    } else {
+                        return None;
+                    };
+                    Some((top, below.floors))
+                })
+                .max_by(|a, b| a.0.total_cmp(&b.0))
+        })
+        .collect()
 }
 
 /// A wall, UV'd so that the tile's storey lines land on floors.
@@ -972,7 +1050,10 @@ mod tests {
         }
         let mut tops: Vec<f32> = vec![f32::MIN; footprints.len()];
         for group in &groups {
-            if !group.material.starts_with("facade/") && !group.material.starts_with("ground/") {
+            if !["facade/", "ground/", "cnres/", "cncom/"]
+                .iter()
+                .any(|prefix| group.material.starts_with(prefix))
+            {
                 continue;
             }
             for chunk in group.positions.chunks_exact(3) {
@@ -1069,15 +1150,46 @@ mod tests {
         );
     }
 
+    /// A city has shop storeys and non-shop ground floors.  In the Chinese
+    /// style the shop storey is the `cnshop/` run and a residential block's
+    /// raised ground floor is its own elevation, so either family counts.
+    /// A tower over a shop podium (商住楼) starts on the podium's roof: the plan
+    /// emits the pair as two buildings, and the tower is found standing on the
+    /// podium rather than rising through it from the pavement.
+    #[test]
+    fn towers_on_podiums_start_at_the_podium_roof() {
+        let city = city();
+        let podiums = podiums_of(&city.buildings, city.frame, urban::CityStyle::ChineseModern);
+        let stacked: Vec<_> = podiums.iter().flatten().collect();
+        assert!(
+            !stacked.is_empty(),
+            "no tower stands on a podium in the city"
+        );
+        for (top, floors) in stacked {
+            assert!(*floors >= 2, "a one-storey podium is not a podium");
+            assert!(
+                *top > level::GROUND + crate::facades::GROUND_STOREY_M,
+                "podium roof at {top} is below the shop storey"
+            );
+        }
+    }
+
     #[test]
     fn every_building_gets_a_ground_floor() {
         let groups = built().meshes;
-        for kind in ["ground/shop", "ground/lobby", "ground/home"] {
-            assert!(
-                groups.iter().any(|g| g.material == kind),
-                "no {kind} in the city"
-            );
-        }
+        let has = |names: &[&str]| {
+            groups
+                .iter()
+                .any(|g| names.iter().any(|name| g.material.starts_with(name)))
+        };
+        assert!(
+            has(&["ground/shop", "cnshop/"]),
+            "no shop storey in the city"
+        );
+        assert!(
+            has(&["ground/lobby", "ground/home", "cnres/"]),
+            "no non-shop ground floor in the city"
+        );
     }
 
     #[test]
@@ -1085,7 +1197,11 @@ mod tests {
         let groups = built().meshes;
         let mut used: Vec<&str> = groups
             .iter()
-            .filter(|g| g.material.starts_with("facade/"))
+            .filter(|g| {
+                ["facade/", "cnres/", "cncom/"]
+                    .iter()
+                    .any(|prefix| g.material.starts_with(prefix))
+            })
             .map(|g| g.material.as_str())
             .collect();
         used.sort_unstable();
@@ -1121,8 +1237,21 @@ mod tests {
         let groups = builder.build().meshes;
         let mut glazed = 0;
         let mut masonry = 0;
-        for group in groups.iter().filter(|g| g.material.starts_with("facade/")) {
-            let index: usize = group.material[7..].parse().unwrap();
+        for group in &groups {
+            // The Chinese elevations: a curtain wall is glass, everything else
+            // (residential render, stone grid, panel ribbon) is masonry.
+            if group.material == "cncom/curtain" {
+                glazed += 1;
+                continue;
+            }
+            if group.material.starts_with("cnres/") || group.material.starts_with("cncom/") {
+                masonry += 1;
+                continue;
+            }
+            let Some(index) = group.material.strip_prefix("facade/") else {
+                continue;
+            };
+            let index: usize = index.parse().unwrap();
             if FACADE_TILES[index].glass {
                 glazed += 1;
             } else {
