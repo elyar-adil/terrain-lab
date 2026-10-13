@@ -117,7 +117,7 @@ function Gallery() {
     camera.position.set(...framing.position);
     const lookAt = new THREE.Vector3(...framing.target);
     camera.lookAt(lookAt);
-    world.fog = createFog(600);
+    world.fog = createFog();
 
     const sky = createSky();
     world.add(sky.dome);

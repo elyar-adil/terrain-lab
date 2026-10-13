@@ -21,6 +21,7 @@
 import * as THREE from "three";
 
 const GLASS_CHUNK = /* glsl */ `
+uniform float uElevTileW;
 float elevHash(vec3 p) {
   p = fract(p * vec3(0.1031, 0.1030, 0.0973));
   p += dot(p, p.yxz + 33.33);
@@ -57,6 +58,13 @@ vec3 elevEmit = vec3(0.0);
   float u = sampledDiffuseColor.r;
   float v = sampledDiffuseColor.g;
   float widthM = max(sampledDiffuseColor.b * 5.0, 0.4);
+  // Metres of wall per pixel.  A window a few pixels across cannot show a
+  // curtain's folds or its edge, and drawing them anyway is what makes a
+  // distant tower sparkle; past ~6 cm a pixel the interior fades to what a
+  // window averages to.
+  float mpp = max(length(dFdx(vMapUv)), length(dFdy(vMapUv))) * uElevTileW;
+  float detail = 1.0 - smoothstep(0.05, 0.22, mpp);
+  float du = max(fwidth(u), 1e-4) * 1.5;
 
 #if defined( ELEV_SHOP )
   // A shop: a pale back wall, shelves of goods in a run of colours, panel
@@ -75,7 +83,8 @@ vec3 elevEmit = vec3(0.0);
   vec3 inside = mix(backWall * 0.7, goods, shelf);
   inside = mix(inside, vec3(0.85), step(0.92, v) * step(fract(u * widthM / 1.5 + h4), 0.32));
   float lit = step(0.12, h1);
-  elevEmit = inside * 0.42 * lit;
+  inside = mix(vec3(0.52, 0.50, 0.46), inside, detail);
+  elevEmit = inside * 0.42 * mix(0.88, lit, detail);
   inside = inside * 0.10 + vec3(0.008);
 #elif defined( ELEV_OFFICE )
   // An office floor: a dark plate under a ceiling of lit panels, half the
@@ -92,19 +101,22 @@ vec3 elevEmit = vec3(0.0);
   if (sampledDiffuseColor.b > 0.97) inside = vec3(0.016, 0.017, 0.018);
   // Coated glass passes well under half the light.
   inside *= 0.42;
+  inside = mix(vec3(0.030, 0.031, 0.033), inside, detail);
 #else
   // The room: dark, a little warmer and lighter towards the ceiling, where the
   // window lights it.
   vec3 room = vec3(0.034, 0.031, 0.028) * (0.55 + 0.9 * h1) * mix(0.7, 1.25, v);
   vec3 inside = room;
-  float folds = 0.86 + 0.14 * sin(u * widthM / 0.11 * 6.2831);
+  float foldFreq = widthM / 0.11;
+  float folds = 1.0 - 0.14 * (1.0 - smoothstep(0.25, 0.6, fwidth(u) * foldFreq))
+    * (0.5 - 0.5 * sin(u * foldFreq * 6.2831));
   if (h2 < 0.32) {
     // No curtain: the room, and now and then a lit lamp or a pale wall.
     inside = room * (h3 < 0.12 ? 3.5 : 1.0);
   } else if (h2 < 0.70) {
     // Sheer white curtains, drawn from one side.
     float f = 0.25 + 0.75 * h3;
-    float covered = h4 < 0.5 ? step(u, f) : step(1.0 - f, u);
+    float covered = h4 < 0.5 ? smoothstep(f + du, f - du, u) : smoothstep(1.0 - f - du, 1.0 - f + du, u);
     inside = mix(room, vec3(0.50, 0.49, 0.45) * folds, covered * 0.82);
   } else if (h2 < 0.90) {
     // A pair of heavy curtains, partly open.
@@ -114,7 +126,7 @@ vec3 elevEmit = vec3(0.0);
       : h5 < 0.85 ? vec3(0.20, 0.13, 0.09)
       : vec3(0.27, 0.31, 0.25);
     float f = 0.30 + 0.70 * h3;
-    float covered = step(u, f * 0.5) + step(1.0 - f * 0.5, u);
+    float covered = smoothstep(f * 0.5 + du, f * 0.5 - du, u) + smoothstep(1.0 - f * 0.5 - du, 1.0 - f * 0.5 + du, u);
     inside = mix(room, cloth * folds, clamp(covered, 0.0, 1.0));
   } else {
     // A roller blind, lowered part way.
@@ -123,6 +135,8 @@ vec3 elevEmit = vec3(0.0);
   }
   // Two panes of float glass take a third of the light each way.
   inside *= 0.62;
+  // What a window averages to: a room with a curtain over part of it.
+  inside = mix(vec3(0.075, 0.071, 0.064), inside, detail);
 #endif
   diffuseColor.rgb = diffuse * mix(solid, inside, elevGlass);
 #ifdef ELEV_TINT_GLASS
@@ -177,7 +191,8 @@ export type ElevationGlass = "residential" | "office" | "curtain" | "shop";
 /** Teach a `MeshStandardMaterial` with a `cnres/*` or `cncom/*` map the surface classes. */
 export function patchElevationMaterial(
   material: THREE.MeshStandardMaterial,
-  glass: ElevationGlass = "residential",
+  glass: ElevationGlass,
+  tileWidthM: number,
 ): void {
   const defines: Record<string, string> = {};
   if (glass === "office" || glass === "curtain") defines.ELEV_OFFICE = "";
@@ -185,6 +200,7 @@ export function patchElevationMaterial(
   if (glass === "curtain") defines.ELEV_TINT_GLASS = "";
   material.defines = { ...(material.defines ?? {}), ...defines };
   material.onBeforeCompile = (shader) => {
+    shader.uniforms.uElevTileW = { value: tileWidthM };
     shader.fragmentShader = shader.fragmentShader
       .replace("void main() {", `${GLASS_CHUNK}\nvoid main() {`)
       .replace("#include <color_fragment>", COLOR_CHUNK)

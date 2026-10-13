@@ -44,6 +44,13 @@ export const SUN_DIR = new THREE.Vector3(-0.58, 0.55, -0.60).normalize();
  */
 export const SKY_FOG = 0xbcc9d8;
 
+/**
+ * Radiance of the lower hemisphere in the environment bake: a sunlit city floor
+ * (paving and asphalt at 0.15 – 0.30 reflectance, half of it in shadow) seen
+ * from street height.  Linear; about 40% of the horizon sky's.
+ */
+const GROUND_RADIANCE = new THREE.Color().setRGB(0.20, 0.195, 0.185, THREE.LinearSRGBColorSpace);
+
 const SKY_VERTEX = /* glsl */ `
   varying vec3 vDir;
   void main() {
@@ -172,8 +179,23 @@ export function bakeSkyEnvironment(
   const clone = new THREE.Mesh(new THREE.SphereGeometry(100, 32, 20), skyMaterial);
   clone.frustumCulled = false;
   scene.add(clone);
+  // The lower half of a city's environment is the city: pavement, asphalt and
+  // the walls across the street, two to three times darker than the horizon
+  // sky.  Leaving the dome's own (horizon-coloured) lower half in the bake lit
+  // every underside like a sky and made glass seen from the street reflect a
+  // bright sky where a photograph shows the street.  The ground cap is drawn
+  // over the dome from just below the horizon down, as plain radiance.
+  const ground = new THREE.Mesh(
+    new THREE.SphereGeometry(90, 32, 10, 0, Math.PI * 2, Math.PI * 0.515, Math.PI * 0.485),
+    new THREE.MeshBasicMaterial({ color: GROUND_RADIANCE, side: THREE.BackSide, fog: false }),
+  );
+  ground.renderOrder = 1;
+  ground.frustumCulled = false;
+  scene.add(ground);
   const texture = pmrem.fromScene(scene, 0.04).texture;
   clone.geometry.dispose();
+  ground.geometry.dispose();
+  (ground.material as THREE.Material).dispose();
   pmrem.dispose();
   return texture;
 }
@@ -257,14 +279,20 @@ export function createLighting(): Lighting {
 /**
  * Atmospheric perspective.
  *
- * **Linear** fog, not exponential, and its range is derived from the scene's
- * extent rather than fixed. An exponential fog with a density tuned by eye is the
- * usual cause of "white dense fog": it does not stop, so the far half of the
- * image is fog colour regardless of how far away it is. Linear fog with a near
- * plane beyond the city and a far plane well beyond it leaves the near field
- * completely clear and only softens the true distance.
+ * The haze of a Chinese city on an ordinary day: a visual range of ten to
+ * fifteen kilometres, which takes a fifth of the contrast out of a tower a
+ * kilometre away and half of it at two (measured on the Beijing reference
+ * photographs: the far towers of a compound skyline sit visibly paler and
+ * bluer than the near ones).  The previous linear fog left everything inside
+ * 450 m untouched and then ramped to solid sky colour by 1.3 km, which made
+ * near buildings pin-sharp cut-outs against a sudden wall of haze.
+ *
+ * Three's squared exponential is used rather than a pure exponential so that
+ * the street in front of the camera stays clear (2% at 300 m) while the
+ * distance still softens continuously; `density` is that falloff per metre.
  */
-export function createFog(extentMetres: number): THREE.Fog {
-  const reach = Math.max(200, extentMetres);
-  return new THREE.Fog(SKY_FOG, reach * 0.45, reach * 1.3);
+export const HAZE_DENSITY = 0.00052;
+
+export function createFog(density = HAZE_DENSITY): THREE.FogExp2 {
+  return new THREE.FogExp2(SKY_FOG, density);
 }

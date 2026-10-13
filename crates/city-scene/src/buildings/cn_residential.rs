@@ -432,11 +432,87 @@ impl WallMap {
 /// Everything a building needs to know to dress a wall.
 struct Ctx<'a> {
     id: u32,
-    tint: [f32; 3],
-    paint: [f32; 3],
     dress: &'a Dress,
     base: f32,
     storeys: u32,
+    bands: Bands,
+}
+
+impl Ctx<'_> {
+    /// The render colour of storey `s` (0 = lowest).
+    fn paint_at(&self, s: u32) -> [f32; 3] {
+        self.bands.paint_at(s, self.storeys)
+    }
+    /// The elevation vertex colour of storey `s`.
+    fn tint_at(&self, s: u32) -> [f32; 3] {
+        wall_tint(self.paint_at(s))
+    }
+}
+
+/// 三段式: most Chinese residential blocks are painted in three bands — a
+/// darker base of one to three storeys (stone-coloured or a deeper shade of the
+/// body), the body, and on many a lighter or contrasting top storey under the
+/// roof.  It is the commonest colour scheme in the reference photographs and
+/// the cheapest thing that stops a block reading as one extruded colour.
+#[derive(Debug, Clone, Copy)]
+struct Bands {
+    body: [f32; 3],
+    base: [f32; 3],
+    base_storeys: u32,
+    top: [f32; 3],
+    top_storeys: u32,
+}
+
+impl Bands {
+    fn of(id: u32, body: [f32; 3], storeys: u32, tower: bool) -> Self {
+        let roll = hash_u32(id, 281, 5);
+        let base_storeys = if storeys < 5 {
+            0
+        } else if tower {
+            2 + (roll * 2.0) as u32
+        } else if roll < 0.3 {
+            0
+        } else if roll < 0.75 {
+            1
+        } else {
+            2
+        };
+        let shade = |c: [f32; 3], k: f32| [c[0] * k, c[1] * k, c[2] * k];
+        let base = match (hash_u32(id, 283, 5) * 4.0) as u32 {
+            0 => [0.40, 0.34, 0.28],
+            1 => [0.46, 0.44, 0.41],
+            2 => [0.52, 0.38, 0.29],
+            _ => shade(body, 0.72),
+        };
+        let top_roll = hash_u32(id, 285, 5);
+        let top_storeys = if storeys >= 6 && top_roll < 0.55 {
+            1
+        } else {
+            0
+        };
+        let top = if top_roll < 0.3 {
+            [0.72, 0.71, 0.68]
+        } else {
+            shade(body, 0.84)
+        };
+        Self {
+            body,
+            base,
+            base_storeys,
+            top,
+            top_storeys,
+        }
+    }
+
+    fn paint_at(&self, s: u32, storeys: u32) -> [f32; 3] {
+        if s < self.base_storeys {
+            self.base
+        } else if s + self.top_storeys >= storeys && s >= self.base_storeys {
+            self.top
+        } else {
+            self.body
+        }
+    }
 }
 
 /// A storey layout: where the elevations start and how many storeys they carry.
@@ -474,7 +550,6 @@ pub(crate) fn shell(
     let retail = on_ground && building.use_type == ParcelUse::MixedUse;
     let tower = building.floors >= 19;
     let paint = paint_colour(id);
-    let tint = wall_tint(paint);
     let dress = dress_for(id, tower);
 
     // Plan: inset so balconies stay inside the plot, then notched.
@@ -501,13 +576,13 @@ pub(crate) fn shell(
 
     let (base, storeys) = storeys_of(building, podium);
     let top = base + storeys as f32 * CN_STOREY_M;
+    let bands = Bands::of(id, paint, storeys, tower);
     let ctx = Ctx {
         id,
-        tint,
-        paint,
         dress: &dress,
         base,
         storeys,
+        bands,
     };
 
     // Plinth and ground storey.
@@ -611,16 +686,33 @@ pub(crate) fn shell(
             }
         };
         let u1 = map.u0 + length * map.u_per_m;
-        let vb = storeys as f32 / 4.0;
-        builder.quad_uv(
-            layout.key,
-            Vec3::from_plan(a, base),
-            Vec3::from_plan(b, base),
-            Vec3::from_plan(b, top),
-            Vec3::from_plan(a, top),
-            [(map.u0, vb), (u1, vb), (u1, 0.0), (map.u0, 0.0)],
-            Some(tint),
-        );
+        // One quad per colour band, each UV'd on the same storey datum.
+        let splits = [
+            0,
+            bands.base_storeys.min(storeys),
+            storeys - bands.top_storeys.min(storeys),
+            storeys,
+        ];
+        for pair in splits.windows(2) {
+            let (s0, s1) = (pair[0], pair[1].max(pair[0]));
+            if s1 == s0 {
+                continue;
+            }
+            let (y0, y1) = (
+                base + s0 as f32 * CN_STOREY_M,
+                base + s1 as f32 * CN_STOREY_M,
+            );
+            let (v0, v1) = (map.v(s0 as f32, 0.0), map.v(s1 as f32, 0.0));
+            builder.quad_uv(
+                layout.key,
+                Vec3::from_plan(a, y0),
+                Vec3::from_plan(b, y0),
+                Vec3::from_plan(b, y1),
+                Vec3::from_plan(a, y1),
+                [(map.u0, v0), (u1, v0), (u1, v1), (map.u0, v1)],
+                Some(ctx.tint_at(s0)),
+            );
+        }
         if map.units > 0 {
             dress_wall(&ctx, layout, &map, builder);
         }
@@ -709,11 +801,7 @@ fn balcony_stack(
     builder: &mut MeshBuilder,
 ) {
     let depth = ctx.dress.balcony_depth;
-    let (rail_mat, rail_colour) = if ctx.dress.white_parapet {
-        (TRIM, None)
-    } else {
-        (PAINT, Some(ctx.paint))
-    };
+    let rail_mat = if ctx.dress.white_parapet { TRIM } else { PAINT };
     let out = map.out;
     let q0 = p0 + out * depth;
     let q1 = p1 + out * depth;
@@ -726,6 +814,11 @@ fn balcony_stack(
         // The floor slab, with its white edge.
         projection(builder, TRIM, None, p0, p1, out, depth, y - 0.14, y, None);
         // The parapet: a front and two cheeks, 1.1 m.
+        let rail_colour = if ctx.dress.white_parapet {
+            None
+        } else {
+            Some(ctx.paint_at(s))
+        };
         let rail = 1.10;
         let t = 0.10;
         projection(
@@ -778,7 +871,7 @@ fn balcony_stack(
                 ],
                 Vec3::new(out.x, 0.0, out.y),
                 Some(front_uv),
-                Some(ctx.tint),
+                Some(ctx.tint_at(s)),
             );
             let side_w = depth * map.u_per_m;
             for (p, q, normal) in [(p0, q0, -along), (p1, q1, along)] {
@@ -803,7 +896,7 @@ fn balcony_stack(
                         (sb, map.v(sf, DOOR_HEAD_M)),
                         (sa, map.v(sf, DOOR_HEAD_M)),
                     ]),
-                    Some(ctx.tint),
+                    Some(ctx.tint_at(s)),
                 );
             }
         }
@@ -854,7 +947,7 @@ fn bay_stack(
         projection(
             builder,
             PAINT,
-            Some(ctx.paint),
+            Some(ctx.paint_at(s)),
             p0,
             p1,
             out,
@@ -881,7 +974,7 @@ fn bay_stack(
             ],
             Vec3::new(out.x, 0.0, out.y),
             Some(front_uv),
-            Some(ctx.tint),
+            Some(ctx.tint_at(s)),
         );
         let side_w = depth * map.u_per_m;
         for (p, normal, (sa, sb)) in [
@@ -904,7 +997,7 @@ fn bay_stack(
                     (sb, map.v(sf, BAY_HEAD_M)),
                     (sa, map.v(sf, BAY_HEAD_M)),
                 ]),
-                Some(ctx.tint),
+                Some(ctx.tint_at(s)),
             );
         }
     }
@@ -912,7 +1005,7 @@ fn bay_stack(
     projection(
         builder,
         PAINT,
-        Some(ctx.paint),
+        Some(ctx.paint_at(ctx.storeys.saturating_sub(1))),
         p0,
         p1,
         out,
@@ -954,7 +1047,7 @@ fn louvre_stack(
             depth,
             y,
             y + LOUVRE_TOP_M,
-            Some((layout.key, uv, ctx.tint)),
+            Some((layout.key, uv, ctx.tint_at(s))),
         );
     }
 }

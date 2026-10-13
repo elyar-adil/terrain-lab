@@ -184,26 +184,9 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
       mark("renderer");
 
       const world = new THREE.Scene();
-      world.fog = createFog(extent);
-      const fogParam = new URLSearchParams(window.location.search).get("fog");
-      // Fog is scaled by how far the camera stands from what it looks at: a
-      // street view wants haze at city scale, a bird's-eye view must not fog the
-      // very city it frames.
-      {
-        const fog = world.fog as THREE.Fog;
-        const reach = Math.max(200, extent);
-        const stand = Math.hypot(
-          chosen.position[0] - chosen.target[0],
-          chosen.position[1] - chosen.target[1],
-          chosen.position[2] - chosen.target[2],
-        );
-        fog.near = reach * 0.45 + stand * 0.6;
-        fog.far = reach * 1.3 + stand * 1.6;
-      }
-      if (fogParam) {
-        const [n, f] = fogParam.split(",").map(Number);
-        if (Number.isFinite(n) && Number.isFinite(f)) (world.fog as THREE.Fog).near = n, (world.fog as THREE.Fog).far = f;
-      }
+      // `?fog=<density>` overrides the haze, for the audit.
+      const fogParam = Number(new URLSearchParams(window.location.search).get("fog"));
+      world.fog = createFog(Number.isFinite(fogParam) && fogParam > 0 ? fogParam : undefined);
       /**
        * A background behind the sky dome, as insurance.
        *

@@ -695,6 +695,7 @@ export function createMaterials(
           : source.name === "cncom/curtain"
             ? "curtain"
             : "office",
+      source.tileWidthM,
     );
   }
   // The render a residential block is painted in arrives as a vertex colour.
