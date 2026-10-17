@@ -173,6 +173,13 @@ export class TreeGrower {
   }
 }
 
+/**
+ * Requests a worker may hold at once. The forest hands the pool more work once
+ * a frame, and a frame can take seconds where the GPU is software, so the queue
+ * must be deep enough that no worker runs dry between two frames.
+ */
+const QUEUE_PER_WORKER = 16;
+
 /** A few workers, each with its own grower; `grow` hands a tree to the least busy one. */
 export class TreePool {
   private readonly workers: Worker[] = [];
@@ -212,7 +219,7 @@ export class TreePool {
   }
 
   get capacity(): number {
-    return this.workers.length * 2;
+    return this.workers.length * QUEUE_PER_WORKER;
   }
 
   grow(spec: TreeSpec, lod: number): Promise<TreeData> {
