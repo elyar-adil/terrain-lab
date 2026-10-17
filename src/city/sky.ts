@@ -228,10 +228,13 @@ export function createLighting(): Lighting {
    * buildings. That is not a stylisation choice; it is a wrong assumption about
    * what is underneath, and it reads as "unlit" rather than as "in shade".
    */
-  const hemisphere = new THREE.HemisphereLight(0xb4cdf0, 0x8a8a78, 0.55);
+  // A hazy day is mostly sky: the photographs of Chinese streets are lit by a
+  // broad, veiled sky more than by a clear sun, so the sky carries more of the
+  // light and the sun less, which is what keeps shadow sides from going black.
+  const hemisphere = new THREE.HemisphereLight(0xb4cdf0, 0x8a8a78, 0.8);
   // Sunlight through a temperate sky is not white; it is warm, because the
   // atmosphere has taken the blue out of it on the way in.
-  const sun = new THREE.DirectionalLight(0xffe6bd, 3.4);
+  const sun = new THREE.DirectionalLight(0xffe6bd, 2.6);
   sun.position.copy(SUN_DIR).multiplyScalar(500);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -239,6 +242,9 @@ export function createLighting(): Lighting {
   // A normal bias rather than a depth bias: a depth bias detaches the shadow
   // from the contact point, which is visible as light leaking under every kerb.
   sun.shadow.normalBias = 0.035;
+  // Soft edges: the shadow filter averages a disc of this many texels. A hazy sun
+  // is a broad source, so its shadow edges are soft rather than cut.
+  sun.shadow.radius = 3;
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 2000;
   // A weak, cool bounce from the opposite side, standing in for skylight off a

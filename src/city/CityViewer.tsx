@@ -179,7 +179,9 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
       // under a correct sun needs a little headroom, not a boost.
       renderer.toneMappingExposure = 0.95;
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = cheap ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+      // PCFSoftShadowMap is deprecated and silently falls back to PCF; the soft
+      // edge comes from the sun's shadow radius instead.
+      renderer.shadowMap.type = THREE.PCFShadowMap;
       host.appendChild(renderer.domElement);
       mark("renderer");
 
