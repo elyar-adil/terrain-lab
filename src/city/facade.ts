@@ -33,6 +33,7 @@ import * as THREE from "three";
 const PARS = /* glsl */ `
 uniform sampler2D uFacadeTable;
 uniform float uInteriorLight;
+uniform float uInteriorMap;
 varying vec3 vFacadeWorld;
 
 vec4 fTex(int x, int row) { return texelFetch(uFacadeTable, ivec2(x, row), 0); }
@@ -424,7 +425,7 @@ vec2 fTilt = vec2(0.0);
     // The room: traced near, averaged far.
     vec3 room = vec3(0.0);
     vec3 roomMean = vec3(0.55, 0.52, 0.47) * uInteriorLight * 0.55;
-    if (detail > 0.001 && spandrel < 0.5) {
+    if (detail > 0.001 && uInteriorMap > 0.5 && spandrel < 0.5) {
       vec3 nV = normalize(vNormal) * (gl_FrontFacing ? 1.0 : -1.0);
       vec3 nW = normalize((vec4(nV, 0.0) * viewMatrix).xyz);
       vec3 tW = normalize(cross(vec3(0.0, 1.0, 0.0), nW));
@@ -505,6 +506,10 @@ export function createFacadeMaterial(table: THREE.Texture): THREE.MeshStandardMa
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uFacadeTable = { value: table };
     shader.uniforms.uInteriorLight = { value: INTERIOR_LIGHT };
+    // `?interior=0` turns interior mapping off, for measuring what it costs.
+    shader.uniforms.uInteriorMap = {
+      value: new URLSearchParams(window.location.search).get("interior") === "0" ? 0 : 1,
+    };
     shader.vertexShader = shader.vertexShader
       .replace("#include <common>", `#include <common>\n${VERTEX_PARS}`)
       .replace("#include <worldpos_vertex>", VERTEX_MAIN);
