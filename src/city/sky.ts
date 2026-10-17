@@ -83,7 +83,7 @@ const SKY_FRAGMENT = /* glsl */ `
 
     // Zenith to horizon. The exponent shapes how fast the blue gives way near the
     // horizon, which is where a real sky is palest.
-    vec3 zenith  = vec3(0.055, 0.185, 0.480);
+    vec3 zenith  = vec3(0.085, 0.170, 0.360);
     vec3 horizon = vec3(0.420, 0.545, 0.700);
     vec3 col = mix(horizon, zenith, pow(clamp(y, 0.0, 1.0), 0.48));
 
