@@ -34,6 +34,7 @@ const PARS = /* glsl */ `
 uniform sampler2D uFacadeTable;
 uniform float uInteriorLight;
 uniform float uInteriorMap;
+uniform float uFacadeFlat;
 varying vec3 vFacadeWorld;
 
 vec4 fTex(int x, int row) { return texelFetch(uFacadeTable, ivec2(x, row), 0); }
@@ -203,7 +204,7 @@ vec2 fTilt = vec2(0.0);
   int spanBits = 0;
   int spanIndex = 0;
   for (int i = 0; i < 20; i++) {
-    if (i >= n) break;
+    if (i >= n || uFacadeFlat > 0.5) break;
     vec4 a = fTex(8 + 2 * i, row);
     float sx1 = fU16(a.ba);
     if (x < sx1 || i == n - 1) {
@@ -507,6 +508,10 @@ export function createFacadeMaterial(table: THREE.Texture): THREE.MeshStandardMa
     shader.uniforms.uFacadeTable = { value: table };
     shader.uniforms.uInteriorLight = { value: INTERIOR_LIGHT };
     // `?interior=0` turns interior mapping off, for measuring what it costs.
+    // `?facade=flat` skips the span search, for measuring what it costs.
+    shader.uniforms.uFacadeFlat = {
+      value: new URLSearchParams(window.location.search).get("facade") === "flat" ? 1 : 0,
+    };
     shader.uniforms.uInteriorMap = {
       value: new URLSearchParams(window.location.search).get("interior") === "0" ? 0 : 1,
     };
