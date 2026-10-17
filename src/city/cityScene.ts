@@ -690,8 +690,9 @@ export function createMaterials(
   // The render a residential block is painted in arrives as a vertex colour.
   standard("cnres.paint", { roughness: 0.9, vertexColors: true }, 0xffffff);
   standard("cnres.trim", { roughness: 0.6 }, 0xdadad5);
-  // Laminated balcony glass: dark and smooth, so it reads by what it reflects.
-  standard("cnres.glass", { roughness: 0.05, metalness: 0, envMapIntensity: 1.2 }, 0x1d2a30);
+  // Laminated balcony glass: a pale, smooth pane that reads by the sky it
+  // reflects.  A dark pane reads as a solid black slab from the street.
+  standard("cnres.glass", { roughness: 0.06, metalness: 0, envMapIntensity: 1.4 }, 0xa9bcc6);
   // Evacuated-tube solar collectors: blue-black glass tubes in a row.
   standard("solar.tubes", { roughness: 0.18, metalness: 0.2, envMapIntensity: 1.0 }, 0x1a2330);
   for (const kind of ["shop", "lobby", "home"]) {
