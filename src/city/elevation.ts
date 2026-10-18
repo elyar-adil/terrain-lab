@@ -71,15 +71,25 @@ vec3 elevEmit = vec3(0.0);
   // lights in the ceiling, and it lights itself — in daylight a shop interior
   // is about as bright as the shaded pavement outside it.  One in eight is
   // shut and dark.
-  float col = floor(u * widthM / 0.45);
+  // Shelf cells 0.45 m wide and a seventh of the glass high.  Their edges are
+  // filtered by the pixel footprint, so a shelf does not sparkle at a grazing
+  // angle, and a dark divider between cells makes them read as shelving.
+  float cellW = u * widthM / 0.45;
+  float col = floor(cellW);
   float row = floor(v * 7.0);
+  float fu = max(fwidth(cellW), 1e-4);
+  float fv = max(fwidth(v), 1e-4);
   vec3 goods = vec3(
     elevHash(seed + col * 3.1 + row * 7.7),
     elevHash(seed + col * 5.3 + row * 1.9 + 3.0),
     elevHash(seed + col * 2.7 + row * 4.1 + 9.0));
-  goods = mix(vec3(0.38), goods, 0.55);
+  goods = mix(vec3(0.44), goods, 0.42);
+  float edgeM = min(fract(cellW), 1.0 - fract(cellW));
+  goods *= 1.0 - 0.35 * (1.0 - smoothstep(0.067 - fu, 0.067 + fu, edgeM));
   vec3 backWall = mix(vec3(0.55, 0.52, 0.46), vec3(0.62, 0.62, 0.60), h3);
-  float shelf = step(0.06, v) * step(v, 0.74) * step(0.16, fract(v * 7.0)) * step(0.30, h2);
+  float inRows = smoothstep(0.06 - fv, 0.06 + fv, v) * (1.0 - smoothstep(0.74 - fv, 0.74 + fv, v));
+  float board = smoothstep(0.16 - fv * 7.0, 0.16 + fv * 7.0, fract(v * 7.0));
+  float shelf = inRows * board * step(0.30, h2);
   vec3 inside = mix(backWall * 0.7, goods, shelf);
   inside = mix(inside, vec3(0.85), step(0.92, v) * step(fract(u * widthM / 1.5 + h4), 0.32));
   float lit = step(0.12, h1);
