@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { beginCityLayer, type CityLayer, type CityLayerBuild } from "../city/cityLayer";
-import { CityTileStreamer } from "../city/cityTiles";
+import { CityTileStreamer, tileDebug } from "../city/cityTiles";
 import { loadCityTile } from "../api";
 import { buildCityMass, type CityMass } from "../city/cityMass";
 import { createFramePerf, perfEnabled, perfTiming } from "../city/perf";
@@ -1822,6 +1822,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     let tileFrame = 0;
     // `?tilelog` prints each city's tile states every half second, for checking the streamer.
     const tileLog = new URLSearchParams(window.location.search).has("tilelog");
+    tileDebug.log = tileLog;
     const streamCityTiles = (seconds: number) => {
       (result.modernCities ?? []).forEach((plan, index) => {
         const origin = plan.frame.origin;

@@ -57,6 +57,9 @@ interface Tile {
   layer: CityLayer | null;
 }
 
+/** Set by the host under `?tilelog`: the streamer then reports how long each step takes. */
+export const tileDebug = { log: false };
+
 export type TileLoader = (index: number, column: number, row: number) => Promise<CityScene>;
 
 /**
@@ -114,14 +117,18 @@ export class CityTileStreamer {
         this.fetch(tile);
       }
       if (tile.state === "ready") {
+        const t0 = performance.now();
         tile.build = beginCityLayer(tile.scene as CityScene);
+        if (tileDebug.log) console.log(`[tiles] begin ${tile.column},${tile.row} ${(performance.now() - t0).toFixed(0)}ms`);
         tile.scene = null;
         tile.state = "building";
       }
       if (tile.state === "building" && tile.build) {
         const remaining = budgetMs - (performance.now() - started);
         if (remaining > 0) {
+          const t1 = performance.now();
           tile.build.step(remaining);
+          if (tileDebug.log) console.log(`[tiles] step ${tile.column},${tile.row} ${(performance.now() - t1).toFixed(1)}ms progress ${tile.build.progress.toFixed(2)}`);
         }
         if (tile.build.done) {
           this.mount(tile, tile.build.layer);
