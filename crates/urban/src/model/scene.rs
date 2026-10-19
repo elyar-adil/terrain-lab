@@ -79,6 +79,18 @@ pub struct ModernCity {
     pub morphology_score: f64,
 }
 
+/// The mean of a ring's corners: where a block, parcel or field is for clipping.
+fn ring_centre(ring: &[Point]) -> Option<Point> {
+    if ring.is_empty() {
+        return None;
+    }
+    let n = ring.len() as f32;
+    Some(Point {
+        x_km: ring.iter().map(|p| p.x_km).sum::<f32>() / n,
+        y_km: ring.iter().map(|p| p.y_km).sum::<f32>() / n,
+    })
+}
+
 impl ModernCity {
     /// The part of the city within `radius_m` of a local point `(x, z)`: for looking at
     /// one neighbourhood of a large plan without building the whole of it. Roads are
@@ -90,16 +102,7 @@ impl ModernCity {
             let [x, z] = local(p);
             (x - centre[0]).hypot(z - centre[1]) <= radius_m + extra
         };
-        let middle = |ring: &[Point]| -> Option<Point> {
-            if ring.is_empty() {
-                return None;
-            }
-            let n = ring.len() as f32;
-            Some(Point {
-                x_km: ring.iter().map(|p| p.x_km).sum::<f32>() / n,
-                y_km: ring.iter().map(|p| p.y_km).sum::<f32>() / n,
-            })
-        };
+        let middle = ring_centre;
         let mut out = self.clone();
         out.hd_roads
             .retain(|road| road.centreline.iter().any(|p| near(p, 60.0)));
@@ -131,5 +134,82 @@ impl ModernCity {
         }
         out.tributaries.retain(|t| t.line.len() >= 2);
         out
+    }
+
+    /// The part of the city inside the square `[min, max]` (local metres).
+    ///
+    /// Every element is kept by where its centre lies: a block, parcel or field by
+    /// its centroid, a building through its parcel, a road by its midpoint. The
+    /// squares of a grid therefore partition the plan, and nothing is drawn in two
+    /// tiles. Rivers are cut to the square, so each tile holds its own stretch.
+    pub fn clipped_rect(&self, min: [f32; 2], max: [f32; 2]) -> ModernCity {
+        let local = |p: &Point| self.frame.to_local(*p);
+        let inside = |p: &Point| {
+            let [x, z] = local(p);
+            x >= min[0] && x < max[0] && z >= min[1] && z < max[1]
+        };
+        let mut out = self.clone();
+        out.hd_roads.retain(|road| {
+            road.centreline
+                .get(road.centreline.len() / 2)
+                .is_some_and(&inside)
+        });
+        let kept: std::collections::HashSet<u32> =
+            out.hd_roads.iter().map(|road| road.sd_road).collect();
+        out.sd_roads.retain(|road| kept.contains(&road.id));
+        out.blocks
+            .retain(|b| ring_centre(&b.boundary).is_some_and(|c| inside(&c)));
+        out.parcels
+            .retain(|b| ring_centre(&b.ring).is_some_and(|c| inside(&c)));
+        let parcels: std::collections::HashSet<u32> = out.parcels.iter().map(|p| p.id).collect();
+        out.buildings.retain(|b| parcels.contains(&b.parcel_id));
+        out.compounds.retain(|c| parcels.contains(&c.parcel_id));
+        out.trees.retain(|t| inside(&t.point));
+        out.fields
+            .retain(|f| ring_centre(&f.ring).is_some_and(|c| inside(&c)));
+        let cut =
+            |line: &[Point]| -> Vec<Point> { line.iter().copied().filter(|p| inside(p)).collect() };
+        out.river = out
+            .river
+            .as_ref()
+            .map(|line| cut(line))
+            .filter(|line| line.len() >= 2);
+        for tributary in &mut out.tributaries {
+            tributary.line = cut(&tributary.line);
+        }
+        out.tributaries.retain(|t| t.line.len() >= 2);
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{ModernChinaSpec, generate_modern_chinese_city};
+
+    #[test]
+    fn a_grid_of_squares_partitions_the_plan() {
+        let city = generate_modern_chinese_city(ModernChinaSpec {
+            radius_km: 0.6,
+            ..ModernChinaSpec::default()
+        });
+        let (mut buildings, mut roads, mut blocks) = (0, 0, 0);
+        // A 4 by 4 grid of 500 m squares covers the whole 0.6 km plan.
+        for i in -2..2 {
+            for j in -2..2 {
+                let min = [i as f32 * 500.0, j as f32 * 500.0];
+                let max = [min[0] + 500.0, min[1] + 500.0];
+                let tile = city.clipped_rect(min, max);
+                buildings += tile.buildings.len();
+                roads += tile.hd_roads.len();
+                blocks += tile.blocks.len();
+            }
+        }
+        assert_eq!(
+            buildings,
+            city.buildings.len(),
+            "a building is missing or doubled"
+        );
+        assert_eq!(roads, city.hd_roads.len(), "a road is missing or doubled");
+        assert_eq!(blocks, city.blocks.len(), "a block is missing or doubled");
     }
 }

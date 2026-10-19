@@ -44,6 +44,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         SceneBudget::default()
     };
+    // `--clip-x m --clip-z m --clip-r m`: only the neighbourhood of one local point,
+    // the unit a streamed scene is built from.
+    // `--square x0,z0,x1,z1`: one square tile of the plan, by the centre of each element.
+    let city = match flag("--square") {
+        Some(text) => {
+            let v: Vec<f32> = text.split(',').filter_map(|s| s.parse().ok()).collect();
+            city.clipped_rect([v[0], v[1]], [v[2], v[3]])
+        }
+        None => city,
+    };
+    let city = match (flag("--clip-x"), flag("--clip-z"), flag("--clip-r")) {
+        (Some(x), Some(z), Some(r)) => city.clipped(
+            [x.parse().unwrap_or(0.0), z.parse().unwrap_or(0.0)],
+            r.parse().unwrap_or(200.0),
+        ),
+        _ => city,
+    };
+    println!("{} buildings in the plan", city.buildings.len());
     let scene = build_city_scene(&city, budget);
     let s = &scene.stats;
     println!(
