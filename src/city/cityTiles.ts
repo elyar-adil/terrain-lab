@@ -137,6 +137,13 @@ export class CityTileStreamer {
     }
   }
 
+  /** How many tiles are in each state, for the console while the streamer is being checked. */
+  summary(): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const tile of this.tiles.values()) counts[tile.state] = (counts[tile.state] ?? 0) + 1;
+    return counts;
+  }
+
   dispose(): void {
     this.disposed = true;
     for (const tile of this.tiles.values()) this.drop(tile);

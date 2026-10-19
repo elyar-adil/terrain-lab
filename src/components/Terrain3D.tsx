@@ -1819,6 +1819,9 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     // the detail is never built twice.
     const TILE_STREAMING = true;
     const cityStreamers: Array<CityTileStreamer | null> = (result.modernCities ?? []).map(() => null);
+    let tileFrame = 0;
+    // `?tilelog` prints each city's tile states every half second, for checking the streamer.
+    const tileLog = new URLSearchParams(window.location.search).has("tilelog");
     const streamCityTiles = (seconds: number) => {
       (result.modernCities ?? []).forEach((plan, index) => {
         const origin = plan.frame.origin;
@@ -1855,6 +1858,8 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
         const local = streamer.group.worldToLocal(camera.position.clone());
         streamer.update(local, 6);
         streamer.tick(seconds, distanceM, camera);
+        tileFrame += 1;
+        if (tileLog && tileFrame % 30 === 0) console.log(`[tiles] city ${index} camera ${local.x.toFixed(0)},${local.z.toFixed(0)} ${JSON.stringify(streamer.summary())}`);
       });
     };
 
