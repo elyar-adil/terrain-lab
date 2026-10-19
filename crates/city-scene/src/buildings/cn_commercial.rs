@@ -16,10 +16,11 @@ use super::cn_kit::{
     PAINT, TRIM, WallMap, edge_out, facade_wall, face, ground_shops, parapet, projection, wall_tint,
 };
 use super::{hash_u32, level, roofscape};
-use crate::facades::GROUND_STOREY_M;
 use crate::facades::cn_grammar::{Elevation, FACADE, FacadeTable, OfficeSkin, Part, SPANDREL_M};
+use crate::facades::cn_shopfront::{SHOPFRONT, SIGN_Y0, SIGN_Y1, shop_spans};
+use crate::facades::{GROUND_FLOOR_BAY_W, GROUND_STOREY_M};
 use crate::math::{Vec2, Vec3, inset_ring, ring_centroid, signed_area};
-use crate::mesh::MeshBuilder;
+use crate::mesh::{MeshBuilder, box_at};
 
 /// Stone and panel colours, final linear reflectance: beige and grey granite,
 /// white and champagne aluminium, and the odd dark-grey panel block.
@@ -231,6 +232,9 @@ pub(crate) fn shell(
     if tower {
         plant_screen(&shaft_ring, top, builder);
     }
+    if stack.skin != OfficeSkin::Curtain {
+        roof_signs(&shaft_ring, top, id, builder);
+    }
     let foot = podium.map_or(level::GROUND, |(y, _)| y);
     super::details::downpipe(&plan, foot, top, id, builder);
     top
@@ -402,6 +406,69 @@ fn dress(
         }
     }
     top
+}
+
+/// Signboards on the roof edge of a commercial block: one shop's sign from the
+/// shopfront tile, a bay wide, on the street side of the parapet and held on
+/// two posts.  Only single-bay shops are used, so the lettering is whole.
+fn roof_signs(ring: &[Vec2], top: f32, id: u32, builder: &mut MeshBuilder) {
+    let singles: Vec<f32> = shop_spans()
+        .into_iter()
+        .filter(|(x0, x1)| (x1 - x0 - GROUND_FLOOR_BAY_W).abs() < 0.01)
+        .map(|(x0, _)| x0)
+        .collect();
+    if singles.is_empty() {
+        return;
+    }
+    let centre = ring_centroid(ring);
+    // The sign band of the tile, as the shopfront uses it: v runs down the wall.
+    let v0 = (GROUND_STOREY_M - SIGN_Y1) / GROUND_STOREY_M;
+    let v1 = (GROUND_STOREY_M - SIGN_Y0) / GROUND_STOREY_M;
+    let y0 = top + 0.4;
+    let y1 = y0 + (SIGN_Y1 - SIGN_Y0);
+    let mut placed = 0;
+    for index in 0..ring.len() {
+        let a = ring[index];
+        let b = ring[(index + 1) % ring.len()];
+        let length = a.distance(b);
+        if placed == 2 || length < 3.0 * GROUND_FLOOR_BAY_W {
+            continue;
+        }
+        if hash_u32(id, 331 + index as i32, 5) >= 0.45 {
+            continue;
+        }
+        placed += 1;
+        let along = (b - a) / length;
+        let out = edge_out(a, b, centre);
+        let angle = along.y.atan2(along.x);
+        let start = (length - GROUND_FLOOR_BAY_W) * 0.5;
+        let p0 = a + along * start;
+        let p1 = p0 + along * GROUND_FLOOR_BAY_W;
+        let pick =
+            (hash_u32(id, 337 + index as i32, 5) * singles.len() as f32) as usize % singles.len();
+        let (u0, u1) = (singles[pick], singles[pick] + GROUND_FLOOR_BAY_W);
+        builder.quad_uv(
+            SHOPFRONT,
+            Vec3::from_plan(p0 + out * 0.25, y0),
+            Vec3::from_plan(p1 + out * 0.25, y0),
+            Vec3::from_plan(p1 + out * 0.25, y1),
+            Vec3::from_plan(p0 + out * 0.25, y1),
+            [(u0, v1), (u1, v1), (u1, v0), (u0, v0)],
+            None,
+        );
+        for p in [p0, p1] {
+            box_at(
+                builder,
+                "trim.dark",
+                p + out * 0.2,
+                top + 0.2,
+                0.12,
+                0.4,
+                0.12,
+                angle,
+            );
+        }
+    }
 }
 
 /// The louvred screen round a tower's roof plant.

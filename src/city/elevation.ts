@@ -75,15 +75,22 @@ vec3 elevEmit = vec3(0.0);
   // filtered by the pixel footprint, so a shelf does not sparkle at a grazing
   // angle, and a dark divider between cells makes them read as shelving.
   float cellW = u * widthM / 0.45;
-  float col = floor(cellW);
-  float row = floor(v * 7.0);
   float fu = max(fwidth(cellW), 1e-4);
   float fv = max(fwidth(v), 1e-4);
-  vec3 goods = vec3(
-    elevHash(seed + col * 3.1 + row * 7.7),
-    elevHash(seed + col * 5.3 + row * 1.9 + 3.0),
-    elevHash(seed + col * 2.7 + row * 4.1 + 9.0));
-  goods = mix(vec3(0.44), goods, 0.42);
+  // The goods are smooth value noise over the same grid: a hash at each
+  // lattice corner, blended with a smoothstep.  A hard cell index flickers from
+  // one pixel to the next at a cell edge; this does not.
+  vec2 gp = vec2(cellW, v * 7.0);
+  vec2 gi = floor(gp);
+  vec2 gf = gp - gi;
+  gf = gf * gf * (3.0 - 2.0 * gf);
+  float n00 = elevHash(seed + gi.x * 3.1 + gi.y * 7.7);
+  float n10 = elevHash(seed + (gi.x + 1.0) * 3.1 + gi.y * 7.7);
+  float n01 = elevHash(seed + gi.x * 3.1 + (gi.y + 1.0) * 7.7);
+  float n11 = elevHash(seed + (gi.x + 1.0) * 3.1 + (gi.y + 1.0) * 7.7);
+  float n = mix(mix(n00, n10, gf.x), mix(n01, n11, gf.x), gf.y);
+  // Goods seen through glass are mostly neutral: grey and warm, not a rainbow.
+  vec3 goods = vec3(0.42 + 0.28 * n, 0.41 + 0.27 * n, 0.38 + 0.26 * n);
   float edgeM = min(fract(cellW), 1.0 - fract(cellW));
   goods *= 1.0 - 0.35 * (1.0 - smoothstep(0.067 - fu, 0.067 + fu, edgeM));
   vec3 backWall = mix(vec3(0.55, 0.52, 0.46), vec3(0.62, 0.62, 0.60), h3);
