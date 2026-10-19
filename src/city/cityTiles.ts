@@ -17,8 +17,8 @@ import type { CityScene } from "./cityScene";
 export const CITY_TILE_M = 500;
 /** Tiles whose centre is within this of the camera are built and kept. */
 export const TILE_LOAD_M = 700;
-/** A built tile is dropped only beyond this, so the edge of the range never flickers. */
-const TILE_UNLOAD_M = 1000;
+/** Beyond the load range by this much a tile is dropped, so the edge never flickers. */
+const TILE_UNLOAD_SLACK_M = 300;
 /** Requests in flight at once. */
 const MAX_FETCHES = 2;
 
@@ -74,6 +74,8 @@ export class CityTileStreamer {
     private readonly load: TileLoader,
     /** Called when a tile's detail is mounted or dropped, so its far form can be hidden. */
     private readonly onDetail: (column: number, row: number, mounted: boolean) => void,
+    /** How far from the camera tiles are built, metres. */
+    private readonly loadM: number = TILE_LOAD_M,
   ) {}
 
   /**
@@ -83,7 +85,7 @@ export class CityTileStreamer {
   update(camera: THREE.Vector3, budgetMs: number): void {
     if (this.disposed) return;
     const started = performance.now();
-    const reach = Math.ceil((TILE_LOAD_M + CITY_TILE_M) / CITY_TILE_M);
+    const reach = Math.ceil((this.loadM + CITY_TILE_M) / CITY_TILE_M);
     const centreColumn = Math.floor(camera.x / CITY_TILE_M);
     const centreRow = Math.floor(camera.z / CITY_TILE_M);
     for (let row = centreRow - reach; row <= centreRow + reach; row += 1) {
@@ -92,7 +94,7 @@ export class CityTileStreamer {
           (column + 0.5) * CITY_TILE_M - camera.x,
           (row + 0.5) * CITY_TILE_M - camera.z,
         );
-        if (distance > TILE_LOAD_M) continue;
+        if (distance > this.loadM) continue;
         const key = tileKey(column, row);
         if (!this.tiles.has(key)) {
           this.tiles.set(key, { column, row, state: "idle", scene: null, build: null, layer: null });
@@ -104,11 +106,11 @@ export class CityTileStreamer {
         (tile.column + 0.5) * CITY_TILE_M - camera.x,
         (tile.row + 0.5) * CITY_TILE_M - camera.z,
       );
-      if (distance > TILE_UNLOAD_M) {
+      if (distance > this.loadM + TILE_UNLOAD_SLACK_M) {
         this.drop(tile);
         continue;
       }
-      if (tile.state === "idle" && distance <= TILE_LOAD_M && this.fetching < MAX_FETCHES) {
+      if (tile.state === "idle" && distance <= this.loadM && this.fetching < MAX_FETCHES) {
         this.fetch(tile);
       }
       if (tile.state === "ready") {

@@ -1827,9 +1827,11 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
         const distanceM = Math.hypot(worldX - camera.position.x, worldZ - camera.position.z) * sceneToMetres;
         let streamer = cityStreamers[index];
         if (!streamer && distanceM < CITY_LOAD_DISTANCE_M) {
+          // `?tileload=<m>` narrows the streamed range, for the software renderer in the audit.
+          const tileLoadM = Number(new URLSearchParams(window.location.search).get("tileload"));
           streamer = new CityTileStreamer(index, loadCityTile, (column, row, mounted) => {
             cityMasses[index]?.setTileHidden(column, row, mounted);
-          });
+          }, tileLoadM > 0 ? tileLoadM : undefined);
           // The same placement as the whole-city layer: the plan's origin, its
           // rotation, and its scale, on the ground that was levelled under it.
           const groundY = terrainHeightAt(worldX, worldZ);
