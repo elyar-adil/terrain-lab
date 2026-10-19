@@ -38,8 +38,12 @@ function hash01(id: number, salt: number): number {
 }
 
 // Facade and roof albedos (sRGB). Real walls are 0.3-0.6, never white.
-const WALLS = [0xc9c3b6, 0xb9b2a4, 0xd2cdc1, 0xa8a398, 0xbfb59f, 0x9fa3a3];
-const ROOFS = [0x6f6b66, 0x77736c, 0x5f5c59, 0x80766a];
+const WALLS = [0xc9c3b6, 0xb9b2a4, 0xd2cdc1, 0xa8a398, 0xbfb59f, 0x9fa3a3, 0xd8cbb0, 0x9c5b4a, 0xe6e4df];
+// Towers are glass and cladding: cooler, darker, and more often blue-grey.
+const TOWER_WALLS = [0x5b6670, 0x6d7780, 0x8a939b, 0xb8bcc0, 0x4d5b66];
+const ROOFS = [0x6f6b66, 0x77736c, 0x5f5c59, 0x80766a, 0xc8c8c4, 0x9a9a96];
+const TANK = 0xd8d8d0;
+const PLANT = 0x5e5c58;
 const TERRACOTTA = 0x8a5a45;
 const ASPHALT = 0x4a4c4f;
 // Paving, plazas and forecourts between the buildings of a block.
@@ -98,6 +102,14 @@ class MassBuilder {
     for (const [i, j, k] of THREE.ShapeUtils.triangulateShape(contour, [])) {
       this.tri([ring[i][0], top, ring[i][1]], [ring[j][0], top, ring[j][1]], [ring[k][0], top, ring[k][1]], [0, 1, 0], roof, 1);
     }
+  }
+
+  /** A small box on a roof: plant, a tank, a stair house. */
+  box(cx: number, cz: number, half: number, bottom: number, top: number, hex: number) {
+    const ring: Ring = [
+      [cx - half, cz - half], [cx + half, cz - half], [cx + half, cz + half], [cx - half, cz + half],
+    ];
+    this.prism(ring, bottom, top, hex, hex);
   }
 
   /** A flat polygon draped on the terrain, `lift` above it. */
@@ -178,14 +190,32 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     // Sink the foot below the lowest corner so a building on a slope has no gap.
     const foot = base - 1.5 * m;
     const total = Math.max(b.heightMetres, 3) * m;
-    const wall = WALLS[Math.floor(hash01(b.id, 1) * WALLS.length)];
+    const towers = b.heightMetres >= 40;
+    const palette = towers ? TOWER_WALLS : WALLS;
+    const wall = palette[Math.floor(hash01(b.id, 1) * palette.length)];
     const roof = b.roof === "terracotta" ? TERRACOTTA : ROOFS[Math.floor(hash01(b.id, 2) * ROOFS.length)];
     const podium = b.podiumHeightMetres ?? 0;
+    const roofTop = base + total;
     if (b.tierRing && b.tierRing.length >= 3 && podium > 0 && podium * m < total) {
       builder.prism(ring, foot, base + podium * m, wall, roof);
       builder.prism(toRing(b.tierRing), base + podium * m, base + total, wall, roof);
     } else {
       builder.prism(ring, foot, base + total, wall, roof);
+    }
+    // Roof plant on the taller blocks: a tank, a machine box, a stair house.
+    if (b.heightMetres >= 15) {
+      const cx = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+      const cz = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+      const reach = Math.sqrt(Math.max(...ring.map(([x, z]) => (x - cx) ** 2 + (z - cz) ** 2))) * 0.4;
+      const count = 1 + Math.floor(hash01(b.id, 3) * 3);
+      for (let k = 0; k < count; k += 1) {
+        const angle = hash01(b.id, 10 + k) * Math.PI * 2;
+        const dist = reach * hash01(b.id, 20 + k);
+        const half = (1.2 + 2.2 * hash01(b.id, 30 + k)) * m;
+        const h = (1.5 + 2.5 * hash01(b.id, 40 + k)) * m;
+        const hex = hash01(b.id, 50 + k) < 0.4 ? TANK : PLANT;
+        builder.box(cx + Math.cos(angle) * dist, cz + Math.sin(angle) * dist, half, roofTop, roofTop + h, hex);
+      }
     }
   }
 
@@ -200,6 +230,40 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
   });
+  // Storey bands and window bays on every wall, from world position: they
+  // resolve as the camera nears and average to a flat wall as it recedes, so
+  // the facade never shimmers at the distances where it is only a few pixels.
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uMetre = { value: m };
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;")
+      .replace(
+        "#include <worldpos_vertex>",
+        "#include <worldpos_vertex>\nvMassWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvMassNormal = normalize(mat3(modelMatrix) * objectNormal);",
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nuniform float uMetre;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;",
+      )
+      .replace(
+        "#include <color_fragment>",
+        `#include <color_fragment>
+        float wallness = 1.0 - smoothstep(0.35, 0.7, abs(vMassNormal.y));
+        vec2 along = vec2(-vMassNormal.z, vMassNormal.x);
+        float s = dot(vMassWorld.xz, along) / uMetre;
+        float hM = vMassWorld.y / uMetre;
+        float fh = max(fwidth(hM), 1e-4) / 3.4;
+        float fs = max(fwidth(s), 1e-4) / 3.3;
+        float storey = fract(hM / 3.4);
+        float bay = fract(s / 3.3);
+        float rows = smoothstep(0.18 - fh, 0.18 + fh, storey) * (1.0 - smoothstep(0.70 - fh, 0.70 + fh, storey));
+        float cols = smoothstep(0.12 - fs, 0.12 + fs, bay) * (1.0 - smoothstep(0.88 - fs, 0.88 + fs, bay));
+        float fade = 1.0 - smoothstep(0.2, 0.6, max(fh, fs));
+        diffuseColor.rgb *= 1.0 - 0.30 * rows * cols * fade * wallness;
+        `,
+      );
+  };
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = "cityMass";
   mesh.castShadow = false;
