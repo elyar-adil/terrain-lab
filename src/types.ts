@@ -281,6 +281,8 @@ export interface BakedMaterialTexture {
 
 export interface ModernCityPayload {  style: "chineseModern";
   seed: number;
+  /** The plan's frame: its origin in world kilometres and its rotation. Tiles are cut from it. */
+  frame: { origin: { x_km: number; y_km: number }; rotationRadians: number };
   nodes: Array<{ id: number; point: UrbanPoint }>;
   sdRoads: Array<{ id: number; from: number; to: number; class: string; bridge: boolean }>;
   hdRoads: Array<{

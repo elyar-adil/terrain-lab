@@ -853,9 +853,15 @@ async fn generate_terrain(
 /// function of the plan, so a city built later (or after the cache is dropped and
 /// rebuilt) is the same city.
 struct CityWorld {
-    plans: Vec<(infrastructure::SettlementClass, urban::ModernCity)>,
+    plans: Vec<(infrastructure::SettlementClass, std::sync::Arc<urban::ModernCity>)>,
     scenes: std::collections::HashMap<usize, std::sync::Arc<city_scene::CityScene>>,
+    /// Square tiles of a city's plan, by city index and tile column and row.
+    tiles: std::collections::HashMap<(usize, i32, i32), std::sync::Arc<city_scene::CityScene>>,
 }
+
+/// Side of one streamed tile, in city-local metres. A tile holds about a hundred
+/// buildings, which is what the detail budget is sized for.
+const CITY_TILE_M: f32 = 500.0;
 
 static CITY_WORLD: std::sync::Mutex<Option<CityWorld>> = std::sync::Mutex::new(None);
 
@@ -864,11 +870,12 @@ fn install_city_plans(infrastructure: &InfrastructureData) {
         .settlements
         .iter()
         .zip(infrastructure.modern_cities.iter())
-        .map(|(settlement, city)| (settlement.class, city.clone()))
+        .map(|(settlement, city)| (settlement.class, std::sync::Arc::new(city.clone())))
         .collect();
     *CITY_WORLD.lock().unwrap_or_else(|error| error.into_inner()) = Some(CityWorld {
         plans,
         scenes: std::collections::HashMap::new(),
+        tiles: std::collections::HashMap::new(),
     });
 }
 
@@ -937,6 +944,56 @@ async fn ensure_city_scene(index: usize) -> Result<std::sync::Arc<city_scene::Ci
 async fn city_scene(index: usize) -> Result<city_scene::CityScene, String> {
     let scene = ensure_city_scene(index).await?;
     Ok((*scene).clone())
+}
+
+/// One square tile of a city's detail, in the binary container, built on the first
+/// request and kept after. Tiles share the city's frame, so the host places every
+/// tile of a city with the same transform. Traffic is not in a tile yet.
+async fn ensure_city_tile(
+    index: usize,
+    column: i32,
+    row: i32,
+) -> Result<std::sync::Arc<city_scene::CityScene>, String> {
+    let (class, city) = {
+        let guard = CITY_WORLD
+            .lock()
+            .map_err(|_| "the city cache is poisoned")?;
+        let world = guard
+            .as_ref()
+            .ok_or_else(|| "no cities: generate the world first".to_owned())?;
+        if let Some(tile) = world.tiles.get(&(index, column, row)) {
+            return Ok(tile.clone());
+        }
+        let (class, city) = world
+            .plans
+            .get(index)
+            .ok_or_else(|| format!("city {index} does not exist ({} cities)", world.plans.len()))?;
+        (*class, city.clone())
+    };
+    let scene = tauri::async_runtime::spawn_blocking(move || {
+        let min = [column as f32 * CITY_TILE_M, row as f32 * CITY_TILE_M];
+        let max = [min[0] + CITY_TILE_M, min[1] + CITY_TILE_M];
+        let tile = city.clipped_rect(min, max);
+        city_scene::build_city_scene(&tile, infrastructure::scene_budget(class))
+    })
+    .await
+    .map_err(|error| format!("building the city tile failed: {error}"))?;
+    let scene = std::sync::Arc::new(scene);
+    let mut guard = CITY_WORLD
+        .lock()
+        .map_err(|_| "the city cache is poisoned")?;
+    if let Some(world) = guard.as_mut() {
+        // A concurrent request may have built it first; keep that one.
+        world.tiles.entry((index, column, row)).or_insert_with(|| scene.clone());
+    }
+    Ok(scene)
+}
+
+#[tauri::command]
+async fn city_tile_bin(index: usize, column: i32, row: i32) -> Result<tauri::ipc::Response, String> {
+    let scene = ensure_city_tile(index, column, row).await?;
+    let bytes = city_scene::scene::encode_binary(&scene)?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// The same scene as `city_scene`, as the binary container
@@ -1278,6 +1335,7 @@ pub fn run() {
             generate_terrain,
             city_scene,
             city_scene_bin,
+            city_tile_bin,
             export_terrain,
             save_project,
             load_project,

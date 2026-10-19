@@ -26,12 +26,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(42_u32);
     let out = flag("--out").unwrap_or_else(|| "public/city-scenes.json".into());
-    let city = generate_modern_chinese_city(ModernChinaSpec {
-        seed,
-        radius_km,
-        block_size_metres: block,
-        ..ModernChinaSpec::default()
-    });
+    // `--fixture plan.json --city i`: the plan of city i from a render fixture, so the
+    // tiles match the far form the terrain view draws for that same city.
+    let city = match flag("--fixture") {
+        Some(path) => {
+            let index: usize = flag("--city").and_then(|v| v.parse().ok()).unwrap_or(0);
+            let document: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+            let plan = document["result"]["modernCities"][index].clone();
+            serde_json::from_value::<urban::ModernCity>(plan)?
+        }
+        None => generate_modern_chinese_city(ModernChinaSpec {
+            seed,
+            radius_km,
+            block_size_metres: block,
+            ..ModernChinaSpec::default()
+        }),
+    };
     let budget = if std::env::args().any(|a| a == "--lite") {
         SceneBudget {
             max_buildings: 150,

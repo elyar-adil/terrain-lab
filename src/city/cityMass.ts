@@ -17,6 +17,10 @@
 import * as THREE from "three";
 
 import type { ModernCityPayload } from "../types";
+import { tileKey, tileOfPoint } from "./cityTiles";
+
+/** Tiles the far form can hide. A city of more than this many tiles hides none past it. */
+const MAX_MASS_TILES = 256;
 
 export interface CityMassFrame {
   /** World kilometres (the plan's frame) to scene x/z. */
@@ -53,7 +57,23 @@ class MassBuilder {
   readonly positions: number[] = [];
   readonly normals: number[] = [];
   readonly colors: number[] = [];
+  /** Per vertex: the tile it belongs to, or -1 past the hiding limit. */
+  readonly tileIds: number[] = [];
+  /** Tile key to the index the shader hides it by. */
+  readonly tileIndex = new Map<string, number>();
+  private current = -1;
   private readonly colour = new THREE.Color();
+
+  /** Make `column, row` the tile the following primitives belong to. */
+  select(column: number, row: number): void {
+    const key = tileKey(column, row);
+    let index = this.tileIndex.get(key);
+    if (index === undefined) {
+      index = this.tileIndex.size;
+      this.tileIndex.set(key, index);
+    }
+    this.current = index < MAX_MASS_TILES ? index : -1;
+  }
 
   triangles(): number {
     return this.positions.length / 9;
@@ -65,6 +85,7 @@ class MassBuilder {
       this.positions.push(p[0], p[1], p[2]);
       this.normals.push(normal[0], normal[1], normal[2]);
       this.colors.push(this.colour.r * shade, this.colour.g * shade, this.colour.b * shade);
+      this.tileIds.push(this.current);
     }
   }
 
@@ -143,6 +164,7 @@ class MassBuilder {
     g.setAttribute("position", new THREE.Float32BufferAttribute(this.positions, 3));
     g.setAttribute("normal", new THREE.Float32BufferAttribute(this.normals, 3));
     g.setAttribute("color", new THREE.Float32BufferAttribute(this.colors, 3));
+    g.setAttribute("aTile", new THREE.Float32BufferAttribute(this.tileIds, 1));
     g.computeBoundingSphere();
     g.computeBoundingBox();
     return g;
@@ -152,22 +174,43 @@ class MassBuilder {
 export interface CityMass {
   mesh: THREE.Mesh;
   triangles: number;
+  /** Hide or show one tile's share of the far form, as its detail is mounted or dropped. */
+  setTileHidden(column: number, row: number, hidden: boolean): void;
   dispose(): void;
+}
+
+/** The mean of a ring's corners, which is how the detail cut places a block or parcel. */
+function ringMean(points: Array<{ x_km: number; y_km: number }>): { x_km: number; y_km: number } {
+  const n = Math.max(points.length, 1);
+  return {
+    x_km: points.reduce((sum, p) => sum + p.x_km, 0) / n,
+    y_km: points.reduce((sum, p) => sum + p.y_km, 0) / n,
+  };
 }
 
 export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): CityMass {
   const m = frame.metresToScene;
   const builder = new MassBuilder();
+  // A building is in the tile of its parcel, as the detail cut keeps it.
+  const parcelTile = new Map<number, [number, number]>();
+  for (const parcel of city.parcels) parcelTile.set(parcel.id, tileOfPoint(city.frame, ringMean(parcel.ring)));
+  // Hidden by a shader uniform, so one mesh can lose any tile's share of itself.
+  const hidden = new Float32Array(MAX_MASS_TILES);
   const toRing = (points: Array<{ x_km: number; y_km: number }>): Ring =>
     points.map((p) => frame.toScene(p.x_km, p.y_km));
 
   // The ground of every block, so buildings stand on paving rather than on the
   // meadow the terrain texture shows.
-  for (const block of city.blocks) builder.flat(toRing(block.boundary), frame.heightAt, 0.15 * m, PAVING);
+  for (const block of city.blocks) {
+    builder.select(...tileOfPoint(city.frame, ringMean(block.boundary)));
+    builder.flat(toRing(block.boundary), frame.heightAt, 0.15 * m, PAVING);
+  }
 
   // Streets next, as flat ribbons a little above the ground. The metre-scale
   // scene draws the real carriageway; this is its line from afar.
   for (const road of city.hdRoads) {
+    const mid = road.centreline[Math.floor(road.centreline.length / 2)];
+    if (mid) builder.select(...tileOfPoint(city.frame, mid));
     const pts = road.centreline.map((p) => {
       const [x, z] = frame.toScene(p.x_km, p.y_km);
       return [x, frame.heightAt(x, z), z] as [number, number, number];
@@ -183,6 +226,7 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
   }
 
   for (const b of city.buildings) {
+    builder.select(...(parcelTile.get(b.parcelId) ?? tileOfPoint(city.frame, ringMean(b.footprint))));
     const ring = toRing(b.footprint);
     if (ring.length < 3) continue;
     let base = Infinity;
@@ -235,20 +279,22 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
   // the facade never shimmers at the distances where it is only a few pixels.
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uMetre = { value: m };
+    shader.uniforms.uHidden = { value: hidden };
     shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;")
+      .replace("#include <common>", "#include <common>\nattribute float aTile;\nvarying float vTile;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;")
       .replace(
         "#include <worldpos_vertex>",
-        "#include <worldpos_vertex>\nvMassWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvMassNormal = normalize(mat3(modelMatrix) * objectNormal);",
+        "#include <worldpos_vertex>\nvTile = aTile;\nvMassWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvMassNormal = normalize(mat3(modelMatrix) * objectNormal);",
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
         "#include <common>",
-        "#include <common>\nuniform float uMetre;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;",
+        "#include <common>\nuniform float uMetre;\nuniform float uHidden[256];\nvarying float vTile;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;",
       )
       .replace(
         "#include <color_fragment>",
-        `#include <color_fragment>
+        `if (vTile >= 0.0 && uHidden[int(vTile + 0.5)] > 0.5) discard;
+        #include <color_fragment>
         float wallness = 1.0 - smoothstep(0.35, 0.7, abs(vMassNormal.y));
         vec2 along = vec2(-vMassNormal.z, vMassNormal.x);
         float s = dot(vMassWorld.xz, along) / uMetre;
@@ -271,6 +317,10 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
   return {
     mesh,
     triangles: builder.triangles(),
+    setTileHidden(column, row, isHidden) {
+      const index = builder.tileIndex.get(tileKey(column, row));
+      if (index !== undefined && index < MAX_MASS_TILES) hidden[index] = isHidden ? 1 : 0;
+    },
     dispose() {
       geometry.dispose();
       material.dispose();

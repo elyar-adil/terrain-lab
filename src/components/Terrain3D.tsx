@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { beginCityLayer, type CityLayer, type CityLayerBuild } from "../city/cityLayer";
+import { CityTileStreamer } from "../city/cityTiles";
+import { loadCityTile } from "../api";
 import { buildCityMass, type CityMass } from "../city/cityMass";
 import { createFramePerf, perfEnabled, perfTiming } from "../city/perf";
 import { Roam } from "../city/roam";
@@ -1810,7 +1812,51 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       });
     };
     let cityCheckFrame = 0;
+    // --- the metre-scale detail, streamed as tiles -------------------------------
+    // Within reach of a city its detail is built tile by tile around the camera. Each
+    // tile that is mounted hides its share of the far form, so the two never share a
+    // surface. The whole-city request below is the older path, now switched off, so
+    // the detail is never built twice.
+    const TILE_STREAMING = true;
+    const cityStreamers: Array<CityTileStreamer | null> = (result.modernCities ?? []).map(() => null);
+    const streamCityTiles = (seconds: number) => {
+      (result.modernCities ?? []).forEach((plan, index) => {
+        const origin = plan.frame.origin;
+        const worldX = (origin.x_km - cityHalfExtentKm) * kilometreToScene;
+        const worldZ = (origin.y_km - cityHalfExtentKm) * kilometreToScene;
+        const distanceM = Math.hypot(worldX - camera.position.x, worldZ - camera.position.z) * sceneToMetres;
+        let streamer = cityStreamers[index];
+        if (!streamer && distanceM < CITY_LOAD_DISTANCE_M) {
+          streamer = new CityTileStreamer(index, loadCityTile, (column, row, mounted) => {
+            cityMasses[index]?.setTileHidden(column, row, mounted);
+          });
+          // The same placement as the whole-city layer: the plan's origin, its
+          // rotation, and its scale, on the ground that was levelled under it.
+          const groundY = terrainHeightAt(worldX, worldZ);
+          streamer.group.scale.setScalar(metresToScene);
+          streamer.group.rotation.y = -plan.frame.rotationRadians;
+          streamer.group.position.set(worldX, groundY + 0.12 * metresToScene, worldZ);
+          streamer.group.updateMatrixWorld(true);
+          scene.add(streamer.group);
+          cityStreamers[index] = streamer;
+        }
+        if (!streamer) return;
+        if (distanceM > CITY_UNLOAD_DISTANCE_M) {
+          // Disposing restores each tile's far form through its callback.
+          streamer.dispose();
+          scene.remove(streamer.group);
+          cityStreamers[index] = null;
+          return;
+        }
+        // City-local metres: the group's own transform undone, as the tiles see it.
+        const local = streamer.group.worldToLocal(camera.position.clone()).divideScalar(metresToScene);
+        streamer.update(local, 6);
+        streamer.tick(seconds, distanceM, camera);
+      });
+    };
+
     const requestNearbyCity = () => {
+      if (TILE_STREAMING) return;
       cityCheckFrame += 1;
       if (cityCheckFrame % 20 !== 0) return;
       let nearest = -1;
@@ -3780,6 +3826,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       }
       stepCityMount(delta);
       updateCityMasses();
+      streamCityTiles(worldTime);
       if (perfEnabled) {
         if (cityLayer) {
           const lod = cityLayer.lodStats();
