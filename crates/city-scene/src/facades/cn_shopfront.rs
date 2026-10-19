@@ -56,6 +56,124 @@ const BOARDS: [([f32; 3], [f32; 3]); 8] = [
     ([0.68, 0.24, 0.03], [0.80, 0.79, 0.74]),
 ];
 
+/// What the signboards say: shop names of two to four characters.  Every
+/// character here must be in the atlas, which `scripts/sign-glyphs.py` builds
+/// from this list.
+const SIGN_PHRASES: &[&str] = &[
+    "超市",
+    "便利店",
+    "大药房",
+    "药房",
+    "面馆",
+    "饺子馆",
+    "包子铺",
+    "小吃",
+    "烧烤",
+    "火锅",
+    "奶茶",
+    "咖啡",
+    "茶饮",
+    "理发",
+    "美发店",
+    "美容院",
+    "洗浴",
+    "足疗",
+    "烟酒",
+    "水果",
+    "生鲜",
+    "五金",
+    "建材",
+    "修车",
+    "汽修",
+    "快递",
+    "电信",
+    "银行",
+    "诊所",
+    "口腔",
+    "眼镜",
+    "服装",
+    "鞋业",
+    "手机",
+    "维修",
+    "文具",
+    "书店",
+    "打印",
+    "花店",
+    "宠物",
+    "早餐",
+    "米线",
+    "家电",
+    "饰品",
+    "金店",
+    "棋牌",
+    "网吧",
+    "台球",
+    "健身",
+    "教育",
+    "培训",
+    "幼儿园",
+    "副食",
+    "百货",
+    "菜馆",
+    "粮油",
+    "干洗",
+    "照相",
+    "彩票",
+    "旧货",
+    "装饰",
+    "家具",
+    "童装",
+    "寿司",
+    "面包",
+    "蛋糕",
+];
+
+/// The signboard atlas: 24 by 24 cells per character, four bits a cell.
+const GLYPH_CELLS: usize = 24;
+const GLYPH_BYTES: usize = GLYPH_CELLS * GLYPH_CELLS / 2;
+const ATLAS: &[u8] = include_bytes!("sign_glyphs.bin");
+
+/// The packed cells of a character, if the atlas has it.
+fn glyph_of(c: char) -> Option<&'static [u8]> {
+    ATLAS
+        .chunks_exact(4 + GLYPH_BYTES)
+        .find(|entry| u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]) == c as u32)
+        .map(|entry| &entry[4..])
+}
+
+fn cell(glyph: &[u8], x: usize, y: usize) -> f32 {
+    let i = y * GLYPH_CELLS + x;
+    let byte = glyph[i / 2];
+    let level = if i.is_multiple_of(2) {
+        byte >> 4
+    } else {
+        byte & 15
+    };
+    f32::from(level) / 15.0
+}
+
+/// Ink at `(gx, gy)` in 0..1 across a glyph, row 0 at the top.  Bilinear, so an
+/// edge is a ramp a texel wide and the strokes do not crawl.
+fn ink(glyph: &[u8], gx: f32, gy: f32) -> f32 {
+    let last = (GLYPH_CELLS - 1) as f32;
+    let x = (gx * GLYPH_CELLS as f32 - 0.5).clamp(0.0, last);
+    let y = (gy * GLYPH_CELLS as f32 - 0.5).clamp(0.0, last);
+    let (x0, y0) = (x as usize, y as usize);
+    let (x1, y1) = ((x0 + 1).min(GLYPH_CELLS - 1), (y0 + 1).min(GLYPH_CELLS - 1));
+    let (fx, fy) = (x - x0 as f32, y - y0 as f32);
+    let top = cell(glyph, x0, y0) * (1.0 - fx) + cell(glyph, x1, y0) * fx;
+    let bottom = cell(glyph, x0, y1) * (1.0 - fx) + cell(glyph, x1, y1) * fx;
+    top * (1.0 - fy) + bottom * fy
+}
+
+fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
+}
+
 /// The tile, `size` texels per bay horizontally.
 pub fn cn_shopfront_texture(size: usize) -> BakedTexture {
     let per_bay = size.max(32);
@@ -118,58 +236,6 @@ pub fn shop_spans() -> Vec<(f32, f32)> {
     spans
 }
 
-/// One stroke-built glyph: true where the glyph is inked.  `gx, gy` in 0..1
-/// across the glyph cell.  Most 汉字 are a radical beside a phonetic part, so
-/// half the glyphs are split left and right and each part is built from
-/// horizontal, vertical and sweeping strokes on a lattice; the rest are one
-/// block.  Six to ten strokes, each a seventh of the cell thick: dense enough
-/// to read as a character from across the street, not as a letter.
-fn glyph(seed: u32, gx: f32, gy: f32) -> bool {
-    if !(0.0..1.0).contains(&gx) || !(0.0..1.0).contains(&gy) {
-        return false;
-    }
-    let split = avalanche01(seed, 0, 0, 19) < 0.5;
-    // The part of the cell this texel is in, and its own 0..1 frame.
-    let (part, px, py) = if split {
-        if gx < 0.36 {
-            (0, gx / 0.36, gy)
-        } else if gx > 0.42 {
-            (1, (gx - 0.42) / 0.58, gy)
-        } else {
-            return false;
-        }
-    } else {
-        (2, gx, gy)
-    };
-    let strokes = match part {
-        0 => 2 + (avalanche01(seed, 1, 0, 21) * 2.0) as i32,
-        _ => 6 + (avalanche01(seed, 2, part, 21) * 4.0) as i32,
-    };
-    let t = if part == 0 { 0.22 } else { 0.15 };
-    for k in 0..strokes {
-        let r = |salt: i32| avalanche01(seed, k + part * 16, salt, 23);
-        let kind = r(1);
-        let lattice = if part == 0 { 3.0 } else { 5.0 };
-        let a = 0.08 + (r(2) * lattice).floor() / (lattice - 1.0) * 0.84;
-        let b0 = (r(3) * 3.0).floor() / 4.0;
-        let b1 = (b0 + 0.35 + r(4) * 0.65).min(1.0);
-        let hit = if kind < 0.42 {
-            (py - a).abs() < t * 0.5 && px >= b0 && px <= b1
-        } else if kind < 0.84 {
-            (px - a).abs() < t * 0.5 && py >= b0 && py <= b1
-        } else {
-            // A sweep (撇 or 捺) across the part.
-            let slope = if r(5) < 0.5 { 1.0 } else { -1.0 };
-            let d = (px - 0.5) - slope * (py - 0.5);
-            d.abs() < t * 0.55 && py >= b0 && py <= b1
-        };
-        if hit {
-            return true;
-        }
-    }
-    false
-}
-
 fn sample(um: f32, m: f32) -> ([f32; 3], u8) {
     let bay = (um / GROUND_FLOOR_BAY_W).floor() as i32;
     let (s0, s1) = shop_of(bay);
@@ -200,25 +266,30 @@ fn sample(um: f32, m: f32) -> ([f32; 3], u8) {
         if !(SIGN_Y0 + 0.04..=SIGN_Y1 - 0.04).contains(&m) || local < 0.08 || local > width - 0.08 {
             return (STEEL, ALPHA_FIXED);
         }
-        // The lettering: one line of characters, centred, 0.72 m high.
+        // The shop's name in one line, centred, 0.72 m high.
         let glyph_h = 0.72;
         let pitch = 0.86;
-        let max = ((width - 0.6) / pitch).floor().max(1.0);
-        let count = (2.0 + (avalanche01(KEY, s0, 0, 43) * 4.0).floor()).min(max);
+        let name = SIGN_PHRASES[(avalanche01(KEY, s0, 0, 43) * SIGN_PHRASES.len() as f32) as usize
+            % SIGN_PHRASES.len()];
+        let count = name.chars().count() as f32;
         let start = (width - count * pitch) * 0.5 + (pitch - glyph_h) * 0.5;
         let gy = (m - (SIGN_Y0 + SIGN_Y1 - glyph_h) * 0.5) / glyph_h;
         let slot = ((local - start) / pitch).floor();
+        let ground = shade(board.0, 0.96 + 0.04 * grime);
         if slot >= 0.0 && slot < count {
             let gx = (local - start - slot * pitch) / glyph_h;
-            if glyph(
-                KEY ^ ((s0 as u32) << 8) ^ (slot as u32).wrapping_mul(97),
-                gx,
-                1.0 - gy,
-            ) {
-                return (board.1, ALPHA_FIXED);
+            let gy = 1.0 - gy;
+            let inside = (0.0..1.0).contains(&gx) && (0.0..1.0).contains(&gy);
+            if let Some(glyph) = name
+                .chars()
+                .nth(slot as usize)
+                .and_then(glyph_of)
+                .filter(|_| inside)
+            {
+                return (mix(ground, board.1, ink(glyph, gx, gy)), ALPHA_FIXED);
             }
         }
-        return (shade(board.0, 0.96 + 0.04 * grime), ALPHA_FIXED);
+        return (ground, ALPHA_FIXED);
     }
 
     // The storefront.
@@ -318,6 +389,16 @@ mod tests {
             changes > 40,
             "the signboards carry no lettering ({changes} edges)"
         );
+    }
+
+    #[test]
+    fn every_sign_name_is_drawn_from_the_atlas() {
+        for name in SIGN_PHRASES {
+            assert!(name.chars().count() <= 4, "{name} does not fit a bay");
+            for c in name.chars() {
+                assert!(glyph_of(c).is_some(), "{c} is missing from the sign atlas");
+            }
+        }
     }
 
     #[test]
