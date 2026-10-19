@@ -1848,8 +1848,9 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
           cityStreamers[index] = null;
           return;
         }
-        // City-local metres: the group's own transform undone, as the tiles see it.
-        const local = streamer.group.worldToLocal(camera.position.clone()).divideScalar(metresToScene);
+        // City-local metres: the group's transform undone, scale included, so the
+        // inverse of the placement is already in metres.
+        const local = streamer.group.worldToLocal(camera.position.clone());
         streamer.update(local, 6);
         streamer.tick(seconds, distanceM, camera);
       });
