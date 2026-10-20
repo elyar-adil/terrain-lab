@@ -59,6 +59,10 @@ class MassBuilder {
   readonly colors: number[] = [];
   /** Per vertex: the tile it belongs to, or -1 past the hiding limit. */
   readonly tileIds: number[] = [];
+  /** Per vertex: the height the block it belongs to stands on, scene units. */
+  readonly bases: number[] = [];
+  /** The base of the prism being built; horizontal faces never read it. */
+  private base = 0;
   /** Tile key to the index the shader hides it by. */
   readonly tileIndex = new Map<string, number>();
   private current = -1;
@@ -86,6 +90,7 @@ class MassBuilder {
       this.normals.push(normal[0], normal[1], normal[2]);
       this.colors.push(this.colour.r * shade, this.colour.g * shade, this.colour.b * shade);
       this.tileIds.push(this.current);
+      this.bases.push(this.base);
     }
   }
 
@@ -102,6 +107,7 @@ class MassBuilder {
   prism(ring: Ring, bottom: number, top: number, wall: number, roof: number) {
     const n = ring.length;
     if (n < 3 || !(top > bottom)) return;
+    this.base = bottom;
     let cx = 0, cz = 0;
     for (const [x, z] of ring) { cx += x; cz += z; }
     cx /= n; cz /= n;
@@ -165,6 +171,7 @@ class MassBuilder {
     g.setAttribute("normal", new THREE.Float32BufferAttribute(this.normals, 3));
     g.setAttribute("color", new THREE.Float32BufferAttribute(this.colors, 3));
     g.setAttribute("aTile", new THREE.Float32BufferAttribute(this.tileIds, 1));
+    g.setAttribute("aBase", new THREE.Float32BufferAttribute(this.bases, 1));
     g.computeBoundingSphere();
     g.computeBoundingBox();
     return g;
@@ -281,15 +288,15 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     shader.uniforms.uMetre = { value: m };
     shader.uniforms.uHidden = { value: hidden };
     shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nattribute float aTile;\nvarying float vTile;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;")
+      .replace("#include <common>", "#include <common>\nattribute float aTile;\nattribute float aBase;\nvarying float vTile;\nvarying float vBase;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;")
       .replace(
         "#include <worldpos_vertex>",
-        "#include <worldpos_vertex>\nvTile = aTile;\nvMassWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvMassNormal = normalize(mat3(modelMatrix) * objectNormal);",
+        "#include <worldpos_vertex>\nvTile = aTile;\nvBase = aBase;\nvMassWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvMassNormal = normalize(mat3(modelMatrix) * objectNormal);",
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
         "#include <common>",
-        "#include <common>\nuniform float uMetre;\nuniform float uHidden[256];\nvarying float vTile;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;",
+        "#include <common>\nuniform float uMetre;\nuniform float uHidden[256];\nvarying float vTile;\nvarying float vBase;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;",
       )
       .replace(
         "#include <color_fragment>",
@@ -298,7 +305,8 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         float wallness = 1.0 - smoothstep(0.35, 0.7, abs(vMassNormal.y));
         vec2 along = vec2(-vMassNormal.z, vMassNormal.x);
         float s = dot(vMassWorld.xz, along) / uMetre;
-        float hM = vMassWorld.y / uMetre;
+        // Height above the block's own ground, so the storeys start at the pavement.
+        float hM = (vMassWorld.y - vBase) / uMetre;
         float fh = max(fwidth(hM), 1e-4) / 3.4;
         float fs = max(fwidth(s), 1e-4) / 3.3;
         float storey = fract(hM / 3.4);
@@ -310,7 +318,14 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         float rows = smoothstep(0.22 - fh, 0.22 + fh, storey) * (1.0 - smoothstep(0.72 - fh, 0.72 + fh, storey));
         float cols = smoothstep(0.25 - fs, 0.25 + fs, bay) * (1.0 - smoothstep(0.75 - fs, 0.75 + fs, bay));
         float fade = 1.0 - smoothstep(1.5, 3.0, max(fh, fs));
-        diffuseColor.rgb *= mix(vec3(1.0), vec3(0.40, 0.46, 0.54), rows * cols * fade * wallness);
+        // A wall darkens toward the pavement, where the block next door takes the sky.
+        float baseOcclusion = mix(0.6, 1.0, smoothstep(0.0, 10.0, hM));
+        diffuseColor.rgb *= mix(vec3(1.0), vec3(baseOcclusion), wallness);
+        // Glass sits back in its reveal, so the head of each window is in shade.
+        float glass = rows * cols * fade * wallness;
+        float head = smoothstep(0.52, 0.72, storey);
+        diffuseColor.rgb *= mix(vec3(1.0), vec3(0.40, 0.46, 0.54), glass);
+        diffuseColor.rgb *= mix(vec3(1.0), vec3(0.72), glass * head);
         `,
       );
   };
