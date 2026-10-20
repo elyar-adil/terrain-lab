@@ -303,10 +303,14 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         float fs = max(fwidth(s), 1e-4) / 3.3;
         float storey = fract(hM / 3.4);
         float bay = fract(s / 3.3);
-        float rows = smoothstep(0.18 - fh, 0.18 + fh, storey) * (1.0 - smoothstep(0.70 - fh, 0.70 + fh, storey));
-        float cols = smoothstep(0.12 - fs, 0.12 + fs, bay) * (1.0 - smoothstep(0.88 - fs, 0.88 + fs, bay));
-        float fade = 1.0 - smoothstep(0.2, 0.6, max(fh, fs));
-        diffuseColor.rgb *= 1.0 - 0.30 * rows * cols * fade * wallness;
+        // Glass is about half of each bay and just over half of each storey, and
+        // darker and cooler than the wall. The edges widen with the pixel footprint,
+        // so a window a pixel or two across averages to a grey that still reads as
+        // glazing; the pattern fades only once several windows share one pixel.
+        float rows = smoothstep(0.22 - fh, 0.22 + fh, storey) * (1.0 - smoothstep(0.72 - fh, 0.72 + fh, storey));
+        float cols = smoothstep(0.25 - fs, 0.25 + fs, bay) * (1.0 - smoothstep(0.75 - fs, 0.75 + fs, bay));
+        float fade = 1.0 - smoothstep(1.5, 3.0, max(fh, fs));
+        diffuseColor.rgb *= mix(vec3(1.0), vec3(0.40, 0.46, 0.54), rows * cols * fade * wallness);
         `,
       );
   };
