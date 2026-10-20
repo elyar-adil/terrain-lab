@@ -316,8 +316,10 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
   };
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = "cityMass";
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
+  // The sun's frustum is fitted to the view, so the towers cast shadows across the
+  // streets they stand over, and a tower in another's shadow goes dark on its wall.
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
   return {
     mesh,
     triangles: builder.triangles(),
