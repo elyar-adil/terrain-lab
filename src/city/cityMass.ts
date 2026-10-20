@@ -344,7 +344,10 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         // Single windows are missing here and there: a dark room, a closed unit.
         vec2 cell = vec2(floor(s / bayM), floor(hM / storeyM)) + vSeed * 97.0;
         float cellR = fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453);
-        float present = curtain ? 1.0 : (sparse ? smoothstep(0.55, 0.65, cellR) : smoothstep(0.1, 0.25, cellR));
+        float presentMean = curtain ? 1.0 : (sparse ? 0.4 : 0.88);
+        float presentNow = curtain ? 1.0 : (sparse ? smoothstep(0.55, 0.65, cellR) : smoothstep(0.1, 0.25, cellR));
+        // Once a cell is a few pixels across, its own value is noise, so it averages to the mean.
+        float present = mix(presentMean, presentNow, 1.0 - smoothstep(0.25, 0.6, max(fh, fs)));
         // A wall darkens toward the pavement, where the block next door takes the sky.
         float baseOcclusion = mix(0.6, 1.0, smoothstep(0.0, 10.0, hM));
         diffuseColor.rgb *= mix(vec3(1.0), vec3(baseOcclusion), wallness);
