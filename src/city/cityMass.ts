@@ -340,7 +340,9 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         // several windows share one pixel.
         float rows = smoothstep(rLo - fh, rLo + fh, storey) * (1.0 - smoothstep(rHi - fh, rHi + fh, storey));
         float cols = smoothstep(cLo - fs, cLo + fs, bay) * (1.0 - smoothstep(cHi - fs, cHi + fs, bay));
-        float fade = 1.0 - smoothstep(1.5, 3.0, max(fh, fs));
+        // Full detail while a window is four or more pixels across; below two pixels it
+        // is only a tone, the average of the pattern, or it aliases into dashes.
+        float fade = 1.0 - smoothstep(0.25, 0.5, max(fh, fs));
         // Single windows are missing here and there: a dark room, a closed unit.
         vec2 cell = vec2(floor(s / bayM), floor(hM / storeyM)) + vSeed * 97.0;
         float cellR = fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453);
@@ -352,7 +354,9 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         float baseOcclusion = mix(0.6, 1.0, smoothstep(0.0, 10.0, hM));
         diffuseColor.rgb *= mix(vec3(1.0), vec3(baseOcclusion), wallness);
         // Glass is darker and cooler than the wall, and each building's glass differs.
-        float glass = rows * cols * present * faceOpen * fade * wallness;
+        // Far enough off, the glass averages to its share of the facade, not to nothing.
+        float meanGlass = (rHi - rLo) * (cHi - cLo) * presentMean;
+        float glass = mix(meanGlass, rows * cols * present, fade) * faceOpen * wallness;
         vec3 tint = mix(vec3(0.40, 0.46, 0.54), vec3(0.30, 0.38, 0.47), r2);
         diffuseColor.rgb *= mix(vec3(1.0), tint, glass);
         // Glass sits back in its reveal, so the head of each window is in shade.
