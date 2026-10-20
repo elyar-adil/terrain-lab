@@ -61,8 +61,12 @@ class MassBuilder {
   readonly tileIds: number[] = [];
   /** Per vertex: the height the block it belongs to stands on, scene units. */
   readonly bases: number[] = [];
+  /** Per vertex: the building's seed, which sets its window rhythm and facade kind. */
+  readonly seeds: number[] = [];
   /** The base of the prism being built; horizontal faces never read it. */
   private base = 0;
+  /** The seed of the building being built, in 0..1. */
+  seed = 0;
   /** Tile key to the index the shader hides it by. */
   readonly tileIndex = new Map<string, number>();
   private current = -1;
@@ -91,6 +95,7 @@ class MassBuilder {
       this.colors.push(this.colour.r * shade, this.colour.g * shade, this.colour.b * shade);
       this.tileIds.push(this.current);
       this.bases.push(this.base);
+      this.seeds.push(this.seed);
     }
   }
 
@@ -172,6 +177,7 @@ class MassBuilder {
     g.setAttribute("color", new THREE.Float32BufferAttribute(this.colors, 3));
     g.setAttribute("aTile", new THREE.Float32BufferAttribute(this.tileIds, 1));
     g.setAttribute("aBase", new THREE.Float32BufferAttribute(this.bases, 1));
+    g.setAttribute("aSeed", new THREE.Float32BufferAttribute(this.seeds, 1));
     g.computeBoundingSphere();
     g.computeBoundingBox();
     return g;
@@ -247,6 +253,7 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     const roof = b.roof === "terracotta" ? TERRACOTTA : ROOFS[Math.floor(hash01(b.id, 2) * ROOFS.length)];
     const podium = b.podiumHeightMetres ?? 0;
     const roofTop = base + total;
+    builder.seed = hash01(b.id, 61);
     if (b.tierRing && b.tierRing.length >= 3 && podium > 0 && podium * m < total) {
       builder.prism(ring, foot, base + podium * m, wall, roof);
       builder.prism(toRing(b.tierRing), base + podium * m, base + total, wall, roof);
@@ -288,15 +295,15 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     shader.uniforms.uMetre = { value: m };
     shader.uniforms.uHidden = { value: hidden };
     shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nattribute float aTile;\nattribute float aBase;\nvarying float vTile;\nvarying float vBase;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;")
+      .replace("#include <common>", "#include <common>\nattribute float aTile;\nattribute float aBase;\nattribute float aSeed;\nvarying float vTile;\nvarying float vBase;\nvarying float vSeed;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;")
       .replace(
         "#include <worldpos_vertex>",
-        "#include <worldpos_vertex>\nvTile = aTile;\nvBase = aBase;\nvMassWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvMassNormal = normalize(mat3(modelMatrix) * objectNormal);",
+        "#include <worldpos_vertex>\nvTile = aTile;\nvBase = aBase;\nvSeed = aSeed;\nvMassWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvMassNormal = normalize(mat3(modelMatrix) * objectNormal);",
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
         "#include <common>",
-        "#include <common>\nuniform float uMetre;\nuniform float uHidden[256];\nvarying float vTile;\nvarying float vBase;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;",
+        "#include <common>\nuniform float uMetre;\nuniform float uHidden[256];\nvarying float vTile;\nvarying float vBase;\nvarying float vSeed;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;",
       )
       .replace(
         "#include <color_fragment>",
@@ -307,24 +314,46 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         float s = dot(vMassWorld.xz, along) / uMetre;
         // Height above the block's own ground, so the storeys start at the pavement.
         float hM = (vMassWorld.y - vBase) / uMetre;
-        float fh = max(fwidth(hM), 1e-4) / 3.4;
-        float fs = max(fwidth(s), 1e-4) / 3.3;
-        float storey = fract(hM / 3.4);
-        float bay = fract(s / 3.3);
-        // Glass is about half of each bay and just over half of each storey, and
-        // darker and cooler than the wall. The edges widen with the pixel footprint,
-        // so a window a pixel or two across averages to a grey that still reads as
-        // glazing; the pattern fades only once several windows share one pixel.
-        float rows = smoothstep(0.22 - fh, 0.22 + fh, storey) * (1.0 - smoothstep(0.72 - fh, 0.72 + fh, storey));
-        float cols = smoothstep(0.25 - fs, 0.25 + fs, bay) * (1.0 - smoothstep(0.75 - fs, 0.75 + fs, bay));
+        // Each building has its own bay and storey, its own kind of facade, and some
+        // faces with no windows at all, so no two towers repeat one grid.
+        float r1 = fract(vSeed * 7.13);
+        float r2 = fract(vSeed * 13.71);
+        float r3 = fract(vSeed * 29.37);
+        float bayM = mix(2.8, 4.2, r1);
+        float storeyM = mix(3.0, 3.9, r2);
+        float faceR = fract(sin(dot(vMassNormal.xz, vec2(12.9898, 78.233)) + vSeed * 19.19) * 43758.5453);
+        float faceOpen = step(0.18, faceR);
+        float fh = max(fwidth(hM), 1e-4) / storeyM;
+        float fs = max(fwidth(s), 1e-4) / bayM;
+        float storey = fract(hM / storeyM);
+        float bay = fract(s / bayM);
+        // Three kinds: a glass curtain wall that is nearly all glass, punched windows
+        // about half of each bay and storey, and a sparse block with many blank bays.
+        bool curtain = r3 > 0.66;
+        bool sparse = r3 < 0.2;
+        float rLo = curtain ? 0.12 : 0.22;
+        float rHi = curtain ? 0.88 : 0.72;
+        float cLo = curtain ? 0.06 : 0.25;
+        float cHi = curtain ? 0.94 : 0.75;
+        // The edges widen with the pixel footprint, so a window a pixel or two across
+        // averages to a grey that still reads as glazing; the pattern fades only once
+        // several windows share one pixel.
+        float rows = smoothstep(rLo - fh, rLo + fh, storey) * (1.0 - smoothstep(rHi - fh, rHi + fh, storey));
+        float cols = smoothstep(cLo - fs, cLo + fs, bay) * (1.0 - smoothstep(cHi - fs, cHi + fs, bay));
         float fade = 1.0 - smoothstep(1.5, 3.0, max(fh, fs));
+        // Single windows are missing here and there: a dark room, a closed unit.
+        vec2 cell = vec2(floor(s / bayM), floor(hM / storeyM)) + vSeed * 97.0;
+        float cellR = fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453);
+        float present = curtain ? 1.0 : (sparse ? smoothstep(0.55, 0.65, cellR) : smoothstep(0.1, 0.25, cellR));
         // A wall darkens toward the pavement, where the block next door takes the sky.
         float baseOcclusion = mix(0.6, 1.0, smoothstep(0.0, 10.0, hM));
         diffuseColor.rgb *= mix(vec3(1.0), vec3(baseOcclusion), wallness);
+        // Glass is darker and cooler than the wall, and each building's glass differs.
+        float glass = rows * cols * present * faceOpen * fade * wallness;
+        vec3 tint = mix(vec3(0.40, 0.46, 0.54), vec3(0.30, 0.38, 0.47), r2);
+        diffuseColor.rgb *= mix(vec3(1.0), tint, glass);
         // Glass sits back in its reveal, so the head of each window is in shade.
-        float glass = rows * cols * fade * wallness;
-        float head = smoothstep(0.52, 0.72, storey);
-        diffuseColor.rgb *= mix(vec3(1.0), vec3(0.40, 0.46, 0.54), glass);
+        float head = smoothstep(rHi - 0.2, rHi, storey);
         diffuseColor.rgb *= mix(vec3(1.0), vec3(0.72), glass * head);
         `,
       );
