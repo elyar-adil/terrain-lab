@@ -41,11 +41,16 @@ function hash01(id: number, salt: number): number {
   return (h >>> 0) / 4294967295;
 }
 
+// Red brick and red-brown tile, only on low and mid-rise blocks.
+const BRICK = 0x9c5b4a;
 // Facade and roof albedos (sRGB). Real walls are 0.3-0.6, never white.
-const WALLS = [0xc9c3b6, 0xb9b2a4, 0xd2cdc1, 0xa8a398, 0xbfb59f, 0x9fa3a3, 0xd8cbb0, 0x9c5b4a, 0xe6e4df];
+const WALLS = [0xc9c3b6, 0xb9b2a4, 0xd2cdc1, 0xa8a398, 0xbfb59f, 0x9fa3a3, 0xd8cbb0, BRICK, 0xe6e4df];
 // Office towers are glass and cladding: cooler, darker, and more often blue-grey.
 const TOWER_WALLS = [0x5b6670, 0x6d7780, 0x8a939b, 0xb8bcc0, 0x4d5b66];
-const ROOFS = [0x6f6b66, 0x77736c, 0x5f5c59, 0x80766a, 0xc8c8c4, 0x9a9a96];
+// Flat roofs seen from the air: cement screed and grey membrane, silver
+// reflective membrane, the odd green-grey screed, and blue steel sheeting over a
+// rooftop shed. Mostly light; the dark greys made every roof a hole.
+const ROOFS = [0x9a978f, 0xa8a59d, 0x8c8a84, 0xb9b8b3, 0xc8c8c4, 0x8f948c, 0x6f8aa3];
 const TANK = 0xd8d8d0;
 const PLANT = 0x5e5c58;
 const TERRACOTTA = 0x8a5a45;
@@ -251,7 +256,9 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     // as the slabs, so a city of flats does not read as a city of dark glass.
     const towers = b.heightMetres >= 40 && b.useType === "commercial";
     const palette = towers ? TOWER_WALLS : WALLS;
-    const wall = palette[Math.floor(hash01(b.id, 1) * palette.length)];
+    let wall = palette[Math.floor(hash01(b.id, 1) * palette.length)];
+    // A brick or red-tiled tower is rare; above about eight storeys it is plaster.
+    if (wall === BRICK && b.heightMetres > 25) wall = WALLS[0];
     const roof = b.roof === "terracotta" ? TERRACOTTA : ROOFS[Math.floor(hash01(b.id, 2) * ROOFS.length)];
     const podium = b.podiumHeightMetres ?? 0;
     const roofTop = base + total;
@@ -310,7 +317,8 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
       )
       .replace(
         "#include <color_fragment>",
-        `if (vTile >= 0.0 && uHidden[int(vTile + 0.5)] > 0.5) discard;
+        `float massGlass = 0.0;
+        if (vTile >= 0.0 && uHidden[int(vTile + 0.5)] > 0.5) discard;
         #include <color_fragment>
         float wallness = 1.0 - smoothstep(0.35, 0.7, abs(vMassNormal.y));
         vec2 along = vec2(-vMassNormal.z, vMassNormal.x);
@@ -376,6 +384,27 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         // Glass sits back in its reveal, so the head of each window is in shade.
         float head = smoothstep(rHi - 0.2, rHi, storey);
         diffuseColor.rgb *= mix(vec3(1.0), vec3(0.72), glass * head);
+        // A residential block reads from afar as floor slabs: the slab edge (or the
+        // balcony front) a light line at each floor, the soffit's shadow under it.
+        // Each band fades to its mean once it is under a couple of pixels.
+        float bandFade = 1.0 - smoothstep(0.05, 0.15, fh);
+        float slabEdge = mix(0.07, smoothstep(-fh, fh, storey) * (1.0 - smoothstep(0.07 - fh, 0.07 + fh, storey)), bandFade);
+        float soffit = mix(0.08, smoothstep(0.07 - fh, 0.07 + fh, storey) * (1.0 - smoothstep(0.15 - fh, 0.15 + fh, storey)), bandFade);
+        float slabs = office ? 0.0 : wallness * faceOpen;
+        diffuseColor.rgb *= (1.0 + 0.12 * slabEdge * slabs) * (1.0 - 0.22 * soffit * slabs);
+        massGlass = glass;
+        `,
+      )
+      .replace(
+        "#include <emissivemap_fragment>",
+        `#include <emissivemap_fragment>
+        // Glass reflects the sky, more at a grazing angle, so far glazing is a cool
+        // mid grey and not a hole in the wall.
+        {
+          float facing = clamp(abs(dot(normalize(vViewPosition), normal)), 0.0, 1.0);
+          float fresnel = pow(1.0 - facing, 3.0);
+          totalEmissiveRadiance += massGlass * vec3(0.055, 0.065, 0.08) * (0.5 + 4.0 * fresnel);
+        }
         `,
       );
   };
