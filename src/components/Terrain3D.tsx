@@ -14,6 +14,7 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { sanitizePass } from "../city/post";
+import { bakeSkyEnvironment } from "../city/sky";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { buildFarTreeSet } from "./farTrees";
 import { createGroundCover } from "./groundCover";
@@ -361,21 +362,14 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     skyDome.frustumCulled = false;
     skyDome.renderOrder = -100;
     scene.add(skyDome);
-    {
-      const pmrem = new THREE.PMREMGenerator(renderer);
-      const envScene = new THREE.Scene();
-      const clone = new THREE.Mesh(new THREE.SphereGeometry(100, 32, 20), skyMaterial);
-      clone.frustumCulled = false;
-      envScene.add(clone);
-      scene.environment = pmrem.fromScene(envScene, 0.05).texture;
-      clone.geometry.dispose();
-      pmrem.dispose();
-    }
+    // The lower half of the bake is the city floor, not more sky: with the dome's
+    // own lower half every shaded wall was lit from below by blue sky.
+    scene.environment = bakeSkyEnvironment(renderer, skyMaterial);
     scene.environmentIntensity = 0.5;
     renderer.toneMappingExposure = 1.05;
 
     // 冷色补光:阴影面不全是黑的,带一点天光蓝。
-    const fillLight = new THREE.DirectionalLight(0xbcd6ff, 0.18);
+    const fillLight = new THREE.DirectionalLight(0xd4def0, 0.18);
     fillLight.position.set(0.5, 0.4, 0.6);
     scene.add(fillLight);
 
@@ -3429,7 +3423,10 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
 
     // 路口工坊移植:半球底光取冷天蓝/地面暖绿;太阳直射负责阴影,颜色与
     // 强度对齐原版(暖白 1.95),投影参数随视野在 animate 中更新。
-    const ambient = new THREE.HemisphereLight(0xcfe2f8, 0x4a5340, 0.4);
+    // In a city the shaded side of a wall sees as much of the street and of the
+    // facades opposite as of the sky, so its fill is a warm grey bounce, not the
+    // sky's blue alone; the dark green ground colour made every shaded wall navy.
+    const ambient = new THREE.HemisphereLight(0xd6e0ea, 0x8a8174, 0.4);
     scene.add(ambient);
     const azimuth = THREE.MathUtils.degToRad(config.sunAzimuth);
     const elevation = THREE.MathUtils.degToRad(config.sunElevation);

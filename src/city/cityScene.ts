@@ -20,6 +20,7 @@ import * as THREE from "three";
 import { applyAntiTiling } from "./antiTile";
 import { patchElevationMaterial } from "./elevation";
 import { createFacadeMaterial, facadeTableTexture } from "./facade";
+import { patchWeathering } from "./weathering";
 import { applyGrassFur } from "./grassFur";
 
 /** One vertex buffer group from the payload. */
@@ -630,6 +631,7 @@ export function createMaterials(
       },
       map ? 0xffffff : 0xa8a49c,
     );
+    if (!glass) patchWeathering(table.get(key) as THREE.MeshStandardMaterial);
     if (glass) {
       const material = table.get(key) as THREE.MeshStandardMaterial;
       // No env map in the harness, so glass is lit by a synthetic sky term: an
@@ -688,8 +690,8 @@ export function createMaterials(
     patchElevationMaterial(material, "shop", source.tileWidthM);
   }
   // The render a residential block is painted in arrives as a vertex colour.
-  standard("cnres.paint", { roughness: 0.9, vertexColors: true }, 0xffffff);
-  standard("cnres.trim", { roughness: 0.6 }, 0xdadad5);
+  patchWeathering(standard("cnres.paint", { roughness: 0.9, vertexColors: true }, 0xffffff));
+  patchWeathering(standard("cnres.trim", { roughness: 0.6 }, 0xdadad5), 0.6);
   // Laminated balcony glass: a pale, smooth pane that reads by the sky it
   // reflects.  A dark pane reads as a solid black slab from the street.
   standard("cnres.glass", { roughness: 0.06, metalness: 0, envMapIntensity: 1.4 }, 0xa9bcc6);
@@ -709,14 +711,14 @@ export function createMaterials(
       emissiveIntensity: 0.55,
     }),
   );
-  standard("trim.light", { roughness: 0.72 }, 0x8e887c);
+  patchWeathering(standard("trim.light", { roughness: 0.72 }, 0x8e887c), 0.6);
   standard("trim.dark", { roughness: 0.45, metalness: 0.2 }, 0x2a2f34);
   standard("balcony.slab", { roughness: 0.82 }, 0x7e7a70);
   // Air-conditioner condensers: off-white plastic, and there are hundreds of
   // them on a Chinese residential block.
-  standard("metal.ac", { roughness: 0.5, metalness: 0.05 }, 0xb8b6ae);
+  patchWeathering(standard("metal.ac", { roughness: 0.5, metalness: 0.05 }, 0xb8b6ae), 0.5);
   standard("awning", { roughness: 0.55 }, 0x1c262c);
-  standard("wall.render", { roughness: 0.88 }, 0x9c968a);
+  patchWeathering(standard("wall.render", { roughness: 0.88 }, 0x9c968a));
 
   // --- street furniture and signals ----------------------------------------
   standard("pole.concrete", { roughness: 0.9 }, 0x807c74);

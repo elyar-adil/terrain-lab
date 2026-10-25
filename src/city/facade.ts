@@ -227,7 +227,9 @@ vec2 fTilt = vec2(0.0);
   float blotch = fNoise(vFacadeWorld.xz * 0.31 + vFacadeWorld.y * 0.27) - 0.5;
   float fine = fNoise(wp * 2.7) - 0.5;
   float streak = max(0.0, fNoise(vec2(U * 9.0, V * H * 0.35)) - 0.45) / 0.55;
-  float paint = 0.86 * (1.0 + (0.035 + 0.05 * weather) * blotch + 0.02 * fine);
+  // Patch repairs and fading leave the paint a few per cent off from bay to bay.
+  float patchN = fNoise(vec2(U * 0.23 + float(row), V * H * 0.11)) - 0.5;
+  float paint = 0.86 * (1.0 + (0.06 + 0.08 * weather) * blotch + 0.03 * fine + 0.08 * patchN);
   paint *= 1.0 - (0.04 + 0.10 * weather) * streak * smoothstep(0.0, 0.9, ml / H + 0.2);
   vec3 skinC = tint * paint;
   float skinRough = 0.9;
@@ -378,6 +380,36 @@ vec2 fTilt = vec2(0.0);
       glassCov *= 1.0 - rail * railCov;
       if (railKind == 1) { fGlass = rail; }
     }
+  }
+
+  // --- weathering ----------------------------------------------------------
+  // What a photograph of any Chinese block shows and a clean render does not:
+  // dirt washed down the wall in vertical streaks, darker under each sill where
+  // the runoff leaves the drip, and a splash zone at the foot.  The strengths are
+  // read off photographs of 1990s-2010s plaster and tile blocks: a streak takes
+  // 10-30 % off the wall, a tear stain 15-35 %.  Each pattern averages to its
+  // mean once it is finer than a pixel.
+  {
+    float wall = 1.0 - glassCov;
+    float wfine = smoothstep(0.04, 0.2, fw);
+    // Streak columns: a few per metre, each of its own strength, long up the wall.
+    float colN = fNoise(vec2(U * 1.9 + float(row) * 3.7, V * H * 0.035));
+    float colF = fNoise(vec2(U * 7.0, V * H * 0.12));
+    float rain = smoothstep(0.42, 0.85, colN) * mix(0.55 + 0.45 * colF, 0.75, wfine);
+    rain = mix(rain, 0.18, smoothstep(0.15, 0.6, fw));
+    float tear = 0.0;
+    if (opening > 0.5 && kind == 2) {
+      // Under the sill, as far as the floor, fading as it runs.
+      float drop = oy0 - 0.06 - ml;
+      float run = smoothstep(0.0, 0.05, drop) * (1.0 - smoothstep(0.0, max(oy0 - 0.06, 0.3), drop));
+      float drip = mix(0.35 + 0.65 * fNoise(vec2(x * 16.0, float(s) * 5.1)), 0.65, wfine);
+      tear = fBox(x, ox0 - 0.04, ox1 + 0.04, fw) * run * drip;
+    }
+    // Splash zone: the bottom 0.6 m of the lowest storey.
+    float splash = (s < 0.5 ? 1.0 - smoothstep(0.1, 0.6, ml) : 0.0);
+    float dirt = (0.10 + 0.20 * weather) * rain + (0.15 + 0.20 * weather) * tear + 0.18 * splash;
+    // Grime is brown-grey, so it takes more blue than red off the wall.
+    colour *= vec3(1.0) - vec3(0.85, 0.92, 1.0) * clamp(dirt, 0.0, 0.6) * wall;
   }
 
   // --- glass ----------------------------------------------------------------

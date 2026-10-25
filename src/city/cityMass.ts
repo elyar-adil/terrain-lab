@@ -364,6 +364,15 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         float glass = mix(meanGlass, rows * cols * present, fade) * faceOpen * wallness;
         vec3 tint = mix(vec3(0.40, 0.46, 0.54), vec3(0.30, 0.38, 0.47), r2);
         diffuseColor.rgb *= mix(vec3(1.0), tint, glass);
+        // Dirt washed down the wall in columns, the far form of the detail facade's
+        // weathering; it averages to a slightly darker wall once a column is
+        // under a pixel, so the hand-off to the detail does not change the tone.
+        float column = floor(s / 0.8);
+        float columnR = fract(sin(column * 12.9898 + seed * 78.233) * 43758.5453);
+        float runR = fract(sin(column * 4.13 + floor(hM / 9.0) * 7.71 + seed * 3.3) * 43758.5453);
+        float streak = smoothstep(0.55, 0.95, columnR) * (0.55 + 0.45 * runR);
+        streak = mix(streak, 0.13, smoothstep(0.2, 0.8, fwidth(s)));
+        diffuseColor.rgb *= 1.0 - vec3(0.20, 0.22, 0.24) * streak * wallness * (1.0 - glass);
         // Glass sits back in its reveal, so the head of each window is in shade.
         float head = smoothstep(rHi - 0.2, rHi, storey);
         diffuseColor.rgb *= mix(vec3(1.0), vec3(0.72), glass * head);
