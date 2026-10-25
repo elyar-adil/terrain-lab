@@ -344,6 +344,13 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     renderer.shadowMap.autoUpdate = false;
     renderer.toneMappingExposure = 1.08;
     host.appendChild(renderer.domElement);
+    // A lost context leaves a transparent canvas that reads as a white frame. Say
+    // so, and prevent the default so the browser may restore it.
+    renderer.domElement.addEventListener("webglcontextlost", (event) => {
+      event.preventDefault();
+      console.error("[webgl] context lost");
+    });
+    renderer.domElement.addEventListener("webglcontextrestored", () => console.warn("[webgl] context restored"));
     const framePerf = createFramePerf(renderer);
 
     // 路口工坊移植:写实天空穹顶(同一份材质烘成 PMREM 环境贴图,玻璃与

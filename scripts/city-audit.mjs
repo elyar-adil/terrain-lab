@@ -160,6 +160,10 @@ try {
       "--enable-webgl",
       "--ignore-gpu-blocklist",
       "--hide-scrollbars",
+      // A software-rendered frame of a mounted city takes minutes. The GPU
+      // watchdog takes that for a hang and drops the WebGL context, and the
+      // capture then reads a transparent canvas: the blank "white" frames.
+      "--disable-gpu-watchdog",
     ],
   });
 
