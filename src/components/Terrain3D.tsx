@@ -1823,6 +1823,9 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     // `?tilelog` prints each city's tile states every half second, for checking the streamer.
     const tileLog = new URLSearchParams(window.location.search).has("tilelog");
     tileDebug.log = tileLog;
+    // Milliseconds of tile building per frame. `?tilebudget=<ms>` raises it for the
+    // software renderer in the audit, where a frame takes seconds anyway.
+    const tileBudgetMs = Number(new URLSearchParams(window.location.search).get("tilebudget")) || 6;
     const streamCityTiles = (seconds: number) => {
       (result.modernCities ?? []).forEach((plan, index) => {
         const origin = plan.frame.origin;
@@ -1857,7 +1860,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
         // City-local metres: the group's transform undone, scale included, so the
         // inverse of the placement is already in metres.
         const local = streamer.group.worldToLocal(camera.position.clone());
-        streamer.update(local, 6);
+        streamer.update(local, tileBudgetMs);
         streamer.tick(seconds, distanceM, camera);
         tileFrame += 1;
         if (tileLog && tileFrame % 30 === 0) console.log(`[tiles] city ${index} camera ${local.x.toFixed(0)},${local.z.toFixed(0)} ${JSON.stringify(streamer.summary())}`);

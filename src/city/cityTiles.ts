@@ -15,8 +15,8 @@ import type { CityScene } from "./cityScene";
 
 /** Side of one tile, city-local metres. */
 export const CITY_TILE_M = 500;
-/** Tiles whose centre is within this of the camera are built and kept. */
-export const TILE_LOAD_M = 700;
+/** Tiles any part of which is within this of the camera are built and kept. */
+export const TILE_LOAD_M = 350;
 /** Beyond the load range by this much a tile is dropped, so the edge never flickers. */
 const TILE_UNLOAD_SLACK_M = 300;
 /** Requests in flight at once. */
@@ -57,6 +57,17 @@ interface Tile {
   layer: CityLayer | null;
 }
 
+/**
+ * Metres from the camera to the nearest point of a tile, zero inside it. Measured to
+ * the tile's centre instead, the tile the camera stands in was out of a range shorter
+ * than half a tile's diagonal, and the camera stood on bare far form.
+ */
+function tileDistance(column: number, row: number, camera: THREE.Vector3): number {
+  const dx = Math.max(column * CITY_TILE_M - camera.x, 0, camera.x - (column + 1) * CITY_TILE_M);
+  const dz = Math.max(row * CITY_TILE_M - camera.z, 0, camera.z - (row + 1) * CITY_TILE_M);
+  return Math.hypot(dx, dz);
+}
+
 /** Set by the host under `?tilelog`: the streamer then reports how long each step takes. */
 export const tileDebug = { log: false };
 
@@ -93,11 +104,7 @@ export class CityTileStreamer {
     const centreRow = Math.floor(camera.z / CITY_TILE_M);
     for (let row = centreRow - reach; row <= centreRow + reach; row += 1) {
       for (let column = centreColumn - reach; column <= centreColumn + reach; column += 1) {
-        const distance = Math.hypot(
-          (column + 0.5) * CITY_TILE_M - camera.x,
-          (row + 0.5) * CITY_TILE_M - camera.z,
-        );
-        if (distance > this.loadM) continue;
+        if (tileDistance(column, row, camera) > this.loadM) continue;
         const key = tileKey(column, row);
         if (!this.tiles.has(key)) {
           this.tiles.set(key, { column, row, state: "idle", scene: null, build: null, layer: null });
@@ -105,10 +112,7 @@ export class CityTileStreamer {
       }
     }
     for (const tile of this.tiles.values()) {
-      const distance = Math.hypot(
-        (tile.column + 0.5) * CITY_TILE_M - camera.x,
-        (tile.row + 0.5) * CITY_TILE_M - camera.z,
-      );
+      const distance = tileDistance(tile.column, tile.row, camera);
       if (distance > this.loadM + TILE_UNLOAD_SLACK_M) {
         this.drop(tile);
         continue;
