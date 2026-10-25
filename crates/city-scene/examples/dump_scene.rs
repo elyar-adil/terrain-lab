@@ -5,6 +5,7 @@
 //!     [--radius-km 0.5] [--block-m 110] [--seed 42] [--out public/city-scenes.json]
 //!     [--bin city.bin]   also write the binary container the desktop app streams
 //!     [--lite]           small budgets, for headless software rendering
+//!     [--plan plan.json] write the city plan itself and stop, for checking a layout
 
 use city_scene::{SceneBudget, build_city_scene};
 use urban::{ModernChinaSpec, generate_modern_chinese_city};
@@ -72,6 +73,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => city,
     };
     println!("{} buildings in the plan", city.buildings.len());
+    if let Some(plan) = flag("--plan") {
+        std::fs::write(&plan, serde_json::to_vec(&city)?)?;
+        println!("wrote {plan}");
+        return Ok(());
+    }
     let scene = build_city_scene(&city, budget);
     let s = &scene.stats;
     println!(

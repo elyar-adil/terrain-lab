@@ -165,7 +165,8 @@ mod tests {
         assert!(
             city.buildings
                 .iter()
-                .all(|building| building.height_metres.is_finite() && building.floors >= 3)
+                // Two storeys at the least: the shop runs that front the compounds.
+                .all(|building| building.height_metres.is_finite() && building.floors >= 2)
         );
         assert!(city.hd_roads.iter().any(|road| road.bridge));
         assert!(city.hd_roads.iter().all(|road| !road.lanes.is_empty()));

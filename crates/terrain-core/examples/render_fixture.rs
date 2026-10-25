@@ -150,6 +150,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 radius_km: site.radius_m / 1000.0,
                 seed: 4242,
+                // The desktop app's towns take their streets from the roads layer,
+                // whose finest street rung is 150 m; the standalone planner's
+                // default 120 m grid is much finer than that, so the fixture uses
+                // the largest block it allows.
+                block_size_metres: 180.0,
                 ..urban::ModernChinaSpec::default()
             })
         })
