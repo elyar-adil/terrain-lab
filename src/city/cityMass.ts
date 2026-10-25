@@ -43,7 +43,7 @@ function hash01(id: number, salt: number): number {
 
 // Facade and roof albedos (sRGB). Real walls are 0.3-0.6, never white.
 const WALLS = [0xc9c3b6, 0xb9b2a4, 0xd2cdc1, 0xa8a398, 0xbfb59f, 0x9fa3a3, 0xd8cbb0, 0x9c5b4a, 0xe6e4df];
-// Towers are glass and cladding: cooler, darker, and more often blue-grey.
+// Office towers are glass and cladding: cooler, darker, and more often blue-grey.
 const TOWER_WALLS = [0x5b6670, 0x6d7780, 0x8a939b, 0xb8bcc0, 0x4d5b66];
 const ROOFS = [0x6f6b66, 0x77736c, 0x5f5c59, 0x80766a, 0xc8c8c4, 0x9a9a96];
 const TANK = 0xd8d8d0;
@@ -247,13 +247,16 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     // Sink the foot below the lowest corner so a building on a slope has no gap.
     const foot = base - 1.5 * m;
     const total = Math.max(b.heightMetres, 3) * m;
-    const towers = b.heightMetres >= 40;
+    // Only office towers are glass. A residential tower is plaster or tile, as light
+    // as the slabs, so a city of flats does not read as a city of dark glass.
+    const towers = b.heightMetres >= 40 && b.useType === "commercial";
     const palette = towers ? TOWER_WALLS : WALLS;
     const wall = palette[Math.floor(hash01(b.id, 1) * palette.length)];
     const roof = b.roof === "terracotta" ? TERRACOTTA : ROOFS[Math.floor(hash01(b.id, 2) * ROOFS.length)];
     const podium = b.podiumHeightMetres ?? 0;
     const roofTop = base + total;
-    builder.seed = hash01(b.id, 61);
+    // The whole part says whether the building is an office, which alone may be glass.
+    builder.seed = hash01(b.id, 61) * 0.999 + (b.useType === "commercial" ? 1 : 0);
     if (b.tierRing && b.tierRing.length >= 3 && podium > 0 && podium * m < total) {
       builder.prism(ring, foot, base + podium * m, wall, roof);
       builder.prism(toRing(b.tierRing), base + podium * m, base + total, wall, roof);
@@ -316,12 +319,14 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         float hM = (vMassWorld.y - vBase) / uMetre;
         // Each building has its own bay and storey, its own kind of facade, and some
         // faces with no windows at all, so no two towers repeat one grid.
-        float r1 = fract(vSeed * 7.13);
-        float r2 = fract(vSeed * 13.71);
-        float r3 = fract(vSeed * 29.37);
+        bool office = vSeed >= 1.0;
+        float seed = fract(vSeed);
+        float r1 = fract(seed * 7.13);
+        float r2 = fract(seed * 13.71);
+        float r3 = fract(seed * 29.37);
         float bayM = mix(2.8, 4.2, r1);
         float storeyM = mix(3.0, 3.9, r2);
-        float faceR = fract(sin(dot(vMassNormal.xz, vec2(12.9898, 78.233)) + vSeed * 19.19) * 43758.5453);
+        float faceR = fract(sin(dot(vMassNormal.xz, vec2(12.9898, 78.233)) + seed * 19.19) * 43758.5453);
         float faceOpen = step(0.18, faceR);
         float fh = max(fwidth(hM), 1e-4) / storeyM;
         float fs = max(fwidth(s), 1e-4) / bayM;
@@ -329,7 +334,7 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         float bay = fract(s / bayM);
         // Three kinds: a glass curtain wall that is nearly all glass, punched windows
         // about half of each bay and storey, and a sparse block with many blank bays.
-        bool curtain = r3 > 0.66;
+        bool curtain = office && r3 > 0.4;
         bool sparse = r3 < 0.2;
         float rLo = curtain ? 0.12 : 0.22;
         float rHi = curtain ? 0.88 : 0.72;
@@ -344,7 +349,7 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         // is only a tone, the average of the pattern, or it aliases into dashes.
         float fade = 1.0 - smoothstep(0.25, 0.5, max(fh, fs));
         // Single windows are missing here and there: a dark room, a closed unit.
-        vec2 cell = vec2(floor(s / bayM), floor(hM / storeyM)) + vSeed * 97.0;
+        vec2 cell = vec2(floor(s / bayM), floor(hM / storeyM)) + seed * 97.0;
         float cellR = fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453);
         float presentMean = curtain ? 1.0 : (sparse ? 0.4 : 0.88);
         float presentNow = curtain ? 1.0 : (sparse ? smoothstep(0.55, 0.65, cellR) : smoothstep(0.1, 0.25, cellR));
