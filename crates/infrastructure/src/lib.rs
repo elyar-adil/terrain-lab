@@ -1385,15 +1385,20 @@ mod tests {
                     // 45 m, not on it: the planner merges nodes closer than 16 m and
                     // straightens near-straight chains, so the street can sit a
                     // few tens of metres off the regional road's own polyline.
+                    // Measured to the street as drawn, its HD centreline: an SD road is
+                    // only the chord between two junctions, and once junctions are a
+                    // block apart a chord cuts well inside a curving regional road.
                     let class = modern_class(road.class) as i32;
-                    let ok = city.sd_roads.iter().any(|r| {
-                        let (a, b) = (
-                            &city.nodes[r.from as usize].point,
-                            &city.nodes[r.to as usize].point,
-                        );
+                    let ok = city.hd_roads.iter().any(|r| {
                         (r.class as i32) <= class
-                            && segment_distance_km(end, [a.x_km, a.y_km], [b.x_km, b.y_km]) * 1000.0
-                                < 45.0
+                            && r.centreline.windows(2).any(|w| {
+                                segment_distance_km(
+                                    end,
+                                    [w[0].x_km, w[0].y_km],
+                                    [w[1].x_km, w[1].y_km],
+                                ) * 1000.0
+                                    < 45.0
+                            })
                     });
                     assert!(
                         ok,

@@ -22,13 +22,17 @@ pub struct LevelSpec {
     pub reach_m: f64,
 }
 
-/// From the arterial grid down to the alleys between buildings: 主干路, 次干路,
-/// 支路, 小区路, 巷.
+/// From the arterial grid down to the streets between blocks: 主干路, 次干路,
+/// 支路, 小区路.
 pub const LEVELS: [LevelSpec; 5] = [
+    // Retired. A 78 m rung cut every block of the dense core to 60 to 80 m, well under
+    // a 小区 block, and its thin diagonal lines read as clutter. It stays in the table
+    // so the rung numbers, and the classes derived from them, do not move. A
+    // `min_urban` above 1 means it never exists.
     LevelSpec {
         level: 0,
         base_spacing_m: 78.0,
-        min_urban: 0.7,
+        min_urban: 2.0,
         reach_m: 50.0,
     },
     LevelSpec {

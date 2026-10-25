@@ -296,8 +296,8 @@ mod tests {
         );
         // The countryside only has the coarsest rung.
         assert!(country.divisions.iter().all(|d| d.level == TOP_RUNG));
-        // A town has all four.
-        for level in 0..=TOP_RUNG {
+        // A town has the four coarser rungs; the finest, retired, never appears.
+        for level in 1..=TOP_RUNG {
             assert!(
                 town.divisions.iter().any(|d| d.level == level),
                 "no level {level}"
