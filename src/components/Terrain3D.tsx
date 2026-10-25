@@ -13,6 +13,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { sanitizePass } from "../city/post";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { buildFarTreeSet } from "./farTrees";
 import { createGroundCover } from "./groundCover";
@@ -404,6 +405,7 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
       const bloomPass = new UnrealBloomPass(new THREE.Vector2(960, 540), 0.14, 0.5, 1.05);
       post.addPass(renderPass);
       post.addPass(gtaoPass);
+      post.addPass(sanitizePass());
       post.addPass(bloomPass);
       post.addPass(new OutputPass());
       post.setSize(host.clientWidth || 2, host.clientHeight || 2);

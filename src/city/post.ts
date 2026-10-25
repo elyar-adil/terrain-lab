@@ -20,6 +20,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 
 import { patchTreeMaterial } from "../trees/shaders";
@@ -137,6 +138,7 @@ export function createPost(
 
   composer.addPass(renderPass);
   composer.addPass(gtao);
+  composer.addPass(sanitizePass());
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
@@ -156,4 +158,33 @@ export function createPost(
       composer.dispose();
     },
   };
+}
+
+/**
+ * Replace non-finite pixels with black and clamp the rest, ahead of bloom.
+ *
+ * Bloom blurs the frame down a mip chain, so a single NaN or infinite pixel from
+ * any material spreads to every pixel and the frame comes out solid white. The
+ * clamp is far above anything a lit surface reaches; it only stops a stray spike.
+ */
+export function sanitizePass(): ShaderPass {
+  return new ShaderPass({
+    name: "SanitizeShader",
+    uniforms: { tDiffuse: { value: null } },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D tDiffuse;
+      varying vec2 vUv;
+      bool bad(float v) { return isnan(v) || isinf(v) || abs(v) > 1.0e4; }
+      void main() {
+        vec4 c = texture2D(tDiffuse, vUv);
+        if (bad(c.r) || bad(c.g) || bad(c.b) || bad(c.a)) c = vec4(0.0, 0.0, 0.0, 1.0);
+        gl_FragColor = vec4(min(c.rgb, vec3(64.0)), c.a);
+      }`,
+  });
 }
