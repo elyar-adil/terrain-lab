@@ -152,9 +152,10 @@ void treeShape(out vec3 pos, out vec3 nor) {
     // The same noise that breaks a crown into clumps: lobes of light and dark.
     float lobe = treeHash(floor(aLeafPos.xyz * 0.9)) * 0.5 + 0.5;
     ao *= mix(0.78, 1.12, lobe);
-    // Shade is cooler and bluer (skylight), sun is warm and yellow.
+    // Shade is cooler and bluer (skylight). The sun's own warmth comes from the
+    // light; doubling it here as well took the blue out of every sunlit crown.
     vec3 shaded = col * vec3(0.55, 0.78, 0.82);
-    vec3 sunlit = col * vec3(1.12, 1.10, 0.86);
+    vec3 sunlit = col * vec3(1.08, 1.06, 0.97);
     col = mix(shaded, sunlit, clamp(ao, 0.0, 1.0)) * clamp(0.38 + 0.80 * ao, 0.38, 1.15);
     vTreeColour = vec4(col, tn.y * ao);
     vTreeA = sh;
@@ -516,8 +517,10 @@ if (vTreeKind > 1.5) {
   vec3 a = max(diffuseColor.rgb, vec3(1e-3));
   float m = max(max(a.r, a.g), a.b);
   vec3 hue = a / m;
-  vec3 through = pow(hue, vec3(0.80, 0.42, 3.0)) * vec3(0.85, 1.0, 0.28);
-  totalEmissiveRadiance += through * (m * 1.9 + 0.012) * directionalLights[0].color * t * seen;
+  // A leaf transmits about what it reflects in the green (5 - 10 %), and a
+  // quarter of that in the blue; at twice that, every back-lit leaf glowed lime.
+  vec3 through = pow(hue, vec3(0.80, 0.42, 1.6)) * vec3(0.85, 1.0, 0.5);
+  totalEmissiveRadiance += through * (m * 0.9 + 0.006) * directionalLights[0].color * t * seen;
 }
 #endif
 `;
