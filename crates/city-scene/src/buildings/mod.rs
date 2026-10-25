@@ -432,9 +432,24 @@ pub fn build(
         }
         builder.ground_uv("block.ground", &plate, level::BLOCK, None);
     }
+    let mut on_parcel: std::collections::HashMap<u32, Vec<&ModernBuilding>> =
+        std::collections::HashMap::new();
+    for building in buildings {
+        on_parcel
+            .entry(building.parcel_id)
+            .or_default()
+            .push(building);
+    }
     for parcel in parcels {
         let ring = ring_of(&parcel.ring, frame);
         if ring.len() < 3 {
+            continue;
+        }
+        let standing = on_parcel.get(&parcel.id).map(Vec::as_slice).unwrap_or(&[]);
+        if style == CityStyle::ChineseModern
+            && parcel.use_type == ParcelUse::Residential
+            && compound_ground(&ring, standing, frame, builder)
+        {
             continue;
         }
         // Residential compounds are landscaped (lawn, hedges, paths); only
@@ -485,6 +500,68 @@ pub fn build(
         compound_shell(compound, &ring, frame, builder);
     }
     table
+}
+
+/// 消防车道 — the fire lane a compound runs inside its fence.  GB 50016 asks
+/// at least 4 m clear; it is also the compound's only road.
+const FIRE_LANE_M: f32 = 4.0;
+/// The footway between the fence and the lane.
+const LANE_SETBACK_M: f32 = 2.5;
+/// The paved apron round each block: its entrances, bins and bicycles.
+const APRON_M: f32 = 3.0;
+
+/// The ground of a residential plot: paved, with a fire lane inside the fence
+/// on a plot large enough for one, lawn inside that, and a paved apron round
+/// each block.
+///
+/// Drawn as one lawn, the plots read as a golf course between towers.  GB 50180
+/// asks a new compound for a green-space ratio of 30 – 35 %; the rest is lanes,
+/// parking, courts and the aprons the blocks stand in.  Layers are drawn a few
+/// millimetres apart, each over the last.  Returns false when the plot is too
+/// thin for even the footway, and the caller draws it plain.
+fn compound_ground(
+    ring: &[Vec2],
+    buildings: &[&ModernBuilding],
+    frame: CityFrameInfo,
+    builder: &mut MeshBuilder,
+) -> bool {
+    let mut outer = ring.to_vec();
+    if signed_area(&outer) < 0.0 {
+        outer.reverse();
+    }
+    let area = signed_area(&outer);
+    // An inset that flipped or collapsed means the plot is thinner than it.
+    let keeps = |inner: &[Vec2], share: f32| {
+        let a = signed_area(inner);
+        a > 0.0 && a < area && a > area * share
+    };
+    let lane = crate::math::inset_ring(&outer, LANE_SETBACK_M);
+    if !keeps(&lane, 0.4) {
+        return false;
+    }
+    builder.ground_uv("parcel.paving", &outer, level::GROUND - 0.004, None);
+    let lawn = crate::math::inset_ring(&outer, LANE_SETBACK_M + FIRE_LANE_M);
+    if area >= 2500.0 && keeps(&lawn, 0.3) {
+        builder.ground_uv("asphalt", &lane, level::GROUND - 0.0035, None);
+        builder.ground_uv("parcel.green", &lawn, level::GROUND - 0.003, None);
+    } else {
+        // A single block's plot: a footway inside the fence, the rest planted.
+        builder.ground_uv("parcel.green", &lane, level::GROUND - 0.003, None);
+    }
+    for building in buildings {
+        let mut footprint = ring_of(&building.footprint, frame);
+        if footprint.len() < 3 {
+            continue;
+        }
+        if signed_area(&footprint) < 0.0 {
+            footprint.reverse();
+        }
+        let apron = crate::math::inset_ring(&footprint, -APRON_M);
+        if signed_area(&apron) > signed_area(&footprint) {
+            builder.ground_uv("parcel.paving", &apron, level::GROUND - 0.0025, None);
+        }
+    }
+    true
 }
 
 /// For each building, the podium it stands on: the roof height and storey
