@@ -69,6 +69,8 @@ const TERRACOTTA = 0x8a5a45;
 const ASPHALT = 0x64625e;
 // Paving, plazas and forecourts between the buildings of a block.
 const PAVING = 0x8b8982;
+// Unbuilt ground inside the town: rough grass and scrub.
+const OPEN_GROUND = 0x66704d;
 // The ground of a lot by what it is, as the detail plants it: a park is lawn and
 // trees, a compound is lawn between its paths, a lot of shops or offices is a
 // paved forecourt, a works yard is concrete, a village is packed lanes. One
@@ -354,10 +356,15 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
 
   // The ground of every block, so buildings stand on paving rather than on the
   // meadow the terrain texture shows.
-  for (const block of city.blocks) {
+  // A block with no lots is open ground (a field, a verge, land not built on
+  // yet), not a plaza: under the lots it is the paving between them.
+  const built = new Set(city.parcels.map((parcel) => parcel.blockId));
+  city.blocks.forEach((block, index) => {
     builder.select(...tileOfPoint(city.frame, ringMean(block.boundary)));
-    builder.flat(toRing(block.boundary), frame.heightAt, 0.15 * m, PAVING);
-  }
+    // A parcel names its block by the block's index in the plan.
+    const ground = built.has(index) ? PAVING : OPEN_GROUND;
+    builder.flat(toRing(block.boundary), frame.heightAt, 0.15 * m, ground);
+  });
 
   // Each lot's own ground over the block's.
   for (const parcel of city.parcels) {
