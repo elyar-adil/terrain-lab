@@ -372,11 +372,16 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     // The lower half of the bake is the city floor, not more sky: with the dome's
     // own lower half every shaded wall was lit from below by blue sky.
     scene.environment = bakeSkyEnvironment(renderer, skyMaterial);
-    scene.environmentIntensity = 0.5;
+    // Shade is lit by sky and bounce alone. With environment 0.5, hemisphere 0.4
+    // and fill 0.18 a sunlit wall was only 2.3 times its shaded side, where a clear
+    // day gives 4 - 6 (skylight 15 - 25 % of the total); every frame looked hazy,
+    // its darkest twentieth at 30-35 of 255 where photographs reach 20 - 40 and the
+    // reference render 2. These bring the ratio to about 3.3.
+    scene.environmentIntensity = 0.32;
     renderer.toneMappingExposure = 1.05;
 
     // 冷色补光:阴影面不全是黑的,带一点天光蓝。
-    const fillLight = new THREE.DirectionalLight(0xd4def0, 0.18);
+    const fillLight = new THREE.DirectionalLight(0xd4def0, 0.1);
     fillLight.position.set(0.5, 0.4, 0.6);
     scene.add(fillLight);
 
@@ -3433,7 +3438,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     // In a city the shaded side of a wall sees as much of the street and of the
     // facades opposite as of the sky, so its fill is a warm grey bounce, not the
     // sky's blue alone; the dark green ground colour made every shaded wall navy.
-    const ambient = new THREE.HemisphereLight(0xd6e0ea, 0x8a8174, 0.4);
+    const ambient = new THREE.HemisphereLight(0xd6e0ea, 0x8a8174, 0.24);
     scene.add(ambient);
     const azimuth = THREE.MathUtils.degToRad(config.sunAzimuth);
     const elevation = THREE.MathUtils.degToRad(config.sunElevation);

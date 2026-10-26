@@ -180,7 +180,9 @@ export function sanitizePass(): ShaderPass {
     fragmentShader: /* glsl */ `
       uniform sampler2D tDiffuse;
       varying vec2 vUv;
-      bool bad(float v) { return isnan(v) || isinf(v) || abs(v) > 1.0e4; }
+      // By the exponent bits: GLSL ES does not require isnan or isinf to work,
+      // and a compiler that assumes no NaNs folds both to false.
+      bool bad(float v) { return (floatBitsToUint(v) & 0x7f800000u) == 0x7f800000u || abs(v) > 1.0e4; }
       void main() {
         vec4 c = texture2D(tDiffuse, vUv);
         if (bad(c.r) || bad(c.g) || bad(c.b) || bad(c.a)) c = vec4(0.0, 0.0, 0.0, 1.0);
