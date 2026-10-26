@@ -1189,10 +1189,8 @@ fn village_block(env: &[V], spurs: &[(V, V, ModernRoadClass)], mut sink: PlanSin
                         ParcelUse::Village,
                         BuildingFacade::PlasterResidential,
                     );
-                    if shop {
-                        if let Some(b) = sink.buildings.last_mut() {
-                            b.entrance_count = 2;
-                        }
+                    if shop && let Some(b) = sink.buildings.last_mut() {
+                        b.entrance_count = 2;
                     }
                 }
                 plot += 1;
