@@ -1049,10 +1049,12 @@ pub fn derive(
         }
         ports.sort_by(|a, b| a.angle.total_cmp(&b.angle));
 
-        let roundabout = ports.len() >= 4 && radius[node_index] > 14.0 && {
-            rng.fork(node);
-            rng.chance(0.20)
-        };
+        // A ramp terminal is signalised, never a roundabout.
+        let roundabout =
+            ports.len() >= 4 && radius[node_index] > 14.0 && !control[node_index].terminal && {
+                rng.fork(node);
+                rng.chance(0.20)
+            };
         let mut ring: Vec<Vec2> = Vec::with_capacity(ports.len() * 9);
         let mut walk_ring: Vec<Vec2> = Vec::with_capacity(ports.len() * 9);
         for index in 0..ports.len() {
@@ -2288,8 +2290,12 @@ mod tests {
                     .find(|junction| junction.kind == JunctionKind::Signalized);
                 assert!(
                     deck == 1 && terminal.is_some(),
-                    "seed {seed}: ramp {} does not run from the deck to a signalised terminal",
-                    road.id
+                    "seed {seed}: ramp {} does not run from the deck to a signalised terminal: deck ends {deck}, junctions {:?}",
+                    road.id,
+                    [road.from_node, road.to_node]
+                        .into_iter()
+                        .map(|node| network.junction(node).map(|j| (j.kind, j.ports.len())))
+                        .collect::<Vec<_>>()
                 );
                 // Every lane of a ramp is reached from the network and leads on.
                 for id in &road.lane_ids {

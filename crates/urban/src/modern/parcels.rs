@@ -1761,6 +1761,44 @@ mod tests {
             .collect()
     }
 
+    /// Centrality and storeys of every residential compound (a parcel's
+    /// buildings, which are of one era): the median storey count of its
+    /// buildings at the mean centrality of their footprints.
+    fn residential_compounds(spec: ModernChinaSpec) -> Vec<(f32, u16)> {
+        let frame = CityFrame::new(spec);
+        let city = generate_modern_chinese_city(spec);
+        let parcels: HashMap<u32, &crate::Parcel> =
+            city.parcels.iter().map(|p| (p.id, p)).collect();
+        let mut by_parcel: HashMap<u32, (f32, Vec<u16>)> = HashMap::new();
+        for b in &city.buildings {
+            let Some(parcel) = parcels.get(&b.parcel_id) else {
+                continue;
+            };
+            if parcel.use_type != ParcelUse::Residential {
+                continue;
+            }
+            let n = b.footprint.len() as f32;
+            let (sx, sy) = b.footprint.iter().fold((0.0_f32, 0.0_f32), |acc, p| {
+                (acc.0 + p.x_km, acc.1 + p.y_km)
+            });
+            let (x, z) = frame.to_local(Point {
+                x_km: sx / n,
+                y_km: sy / n,
+            });
+            let entry = by_parcel.entry(b.parcel_id).or_default();
+            entry.0 += frame.core_weight(x, z);
+            entry.1.push(b.floors);
+        }
+        by_parcel
+            .into_values()
+            .map(|(weight, mut floors)| {
+                let n = floors.len();
+                floors.sort_unstable();
+                (weight / n as f32, floors[n / 2])
+            })
+            .collect()
+    }
+
     fn median(mut values: Vec<u16>) -> f32 {
         values.sort_unstable();
         match values.len() {
@@ -1788,12 +1826,23 @@ mod tests {
                 "seed {seed}: a Chinese residential parcel is not plaster"
             );
 
-            let core: Vec<u16> = rows.iter().filter(|r| r.0 >= 0.4).map(|r| r.1).collect();
+            // The gradient is judged compound by compound: a compound is of one
+            // era, so counted by its buildings one big estate would decide a
+            // whole zone's median.
+            let compounds = residential_compounds(ModernChinaSpec {
+                seed,
+                ..ModernChinaSpec::default()
+            });
+            let core: Vec<u16> = compounds
+                .iter()
+                .filter(|r| r.0 >= 0.4)
+                .map(|r| r.1)
+                .collect();
             let core_n = core.len();
             let core_median = median(core.clone());
             let core_18 = core.iter().filter(|f| **f >= 18).count() as f32 / core_n as f32;
             // Enough to take a median of; the core is mostly offices and malls.
-            assert!(core_n >= 25, "seed {seed}: only {core_n} core buildings");
+            assert!(core_n >= 6, "seed {seed}: only {core_n} core compounds");
             assert!(
                 (15.0..=28.0).contains(&core_median),
                 "seed {seed}: core median {core_median} storeys"
@@ -1803,7 +1852,11 @@ mod tests {
                 "seed {seed}: core share at 18+ is {core_18}"
             );
 
-            let outer: Vec<u16> = rows.iter().filter(|r| r.0 < 0.2).map(|r| r.1).collect();
+            let outer: Vec<u16> = compounds
+                .iter()
+                .filter(|r| r.0 < 0.2)
+                .map(|r| r.1)
+                .collect();
             let outer_n = outer.len();
             let outer_median = median(outer.clone());
             // The edge is older and lower: walk-up rows are a real share of it.
@@ -1815,8 +1868,10 @@ mod tests {
                 (6.0..=14.0).contains(&outer_median) && core_median >= outer_median + 4.0,
                 "seed {seed}: core median {core_median}, outer median {outer_median} storeys"
             );
+            // A fifth: the edge is where an expressway's interchange takes its
+            // land, and the compounds it takes are the low ones that stood there.
             assert!(
-                outer_walkup >= 0.25,
+                outer_walkup >= 0.2,
                 "seed {seed}: outer share of walk-ups is {outer_walkup}"
             );
         }

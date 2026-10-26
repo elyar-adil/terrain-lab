@@ -1531,7 +1531,7 @@ mod tests {
     /// re-pinned again when expressways got interchanges: the fixture's ring
     /// road now has a diamond, whose ramps take land and whose verges are left
     /// unbuilt, so the plan under the buildings changed, not the buildings.
-    const WESTERN_MIXED_LAYER_HASH: u64 = 14_961_707_648_642_689_310;
+    const WESTERN_MIXED_LAYER_HASH: u64 = 3_655_475_617_883_524_457;
 
     #[test]
     fn western_mixed_building_layer_is_bit_identical() {

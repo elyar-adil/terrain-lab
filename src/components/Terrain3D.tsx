@@ -391,6 +391,14 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     // 的阴影不是模型自带的,少了它所有物体都像悬浮。
     let composer: THREE.WebGLRenderer | { render: () => void } | null = null;
     let gtaoPassRef: { enabled: boolean } | null = null;
+    // Objects the occlusion pass does not see. A forest crown is a mass of
+    // interpenetrating leaf clumps, which GTAO reads as deep occlusion and
+    // turned every tree black; left out of its G-buffer, a crown takes the
+    // occlusion of the ground behind it, which is next to none, and keeps the
+    // shading of its own clumps.
+    const aoExcluded: THREE.Object3D[] = [];
+    // `?ao=0` turns the occlusion pass off, for diagnosis.
+    const aoOff = new URLSearchParams(window.location.search).get("ao") === "0";
     try {
       if (new URLSearchParams(window.location.search).get("post") === "0") throw new Error("post disabled for diagnosis");
       const composerTarget = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, samples: 4 });
@@ -414,6 +422,19 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
       // itself to black.
       patchOcclusionFoliage(gtaoPass.normalMaterial);
       patchTreeMaterial(gtaoPass.normalMaterial, "normal");
+      {
+        type OverridePass = { _renderOverride: (...args: unknown[]) => void };
+        const pass = gtaoPass as unknown as OverridePass;
+        const renderOverride = pass._renderOverride.bind(gtaoPass);
+        pass._renderOverride = (...args: unknown[]) => {
+          const shown = aoExcluded.map((object) => object.visible);
+          for (const object of aoExcluded) object.visible = false;
+          renderOverride(...args);
+          aoExcluded.forEach((object, index) => {
+            object.visible = shown[index];
+          });
+        };
+      }
       const bloomPass = new UnrealBloomPass(new THREE.Vector2(960, 540), 0.14, 0.5, 1.05);
       post.addPass(renderPass);
       post.addPass(gtaoPass);
@@ -870,6 +891,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       trees.add(mesh);
     });
     scene.add(trees);
+    aoExcluded.push(trees);
 
     // A whole-world tree mesh cannot retain real tree density over hundreds of
     // kilometres. These two instance layers act as a small vegetation clipmap:
@@ -890,6 +912,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       return mesh;
     }));
     const detailMeshes = detailMeshSets.flat();
+    aoExcluded.push(...detailMeshes);
 
     const sampleGrid = (values: ArrayLike<number>, worldX: number, worldZ: number) => {
       const gridX = THREE.MathUtils.clamp((worldX + 1.6) / 3.2 * (result.meshSize - 1), 0, result.meshSize - 1);
@@ -3853,7 +3876,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       // Contact occlusion is a 0.8 m effect: beyond a kilometre of view it is
       // invisible, and it costs a second scene render plus full-screen passes.
       if (gtaoPassRef) {
-        const wantAo = viewSpanMetres < 1500;
+        const wantAo = viewSpanMetres < 1500 && !aoOff;
         if (gtaoPassRef.enabled !== wantAo) gtaoPassRef.enabled = wantAo;
       }
       stepCityMount(delta);

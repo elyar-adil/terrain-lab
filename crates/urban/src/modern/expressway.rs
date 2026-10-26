@@ -36,7 +36,10 @@ use crate::{HdLane, HdRoad, LaneUse, ModernRoadClass, Movement, SdNode, SdRoad};
 const RAMP_REACH_M: f32 = 420.0;
 /// Distance along the arterial from the crossing to each ramp terminal: the
 /// half width of the deck, the terminal's own box, and room to queue between.
+/// Nearer where the arterial's next junction is close, but never under
+/// `TERMINAL_MIN_M`, where the ramps could not splay out from the deck.
 const TERMINAL_M: f32 = 58.0;
+const TERMINAL_MIN_M: f32 = 38.0;
 /// The ramp runs beside the deck for this long before it splays away from it.
 const TAPER_M: f32 = 70.0;
 /// Interchanges are at least this far apart along the expressway.
@@ -66,6 +69,7 @@ struct Road {
 }
 
 /// The plan's street graph in local metres, while the expressway is laid into it.
+#[derive(Clone)]
 struct Graph {
     pts: Vec<V>,
     roles: Vec<String>,
@@ -628,8 +632,9 @@ struct Diamond {
     node: usize,
     chain: Chain,
     /// The two arms of the street across: (road index, or `None` for the stub
-    /// that carries an arterial across; its line from the node).
-    terminals: [(Option<usize>, Vec<V>); 2],
+    /// that carries an arterial across; its line from the node; the distance
+    /// along it to the terminal).
+    terminals: [(Option<usize>, Vec<V>, f32); 2],
     ramps: Vec<RampPlan>,
     /// Local streets cut where the ramps come down.
     remove: Vec<usize>,
@@ -649,6 +654,7 @@ struct RampPlan {
 
 /// Plan the diamond at `node`, or say why not.
 fn plan_diamond(graph: &Graph, node: usize, half_deck: f32) -> Option<Diamond> {
+    // Each `return None` says why, for whoever reads this next.
     // Each `return None` says why, for whoever reads this next.
     let debug = |_why: &str| {};
     let incident = graph.incident(node);
@@ -680,13 +686,21 @@ fn plan_diamond(graph: &Graph, node: usize, half_deck: f32) -> Option<Diamond> {
         unit(sub(sample(&line, 12.0).0, line[0]))
     };
     let mut across: Vec<Option<usize>> = Vec::new();
-    let arterial: Vec<usize> = streets
+    // An arterial first; in a town whose arterials are only its core, a
+    // collector (次干路) is where the expressway is entered.
+    let mut through: Vec<usize> = streets
         .iter()
         .copied()
-        .filter(|&i| graph.roads[i].class == ModernRoadClass::Arterial)
+        .filter(|&i| {
+            matches!(
+                graph.roads[i].class,
+                ModernRoadClass::Arterial | ModernRoadClass::Collector
+            )
+        })
         .collect();
-    let Some(&first) = arterial.first() else {
-        debug("no arterial");
+    through.sort_by_key(|&i| graph.roads[i].class as u8);
+    let Some(&first) = through.first() else {
+        debug("no arterial or collector");
         return None;
     };
     across.push(Some(first));
@@ -731,13 +745,45 @@ fn plan_diamond(graph: &Graph, node: usize, half_deck: f32) -> Option<Diamond> {
         Some(road) => arm(graph, road, node).1,
         None => stub.clone().unwrap_or_default(),
     };
-    let mut terminals: Vec<(Option<usize>, Vec<V>)> = Vec::new();
+    let mut terminals: Vec<(Option<usize>, Vec<V>, f32)> = Vec::new();
+    let mut remove: Vec<usize> = Vec::new();
     for slot in across {
         let line = arm_line(slot);
-        // Room for the terminal and its box before the arm's next junction.
-        if polyline_len(&line) < TERMINAL_M + 30.0 {
-            debug("no room for a terminal on the arterial");
-            return None;
+        let arm_len = polyline_len(&line);
+        // Room for the terminal and its box before the arm's next junction;
+        // or, where that junction is close, the ramps land at it, and the
+        // local streets that met the arterial there are closed off.
+        let mut at = TERMINAL_M.min(arm_len - 30.0);
+        if at < TERMINAL_MIN_M {
+            let Some(road) = slot else {
+                debug("no room for a terminal on the stub");
+                return None;
+            };
+            if !(TERMINAL_MIN_M..=TERMINAL_M + 40.0).contains(&arm_len) {
+                debug("no room for a terminal on the arterial");
+                return None;
+            }
+            let (far, _, _) = arm(graph, road, node);
+            let away = unit(sub(line[line.len() - 1], sample(&line, arm_len - 12.0).0));
+            let mut onward = 0;
+            for i in graph.incident(far) {
+                if i == road {
+                    continue;
+                }
+                let r = &graph.roads[i];
+                let (_, next, _) = arm(graph, i, far);
+                let out = unit(sub(sample(&next, 12.0).0, next[0]));
+                if r.class == ModernRoadClass::Local {
+                    remove.push(i);
+                } else if r.class == graph.roads[road].class && dot(out, away) > 0.8 && onward == 0
+                {
+                    onward += 1;
+                } else {
+                    debug("a street meets the arterial where its terminal would be");
+                    return None;
+                }
+            }
+            at = arm_len;
         }
         // The arterial crosses square enough for a diamond.
         let a = unit(sub(sample(&line, 12.0).0, line[0]));
@@ -745,12 +791,11 @@ fn plan_diamond(graph: &Graph, node: usize, half_deck: f32) -> Option<Diamond> {
             debug("the arterial crosses too obliquely");
             return None;
         }
-        terminals.push((slot, line));
+        terminals.push((slot, line, at));
     }
     // A local street crossing where the ramps come down is cut short of the
     // expressway (it ends at the frontage, as it would); anything bigger rules
     // the interchange out.
-    let mut remove: Vec<usize> = Vec::new();
     for &(s, n) in &chain.nodes {
         if n == node || (s - chain.at).abs() >= LANDING_CLEAR_M {
             continue;
@@ -767,10 +812,10 @@ fn plan_diamond(graph: &Graph, node: usize, half_deck: f32) -> Option<Diamond> {
             remove.push(i);
         }
     }
-    let terminals: [(Option<usize>, Vec<V>); 2] = terminals.try_into().ok()?;
+    let terminals: [(Option<usize>, Vec<V>, f32); 2] = terminals.try_into().ok()?;
     let mut ramps = Vec::new();
-    for (k, (_, line)) in terminals.iter().enumerate() {
-        let tp = sample(line, TERMINAL_M).0;
+    for (k, (_, line, at)) in terminals.iter().enumerate() {
+        let tp = sample(line, *at).0;
         let (s_t, lateral) = project(&chain.line, tp);
         // Traffic on the terminal's side of the deck runs with the main line
         // when that side is its kerb side.
@@ -836,7 +881,7 @@ fn plan_diamond(graph: &Graph, node: usize, half_deck: f32) -> Option<Diamond> {
     // Both sides of the deck, one terminal each.
     let sides: Vec<f32> = terminals
         .iter()
-        .map(|(_, line)| project(&chain.line, sample(line, TERMINAL_M).0).1.signum())
+        .map(|(_, line, at)| project(&chain.line, sample(line, *at).0).1.signum())
         .collect();
     if sides[0] == sides[1] {
         debug("both terminals are on one side of the deck");
@@ -850,7 +895,7 @@ fn plan_diamond(graph: &Graph, node: usize, half_deck: f32) -> Option<Diamond> {
             if road.class == ModernRoadClass::Expressway || remove.contains(&index) {
                 continue;
             }
-            if terminals.iter().any(|(slot, _)| *slot == Some(index)) {
+            if terminals.iter().any(|(slot, _, _)| *slot == Some(index)) {
                 continue;
             }
             let mut low = false;
@@ -898,7 +943,7 @@ fn build_diamond(graph: &mut Graph, diamond: Diamond, layout: &mut Layout) {
     }
     // The terminals first: they cut the arterial arms, which the ramps end on.
     let mut terminal_nodes = Vec::new();
-    for (slot, line) in &diamond.terminals {
+    for (slot, line, at) in &diamond.terminals {
         let road = match slot {
             Some(road) => *road,
             None => {
@@ -906,10 +951,15 @@ fn build_diamond(graph: &mut Graph, diamond: Diamond, layout: &mut Layout) {
                     return;
                 };
                 let end = graph.node(stub[stub.len() - 1], "regional-gateway");
+                // Carried across as the street it is.
+                let class = diamond.terminals[0]
+                    .0
+                    .map(|road| graph.roads[road].class)
+                    .unwrap_or(ModernRoadClass::Arterial);
                 graph.roads.push(Road {
                     from: diamond.node,
                     to: end,
-                    class: ModernRoadClass::Arterial,
+                    class,
                     bridge: false,
                     oneway: false,
                     line: stub,
@@ -917,14 +967,21 @@ fn build_diamond(graph: &mut Graph, diamond: Diamond, layout: &mut Layout) {
                 graph.roads.len() - 1
             }
         };
-        let p = sample(line, TERMINAL_M).0;
+        let (from, to) = (graph.roads[road].from, graph.roads[road].to);
+        let total = polyline_len(&graph.roads[road].line);
+        // At the arm's own far junction: that node is the terminal.
+        if *at >= total - 0.5 {
+            let far = if from == diamond.node { to } else { from };
+            graph.roles[far] = "ramp-terminal".into();
+            terminal_nodes.push(far);
+            continue;
+        }
+        let p = sample(line, *at).0;
         let n = graph.node(p, "ramp-terminal");
-        let r = &graph.roads[road];
-        let total = polyline_len(&r.line);
-        let along = if r.from == diamond.node {
-            TERMINAL_M
+        let along = if from == diamond.node {
+            *at
         } else {
-            total - TERMINAL_M
+            total - *at
         };
         graph.split(road, vec![(along, n)]);
         terminal_nodes.push(n);
@@ -967,6 +1024,296 @@ fn build_diamond(graph: &mut Graph, diamond: Diamond, layout: &mut Layout) {
     }
 }
 
+/// The width the corridor's right of way takes from the town: no street may run
+/// along it within this of its centreline.
+const CORRIDOR_HALF_M: f32 = 34.0;
+
+/// Give a big town an expressway (城市快速路) of its own, before its blocks are
+/// cut, and say whether it did.
+///
+/// It is one straight line across the town, chosen among lines at every 5
+/// degrees and a few offsets from the centre: one that crosses arterials
+/// square, far enough apart for interchanges, runs along as few streets as it
+/// can (those it does run along give way to it), crosses few streets at a
+/// slant, and passes at a fringe of the centre, as a Chinese city's elevated
+/// expressway skirts its old core. The streets it crosses are cut where it
+/// crosses them; the expressway is lifted off them after the blocks.
+fn lay_corridor(frame: &CityFrame, graph: &mut Graph) -> bool {
+    // How big the town is: where nine in ten of its nodes lie.
+    let mut radii: Vec<f32> = graph.pts.iter().map(|p| len(*p)).collect();
+    if radii.len() < 200 {
+        return false;
+    }
+    radii.sort_by(f32::total_cmp);
+    let reach = radii[radii.len() * 9 / 10];
+    let arterial_m: f32 = graph
+        .roads
+        .iter()
+        .filter(|r| r.class == ModernRoadClass::Arterial)
+        .map(|r| polyline_len(&r.line))
+        .sum();
+    if reach < 1_200.0 || arterial_m < 6_000.0 {
+        return false;
+    }
+    let river = frame.river_line();
+    // The line at angle `a` and offset `o`, out past the town.
+    let line_for = |a: f32, o: f32| -> Vec<V> {
+        let (d, n) = ((a.cos(), a.sin()), (-a.sin(), a.cos()));
+        let half = ((reach * 1.3).powi(2) - o * o).max(0.0).sqrt();
+        let steps = ((2.0 * half) / 50.0).ceil() as usize;
+        (0..=steps)
+            .map(|k| {
+                let s = -half + 2.0 * half * k as f32 / steps as f32;
+                add(mul(n, o), mul(d, s))
+            })
+            .collect()
+    };
+    let mut candidates: Vec<(f32, Vec<V>)> = Vec::new();
+    for step in 0..36 {
+        let a = std::f32::consts::PI * step as f32 / 36.0;
+        let dir = (a.cos(), a.sin());
+        for k in [
+            -0.6_f32, -0.48, -0.36, -0.24, -0.12, 0.12, 0.24, 0.36, 0.48, 0.6,
+        ] {
+            let o = k * reach;
+            let line = line_for(a, o);
+            let (first, last) = (line[0], line[line.len() - 1]);
+            let total = len(sub(last, first));
+            let mut cost = 2_000.0 * (k.abs() - 0.36).powi(2);
+            // Every crossing: station on the line, how square, the street's
+            // class, and how far its piece runs on each side.
+            let mut crossings: Vec<(f32, f32, ModernRoadClass, f32)> = Vec::new();
+            for road in &graph.roads {
+                if road.line.len() < 2 {
+                    continue;
+                }
+                let weight = match road.class {
+                    ModernRoadClass::Arterial | ModernRoadClass::Collector => 4.0,
+                    _ => 1.5,
+                };
+                let road_len = polyline_len(&road.line);
+                let mut walked = 0.0;
+                for w in road.line.windows(2) {
+                    let seg = sub(w[1], w[0]);
+                    let l = len(seg);
+                    if l < 0.1 {
+                        continue;
+                    }
+                    let along = dot(unit(seg), dir).abs();
+                    // Running along it, inside the right of way.
+                    let mid = mul(add(w[0], w[1]), 0.5);
+                    let off = cross(dir, sub(mid, first));
+                    if off.abs() < CORRIDOR_HALF_M && along > 0.82 {
+                        cost += weight * l;
+                    }
+                    if let Some((t, u)) = intersect(w[0], w[1], first, last) {
+                        let at_road = walked + t * l;
+                        let room = at_road.min(road_len - at_road);
+                        crossings.push((u * total, along, road.class, room));
+                        cost += match road.class {
+                            ModernRoadClass::Local => 6.0,
+                            ModernRoadClass::Collector => 10.0,
+                            _ => 4.0,
+                        };
+                        if along > 0.57 {
+                            cost += 40.0;
+                        }
+                    }
+                    walked += l;
+                }
+            }
+            crossings.sort_by(|a, b| a.0.total_cmp(&b.0));
+            // Interchanges it could have, as `plan_diamond` would judge them: a
+            // square crossing of an arterial or a collector, room on it for a
+            // terminal each side, no other through street near the landings,
+            // spaced apart and clear of the line's ends.
+            let mut kept: Vec<(f32, ModernRoadClass)> = Vec::new();
+            for &(s, along, class, room) in &crossings {
+                if class == ModernRoadClass::Local || along > 0.42 || room < TERMINAL_MIN_M {
+                    continue;
+                }
+                if s < RAMP_REACH_M + 200.0 || s > total - RAMP_REACH_M - 200.0 {
+                    continue;
+                }
+                let crowded = crossings.iter().any(|&(s2, _, c2, _)| {
+                    c2 != ModernRoadClass::Local
+                        && (s2 - s).abs() > 1.0
+                        && (s2 - s).abs() < LANDING_CLEAR_M
+                });
+                if crowded {
+                    continue;
+                }
+                if kept.last().is_none_or(|(t, _)| s - t > SPACING_M) {
+                    kept.push((s, class));
+                }
+            }
+            if kept.is_empty() {
+                continue;
+            }
+            // An expressway is for its interchanges: two or three of them make
+            // a line worth far more than the streets it costs, and one on an
+            // arterial more than one on a collector.
+            for (_, class) in kept.iter().take(3) {
+                cost -= if *class == ModernRoadClass::Arterial {
+                    500.0
+                } else {
+                    350.0
+                };
+            }
+            for w in river.windows(2) {
+                if intersect(w[0], w[1], first, last).is_some() {
+                    let along = dot(unit(sub(w[1], w[0])), dir).abs();
+                    cost += if along > 0.6 { 120.0 } else { 30.0 };
+                }
+            }
+            candidates.push((cost, line));
+        }
+    }
+    // The few best on paper are tried for real: laid into a copy of the graph,
+    // the line whose crossings `plan_diamond` can actually build the most
+    // interchanges at wins, and the paper score breaks a tie.
+    candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let half_deck = crate::cross_section(ModernRoadClass::Expressway).width_metres * 0.5;
+    let mut best: Option<(usize, f32, Vec<V>)> = None;
+    for (cost, line) in candidates.into_iter().take(10) {
+        let mut trial = graph.clone();
+        let crossings = insert_corridor(&mut trial, &line);
+        let mut built: Vec<f32> = Vec::new();
+        for (s, node) in crossings {
+            if built.iter().any(|t| (s - t).abs() < SPACING_M) {
+                continue;
+            }
+            if plan_diamond(&trial, node, half_deck).is_some() {
+                built.push(s);
+            }
+        }
+        let better = match &best {
+            None => !built.is_empty(),
+            Some((count, c, _)) => built.len() > *count || (built.len() == *count && cost < *c),
+        };
+        if better {
+            best = Some((built.len(), cost, line));
+        }
+    }
+    let Some((_, _, line)) = best else {
+        return false;
+    };
+    insert_corridor(graph, &line);
+    true
+}
+
+/// Lay the corridor along `line`: the streets running along it give way, and it
+/// is cut into the graph where it crosses the rest. Returns the crossings.
+fn insert_corridor(graph: &mut Graph, line: &[V]) -> Vec<(f32, usize)> {
+    // The streets that run along the corridor give way to it.
+    let (first, last) = (line[0], line[line.len() - 1]);
+    let dir = unit(sub(last, first));
+    for road in graph.roads.iter_mut() {
+        if road.line.len() < 2 {
+            continue;
+        }
+        let total = polyline_len(&road.line);
+        let inside: f32 = road
+            .line
+            .windows(2)
+            .filter(|w| {
+                let mid = mul(add(w[0], w[1]), 0.5);
+                cross(dir, sub(mid, first)).abs() < CORRIDOR_HALF_M
+                    && dot(unit(sub(w[1], w[0])), dir).abs() > 0.82
+            })
+            .map(|w| len(sub(w[1], w[0])))
+            .sum();
+        if inside > total * 0.3 {
+            road.from = usize::MAX;
+            road.to = usize::MAX;
+            road.line.clear();
+        }
+    }
+    // Cut it into the graph where it crosses the streets, and lay it.
+    let crossings = graph.cross(line, |r| r.class != ModernRoadClass::Expressway);
+    let total = polyline_len(line);
+    let start = graph.node(first, "regional-gateway");
+    let end = graph.node(last, "regional-gateway");
+    let mut stops: Vec<(f32, usize)> = vec![(0.0, start)];
+    stops.extend(
+        crossings
+            .iter()
+            .copied()
+            .filter(|(s, _)| *s > 1.0 && *s < total - 1.0),
+    );
+    stops.push((total, end));
+    stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+    stops.dedup_by(|a, b| a.1 == b.1);
+    for w in stops.windows(2) {
+        let ((s0, n0), (s1, n1)) = (w[0], w[1]);
+        if s1 - s0 < 0.5 || n0 == n1 {
+            continue;
+        }
+        let mut piece = slice(line, s0, s1);
+        piece[0] = graph.pts[n0];
+        *piece.last_mut().expect("a slice has two ends") = graph.pts[n1];
+        graph.roads.push(Road {
+            from: n0,
+            to: n1,
+            class: ModernRoadClass::Expressway,
+            bridge: false,
+            oneway: false,
+            line: piece,
+        });
+    }
+    crossings
+}
+
+/// The blocks are faces of the graph's straight edges, node to node, so every
+/// crossing of two edges must be a node. The expressway and its ramps are cut
+/// into the graph where their lines cross the streets', but a chord can still
+/// cross a chord where the lines do not quite. Each such crossing of an
+/// expressway or ramp edge with a street edge gets a node of its own, which the
+/// second pass then takes apart like any other.
+fn repair_planarity(graph: &mut Graph, layout: &mut Layout) {
+    for _ in 0..8 {
+        let mut found: Option<(usize, usize, V)> = None;
+        'search: for a in 0..graph.roads.len() {
+            let ra = &graph.roads[a];
+            if ra.class != ModernRoadClass::Expressway || ra.line.len() < 2 || ra.from == ra.to {
+                continue;
+            }
+            let (pa, qa) = (graph.pts[ra.from], graph.pts[ra.to]);
+            for b in 0..graph.roads.len() {
+                let rb = &graph.roads[b];
+                if rb.class == ModernRoadClass::Expressway || rb.line.len() < 2 || rb.bridge {
+                    continue;
+                }
+                if [rb.from, rb.to]
+                    .iter()
+                    .any(|n| *n == ra.from || *n == ra.to)
+                {
+                    continue;
+                }
+                let (pb, qb) = (graph.pts[rb.from], graph.pts[rb.to]);
+                if let Some((t, u)) = intersect(pa, qa, pb, qb)
+                    && t > 0.01
+                    && t < 0.99
+                    && u > 0.01
+                    && u < 0.99
+                {
+                    found = Some((a, b, add(pa, mul(sub(qa, pa), t))));
+                    break 'search;
+                }
+            }
+        }
+        let Some((a, b, p)) = found else {
+            return;
+        };
+        let node = graph.node(p, "district-junction");
+        for road in [a, b] {
+            let (station, _) = project(&graph.roads[road].line, p);
+            graph.split(road, vec![(station, node)]);
+        }
+        layout.detach.push(node);
+    }
+}
+
 /// Lay the interchanges into the street graph, before the blocks are cut.
 pub(super) fn lay_out(
     frame: &CityFrame,
@@ -976,10 +1323,14 @@ pub(super) fn lay_out(
     rules: &TrafficRules,
 ) -> (Vec<SdNode>, Vec<SdRoad>, Vec<HdRoad>, Layout) {
     let mut layout = Layout::default();
-    if !sd.iter().any(|r| r.class == ModernRoadClass::Expressway) {
+    let mut graph = Graph::new(frame, &nodes, &sd, &hd);
+    // A town grown on outside streets has no expressway of its own; a big one
+    // gets one (`lay_corridor`).
+    if !sd.iter().any(|r| r.class == ModernRoadClass::Expressway)
+        && !(frame.external.is_some() && lay_corridor(frame, &mut graph))
+    {
         return (nodes, sd, hd, layout);
     }
-    let mut graph = Graph::new(frame, &nodes, &sd, &hd);
     let half_deck = crate::cross_section(ModernRoadClass::Expressway).width_metres * 0.5;
     // Candidate crossings, the most central first, so a town's interchange is
     // where its traffic is.
@@ -987,9 +1338,12 @@ pub(super) fn lay_out(
         .filter(|&n| {
             let list = graph.incident(n);
             list.iter().any(|&i| main_line(&graph.roads[i]))
-                && list
-                    .iter()
-                    .any(|&i| graph.roads[i].class == ModernRoadClass::Arterial)
+                && list.iter().any(|&i| {
+                    matches!(
+                        graph.roads[i].class,
+                        ModernRoadClass::Arterial | ModernRoadClass::Collector
+                    )
+                })
         })
         .collect();
     candidates.sort_by(|a, b| {
@@ -1029,6 +1383,7 @@ pub(super) fn lay_out(
             }
         }
     }
+    repair_planarity(&mut graph, &mut layout);
     let (nodes, sd, hd) = graph.into_plan(frame, rules);
     (nodes, sd, hd, layout)
 }
