@@ -800,9 +800,13 @@ fn sweep_ring(builder: &mut MeshBuilder, material: &str, ring: &[Vec2], thicknes
 /// follow a 6 m island, so the inner 400 mm of every roundabout is laid as a
 /// mountable kerb at a different tone, and that single ring is most of what
 /// tells a driver how big the circle is.
-pub(super) fn roundabout(junction: &Junction, builder: &mut MeshBuilder, spec: &JunctionSpec) {
-    let radius = junction.radius.max(18.0);
-    let island = radius * 0.42;
+pub(super) fn roundabout(
+    network: &Network,
+    junction: &Junction,
+    builder: &mut MeshBuilder,
+    spec: &JunctionSpec,
+) {
+    let (island, _) = crate::network::roundabout_rings(junction.radius);
     let centre = junction.centre;
     let ring = |r: f32, segments: usize| -> Vec<Vec2> {
         (0..segments)
@@ -879,8 +883,44 @@ pub(super) fn roundabout(junction: &Junction, builder: &mut MeshBuilder, spec: &
         // tangent, so the driver is told to curve rather than to continue.
         let entry = centre + outward * (distance - 8.0);
         deflection_arrow(builder, entry, right, 0.0);
+        // A splitter island on an undivided arm: a raised teardrop between the
+        // lane in and the lane out, which deflects the entry and is the
+        // pedestrian's refuge where the crossing meets it.
+        let undivided = network
+            .road(port.road)
+            .is_some_and(|road| road.section.median_metres < 0.3);
+        if undivided {
+            splitter_island(builder, mouth, outward);
+        }
     }
     let _ = spec.roundabout_apron;
+}
+
+/// A raised teardrop island on an arm's centreline, from the mouth out.
+fn splitter_island(builder: &mut MeshBuilder, mouth: Vec2, outward: Vec2) {
+    let side = outward.left_normal();
+    let length = 14.0;
+    let steps = 10;
+    let mut left = Vec::with_capacity(steps + 1);
+    let mut right = Vec::with_capacity(steps + 1);
+    for k in 0..=steps {
+        let t = k as f32 / steps as f32;
+        // Widest just off the circle, tapering to a point up the arm.
+        let half = 0.75 * (1.0 - t).powf(0.7) * (t * 6.0).clamp(0.35, 1.0);
+        let at = mouth + outward * (1.5 + length * t);
+        left.push(at + side * half);
+        right.push(at - side * half);
+    }
+    let mut outline: Vec<Vec2> = left.clone();
+    outline.extend(right.iter().rev().copied());
+    for index in 0..outline.len() {
+        let (a, b) = (outline[index], outline[(index + 1) % outline.len()]);
+        builder.wall("kerb", b, a, super::level::ROAD, super::level::KERB, None);
+    }
+    if crate::math::signed_area(&outline) < 0.0 {
+        outline.reverse();
+    }
+    builder.ground_uv("kerb", &outline, super::level::KERB, None);
 }
 
 /// A straight drive arrow re-laid along an arbitrary direction, for a

@@ -267,13 +267,16 @@ pub fn grass_texture(size: usize) -> BakedTexture {
             } else {
                 0.0
             };
-            // Bare earth: the thin places a clipped bed always has.
-            let bare = noise(0x9d17, u * 4.0, v * 4.0, 4.0);
-            let earth = if bare > 0.62 {
-                (bare - 0.62) * 210.0
-            } else {
-                0.0
-            };
+            // Bare earth: the thin places a clipped bed always has. Warped,
+            // three octaves: a single low octave thresholded put a bare spot on
+            // every lattice point of the noise, and the tile repeated them in a
+            // grid you could count from the air.
+            let wu = u + 0.08 * signed_noise(0x51a, u * 5.0, v * 5.0, 5.0);
+            let wv = v + 0.08 * signed_noise(0x51b, u * 5.0, v * 5.0, 5.0);
+            let bare = 0.5 * noise(0x9d17, wu * 6.0, wv * 6.0, 6.0)
+                + 0.3 * noise(0x9d18, wu * 13.0, wv * 13.0, 13.0)
+                + 0.2 * noise(0x9d19, wu * 29.0, wv * 29.0, 29.0);
+            let earth = ((bare - 0.6) / 0.2).clamp(0.0, 1.0).powi(2) * 34.0;
             let dry = signed_noise(41, u * 6.0, v * 6.0, 6.0) * 11.0;
             let leaf = if hash(43, x as i32, y as i32) < 0.012 {
                 22.0

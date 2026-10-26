@@ -69,6 +69,23 @@ const TERRACOTTA = 0x8a5a45;
 const ASPHALT = 0x64625e;
 // Paving, plazas and forecourts between the buildings of a block.
 const PAVING = 0x8b8982;
+// The ground of a lot by what it is, as the detail plants it: a park is lawn and
+// trees, a compound is lawn between its paths, a lot of shops or offices is a
+// paved forecourt, a works yard is concrete, a village is packed lanes. One
+// colour of grey under every lot was the first thing that gave the far form away.
+const LOT_GROUND: Record<string, number> = {
+  park: 0x5d7344,
+  green: 0x5d7344,
+  residential: 0x737d5c,
+  commercial: 0x9b988f,
+  mixedUse: 0x96938a,
+  civic: 0x948f84,
+  industrial: 0x8c8a84,
+  village: 0x7a736a,
+};
+// Crowns from afar: the detail's species range, from the dark of camphor and
+// pine to the light green of a plane or a willow.
+const CROWNS = [0x3e5a33, 0x47633a, 0x51703f, 0x3a5230, 0x5b7845, 0x34492f];
 
 // The whole part of a vertex's seed is its kind: 0 a wall with windows, 1 an
 // office (which alone may be a curtain wall), 2 a shed, 3 plant with no windows.
@@ -342,6 +359,14 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     builder.flat(toRing(block.boundary), frame.heightAt, 0.15 * m, PAVING);
   }
 
+  // Each lot's own ground over the block's.
+  for (const parcel of city.parcels) {
+    const colour = LOT_GROUND[parcel.useType] ?? PAVING;
+    const ground = parcel.useType === "residential" && !parcel.compound ? 0x7f7d72 : colour;
+    builder.select(...(parcelTile.get(parcel.id) ?? tileOfPoint(city.frame, ringMean(parcel.ring))));
+    builder.flat(toRing(parcel.ring), frame.heightAt, 0.25 * m, ground);
+  }
+
   // Streets next, as flat ribbons a little above the ground. The metre-scale
   // scene draws the real carriageway; this is its line from afar.
   for (const road of city.hdRoads) {
@@ -522,6 +547,8 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
   };
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = "cityMass";
+  const trees = buildFarTrees(city, frame, builder, hidden);
+  if (trees) mesh.add(trees.mesh);
   // The sun's frustum is fitted to the view, so the towers cast shadows across the
   // streets they stand over, and a tower in another's shadow goes dark on its wall.
   mesh.castShadow = true;
@@ -535,6 +562,90 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     },
     dispose() {
       geometry.dispose();
+      material.dispose();
+      trees?.dispose();
+    },
+  };
+}
+
+/**
+ * Every tree of the plan as a crown, one instanced draw: a low ellipsoid at the
+ * tree's own height and spread, lighter on top where the sun falls, in the
+ * colour range of the species the detail grows. Hidden tile by tile with the
+ * masses, so it stands exactly where the detail's trees will. Without it a
+ * town's streets and compounds were bare until the detail arrived, and then
+ * suddenly full of trees.
+ */
+function buildFarTrees(
+  city: ModernCityPayload,
+  frame: CityMassFrame,
+  builder: MassBuilder,
+  hidden: Float32Array,
+): { mesh: THREE.InstancedMesh; dispose(): void } | null {
+  const trees = city.trees ?? [];
+  if (!trees.length) return null;
+  const m = frame.metresToScene;
+  const crown = new THREE.IcosahedronGeometry(1, 1);
+  // Shade from the underside to the sunlit top, in the geometry's own colours.
+  const position = crown.attributes.position;
+  const shades = new Float32Array(position.count * 3);
+  for (let i = 0; i < position.count; i += 1) {
+    const y = position.getY(i);
+    const k = 0.55 + 0.45 * (y * 0.5 + 0.5);
+    shades[i * 3] = k;
+    shades[i * 3 + 1] = k;
+    shades[i * 3 + 2] = k;
+  }
+  crown.setAttribute("color", new THREE.BufferAttribute(shades, 3));
+  const tiles = new Float32Array(trees.length);
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uHidden = { value: hidden };
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nattribute float aTile;\nvarying float vTile;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvTile = aTile;");
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform float uHidden[256];\nvarying float vTile;")
+      .replace("#include <color_fragment>", "if (vTile >= 0.0 && uHidden[int(vTile + 0.5)] > 0.5) discard;\n#include <color_fragment>");
+  };
+  material.customProgramCacheKey = () => "far-trees";
+  const mesh = new THREE.InstancedMesh(crown, material, trees.length);
+  const matrix = new THREE.Matrix4();
+  const colour = new THREE.Color();
+  const quaternion = new THREE.Quaternion();
+  let count = 0;
+  for (let i = 0; i < trees.length; i += 1) {
+    const tree = trees[i];
+    const point = tree.point ?? { x_km: tree.x_km, y_km: tree.y_km };
+    if (point.x_km === undefined || point.y_km === undefined) continue;
+    const [x, z] = frame.toScene(point.x_km, point.y_km);
+    const height = Math.max(tree.heightMetres ?? 9, 3);
+    const spread = Math.max(tree.crownRadiusMetres ?? height * 0.3, 1.2);
+    const tall = Math.min(spread * 1.1, height * 0.45);
+    const y = frame.heightAt(x, z) + (height - tall) * m;
+    matrix.compose(new THREE.Vector3(x, y, z), quaternion, new THREE.Vector3(spread * m, tall * m, spread * m));
+    mesh.setMatrixAt(count, matrix);
+    const id = tree.id ?? i;
+    colour.setHex(CROWNS[Math.floor(hash01(id, 5) * CROWNS.length)]);
+    colour.multiplyScalar(0.9 + 0.2 * hash01(id, 6));
+    mesh.setColorAt(count, colour);
+    builder.select(...tileOfPoint(city.frame, point));
+    tiles[count] = builder.tileIndex.get(tileKey(...tileOfPoint(city.frame, point))) ?? -1;
+    if (tiles[count] >= MAX_MASS_TILES) tiles[count] = -1;
+    count += 1;
+  }
+  mesh.count = count;
+  crown.setAttribute("aTile", new THREE.InstancedBufferAttribute(tiles, 1));
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.computeBoundingSphere();
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.name = "cityMass/trees";
+  return {
+    mesh,
+    dispose() {
+      crown.dispose();
       material.dispose();
     },
   };

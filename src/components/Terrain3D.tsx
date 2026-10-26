@@ -13,6 +13,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { furMetres } from "../city/grassFur";
 import { offerFoliageMask, patchOcclusionFoliage, sanitizePass } from "../city/post";
 import { patchTreeMaterial } from "../trees";
 import { bakeSkyEnvironment } from "../city/sky";
@@ -476,6 +477,8 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     const geometry = new THREE.PlaneGeometry(3.2, 3.2, result.meshSize - 1, result.meshSize - 1);
     const positions = geometry.attributes.position as THREE.BufferAttribute;
     const metresToScene = 3.2 / (result.worldSizeKm * 1000);
+    // The city's grass pile is drawn in metres, and here a world unit is not one.
+    furMetres.value = 1 / metresToScene;
     const sceneToMetres = 1 / metresToScene;
     const terrainHalfExtent = 1.6;
     const terrainSampleMargin = 3.2 / Math.max(2, result.meshSize - 1) * 0.5;

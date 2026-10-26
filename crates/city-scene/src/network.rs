@@ -393,7 +393,7 @@ pub fn derive(
             control_for(&classes)
         })
         .collect();
-    let control = space_median_openings(control, &incidence, &sd_by_id, hd_roads, frame);
+    let mut control = space_median_openings(control, &incidence, &sd_by_id, hd_roads, frame);
 
     let sections: HashMap<u32, RoadCrossSection> = hd_roads
         .iter()
@@ -443,6 +443,29 @@ pub fn derive(
         }
         radius[index] = value;
     }
+
+    // --- roundabouts ----------------------------------------------------------
+    // Decided before any road is built, so a road knows its end gives way at a
+    // circle rather than stops at a line. A Chinese town has its roundabouts
+    // where streets of the second rank and below cross, never on an arterial,
+    // which is signalised (most of the old ones were rebuilt as signals).
+    for node in 0..incidence.len() {
+        let c = control[node];
+        let at_grade = incidence[node]
+            .iter()
+            .all(|id| layer_of.get(id).copied().unwrap_or(0) == 0);
+        if air[node] || !at_grade || incidence[node].len() != 4 || c.terminal || c.major < 2 {
+            continue;
+        }
+        if radius[node] <= 14.0 {
+            continue;
+        }
+        let mut roll = Rng::new(seed ^ 0x726f_756e ^ (node as u32).wrapping_mul(0x9e37_79b9));
+        if roll.chance(0.12) {
+            control[node].kind = JunctionKind::Roundabout;
+        }
+    }
+    let control = control;
 
     // --- roads ---------------------------------------------------------------
     for hd in hd_roads {
@@ -578,7 +601,9 @@ pub fn derive(
         let controlled = |node: usize| {
             incidence[node].len() > 2 && {
                 let c = control[node];
-                c.kind == JunctionKind::Signalized || class_rank(hd.class) > c.major
+                c.kind == JunctionKind::Signalized
+                    || c.kind == JunctionKind::Roundabout
+                    || class_rank(hd.class) > c.major
             }
         };
         let crossing_start = controlled(from_index);
@@ -753,6 +778,10 @@ pub fn derive(
         }
         if incidence[node_index].len() == 1 {
             dead_end_turns(&mut network, node);
+            continue;
+        }
+        if control[node_index].kind == JunctionKind::Roundabout {
+            roundabout_connectors(&mut network, node, local[node_index], radius[node_index]);
             continue;
         }
         let incoming: Vec<usize> = network
@@ -990,7 +1019,6 @@ pub fn derive(
     }
 
     // --- junctions -----------------------------------------------------------
-    let mut rng = Rng::new(seed ^ 0x6a75_6e63);
     for node_index in 0..local.len() {
         let node = node_index as u32;
         // Decks meeting in the air have no junction box.
@@ -1049,12 +1077,7 @@ pub fn derive(
         }
         ports.sort_by(|a, b| a.angle.total_cmp(&b.angle));
 
-        // A ramp terminal is signalised, never a roundabout.
-        let roundabout =
-            ports.len() >= 4 && radius[node_index] > 14.0 && !control[node_index].terminal && {
-                rng.fork(node);
-                rng.chance(0.20)
-            };
+        let roundabout = control[node_index].kind == JunctionKind::Roundabout && ports.len() >= 4;
         let mut ring: Vec<Vec2> = Vec::with_capacity(ports.len() * 9);
         let mut walk_ring: Vec<Vec2> = Vec::with_capacity(ports.len() * 9);
         for index in 0..ports.len() {
@@ -1600,6 +1623,113 @@ fn free_flow_connectors(network: &mut Network, node: u32) {
     }
 }
 
+/// The island and the circulating carriageway of a roundabout of trim radius
+/// `radius`, as `street::surfaces::roundabout` draws them: the island, and the
+/// radius a vehicle circulates at, midway across the carriageway.
+pub fn roundabout_rings(radius: f32) -> (f32, f32) {
+    let radius = radius.max(18.0);
+    let island = radius * 0.42;
+    (island, (island + 3.4 + radius) * 0.5)
+}
+
+/// Lanes round a roundabout: every lane arriving gives way and joins the
+/// circle, runs round it the way right-hand traffic does, and leaves by any
+/// other arm, into the lane of its own index. The path is the lane's end, a
+/// curve onto the circulating radius, the arc, and a curve off it; so a vehicle
+/// goes round the island, not across it.
+fn roundabout_connectors(network: &mut Network, node: u32, centre: Vec2, radius: f32) {
+    let (_, circle) = roundabout_rings(radius);
+    let motor = |lane: &Lane| lane.use_kind != LaneUse::Bike && lane.use_kind != LaneUse::Shoulder;
+    let incoming: Vec<usize> = (0..network.lanes.len())
+        .filter(|&i| network.lanes[i].to_node == node && motor(&network.lanes[i]))
+        .collect();
+    let outgoing: Vec<usize> = (0..network.lanes.len())
+        .filter(|&i| network.lanes[i].from_node == node && motor(&network.lanes[i]))
+        .collect();
+    let angle_of = |p: Vec3| (p.z - centre.y).atan2(p.x - centre.x);
+    for &a in &incoming {
+        let from = network.lanes[a].clone();
+        let p = from.path.end();
+        let mut roads: Vec<u32> = outgoing
+            .iter()
+            .map(|&b| network.lanes[b].road)
+            .filter(|&road| road != from.road)
+            .collect();
+        roads.sort_unstable();
+        roads.dedup();
+        for road in roads {
+            let mut targets: Vec<usize> = outgoing
+                .iter()
+                .copied()
+                .filter(|&b| network.lanes[b].road == road)
+                .collect();
+            targets.sort_by_key(|&b| network.lanes[b].index);
+            let Some(&b) = targets.get((from.index as usize).min(targets.len().saturating_sub(1)))
+            else {
+                continue;
+            };
+            let to = network.lanes[b].clone();
+            let q = to.path.start();
+            // Right-hand traffic goes round with the angle falling in this
+            // frame (a driver's right is the left normal here).
+            let (a0, a1) = (angle_of(p), angle_of(q));
+            let mut sweep = a1 - a0;
+            while sweep >= -0.15 {
+                sweep -= std::f32::consts::TAU;
+            }
+            while sweep < -std::f32::consts::TAU - 0.15 {
+                sweep += std::f32::consts::TAU;
+            }
+            // How far round it goes says what turn it is.
+            let turn = -sweep;
+            let movement = if turn < 2.4 {
+                Movement::Right
+            } else if turn < 3.9 {
+                Movement::Straight
+            } else {
+                Movement::Left
+            };
+            let mut points: Vec<Vec3> = Vec::new();
+            let steps = ((turn * circle / 2.5).ceil() as usize).clamp(8, 80);
+            // Onto the circle a little past the entry, off it a little before
+            // the exit, so entering and leaving are curves and not corners.
+            let ease = 0.22_f32.min(turn * 0.2);
+            for k in 0..=steps {
+                let t = k as f32 / steps as f32;
+                let angle = a0 + sweep * t;
+                let r_entry = (Vec2::new(p.x, p.z) - centre).length();
+                let r_exit = (Vec2::new(q.x, q.z) - centre).length();
+                let along = turn * t;
+                let r = if along < ease {
+                    r_entry + (circle - r_entry) * smootherstep(along / ease)
+                } else if turn - along < ease {
+                    r_exit + (circle - r_exit) * smootherstep((turn - along) / ease)
+                } else {
+                    circle
+                };
+                let plan = centre + Vec2::new(angle.cos(), angle.sin()) * r;
+                points.push(Vec3::from_plan(plan, lerp_height(p.y, q.y, t)));
+            }
+            let id = format!("{}>{}", from.id, to.id);
+            if network.connectors.iter().any(|c| c.id == id) {
+                continue;
+            }
+            network.lanes[a].successors.push(to.id.clone());
+            network.lanes[b].predecessors.push(from.id.clone());
+            network.connectors.push(Connector {
+                id,
+                node,
+                from_lane: from.id.clone(),
+                to_lane: to.id.clone(),
+                movement,
+                turn_degrees: turn.to_degrees(),
+                path: Path::new(points),
+                width: from.width,
+            });
+        }
+    }
+}
+
 /// A street that ends goes back the way it came: each lane arriving at the
 /// end turns into the lane of the same index leaving it, round a turning head.
 /// Without it a vehicle that reached a dead end had nowhere to go.
@@ -2100,6 +2230,48 @@ mod tests {
         assert_eq!(kind(&[C, C, L]), JunctionKind::Priority);
         assert_eq!(kind(&[C, C, C]), JunctionKind::Priority);
         assert_eq!(kind(&[L, L, L, L]), JunctionKind::Priority);
+    }
+
+    #[test]
+    fn traffic_goes_round_a_roundabout_and_never_across_its_island() {
+        let mut seen = 0;
+        for seed in SEEDS {
+            let network = derived(seed);
+            for junction in network
+                .junctions
+                .iter()
+                .filter(|j| j.kind == JunctionKind::Roundabout)
+            {
+                seen += 1;
+                for port in &junction.ports {
+                    let class = network.road(port.road).map(|r| r.class);
+                    assert!(
+                        !matches!(
+                            class,
+                            Some(ModernRoadClass::Arterial | ModernRoadClass::Expressway)
+                        ),
+                        "seed {seed}: a roundabout on an arterial at node {}",
+                        junction.node
+                    );
+                }
+                let (island, _) = roundabout_rings(junction.radius);
+                for connector in network
+                    .connectors
+                    .iter()
+                    .filter(|c| c.node == junction.node)
+                {
+                    for p in connector.path.points() {
+                        let r = Vec2::new(p.x, p.z).distance(junction.centre);
+                        assert!(
+                            r > island + 0.5,
+                            "seed {seed}: {} cuts across the island ({r:.1} m from the centre)",
+                            connector.id
+                        );
+                    }
+                }
+            }
+        }
+        assert!(seen > 0, "no roundabout in any test city");
     }
 
     #[test]

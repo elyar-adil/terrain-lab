@@ -17,10 +17,18 @@
 
 import * as THREE from "three";
 
+/**
+ * Metres per world unit. The pile is drawn in metres; a host that scales its
+ * city into a larger world (the terrain view draws a city at its map scale)
+ * sets this, or every blade, clump and drift is drawn at the wrong size.
+ */
+export const furMetres = { value: 1 };
+
 type Compile = (shader: THREE.WebGLProgramParametersWithUniforms, renderer: THREE.WebGLRenderer) => void;
 
 const COMMON = /* glsl */ `
 varying vec3 vFurRel;
+uniform float uFurMetres;
 // Cell hashes are taken on wrapped coordinates: a lawn is thousands of metres from the
 // origin and a hash of a million loses every bit it has. The noise is periodic over a
 // few hundred cells, which nobody can see.
@@ -47,7 +55,7 @@ uniform vec3 uFurDry;
 /** The colour and lighting of the pile, inserted where the diffuse colour is final. */
 const FRAGMENT_COLOUR = /* glsl */ `
 {
-  vec2 p = (vFurRel + cameraPosition).xz;
+  vec2 p = (vFurRel + cameraPosition).xz * uFurMetres;
   // How big one pixel is on the ground, metres: detail below it must not be drawn.
   // The footprint of one pixel on the ground, metres. At a grazing angle it is long
   // one way and short the other; a layer must be gone when its feature is smaller
@@ -80,7 +88,7 @@ const FRAGMENT_COLOUR = /* glsl */ `
 /** After the normal is known: tilt it by the clumps, and add the pile's own light. */
 const FRAGMENT_LIGHT = /* glsl */ `
 {
-  vec2 p = (vFurRel + cameraPosition).xz;
+  vec2 p = (vFurRel + cameraPosition).xz * uFurMetres;
   float px = max(length(dFdx(p)), length(dFdy(p)));
   float fc = 1.0 - smoothstep(0.02, 0.10, px);
   float e = 0.12;
@@ -129,6 +137,7 @@ export function applyGrassFur(material: THREE.MeshStandardMaterial, tip = 0xd8cf
   material.onBeforeCompile = (shader, renderer) => {
     previous?.(shader, renderer);
     shader.uniforms.uFurTip = { value: tipColour };
+    shader.uniforms.uFurMetres = furMetres;
     shader.uniforms.uFurDry = { value: dryColour };
     shader.vertexShader = patchVertexPosition(shader.vertexShader);
     shader.fragmentShader = shader.fragmentShader
@@ -158,6 +167,7 @@ function shellMaterial(_base: THREE.MeshStandardMaterial): THREE.MeshStandardMat
   material.customProgramCacheKey = () => "grass-shell";
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uShells = { value: SHELL_COUNT };
+    shader.uniforms.uFurMetres = furMetres;
     shader.uniforms.uShellHeight = { value: SHELL_HEIGHT_M };
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -187,7 +197,7 @@ vFurRel = (modelMatrix * vec4(transformed, 1.0)).xyz - cameraPosition;`,
 varying float vShell;
 void main() {
   {
-    vec2 p = (vFurRel + cameraPosition).xz;
+    vec2 p = (vFurRel + cameraPosition).xz * uFurMetres;
     float px = max(length(dFdx(p)), length(dFdy(p)));
     // Blades a centimetre across, one per cell; the cell's own height decides how
     // many shells it reaches, and its width tapers toward the tip.

@@ -16,8 +16,12 @@ import { offerFoliageMask } from "./post";
 
 /** Side of one tile, city-local metres. */
 export const CITY_TILE_M = 500;
-/** Tiles any part of which is within this of the camera are built and kept. */
-export const TILE_LOAD_M = 350;
+/**
+ * Tiles any part of which is within this of the camera are built and kept. At
+ * 350 m the far form began a block or two away, and its hand-off was the first
+ * thing an aerial view showed; 600 m puts it past the near streets.
+ */
+export const TILE_LOAD_M = 600;
 /** Beyond the load range by this much a tile is dropped, so the edge never flickers. */
 const TILE_UNLOAD_SLACK_M = 300;
 /** Requests in flight at once. */

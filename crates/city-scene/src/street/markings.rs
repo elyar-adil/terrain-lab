@@ -386,6 +386,16 @@ pub(super) fn road_markings(
             continue;
         }
         crosswalk_band(builder, &surface, centre, half, spec.crosswalk.depth);
+        // An entry to a roundabout gives way at the circle (its triangles are
+        // the roundabout's); it has no stop line.
+        let node = if approach.outward > 0.0 {
+            road.to_node
+        } else {
+            road.from_node
+        };
+        if at_roundabout(network, node) {
+            continue;
+        }
         transverse_stripe(
             builder,
             "marking.white",
@@ -415,7 +425,7 @@ pub(super) fn road_markings(
         }) else {
             continue;
         };
-        if !lane.allowed.contains(&Movement::Left) {
+        if !lane.allowed.contains(&Movement::Left) || at_roundabout(network, node) {
             continue;
         }
         let companions = network
@@ -444,6 +454,12 @@ pub(super) fn road_markings(
     }) {
         drive_arrow(builder, lane, spec);
     }
+}
+
+fn at_roundabout(network: &Network, node: u32) -> bool {
+    network
+        .junction(node)
+        .is_some_and(|j| j.kind == urban::JunctionKind::Roundabout)
 }
 
 /// Does any approach into `node` get a left-turn waiting box?  The box owns the

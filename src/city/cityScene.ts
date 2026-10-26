@@ -893,14 +893,16 @@ export function createMaterials(
         if (part === "bark") {
           // Bark is per species as well — a plum's near-black fissured bark and a
           // plane tree's pale mottled bark are not one material — and the tint
-          // arrives per instance through the vertex colour.
+          // arrives per instance through the vertex colour. Smooth-shaded from
+          // the limbs' own normals: flat-shaded, every facet of a fluted limb
+          // caught the sun on its own, and trunks and the branches seen through
+          // a crown were a spray of warm specks.
           return register(
             key,
             new THREE.MeshStandardMaterial({
               color: 0xffffff,
               roughness: 0.95,
               metalness: 0,
-              flatShading: true,
               vertexColors: true,
             }),
           );
