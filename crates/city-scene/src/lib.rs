@@ -8,6 +8,7 @@
 
 pub mod bake;
 pub mod buildings;
+pub mod corner;
 pub mod crops;
 pub mod facades;
 pub mod furniture;

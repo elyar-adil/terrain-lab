@@ -52,6 +52,8 @@ mod surfaces;
 mod tests;
 mod viaduct;
 
+use viaduct::Gap;
+
 pub use markings::junction_lane_guides;
 pub use signals::{SignalLamp, SignalRig, signal_axis};
 
@@ -177,7 +179,18 @@ impl Carriageway {
     /// A point on the crowned surface, `lift` metres above the gutter datum.
     pub fn point(&self, station: f32, offset: f32, lift: f32) -> Vec3 {
         let (position, tangent) = self.path.sample(station);
-        let lateral = tangent.left_normal() * offset;
+        // At a vertex the offset is mitred, so the edges of the two segments
+        // meet there instead of leaving a notch on the outside of the bend.
+        let before = self.path.tangent_at(station - 0.01);
+        let after = self.path.tangent_at(station + 0.01);
+        let lateral =
+            if before.dot(after) < 0.9999 && station > 0.01 && station < self.length - 0.01 {
+                let bisector = (before + after).normalize();
+                let cos = bisector.dot(after).max(0.3);
+                bisector.left_normal() * (offset / cos)
+            } else {
+                tangent.left_normal() * offset
+            };
         Vec3::new(
             position.x + lateral.x,
             position.y + lift + self.lift(offset, station),
@@ -222,10 +235,8 @@ pub(super) fn ribbon(
     if road.length <= 1.0e-4 || to <= from {
         return;
     }
-    let steps = (((to - from) / MAX_RESAMPLE_METRES).ceil().max(1.0)) as usize;
     let mut previous: Option<(Vec3, Vec3, f32)> = None;
-    for step in 0..=steps {
-        let station = from + (to - from) * step as f32 / steps as f32;
+    for station in stations(&road.path, from, to, MAX_RESAMPLE_METRES) {
         let a = road.point(station, inner, lift);
         let b = road.point(station, outer, lift);
         if let Some((pa, pb, previous_station)) = previous {
@@ -264,6 +275,26 @@ pub(super) fn ribbon(
     }
 }
 
+/// Stations from `from` to `to` at most `step` apart, and at every vertex of
+/// `path` between them.  A ribbon that skipped a vertex would cut the corner
+/// of every bend in its street, and the footway's back edge would pull off the
+/// block beside it.
+pub(super) fn stations(path: &Path, from: f32, to: f32, step: f32) -> Vec<f32> {
+    let steps = (((to - from) / step).ceil().max(1.0)) as usize;
+    let mut out: Vec<f32> = (0..=steps)
+        .map(|k| from + (to - from) * k as f32 / steps as f32)
+        .collect();
+    out.extend(
+        path.stations()
+            .iter()
+            .copied()
+            .filter(|s| *s > from + 0.05 && *s < to - 0.05),
+    );
+    out.sort_by(f32::total_cmp);
+    out.dedup_by(|a, b| (*a - *b).abs() < 0.05);
+    out
+}
+
 /// Side walls and a bottom slab for a ribbon, giving a surface real thickness.
 pub(super) fn sweep(
     builder: &mut MeshBuilder,
@@ -278,10 +309,8 @@ pub(super) fn sweep(
     if thickness <= 0.0 {
         return;
     }
-    let steps = (((to - from) / 14.0).ceil().max(1.0)) as usize;
     let mut previous: Option<(Vec3, Vec3)> = None;
-    for step in 0..=steps {
-        let station = from + (to - from) * step as f32 / steps as f32;
+    for station in stations(&surface.path, from, to, 14.0) {
         let (a, b) = (
             surface.point(station, inner, 0.0),
             surface.point(station, outer, 0.0),
@@ -378,8 +407,8 @@ pub fn build(network: &Network, builder: &mut MeshBuilder, seed: u32) -> StreetO
     let spec = network.spec;
     let joins = viaduct::joins(network);
     for road in &network.roads {
-        surfaces::road_surface(road, builder, &spec);
-        markings::road_markings(network, road, builder, &spec);
+        surfaces::road_surface(road, builder, &spec, joins.tapers(road.id));
+        markings::road_markings(network, road, builder, &spec, joins.tapers(road.id));
         markings::approach_taper(road, builder, &spec);
         // An expressway's deck and its ramps are a viaduct; anything else on
         // a structure is a bridge.

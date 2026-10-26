@@ -45,9 +45,9 @@ const CUSHION: [f32; 3] = [0.78, 0.56, 0.05];
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Gap {
     /// `-1` or `1`: the edge's side of the centreline.
-    side: f32,
-    from: f32,
-    to: f32,
+    pub(super) side: f32,
+    pub(super) from: f32,
+    pub(super) to: f32,
 }
 
 /// One ramp's join with the main deck.
@@ -74,11 +74,19 @@ struct Join {
 pub(super) struct Joins {
     joins: Vec<Join>,
     gaps: HashMap<u32, Vec<Gap>>,
+    tapers: HashMap<u32, Vec<Gap>>,
 }
 
 impl Joins {
     pub(super) fn gaps(&self, road: u32) -> &[Gap] {
         self.gaps.get(&road).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// The stretches of a main deck's edge where it widens into a ramp: from
+    /// the node to where the ramp's own deck begins.  The deck's edge line is
+    /// broken there and its shoulder gives way to the new lane.
+    pub(super) fn tapers(&self, road: u32) -> &[Gap] {
+        self.tapers.get(&road).map(Vec::as_slice).unwrap_or(&[])
     }
 }
 
@@ -131,10 +139,16 @@ pub(super) fn joins(network: &Network) -> Joins {
             let end = if diverge { 0.0 } else { length };
             let p = plan(ramp.carriageway.sample(end).0);
             // The main deck the ramp lies beside.
+            // By true distance: the lateral offset alone picks the piece on the
+            // far side of the node, onto whose end the ramp projects.
+            let distance = |m: &Road| {
+                let plan: Vec<Vec2> = m.carriageway.points().iter().map(|q| plan(*q)).collect();
+                crate::math::distance_to_polyline(p, &plan)
+            };
             let Some((main, (at_ramp, lateral))) = mains
                 .iter()
+                .min_by(|a, b| distance(a).total_cmp(&distance(b)))
                 .map(|m| (*m, project(m, p)))
-                .min_by(|a, b| a.1.1.abs().total_cmp(&b.1.1.abs()))
             else {
                 continue;
             };
@@ -180,7 +194,13 @@ pub(super) fn joins(network: &Network) -> Joins {
         }
     }
     let mut gaps: HashMap<u32, Vec<Gap>> = HashMap::new();
+    let mut tapers: HashMap<u32, Vec<Gap>> = HashMap::new();
     for join in &joins {
+        tapers.entry(join.main).or_default().push(Gap {
+            side: join.side,
+            from: join.at_node.min(join.at_ramp),
+            to: join.at_node.max(join.at_ramp),
+        });
         let (a, b) = (join.at_node, join.nose_main);
         gaps.entry(join.main).or_default().push(Gap {
             side: join.side,
@@ -202,7 +222,11 @@ pub(super) fn joins(network: &Network) -> Joins {
             to,
         });
     }
-    Joins { joins, gaps }
+    Joins {
+        joins,
+        gaps,
+        tapers,
+    }
 }
 
 fn declare(builder: &mut MeshBuilder) {
@@ -747,6 +771,12 @@ fn piers(
     }
 }
 
+/// Lateral offset of a ramp's outer edge line from its centreline, as
+/// `ramp_markings` paints it.
+fn main_line_offset(ramp: &Road) -> f32 {
+    ramp.section.motor_lanes_per_direction as f32 * ramp.section.motor_lane_width * 0.5 + 0.1
+}
+
 /// The taper where a ramp's deck meets the main deck, the hatched gore to the
 /// nose, and the crash cushion on the nose.
 fn draw_join(builder: &mut MeshBuilder, network: &Network, main: &Road, ramp: &Road, join: &Join) {
@@ -816,6 +846,26 @@ fn draw_join(builder: &mut MeshBuilder, network: &Network, main: &Road, ramp: &R
             [p(s0, 1.1), p(s1, 1.1), p(s1, 1.1), p(s0, 1.1)],
             Vec3::new(0.0, 1.0, 0.0),
             PARAPET,
+        );
+    }
+    // The new lane's edge line, running out from the deck's own edge line to
+    // the ramp's along the taper, so the lane the ramp becomes is marked from
+    // the moment it opens.
+    let main_line = main.section.half_carriageway() + 0.1;
+    let ramp_line = half + width * 0.5 + main_line_offset(ramp);
+    let line_at = |s: f32| {
+        let t = ((s - a) / (b - a)).clamp(0.0, 1.0);
+        main_line + (ramp_line - main_line) * t * t * (3.0 - 2.0 * t)
+    };
+    for k in 0..steps {
+        let s0 = a + (b - a) * k as f32 / steps as f32;
+        let s1 = a + (b - a) * (k + 1) as f32 / steps as f32;
+        let w = network.spec.edge_line_width * 0.5;
+        let p = |s: f32, d: f32| surface.point(s, join.side * (line_at(s) + d), level::PAINT);
+        paint_quad(
+            builder,
+            "marking.white",
+            [p(s0, -w), p(s1, -w), p(s1, w), p(s0, w)],
         );
     }
     // The gore: paved and hatched between the two deck edges up to the nose.

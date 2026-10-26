@@ -14,12 +14,6 @@ use crate::spec::{JunctionSpec, MM, Movement, arrow_polygons};
 
 use super::{Carriageway, WALK_Y, ribbon, sweep};
 
-/// How far the corner paving dips below sidewalk level at its outer edge.  A
-/// dropped kerb ramp reads as a ramp; a flat one reads as a floating slab.
-const CORNER_SINK: f32 = 0.40;
-/// Outward bulge applied to the corner paving's outer edge so it slides under
-/// the block's corner chamfer instead of leaving a wedge of bare ground.
-const CORNER_BULGE: f32 = 3.0;
 /// Length of the dropped kerb either side of a crossing's centre line.  GB 50763
 /// wants at least 2.5 m of dropped kerb on each side of a crossing.
 const RAMP_HALF: f32 = 2.0;
@@ -71,7 +65,12 @@ fn remaining(length: f32, cut: &[(f32, f32)]) -> Vec<(f32, f32)> {
     pieces
 }
 
-pub(super) fn road_surface(road: &Road, builder: &mut MeshBuilder, spec: &JunctionSpec) {
+pub(super) fn road_surface(
+    road: &Road,
+    builder: &mut MeshBuilder,
+    spec: &JunctionSpec,
+    tapers: &[super::Gap],
+) {
     if road.carriageway.length() < 1.0 {
         return;
     }
@@ -126,18 +125,22 @@ pub(super) fn road_surface(road: &Road, builder: &mut MeshBuilder, spec: &Juncti
         for side in [-1.0_f32, 1.0] {
             let inner = side * (motor_edge + section.bike_lane_width);
             let outer = inner + side * section.shoulder_width;
-            ribbon(
-                builder,
-                "asphalt.cycle",
-                &surface,
-                inner.min(outer),
-                inner.max(outer),
-                0.0,
-                length,
-                super::level::ROAD,
-                None,
-                super::Uvs::World,
-            );
+            // Where the deck widens into a ramp the shoulder is lane.
+            let (pieces, _) = super::markings::split_by(length, tapers, side);
+            for (from, to) in pieces {
+                ribbon(
+                    builder,
+                    "asphalt.cycle",
+                    &surface,
+                    inner.min(outer),
+                    inner.max(outer),
+                    from,
+                    to,
+                    super::level::ROAD,
+                    None,
+                    super::Uvs::World,
+                );
+            }
         }
     }
 
@@ -162,7 +165,11 @@ pub(super) fn road_surface(road: &Road, builder: &mut MeshBuilder, spec: &Juncti
     let cut = dropped_kerb(&surface, spec, road.crossing_start, road.crossing_end);
     let footway = remaining(length, &cut);
     for side in [-1.0_f32, 1.0] {
-        let inner = side * (half + 0.20);
+        // The footway runs from the back of the kerb top; the kerb top from the
+        // carriageway edge, exactly as round a junction corner.
+        let kerb_from = side * half;
+        let kerb_to = side * (half + KERB_TOP);
+        let inner = kerb_to;
         let outer = side * (half + section.sidewalk_metres);
         for (from, to) in &footway {
             ribbon(
@@ -187,8 +194,8 @@ pub(super) fn road_surface(road: &Road, builder: &mut MeshBuilder, spec: &Juncti
                 builder,
                 "kerb",
                 &surface,
-                inner - 0.16,
-                inner + 0.16,
+                kerb_from.min(kerb_to),
+                kerb_from.max(kerb_to),
                 *from,
                 *to,
                 super::level::KERB + 0.002,
@@ -199,8 +206,8 @@ pub(super) fn road_surface(road: &Road, builder: &mut MeshBuilder, spec: &Juncti
                 builder,
                 "kerb",
                 &surface,
-                inner - 0.16,
-                inner + 0.16,
+                kerb_from.min(kerb_to),
+                kerb_from.max(kerb_to),
                 *from,
                 *to,
                 super::level::KERB,
@@ -232,7 +239,7 @@ fn kerb_ramp(
     spec: &JunctionSpec,
 ) {
     let half = surface.half;
-    let kerb = side * (half + 0.20);
+    let kerb = side * half;
     let back = side * (half + 1.35);
     let middle = (from + to) * 0.5;
     // Three longitudinal stations: flat kerb, dropped, flat kerb.
@@ -262,8 +269,8 @@ fn kerb_ramp(
     quad(builder, hi, ground, to, super::level::KERB);
 
     // The tactile strip, set back from the kerb, with six raised ribs.
-    let inner = side * (half + 0.20 + TACTILE_SETBACK);
-    let outer = side * (half + 0.20 + TACTILE_SETBACK + spec.tactile_width);
+    let inner = side * (half + KERB_TOP + TACTILE_SETBACK);
+    let outer = side * (half + KERB_TOP + TACTILE_SETBACK + spec.tactile_width);
     let start = (middle - 1.6).max(lo);
     let end = (middle + 1.6).min(hi);
     if end - start < 0.4 {
@@ -316,6 +323,16 @@ fn median_and_hazard(
         return;
     }
     let median_half = section.median_metres * 0.5;
+    // At a crossing the median stops behind the crosswalk, its nose level with
+    // the stop line: the crossing runs across the carriageway unbroken and the
+    // box is clear.  Run on into the box, the median of a divided street
+    // pokes into the turning paths of every left turn.
+    let nose = spec.crosswalk.gap + spec.crosswalk.depth * 0.5 + 0.4;
+    let from = if road.crossing_start { nose } else { 0.0 };
+    let to = surface.length - if road.crossing_end { nose } else { 0.0 };
+    if to - from < 1.0 {
+        return;
+    }
     for side in [-1.0_f32, 1.0] {
         ribbon(
             builder,
@@ -323,8 +340,8 @@ fn median_and_hazard(
             surface,
             (side * median_half - 0.12).min(side * median_half + 0.12),
             (side * median_half - 0.12).max(side * median_half + 0.12),
-            0.0,
-            surface.length,
+            from,
+            to,
             super::level::KERB,
             None,
             super::Uvs::None,
@@ -336,25 +353,22 @@ fn median_and_hazard(
         surface,
         -median_half,
         median_half,
-        0.0,
-        surface.length,
+        from,
+        to,
         super::level::MEDIAN,
         None,
         super::Uvs::World,
     );
-    // The nose: on a divided road the median is cut back and marked before the
-    // box, and the black-and-yellow diagonal is the single most recognisable
-    // piece of Chinese junction furniture there is.
-    for (base, outward, crossing) in [
-        (0.0_f32, -1.0_f32, road.crossing_start),
-        (surface.length, 1.0_f32, road.crossing_end),
+    // The nose: the black-and-yellow diagonal on the median's end, the single
+    // most recognisable piece of Chinese junction furniture there is.
+    for (start, outward, crossing) in [
+        (from, 1.0_f32, road.crossing_start),
+        (to, -1.0_f32, road.crossing_end),
     ] {
-        let start = if crossing {
-            (base - outward * spec.median_hazard_length).clamp(0.0, surface.length)
-        } else {
+        if !crossing {
             continue;
-        };
-        let end = (start + outward * spec.median_hazard_length).clamp(0.0, surface.length);
+        }
+        let end = (start + outward * spec.median_hazard_length).clamp(from, to);
         if (end - start).abs() < 0.2 {
             continue;
         }
@@ -455,10 +469,10 @@ fn hazard_stripes(
         } else {
             "asphalt.pavement"
         };
-        let p0 = surface.point(from, a, super::level::PAINT);
-        let p1 = surface.point(from, b, super::level::PAINT);
-        let p2 = surface.point(to, b + skew, super::level::PAINT);
-        let p3 = surface.point(to, a + skew, super::level::PAINT);
+        let p0 = surface.point(from, a, super::level::KERB + 0.004);
+        let p1 = surface.point(from, b, super::level::KERB + 0.004);
+        let p2 = surface.point(to, b + skew, super::level::KERB + 0.004);
+        let p3 = surface.point(to, a + skew, super::level::KERB + 0.004);
         builder.quad(material, p0, p1, p2, p3, None);
     }
 }
@@ -540,71 +554,70 @@ pub(super) fn junction_geometry(
     builder.ground_uv("asphalt", &junction.ring, super::level::ROAD, None);
     sweep_ring(builder, "asphalt.pavement", &junction.ring, 0.25);
 
-    // Corner paving.  Nine inner vertices follow the junction's own kerb
-    // fillet at sidewalk level; the outer edge is a quadratic from one mouth's
-    // sidewalk end to the next, bulged outward and sunk on a sine so it reads as
-    // a dropped kerb ramp instead of a floating slab.  The invariant that makes
-    // this work is `ring.len() == walk_ring.len() == 9 * ports`.
-    //
-    // It is triangulated from a patch that carries **per-vertex elevation**.
-    // The previous version computed a 400 mm sink into the corner's outer edge
-    // and then threw it away by handing the triangulator a single `y`, so every
-    // corner in the city was a flat slab at footway height with a hole in the
-    // ground beside it.
-    let count = junction.ring.len();
-    if !count.is_multiple_of(9) || junction.walk_ring.len() != count {
+    // Corner paving: everything between the kerb return and the back of the
+    // footway round the corner, flat at footway level like the footways it
+    // joins, with the same kerb as theirs along its edge.  Built from the
+    // streets' own kerb and footway lines (`network::Corner`), so it meets each
+    // footway along its end and the block behind along its back edge.
+    for corner in &junction.corners {
+        corner_paving(builder, junction, corner);
+    }
+}
+
+/// Width of the kerb's top, from the carriageway edge back onto the footway.
+pub(super) const KERB_TOP: f32 = 0.25;
+
+fn corner_paving(builder: &mut MeshBuilder, junction: &Junction, corner: &crate::network::Corner) {
+    let kerb = &corner.kerb;
+    if kerb.len() < 2 {
         return;
     }
-    let centre = junction.centre;
-    for start in (0..count).step_by(9) {
-        let a = junction.walk_ring[(start + 9) % count];
-        let b = junction.walk_ring[start + 1];
-        let mut patch: Vec<Vec3> = Vec::with_capacity(16);
-        for step in 1..=9 {
-            let point = junction.ring[(start + step) % count];
-            patch.push(Vec3::new(point.x, WALK_Y, point.y));
+    // Which side of the kerb the footway is: away from the box.
+    let outward = |a: Vec2, b: Vec2| -> Vec2 {
+        let along = (b - a).normalize();
+        let n = Vec2::new(along.y, -along.x);
+        let mid = (a + b) * 0.5;
+        if crate::math::point_in_ring(mid + n * 0.05, &junction.ring) {
+            -n
+        } else {
+            n
         }
-        let midpoint = (a + b) * 0.5;
-        let offset = midpoint - centre;
-        let distance = offset.length().max(0.01);
-        let control = centre + offset * ((distance + CORNER_BULGE) / distance);
-        for step in 0..=6 {
-            let t = step as f32 / 6.0;
-            let u = 1.0 - t;
-            let point = a * (u * u) + control * (2.0 * u * t) + b * (t * t);
-            let y = WALK_Y - CORNER_SINK * (std::f32::consts::PI * t).sin();
-            patch.push(Vec3::new(point.x, y, point.y));
-        }
-        // The kerb: a real 150 mm face along the fillet, so the corner reads as
-        // kerbed pavement rather than as a painted patch.
-        for index in 0..9 {
-            let p0 = patch[index];
-            let p1 = patch[index + 1];
-            builder.wall(
-                "kerb",
-                Vec2::new(p0.x, p0.z),
-                Vec2::new(p1.x, p1.z),
-                super::level::ROAD,
-                WALK_Y,
-                None,
-            );
-        }
-        let plan: Vec<Vec2> = patch.iter().map(|v| Vec2::new(v.x, v.z)).collect();
+    };
+    let mut plan: Vec<Vec2> = kerb.clone();
+    plan.extend(corner.walk.iter().rev().copied());
+    if crate::math::signed_area(&plan).abs() > 0.5 {
         for [i, j, k] in crate::math::triangulate(&plan) {
-            // `triangulate` normalises to counter-clockwise, which faces `-Y`;
-            // reverse so the paving lights from above, as `fill_ring` does.
+            let (a, b, c) = (plan[i], plan[j], plan[k]);
             builder.tri_uv(
                 "sidewalk",
-                patch[i],
-                patch[k],
-                patch[j],
-                [
-                    (patch[i].x, patch[i].z),
-                    (patch[k].x, patch[k].z),
-                    (patch[j].x, patch[j].z),
-                ],
+                Vec3::from_plan(a, WALK_Y),
+                Vec3::from_plan(c, WALK_Y),
+                Vec3::from_plan(b, WALK_Y),
+                [(a.x, a.y), (c.x, c.y), (b.x, b.y)],
                 None,
             );
+        }
+    }
+    for pair in kerb.windows(2) {
+        let (p0, p1) = (pair[0], pair[1]);
+        if p0.distance(p1) < 1.0e-3 {
+            continue;
+        }
+        // The kerb face, toward the box...
+        builder.wall("kerb", p0, p1, super::level::ROAD, WALK_Y, None);
+        // ...and its top, mitred at each point by the neighbouring segments.
+        let n = outward(p0, p1) * KERB_TOP;
+        let y = super::level::KERB + 0.002;
+        let q = [
+            Vec3::from_plan(p0, y),
+            Vec3::from_plan(p1, y),
+            Vec3::from_plan(p1 + n, y),
+            Vec3::from_plan(p0 + n, y),
+        ];
+        if crate::mesh::face_normal(q[0], q[1], q[2]).y >= 0.0 {
+            builder.quad("kerb", q[0], q[1], q[2], q[3], None);
+        } else {
+            builder.quad("kerb", q[3], q[2], q[1], q[0], None);
         }
     }
 }

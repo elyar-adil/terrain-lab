@@ -17,7 +17,7 @@ use super::graph::{QUAY_OFF_M, modern_hash};
 use super::suburb;
 use crate::model::cross_section;
 use crate::{
-    BuildingFacade, CityStyle, ModernBuilding, ModernRoadClass, Parcel, ParcelUse, Point,
+    BuildingFacade, CityStyle, HdRoad, ModernBuilding, ModernRoadClass, Parcel, ParcelUse, Point,
     RoofStyle, SdNode, SdRoad, UrbanBlock,
 };
 use worldgen_core::smoothstep;
@@ -28,6 +28,9 @@ pub(super) struct ParcelOutput {
     pub buildings: Vec<ModernBuilding>,
     pub fields: Vec<crate::Field>,
 }
+
+/// A point's exact bits, to look a node up by its coordinates.
+type PointKey = (u32, u32);
 
 const PODIUM_FLOOR_M: f32 = 4.5;
 /// Gap left between two lots that share a bisection line.
@@ -59,6 +62,7 @@ pub(super) fn build_parcels(
     frame: &CityFrame,
     nodes: &[SdNode],
     sd_roads: &[SdRoad],
+    hd_roads: &[HdRoad],
 ) -> ParcelOutput {
     let radius_m = frame.radius_m;
     let density = frame.density;
@@ -74,6 +78,25 @@ pub(super) fn build_parcels(
         .filter(|r| !r.bridge)
         .map(|r| (r.from as usize, r.to as usize, r.class))
         .collect();
+    // The street each face edge runs along, as drawn: a street's centreline
+    // can bow a few metres off the straight line between its nodes, and the
+    // block plate has to follow the street, not the chord.
+    let key = |p: V| (p.0.to_bits(), p.1.to_bits());
+    let mut drawn: std::collections::HashMap<(PointKey, PointKey), Vec<V>> =
+        std::collections::HashMap::new();
+    for (sd, hd) in sd_roads.iter().zip(hd_roads) {
+        if sd.bridge || sd.id != hd.id || hd.centreline.len() < 2 {
+            continue;
+        }
+        let (Some(&a), Some(&b)) = (pts.get(sd.from as usize), pts.get(sd.to as usize)) else {
+            continue;
+        };
+        let line: Vec<V> = hd.centreline.iter().map(|p| frame.to_local(*p)).collect();
+        let mut back = line.clone();
+        back.reverse();
+        drawn.insert((key(a), key(b)), line);
+        drawn.insert((key(b), key(a)), back);
+    }
     let Extraction { faces, spurs } = extract_faces(&pts, &edges);
     let faces: Vec<_> = faces.into_iter().flat_map(split_concave).collect();
 
@@ -89,6 +112,102 @@ pub(super) fn build_parcels(
     let to_world =
         |ring: &[V]| -> Vec<Point> { ring.iter().map(|p| frame.to_world(p.0, p.1)).collect() };
 
+    // The block's ground plate, cut back from every street along the street as
+    // drawn.
+    // The block's ground plate stops under the kerb, not at the street centre
+    // line: the plate sits above the carriageway datum, so a plate that
+    // reached the centre line would paint grass over half of every road.  It
+    // is the face's outline offset inward along each street *as drawn*, joined
+    // by mitres, which follows a street that bows off its chord and stays
+    // whole at a node where the outline bends inward; cutting the face with
+    // one half-plane per edge took a wedge out at every such bend.
+    let plate_of = |face: &super::blocks::Face| -> Vec<V> {
+        let n = face.ring.len();
+        // (start, end, inset) of every straight piece of the outline.
+        let mut pieces: Vec<(V, V, f32)> = Vec::new();
+        for i in 0..n {
+            let (a, b) = (face.ring[i], face.ring[(i + 1) % n]);
+            let inset = if face.open[i] {
+                0.0
+            } else {
+                (right_of_way(face.classes[i]) - BUILDING_LINE_M - 1.2).max(1.0)
+            };
+            let line = drawn
+                .get(&(key(a), key(b)))
+                .filter(|_| !face.open[i])
+                .cloned()
+                .unwrap_or_else(|| vec![a, b]);
+            for w in line.windows(2) {
+                if (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1) > 0.05 {
+                    pieces.push((w[0], w[1], inset));
+                }
+            }
+        }
+        // Each piece offset inward, joined to the next where the offset lines
+        // meet.  A piece shorter than the corner it sits in (the last few
+        // metres of a curved street at an acute node) comes out reversed;
+        // it is dropped and its neighbours joined directly, until none is.
+        let joint = |pieces: &[(V, V, f32)], k: usize| -> V {
+            let m = pieces.len();
+            let line = |k: usize| -> (V, V) {
+                let (p, q, d) = pieces[k];
+                let l = (q.0 - p.0).hypot(q.1 - p.1);
+                let t = ((q.0 - p.0) / l, (q.1 - p.1) / l);
+                ((p.0 - t.1 * d, p.1 + t.0 * d), t)
+            };
+            let (p0, t0) = line(k);
+            let (p1, t1) = line((k + 1) % m);
+            let denom = t0.0 * t1.1 - t0.1 * t1.0;
+            if denom.abs() < 0.02 {
+                // Nearly in line: the two offset ends, averaged.
+                let end = pieces[k].1;
+                let d = (pieces[k].2 + pieces[(k + 1) % m].2) * 0.5;
+                (end.0 - t0.1 * d, end.1 + t0.0 * d)
+            } else {
+                let w = (p1.0 - p0.0, p1.1 - p0.1);
+                let s = (w.0 * t1.1 - w.1 * t1.0) / denom;
+                (p0.0 + t0.0 * s, p0.1 + t0.1 * s)
+            }
+        };
+        loop {
+            let m = pieces.len();
+            if m < 3 {
+                return Vec::new();
+            }
+            let joints: Vec<V> = (0..m).map(|k| joint(&pieces, k)).collect();
+            let reversed = (0..m).find(|&k| {
+                let (from, to) = (joints[(k + m - 1) % m], joints[k]);
+                let (p, q, _) = pieces[k];
+                (to.0 - from.0) * (q.0 - p.0) + (to.1 - from.1) * (q.1 - p.1) <= 0.0
+            });
+            match reversed {
+                Some(k) => {
+                    pieces.remove(k);
+                }
+                None => break,
+            }
+        }
+        let m = pieces.len();
+        let plate: Vec<V> = (0..m).map(|k| joint(&pieces, k)).collect();
+        // A mitre that ran away (a very short piece between two others) would
+        // fold the outline; the half-plane cut is the safe fallback there.
+        let sane = signed_area(&plate) > 0.0
+            && simple(&plate)
+            && signed_area(&plate) < signed_area(&face.ring);
+        if sane {
+            return plate;
+        }
+        let mut plate = face.ring.clone();
+        for (p, q, d) in pieces {
+            let l = (q.0 - p.0).hypot(q.1 - p.1);
+            let nrm = (-(q.1 - p.1) / l, (q.0 - p.0) / l);
+            plate = clip_half(&plate, nrm, nrm.0 * p.0 + nrm.1 * p.1 + d);
+            if plate.len() < 3 {
+                break;
+            }
+        }
+        plate
+    };
     for (face_index, face) in faces.iter().enumerate() {
         let centre = centroid(&face.ring);
         if centre.0.hypot(centre.1) > radius_m * 1.04 {
@@ -111,6 +230,18 @@ pub(super) fn build_parcels(
             continue;
         }
         if signed_area(&face.ring) < 900.0 {
+            // Too small to build on, but a sliver split off a concave block is
+            // still ground between streets: it keeps its plate, or the terrain
+            // shows through beside the footway.
+            if face.open.iter().any(|open| *open) {
+                let plate = plate_of(face);
+                if plate.len() >= 3 {
+                    blocks.push(UrbanBlock {
+                        boundary: to_world(&plate),
+                        courtyard: None,
+                    });
+                }
+            }
             continue;
         }
         // The land between an expressway and its ramps, or inside a loop of
@@ -153,28 +284,7 @@ pub(super) fn build_parcels(
         if envelope.len() < 3 {
             continue;
         }
-        // The block's ground plate stops under the kerb, not at the street
-        // centre line: the plate sits above the carriageway datum, so a plate
-        // that reached the centre line would paint grass over half of every road.
-        let mut plate = face.ring.clone();
-        for i in 0..face.ring.len() {
-            let a = face.ring[i];
-            let b = face.ring[(i + 1) % face.ring.len()];
-            let len = face.edge_len[i];
-            if len < 1.0e-3 {
-                continue;
-            }
-            let n = (-(b.1 - a.1) / len, (b.0 - a.0) / len);
-            let inset = if face.open[i] {
-                0.0
-            } else {
-                (right_of_way(face.classes[i]) - BUILDING_LINE_M - 1.2).max(1.0)
-            };
-            plate = clip_half(&plate, n, n.0 * a.0 + n.1 * a.1 + inset);
-            if plate.len() < 3 {
-                break;
-            }
-        }
+        let plate = plate_of(face);
         if plate.len() < 3 {
             continue;
         }
@@ -1722,6 +1832,27 @@ fn rect(x0: f32, x1: f32, z0: f32, z1: f32, shrink: f32) -> Vec<V> {
         (x1 - dx, z1 - dz),
         (x0 + dx, z1 - dz),
     ]
+}
+
+/// Does the closed ring cross itself anywhere?
+fn simple(ring: &[V]) -> bool {
+    let n = ring.len();
+    let cross = |o: V, a: V, b: V| (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0);
+    for i in 0..n {
+        let (a, b) = (ring[i], ring[(i + 1) % n]);
+        for j in i + 2..n {
+            if i == 0 && j == n - 1 {
+                continue;
+            }
+            let (c, d) = (ring[j], ring[(j + 1) % n]);
+            let (d1, d2) = (cross(a, b, c), cross(a, b, d));
+            let (d3, d4) = (cross(c, d, a), cross(c, d, b));
+            if d1 * d2 < 0.0 && d3 * d4 < 0.0 {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 #[cfg(test)]

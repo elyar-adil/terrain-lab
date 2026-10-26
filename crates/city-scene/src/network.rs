@@ -55,6 +55,7 @@ const RAMP_LANDING_M: f32 = 15.0;
 /// reported as a warning.
 const MAX_GRADE: f32 = 0.05;
 /// A deck lower than this is a causeway at quay level, not a bridge: 0.3 m.
+/// A span too short to rise even this far within the grade limit rises less.
 pub const MIN_DECK: f32 = 0.3;
 /// Below this height a structure is a girder bridge with no towers or cables.
 pub const LOW_DECK: f32 = 3.0;
@@ -133,14 +134,26 @@ pub struct Junction {
     pub y: f32,
     pub radius: f32,
     pub ports: Vec<Port>,
-    /// Kerb face of the junction box: two port corners plus a cubic fillet
-    /// between consecutive ports.  Nine points per port, which is the invariant
-    /// the sidewalk collar relies on.
+    /// Kerb face of the junction box: each port's two kerb corners, then the
+    /// kerb return to the next port.
     pub ring: Vec<Vec2>,
-    /// `ring` pushed out by the sidewalk width, used only for the kerb-return
-    /// line and the corner paving.
+    /// The back of the footway all the way round: each port's two footway
+    /// corners, then the footway's return to the next port.
     pub walk_ring: Vec<Vec2>,
+    /// The corner after each port, in port order.
+    pub corners: Vec<Corner>,
     pub warnings: Vec<String>,
+}
+
+/// One corner of a junction, between a port and the next one round.
+#[derive(Debug, Clone)]
+pub struct Corner {
+    /// The kerb return, from this port's right kerb corner to the next port's
+    /// left one, both included.
+    pub kerb: Vec<Vec2>,
+    /// The back of the footway round the corner, from this port's right
+    /// footway corner to the next port's left one.
+    pub walk: Vec<Vec2>,
 }
 
 /// A road with its cross-section resolved and both ends trimmed back to the
@@ -400,49 +413,96 @@ pub fn derive(
         .map(|road| (road.id, road.cross_section()))
         .collect();
 
-    // --- trim radii ----------------------------------------------------------
-    // A degree-2 node is a continuation or a bend, not an intersection.  Sizing
-    // its trim like a crossing is what digs a broken box out of every corner.
+    // --- trims ----------------------------------------------------------------
+    // Each street end stops where its own corners need it (`corner::trims`):
+    // well back at an acute corner, close in at an obtuse one, so every kerb
+    // return is a true arc tangent to both kerbs and no two footways overlap.
+    // A node in the air keeps a hair of a gap, so the lane joining two decks
+    // has a length.
+    let hd_by_id: HashMap<u32, &HdRoad> = hd_roads.iter().map(|road| (road.id, road)).collect();
     let mut radius = vec![0.0_f32; nodes.len()];
+    let mut trims: HashMap<(u32, bool), f32> = HashMap::new();
     for (index, list) in incidence.iter().enumerate() {
         if air[index] {
-            // Decks meet end to end in the air: a hair of a gap, so the lane
-            // joining them has a length.
             radius[index] = AIR_GAP_M;
             continue;
         }
         if list.len() < 2 {
             continue;
         }
-        let mut widths: Vec<f32> = list
-            .iter()
-            .filter_map(|id| sections.get(id))
-            .map(|section| section.width_metres)
-            .collect();
-        widths.sort_by(|a, b| b.total_cmp(a));
-        let widest = widths.first().copied().unwrap_or(0.0);
-        let second = widths.get(1).copied().unwrap_or(0.0);
-        // The same number the street planner sizes its links by: the widest
-        // street's half width plus the kerb-return radius.
-        let _ = second;
-        let mut value = urban::junction_trim_m(widest, list.len());
-        let shortest = list
-            .iter()
-            .filter_map(|id| sd_by_id.get(id))
-            .map(|road| {
-                let other = if road.from as usize == index {
-                    road.to as usize
-                } else {
-                    road.from as usize
-                };
-                local[index].distance(local.get(other).copied().unwrap_or_default())
-            })
-            .fold(f32::MAX, f32::min);
-        if shortest.is_finite() {
-            value = value.min(shortest * 0.4);
+        // (road, at_start, arm, length)
+        let mut arms: Vec<(u32, bool, crate::corner::Arm, f32)> = Vec::new();
+        for id in list {
+            let (Some(sd), Some(hd), Some(section)) =
+                (sd_by_id.get(id), hd_by_id.get(id), sections.get(id))
+            else {
+                continue;
+            };
+            if !is_port(hd) || sd.from == sd.to {
+                continue;
+            }
+            let at_start = sd.from as usize == index;
+            let mut line: Vec<Vec2> = hd
+                .centreline
+                .iter()
+                .map(|point| {
+                    let [x, z] = frame.to_local(*point);
+                    Vec2::new(x, z)
+                })
+                .collect();
+            if line.len() < 2 {
+                continue;
+            }
+            if !at_start {
+                line.reverse();
+            }
+            let path = Path::flat(line);
+            let length = path.length();
+            let probe = path.plan_at((length * 0.3).min(12.0));
+            let dir = (probe - local[index]).normalize();
+            if !dir.is_finite() || dir.length_squared() < 0.5 {
+                continue;
+            }
+            let half = section.half_width();
+            arms.push((
+                *id,
+                at_start,
+                crate::corner::Arm {
+                    dir,
+                    kerb: half,
+                    walk: half + section.sidewalk_metres,
+                    radius: kerb_return_radius(hd.class, hd.oneway),
+                },
+                length,
+            ));
         }
-        radius[index] = value;
+        arms.sort_by(|a, b| a.2.dir.angle().total_cmp(&b.2.dir.angle()));
+        let geometry: Vec<crate::corner::Arm> = arms.iter().map(|arm| arm.2).collect();
+        let wanted = crate::corner::trims(&geometry);
+        // A crossing keeps at least a metre of box; two streets meeting end to
+        // end, half a metre, as two decks do.
+        let floor = if arms.len() >= 3 { 1.0 } else { AIR_GAP_M };
+        for (k, (id, at_start, _, length)) in arms.iter().enumerate() {
+            let value = wanted[k].max(floor).min(length * 0.45);
+            trims.insert((*id, *at_start), value);
+            radius[index] = radius[index].max(value);
+        }
     }
+
+    // The main line's decks, for laying ramps flush against them.
+    let decks: Vec<Vec<Vec2>> = hd_roads
+        .iter()
+        .filter(|road| road.class == ModernRoadClass::Expressway && !road.oneway && road.layer != 0)
+        .map(|road| {
+            road.centreline
+                .iter()
+                .map(|point| {
+                    let [x, z] = frame.to_local(*point);
+                    Vec2::new(x, z)
+                })
+                .collect()
+        })
+        .collect();
 
     // --- roads ---------------------------------------------------------------
     for hd in hd_roads {
@@ -485,14 +545,73 @@ pub fn derive(
         } else {
             path_points
         };
+        // A ramp leaving or joining the deck in the air starts flush against
+        // the deck it serves and peels away from it, whatever line the planner
+        // drew for it against the main line before that was smoothed.
+        let path_points = if hd.oneway {
+            let mut line = path_points;
+            for (node, at_start) in [(from_index, true), (to_index, false)] {
+                if !air[node] {
+                    continue;
+                }
+                let start = if at_start {
+                    line[0]
+                } else {
+                    line[line.len() - 1]
+                };
+                let beside = incidence[node]
+                    .iter()
+                    .filter(|id| **id != hd.id)
+                    .filter_map(|id| hd_by_id.get(id))
+                    .filter(|road| !road.oneway)
+                    .map(|road| {
+                        let plan: Vec<Vec2> = road
+                            .centreline
+                            .iter()
+                            .map(|point| {
+                                let [x, z] = frame.to_local(*point);
+                                Vec2::new(x, z)
+                            })
+                            .collect();
+                        let half = road.cross_section().half_width();
+                        (crate::math::distance_to_polyline(start, &plan), plan, half)
+                    })
+                    .min_by(|a, b| a.0.total_cmp(&b.0));
+                if let Some((_, _, half_main)) = beside {
+                    if !at_start {
+                        line.reverse();
+                    }
+                    merge_ramp(&mut line, &decks, half_main, section.half_width());
+                    if !at_start {
+                        line.reverse();
+                    }
+                }
+            }
+            line
+        } else {
+            path_points
+        };
         let full_length = Path::flat(path_points.clone()).length();
-        let trim_start = radius[from_index];
-        let trim_end = radius[to_index];
-        if full_length - trim_start - trim_end < 6.0 {
-            // Too short to carry a carriageway between two boxes; the
-            // intersection geometry itself will cover the gap.
+        if full_length < 6.0 {
             continue;
         }
+        let trim_start = trims
+            .get(&(hd.id, true))
+            .copied()
+            .unwrap_or(radius[from_index]);
+        let trim_end = trims
+            .get(&(hd.id, false))
+            .copied()
+            .unwrap_or(radius[to_index]);
+        // A street too short for both its trims keeps six metres between the
+        // boxes rather than vanishing and leaving a hole between them.
+        let room = full_length - 6.0;
+        let (trim_start, trim_end) = if trim_start + trim_end > room {
+            let k = room / (trim_start + trim_end).max(1.0e-3);
+            (trim_start * k, trim_end * k)
+        } else {
+            (trim_start, trim_end)
+        };
 
         // Elevated roads ramp up away from the junction and hold a plateau
         // across whatever they cross, so a bridge never dips into traffic.
@@ -544,7 +663,12 @@ pub fn derive(
         let deck = if let Some(ramp) = &ramp {
             ramp.top
         } else if elevated {
-            (MAX_GRADE * rise_len.min(fall_len) / SMOOTHSTEP_PEAK).clamp(MIN_DECK, ceiling)
+            let carried = MAX_GRADE * rise_len.min(fall_len) / SMOOTHSTEP_PEAK;
+            if carried < MIN_DECK {
+                carried.max(0.0)
+            } else {
+                carried.min(ceiling)
+            }
         } else {
             0.0
         };
@@ -575,8 +699,9 @@ pub fn derive(
         // An end is a controlled approach (a crosswalk and a stop or give-way
         // line) at a signal, and at an unsignalised junction only when it is a
         // minor arm: the major street runs through without stopping.
+        // Decks meeting in the air are a merge or a diverge: no one stops there.
         let controlled = |node: usize| {
-            incidence[node].len() > 2 && {
+            !air[node] && incidence[node].len() > 2 && {
                 let c = control[node];
                 c.kind == JunctionKind::Signalized || class_rank(hd.class) > c.major
             }
@@ -1016,15 +1141,10 @@ pub fn derive(
             } else {
                 road.centreline.length() - road.trim_end
             };
-            let inward = if at_start {
-                road.centreline
-                    .tangent_at((road.trim_start + 2.0).min(road.centreline.length()))
-            } else {
-                -road
-                    .centreline
-                    .tangent_at((road.centreline.length() - road.trim_end - 2.0).max(0.0))
-            };
-            let outward = -inward;
+            // The road's own tangent at its end, so the box's kerb runs on from
+            // the street's kerb without a kink.
+            let tangent = road.centreline.tangent_at(station);
+            let inward = if at_start { -tangent } else { tangent };
             let side = if at_start { -1.0 } else { 1.0 };
             let half = road.half_width();
             let outer = half + road.section.sidewalk_metres;
@@ -1035,13 +1155,13 @@ pub fn derive(
             ports.push(Port {
                 road: road.id,
                 at_start,
-                dir: outward,
+                dir: inward,
                 station,
                 left: Vec2::new(left.x, left.z),
                 right: Vec2::new(right.x, right.z),
                 outer_left: Vec2::new(outer_left.x, outer_left.z),
                 outer_right: Vec2::new(outer_right.x, outer_right.z),
-                angle: Vec2::new(left.x - centre.x, left.z - centre.y).angle(),
+                angle: (-inward).angle(),
             });
         }
         if ports.is_empty() {
@@ -1055,79 +1175,69 @@ pub fn derive(
                 rng.fork(node);
                 rng.chance(0.20)
             };
-        let mut ring: Vec<Vec2> = Vec::with_capacity(ports.len() * 9);
-        let mut walk_ring: Vec<Vec2> = Vec::with_capacity(ports.len() * 9);
+        let return_radius = |road: u32| {
+            network
+                .road(road)
+                .map(|r| kerb_return_radius(r.class, r.oneway))
+                .unwrap_or(9.0)
+        };
+        let mut corners: Vec<Corner> = Vec::with_capacity(ports.len());
         for index in 0..ports.len() {
             let port = ports[index];
-            ring.push(port.left);
-            ring.push(port.right);
-            walk_ring.push(port.outer_left);
-            walk_ring.push(port.outer_right);
             let next = ports[(index + 1) % ports.len()];
-            let chord = port.right.distance(next.left);
-            let handle = chord * 0.45;
-            let corner = if roundabout {
-                // A roundabout's kerb is a circle: sweep between the two mouth
-                // corners on an arc about the centre, radius blended between them,
-                // so the carriageway is round instead of a square box.
-                let (d0, d1) = (port.right - centre, next.left - centre);
-                let (r0, r1) = (d0.length().max(0.5), d1.length().max(0.5));
-                let a0 = d0.y.atan2(d0.x);
-                let mut delta = d1.y.atan2(d1.x) - a0;
-                while delta > std::f32::consts::PI {
-                    delta -= std::f32::consts::TAU;
-                }
-                while delta < -std::f32::consts::PI {
-                    delta += std::f32::consts::TAU;
-                }
-                let r_mid = (r0 + r1) * 0.5;
-                (0..=7)
-                    .map(|i| {
-                        let t = i as f32 / 7.0;
-                        // Bulge to the mean radius in the middle of the arc.
-                        let bulge = (std::f32::consts::PI * t).sin();
-                        let r = r0
-                            + (r1 - r0) * t
-                            + (r_mid.max(r0.max(r1)) - (r0 + (r1 - r0) * t)) * bulge * 0.5;
-                        let angle = a0 + delta * t;
-                        centre + Vec2::new(angle.cos(), angle.sin()) * r
-                    })
-                    .collect::<Vec<Vec2>>()
-            } else {
-                cubic_points(
-                    port.right,
-                    // `dir` points from the road *towards* the junction (it is the
-                    // negated into-the-road tangent), so the handles run along each
-                    // kerb line into the box.  With the opposite sign the corner
-                    // bows away from the junction and reads as a convex blob rather
-                    // than a kerb return.
-                    port.right + port.dir * handle,
-                    next.left + next.dir * handle,
-                    next.left,
-                    8,
-                )
-            };
-            // Drop the two endpoints; they are already the port corners.
-            for point in corner.iter().skip(1).take(7) {
-                ring.push(*point);
-                // The walk ring is the same fillet pushed radially outward by
-                // the approaching road's own sidewalk width plus 300 mm — the
-                // source kernel's `sidewalkWidth + 0.3`.  Refitting a fresh
-                // cubic out here folds the control-point sag back into the box
-                // and floods the junction with pavement, so the radial push is
-                // load-bearing, not cosmetic.  A fixed width would leave the
-                // collar of a wide arterial footway floating short of the
-                // block corner it has to meet.
-                let walk = network
-                    .road(port.road)
-                    .map(|road| road.section.sidewalk_metres)
-                    .unwrap_or(2.4);
-                let delta = *point - centre;
-                let distance = delta.length().max(0.01);
-                let scale = (distance + walk + 0.3) / distance;
-                walk_ring.push(centre + delta * scale);
+            if roundabout {
+                // A roundabout's kerb is a circle about the centre, and its
+                // footway the same circle a footway further out.
+                let arc = |from: Vec2, to: Vec2| -> Vec<Vec2> {
+                    let (d0, d1) = (from - centre, to - centre);
+                    let (r0, r1) = (d0.length().max(0.5), d1.length().max(0.5));
+                    let a0 = d0.y.atan2(d0.x);
+                    let mut delta = d1.y.atan2(d1.x) - a0;
+                    while delta <= 0.0 {
+                        delta += std::f32::consts::TAU;
+                    }
+                    let steps = ((delta * 12.0).ceil() as usize).max(2);
+                    (0..=steps)
+                        .map(|i| {
+                            let t = i as f32 / steps as f32;
+                            let r = r0 + (r1 - r0) * t;
+                            let angle = a0 + delta * t;
+                            centre + Vec2::new(angle.cos(), angle.sin()) * r
+                        })
+                        .collect()
+                };
+                corners.push(Corner {
+                    kerb: arc(port.right, next.left),
+                    walk: arc(port.outer_right, next.outer_left),
+                });
+                continue;
             }
+            let r = return_radius(port.road).min(return_radius(next.road));
+            let kerb = crate::corner::kerb_return(port.right, port.dir, next.left, next.dir, r);
+            // The back of the footway is the same construction one footway out,
+            // its return smaller by the footway's width, so the corner paving
+            // meets both footways along their own back edges.
+            let walk_width =
+                (port.outer_right.distance(port.right) + next.outer_left.distance(next.left)) * 0.5;
+            let walk = crate::corner::kerb_return(
+                port.outer_right,
+                port.dir,
+                next.outer_left,
+                next.dir,
+                (r - walk_width).max(0.0),
+            );
+            corners.push(Corner { kerb, walk });
         }
+        let mut ring: Vec<Vec2> = Vec::new();
+        let mut walk_ring: Vec<Vec2> = Vec::new();
+        for (port, corner) in ports.iter().zip(&corners) {
+            ring.push(port.left);
+            ring.extend(corner.kerb[..corner.kerb.len() - 1].iter().copied());
+            walk_ring.push(port.outer_left);
+            walk_ring.extend(corner.walk[..corner.walk.len() - 1].iter().copied());
+        }
+        ring = dedup_ring(ring);
+        walk_ring = dedup_ring(walk_ring);
         let kind = if roundabout {
             JunctionKind::Roundabout
         } else if ports.len() >= 4
@@ -1153,6 +1263,7 @@ pub fn derive(
             ports,
             ring,
             walk_ring,
+            corners,
             warnings: Vec::new(),
         });
     }
@@ -1185,6 +1296,94 @@ pub(crate) fn class_rank(class: ModernRoadClass) -> u8 {
         ModernRoadClass::Collector => 2,
         ModernRoadClass::Local => 3,
     }
+}
+
+/// Length over which a ramp peels away from the deck edge, metres.
+const RAMP_PEEL_M: f32 = 140.0;
+
+/// Lay the start of a ramp (`line[0]` its end at the deck) flush against the
+/// main deck: its inner edge on the deck's edge where it begins, easing out
+/// onto its own line over `RAMP_PEEL_M`.  The deck is every piece of the main
+/// line together, since a ramp often runs on past the piece its node ends.
+fn merge_ramp(line: &mut [Vec2], decks: &[Vec<Vec2>], half_main: f32, half_ramp: f32) {
+    if line.len() < 2 || decks.is_empty() {
+        return;
+    }
+    // Foot and unit left normal of the nearest point of any deck, and the
+    // signed lateral offset of `p` along that normal.
+    let project = |p: Vec2| -> Option<(Vec2, Vec2, f32)> {
+        let mut best: Option<(f32, Vec2, Vec2, f32)> = None;
+        for deck in decks {
+            for pair in deck.windows(2) {
+                let d = pair[1] - pair[0];
+                let l = d.length();
+                if l < 1.0e-6 {
+                    continue;
+                }
+                let t = ((p - pair[0]).dot(d) / (l * l)).clamp(0.0, 1.0);
+                let q = pair[0] + d * t;
+                let gap = p.distance(q);
+                if best.is_none_or(|b| gap < b.0) {
+                    let n = (d / l).left_normal();
+                    best = Some((gap, q, n, (p - q).dot(n)));
+                }
+            }
+        }
+        best.map(|(_, q, n, lateral)| (q, n, lateral))
+    };
+    // Stations along the ramp as planned, before any point moves.
+    let mut stations = vec![0.0_f32; line.len()];
+    for k in 1..line.len() {
+        stations[k] = stations[k - 1] + line[k - 1].distance(line[k]);
+    }
+    for k in 0..line.len() {
+        let w = smootherstep(stations[k] / RAMP_PEEL_M);
+        if w >= 1.0 {
+            break;
+        }
+        let Some((foot, normal, lateral)) = project(line[k]) else {
+            continue;
+        };
+        // The ramp never crosses the deck, so its own side is the target side.
+        let target = lateral.signum() * (half_main + half_ramp);
+        let lateral = target + (lateral - target) * w;
+        line[k] = foot + normal * lateral;
+    }
+}
+
+/// Does this road meet the junction boxes at its ends?  A flyover only passes
+/// over the node it was lifted off.
+fn is_port(road: &HdRoad) -> bool {
+    road.layer == 0 || road.bridge || road.oneway
+}
+
+/// Kerb return radius (缘石转弯半径) a street asks for at its corners, CJJ 37
+/// practice for the right turn out of it.  A corner takes the smaller of its
+/// two streets'.
+fn kerb_return_radius(class: ModernRoadClass, oneway: bool) -> f32 {
+    if oneway {
+        return 12.0;
+    }
+    match class {
+        ModernRoadClass::Expressway => 18.0,
+        ModernRoadClass::Arterial => 15.0,
+        ModernRoadClass::Collector => 12.0,
+        ModernRoadClass::Local => 9.0,
+    }
+}
+
+/// A closed ring without repeated points, so it triangulates.
+fn dedup_ring(ring: Vec<Vec2>) -> Vec<Vec2> {
+    let mut out: Vec<Vec2> = Vec::with_capacity(ring.len());
+    for point in ring {
+        if out.last().is_none_or(|last| last.distance(point) > 0.01) {
+            out.push(point);
+        }
+    }
+    while out.len() > 1 && out[0].distance(out[out.len() - 1]) <= 0.01 {
+        out.pop();
+    }
+    out
 }
 
 /// The control of an at-grade junction from the classes of the streets meeting

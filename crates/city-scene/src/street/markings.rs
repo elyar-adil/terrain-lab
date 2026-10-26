@@ -212,6 +212,7 @@ pub(super) fn road_markings(
     road: &Road,
     builder: &mut MeshBuilder,
     spec: &JunctionSpec,
+    tapers: &[super::Gap],
 ) {
     let length = road.carriageway.length();
     if length < 2.0 {
@@ -226,7 +227,7 @@ pub(super) fn road_markings(
         return;
     }
     if road.is_motorway() {
-        motorway_markings(road, builder, spec);
+        motorway_markings(road, builder, spec, tapers);
         return;
     }
     if road.layer != 0 {
@@ -543,7 +544,12 @@ pub(super) fn waiting_box(
     );
 }
 
-fn motorway_markings(road: &Road, builder: &mut MeshBuilder, spec: &JunctionSpec) {
+fn motorway_markings(
+    road: &Road,
+    builder: &mut MeshBuilder,
+    spec: &JunctionSpec,
+    tapers: &[super::Gap],
+) {
     let length = road.carriageway.length();
     if length < 2.0 {
         return;
@@ -581,15 +587,33 @@ fn motorway_markings(road: &Road, builder: &mut MeshBuilder, spec: &JunctionSpec
         );
         let kerb_lane =
             first_lane + section.motor_lanes_per_direction as f32 * section.motor_lane_width;
-        stripe(
-            builder,
-            "marking.white",
-            &surface,
-            direction * (kerb_lane + 0.1),
-            0.0,
-            length,
-            spec.edge_line_width,
-        );
+        // Solid, except where the deck widens into a ramp: there the edge line
+        // is the broken line between the through lanes and the lane that
+        // leaves (or joins), as GB 5768.3 marks a deceleration lane.
+        let (solid, broken) = split_by(length, tapers, direction);
+        for (from, to) in solid {
+            stripe(
+                builder,
+                "marking.white",
+                &surface,
+                direction * (kerb_lane + 0.1),
+                from,
+                to,
+                spec.edge_line_width,
+            );
+        }
+        for (from, to) in broken {
+            dashed_stripe(
+                builder,
+                "marking.dashed-3-5",
+                &surface,
+                direction * (kerb_lane + 0.1),
+                from,
+                to,
+                spec.edge_line_width * 2.0,
+                from,
+            );
+        }
     }
     // Crash barriers on the verges of an expressway at grade; on a viaduct the
     // parapets and the median barrier are the structure's (`viaduct`).
@@ -621,6 +645,33 @@ fn motorway_markings(road: &Road, builder: &mut MeshBuilder, spec: &JunctionSpec
             );
         }
     }
+}
+
+/// A stretch of a road, `(from, to)` stations.
+pub(super) type Span = (f32, f32);
+
+/// `[0, length]` split into the pieces outside and inside the `tapers` on the
+/// `side` of the centreline.
+pub(super) fn split_by(length: f32, tapers: &[super::Gap], side: f32) -> (Vec<Span>, Vec<Span>) {
+    let mut inside: Vec<Span> = tapers
+        .iter()
+        .filter(|gap| gap.side == side)
+        .map(|gap| (gap.from.clamp(0.0, length), gap.to.clamp(0.0, length)))
+        .filter(|(a, b)| b - a > 0.5)
+        .collect();
+    inside.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut outside = Vec::new();
+    let mut cursor = 0.0_f32;
+    for (a, b) in &inside {
+        if *a > cursor + 0.05 {
+            outside.push((cursor, *a));
+        }
+        cursor = cursor.max(*b);
+    }
+    if cursor < length - 0.05 {
+        outside.push((cursor, length));
+    }
+    (outside, inside)
 }
 
 /// Lane paint on a one-way ramp: white edge lines either side of its lane(s),

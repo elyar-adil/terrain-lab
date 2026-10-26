@@ -1458,14 +1458,25 @@ pub(super) fn grade_separate(
             main_only[n] &= r.class == ModernRoadClass::Expressway && !ramp;
         }
     }
+    // And where ramps meet the deck in the air: two pieces of the main line
+    // and the ramps, the corner in the main line as sharp as anywhere else.
+    let mut main_degree = vec![0_u32; nodes.len()];
+    for r in sd.iter() {
+        if r.class == ModernRoadClass::Expressway && !oneway.get(&r.id).copied().unwrap_or(false) {
+            main_degree[r.from as usize] += 1;
+            main_degree[r.to as usize] += 1;
+        }
+    }
     for n in 0..nodes.len() {
-        if degree[n] == 2 && main_only[n] && !lifted.contains(&n) {
+        let deck_node = main_degree[n] == 2 && degree[n] > 2 && nodes[n].role == "interchange";
+        if ((degree[n] == 2 && main_only[n]) || deck_node) && !lifted.contains(&n) {
             lifted.push(n);
         }
     }
     for node in lifted {
         ease_through(frame, nodes, sd, hd, node);
     }
+    smooth_main_line(frame, nodes, sd, hd);
     drop_tapers(sd, hd, &layout.tapers);
     drop_orphans(nodes.len(), sd, hd);
     for road in hd.iter_mut() {
@@ -1477,6 +1488,157 @@ pub(super) fn grade_separate(
     for road in sd.iter_mut() {
         if road.class == ModernRoadClass::Expressway {
             road.bridge = false;
+        }
+    }
+}
+
+/// Spacing of the main line's vertices once it is smoothed, metres.
+const SMOOTH_STEP_M: f32 = 4.0;
+/// Passes of the 1-2-1 filter: a Gaussian of `SMOOTH_STEP_M * sqrt(n / 2)`,
+/// about 16 m, which rounds a corner of the street grid into a curve an 80 km/h
+/// road can take without moving the line more than a few metres.
+const SMOOTH_PASSES: usize = 32;
+
+/// Smooth the expressway's main line as one line, through every node on it.
+///
+/// Easing it node by node left a kink wherever two nodes were close together
+/// (a street crossing and an interchange a few metres apart), because each
+/// node could only round its corner within its own short pieces.  Here every
+/// chain of main-line pieces is walked end to end, resampled, filtered, and
+/// cut back into its pieces at the same stations, the nodes moving onto the
+/// smoothed line.  The chain's own ends stay where they are.
+fn smooth_main_line(frame: &CityFrame, nodes: &mut [SdNode], sd: &[SdRoad], hd: &mut [HdRoad]) {
+    let main: Vec<usize> = (0..sd.len())
+        .filter(|&i| sd[i].class == ModernRoadClass::Expressway && !hd[i].oneway)
+        .collect();
+    let mut at: HashMap<usize, Vec<usize>> = HashMap::new();
+    for &i in &main {
+        at.entry(sd[i].from as usize).or_default().push(i);
+        at.entry(sd[i].to as usize).or_default().push(i);
+    }
+    let mut used = vec![false; sd.len()];
+    let starts: Vec<usize> = at
+        .iter()
+        .filter(|(_, list)| list.len() != 2)
+        .map(|(node, _)| *node)
+        .collect();
+    let mut chains: Vec<(usize, Vec<usize>)> = Vec::new();
+    let mut walk = |start: usize, used: &mut Vec<bool>| {
+        let mut node = start;
+        let mut pieces = Vec::new();
+        while let Some(&next) = at
+            .get(&node)
+            .and_then(|list| list.iter().find(|&&i| !used[i]))
+        {
+            used[next] = true;
+            pieces.push(next);
+            node = if sd[next].from as usize == node {
+                sd[next].to as usize
+            } else {
+                sd[next].from as usize
+            };
+            if at.get(&node).is_none_or(|list| list.len() != 2) || node == start {
+                break;
+            }
+        }
+        if !pieces.is_empty() {
+            chains.push((start, pieces));
+        }
+    };
+    for start in starts {
+        while at
+            .get(&start)
+            .is_some_and(|list| list.iter().any(|&i| !used[i]))
+        {
+            walk(start, &mut used);
+        }
+    }
+    for &i in &main {
+        if !used[i] {
+            walk(sd[i].from as usize, &mut used);
+        }
+    }
+    for (start, pieces) in chains {
+        // The chain's line, and the station of each node along it.
+        let mut line: Vec<V> = Vec::new();
+        let mut cuts: Vec<f32> = Vec::new();
+        let mut node = start;
+        for &i in &pieces {
+            let mut piece: Vec<V> = hd[i]
+                .centreline
+                .iter()
+                .map(|p| frame.to_local(*p))
+                .collect();
+            if sd[i].from as usize != node {
+                piece.reverse();
+            }
+            node = if sd[i].from as usize == node {
+                sd[i].to as usize
+            } else {
+                sd[i].from as usize
+            };
+            if line.is_empty() {
+                line.extend(piece);
+            } else {
+                line.extend(piece.into_iter().skip(1));
+            }
+            cuts.push(polyline_len(&line));
+        }
+        let total = polyline_len(&line);
+        if total < SMOOTH_STEP_M * 4.0 {
+            continue;
+        }
+        let closed = node == start;
+        let count = (total / SMOOTH_STEP_M).ceil() as usize;
+        let step = total / count as f32;
+        let mut points: Vec<V> = (0..=count)
+            .map(|k| sample(&line, step * k as f32).0)
+            .collect();
+        for _ in 0..SMOOTH_PASSES {
+            let previous = points.clone();
+            let n = previous.len();
+            for k in 0..n {
+                let (lo, hi) = if closed {
+                    (previous[(k + n - 2) % (n - 1)], previous[(k + 1) % (n - 1)])
+                } else if k == 0 || k == n - 1 {
+                    continue;
+                } else {
+                    (previous[k - 1], previous[k + 1])
+                };
+                let here = previous[k];
+                points[k] = (
+                    0.25 * lo.0 + 0.5 * here.0 + 0.25 * hi.0,
+                    0.25 * lo.1 + 0.5 * here.1 + 0.25 * hi.1,
+                );
+            }
+            if closed {
+                points[count] = points[0];
+            }
+        }
+        // Back into the pieces, cut at the nodes' own stations.
+        let mut from = 0.0_f32;
+        let mut node = start;
+        for (&i, &cut) in pieces.iter().zip(&cuts) {
+            let a = (from / step).round() as usize;
+            let b = ((cut / step).round() as usize).min(count).max(a + 1);
+            let mut piece: Vec<V> = points[a..=b].to_vec();
+            let far = if sd[i].from as usize == node {
+                sd[i].to as usize
+            } else {
+                piece.reverse();
+                sd[i].from as usize
+            };
+            let near_end = if sd[i].from as usize == node {
+                0
+            } else {
+                piece.len() - 1
+            };
+            let far_end = piece.len() - 1 - near_end;
+            nodes[node].point = frame.to_world(piece[near_end].0, piece[near_end].1);
+            nodes[far].point = frame.to_world(piece[far_end].0, piece[far_end].1);
+            hd[i].centreline = piece.iter().map(|p| frame.to_world(p.0, p.1)).collect();
+            node = far;
+            from = cut;
         }
     }
 }
@@ -1494,14 +1656,65 @@ fn ease_through(
     hd: &mut [HdRoad],
     node: usize,
 ) {
-    let at: Vec<usize> = (0..sd.len())
+    ease_corner(frame, nodes, sd, hd, node, false);
+}
+
+/// Round every bend of a street that is one street through a node: two pieces
+/// of the same class, nothing else there.  The street grid draws a ring road
+/// or a street that turns as a polygon, and a street with a square corner in
+/// it is drawn with a square kerb; a real one curves.  Done before the blocks
+/// are cut, so the blocks follow the curve.
+pub(super) fn ease_bends(
+    frame: &CityFrame,
+    nodes: &mut [SdNode],
+    sd: &[SdRoad],
+    hd: &mut [HdRoad],
+) {
+    let mut degree = vec![0_u32; nodes.len()];
+    for r in sd {
+        degree[r.from as usize] += 1;
+        degree[r.to as usize] += 1;
+    }
+    for node in 0..nodes.len() {
+        if degree[node] == 2 {
+            ease_corner(frame, nodes, sd, hd, node, true);
+        }
+    }
+}
+
+fn ease_corner(
+    frame: &CityFrame,
+    nodes: &mut [SdNode],
+    sd: &[SdRoad],
+    hd: &mut [HdRoad],
+    node: usize,
+    any_corner: bool,
+) {
+    let mut at: Vec<usize> = (0..sd.len())
         .filter(|&i| sd[i].from as usize == node || sd[i].to as usize == node)
         .collect();
+    // Where ramps leave or join the deck, the deck itself still runs through
+    // the node and is eased like any other bend; the ramps begin beside it,
+    // further along, and do not move.
+    if at.len() > 2 {
+        at.retain(|&i| sd[i].class == ModernRoadClass::Expressway && !hd[i].oneway);
+    }
     let [a, b] = at.as_slice() else {
         return;
     };
     let (a, b) = (*a, *b);
     if hd[a].oneway != hd[b].oneway || sd[a].class != sd[b].class {
+        return;
+    }
+    // Streets only: the expressway and its ramps are laid out against each
+    // other and eased together once the expressway is lifted.
+    if any_corner
+        && (sd[a].bridge
+            || sd[b].bridge
+            || hd[a].layer != hd[b].layer
+            || sd[a].class == ModernRoadClass::Expressway
+            || hd[a].oneway)
+    {
         return;
     }
     let local = |road: usize| -> Vec<V> {
@@ -1520,6 +1733,17 @@ fn ease_through(
         line
     };
     let (la, lb) = (toward(a), toward(b));
+    if any_corner && la.len() >= 2 && lb.len() >= 2 {
+        // Already a curve (the street was drawn smooth): only a street that
+        // turns *at* the node has a corner to round.  Re-rounding a curve from
+        // chords would put a kink where the new arc meets it.
+        let ua = unit(sub(la[la.len() - 2], la[la.len() - 1]));
+        let ub = unit(sub(lb[lb.len() - 2], lb[lb.len() - 1]));
+        let turn = std::f32::consts::PI - dot(ua, ub).clamp(-1.0, 1.0).acos();
+        if turn < 6.0_f32.to_radians() {
+            return;
+        }
+    }
     let (len_a, len_b) = (polyline_len(&la), polyline_len(&lb));
     let reach = 45.0_f32.min(len_a * 0.45).min(len_b * 0.45);
     if reach < 4.0 {
@@ -1538,7 +1762,7 @@ fn ease_through(
     // Two streets that met the expressway at a real corner are left meeting
     // at it; only a gentle bend (up to 45 degrees) is one street running on.
     let expressway = sd[a].class == ModernRoadClass::Expressway;
-    if !expressway && opening < std::f32::consts::PI * 0.75 {
+    if !expressway && !any_corner && opening < std::f32::consts::PI * 0.75 {
         return;
     }
     // The arc tangent to both at `reach` from the corner.
@@ -1557,7 +1781,11 @@ fn ease_through(
         let angle = start + sweep * t;
         add(centre, (radius * angle.cos(), radius * angle.sin()))
     };
-    let steps = ((radius * sweep.abs() / 3.0).ceil() as usize).clamp(4, 40);
+    // A point every 3 m of arc and every 2.5 degrees of turn, so even a
+    // tight corner turns smoothly rather than in four 10-degree steps.
+    let steps = ((radius * sweep.abs() / 3.0).ceil() as usize)
+        .max((sweep.abs().to_degrees() / 2.5).ceil() as usize)
+        .clamp(4, 72);
     let half = steps.div_ceil(2);
     let middle = arc(0.5);
     let first: Vec<V> = (0..=half)

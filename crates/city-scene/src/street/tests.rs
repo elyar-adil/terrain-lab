@@ -546,9 +546,20 @@ fn a_four_port_junction_is_complete_on_every_arm() {
         );
     }
     assert!(vertex_count > 0, "no corner paving emitted");
+    // One corner after every port, running from that port's kerb corner to
+    // the next port's: the box is closed by the streets' own kerb lines.
     for junction in &network.junctions {
-        assert_eq!(junction.ring.len(), junction.ports.len() * 9);
-        assert_eq!(junction.walk_ring.len(), junction.ring.len());
+        assert_eq!(junction.corners.len(), junction.ports.len());
+        for (index, corner) in junction.corners.iter().enumerate() {
+            let port = junction.ports[index];
+            let next = junction.ports[(index + 1) % junction.ports.len()];
+            let (first, last) = (corner.kerb[0], corner.kerb[corner.kerb.len() - 1]);
+            assert!(first.distance(port.right) < 0.02 && last.distance(next.left) < 0.02);
+            let (first, last) = (corner.walk[0], corner.walk[corner.walk.len() - 1]);
+            assert!(
+                first.distance(port.outer_right) < 0.02 && last.distance(next.outer_left) < 0.02
+            );
+        }
     }
 }
 
@@ -917,6 +928,43 @@ fn no_marking_is_emitted_outside_its_carriageway() {
         }
         best
     };
+    // Where a ramp leaves or joins a deck in the air, the deck widens by the
+    // ramp's width over the taper before the ramp's own deck begins: within
+    // a taper's length of such a node, a main deck is that much wider.
+    let air_nodes: Vec<Vec2> = network
+        .roads
+        .iter()
+        .filter(|road| road.oneway)
+        .flat_map(|road| {
+            [
+                (road.from_node, road.centreline.start()),
+                (road.to_node, road.centreline.end()),
+            ]
+        })
+        .filter(|(node, _)| network.is_air(*node))
+        .map(|(_, p)| Vec2::new(p.x, p.z))
+        .collect();
+    let ramp_width = urban::ramp_cross_section().width_metres;
+    let taper_clearance = |point: Vec2| {
+        let mut best = f32::MAX;
+        for road in network
+            .roads
+            .iter()
+            .filter(|r| r.is_motorway() && !r.oneway && r.layer != 0)
+        {
+            let plan: Vec<Vec2> = road
+                .centreline
+                .points()
+                .iter()
+                .map(|p| Vec2::new(p.x, p.z))
+                .collect();
+            best = best.min(
+                crate::math::distance_to_polyline(point, &plan) - road.half_width() - ramp_width,
+            );
+        }
+        best
+    };
+    let near_a_join = |point: Vec2| air_nodes.iter().any(|node| node.distance(point) < 150.0);
     let rings: Vec<Vec<Vec2>> = network.junctions.iter().map(|j| j.ring.clone()).collect();
     let mut offenders: Vec<String> = Vec::new();
     for group in &scene.meshes {
@@ -931,7 +979,7 @@ fn no_marking_is_emitted_outside_its_carriageway() {
             // it, on a viaduct's own deck, or inside a junction box.  Nowhere
             // else.
             let slack = spec.taper_lane_width + 0.5;
-            if clearance(point) <= slack {
+            if clearance(point) <= slack || (near_a_join(point) && taper_clearance(point) <= 0.5) {
                 continue;
             }
             if rings

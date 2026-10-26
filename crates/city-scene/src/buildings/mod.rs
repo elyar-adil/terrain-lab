@@ -1531,7 +1531,11 @@ mod tests {
     /// re-pinned again when expressways got interchanges: the fixture's ring
     /// road now has a diamond, whose ramps take land and whose verges are left
     /// unbuilt, so the plan under the buildings changed, not the buildings.
-    const WESTERN_MIXED_LAYER_HASH: u64 = 3_655_475_617_883_524_457;
+    /// And again when the block plates were cut back along each street as
+    /// drawn (mitred, so a block whose outline bends inward keeps its plate)
+    /// and a street's own bends were rounded before the blocks are cut: the
+    /// plates and the land they leave changed, not the buildings' rules.
+    const WESTERN_MIXED_LAYER_HASH: u64 = 16_912_480_529_014_877_814;
 
     #[test]
     fn western_mixed_building_layer_is_bit_identical() {

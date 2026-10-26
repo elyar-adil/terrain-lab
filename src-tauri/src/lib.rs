@@ -853,7 +853,10 @@ async fn generate_terrain(
 /// function of the plan, so a city built later (or after the cache is dropped and
 /// rebuilt) is the same city.
 struct CityWorld {
-    plans: Vec<(infrastructure::SettlementClass, std::sync::Arc<urban::ModernCity>)>,
+    plans: Vec<(
+        infrastructure::SettlementClass,
+        std::sync::Arc<urban::ModernCity>,
+    )>,
     scenes: std::collections::HashMap<usize, std::sync::Arc<city_scene::CityScene>>,
     /// Square tiles of a city's plan, by city index and tile column and row.
     tiles: std::collections::HashMap<(usize, i32, i32), std::sync::Arc<city_scene::CityScene>>,
@@ -984,13 +987,20 @@ async fn ensure_city_tile(
         .map_err(|_| "the city cache is poisoned")?;
     if let Some(world) = guard.as_mut() {
         // A concurrent request may have built it first; keep that one.
-        world.tiles.entry((index, column, row)).or_insert_with(|| scene.clone());
+        world
+            .tiles
+            .entry((index, column, row))
+            .or_insert_with(|| scene.clone());
     }
     Ok(scene)
 }
 
 #[tauri::command]
-async fn city_tile_bin(index: usize, column: i32, row: i32) -> Result<tauri::ipc::Response, String> {
+async fn city_tile_bin(
+    index: usize,
+    column: i32,
+    row: i32,
+) -> Result<tauri::ipc::Response, String> {
     let scene = ensure_city_tile(index, column, row).await?;
     let bytes = city_scene::scene::encode_binary(&scene)?;
     Ok(tauri::ipc::Response::new(bytes))

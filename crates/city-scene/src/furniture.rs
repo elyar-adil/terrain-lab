@@ -1103,7 +1103,7 @@ fn junction_bollards(
 ) {
     // A two-port "junction" is a bend, not an intersection: its walk ring has no
     // kerb return to protect.
-    if junction.ports.len() < 3 || junction.walk_ring.len() != junction.ring.len() {
+    if junction.ports.len() < 3 || junction.walk_ring.len() < 3 {
         return;
     }
     let at_grade: Vec<(Vec<Vec2>, f32)> = network

@@ -305,12 +305,13 @@ pub fn generate_modern_chinese_city_with_options(
     } = build_graph(&frame, approaches);
     let (mut nodes, mut sd_roads, mut hd_roads, layout) =
         expressway::lay_out(&frame, nodes, sd_roads, hd_roads, &roads::china_rules());
+    expressway::ease_bends(&frame, &mut nodes, &sd_roads, &mut hd_roads);
     let ParcelOutput {
         blocks,
         parcels,
         buildings,
         fields,
-    } = build_parcels(&frame, &nodes, &sd_roads);
+    } = build_parcels(&frame, &nodes, &sd_roads, &hd_roads);
     expressway::grade_separate(&frame, &mut nodes, &mut sd_roads, &mut hd_roads, &layout);
     let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
     ModernCity {
@@ -487,12 +488,13 @@ pub fn generate_modern_chinese_city_from_streets(
         sd_roads: &sd_roads,
         hd_roads: &hd_roads,
     });
+    expressway::ease_bends(&frame, &mut nodes, &sd_roads, &mut hd_roads);
     let ParcelOutput {
         blocks,
         parcels,
         buildings,
         fields,
-    } = build_parcels(&frame, &nodes, &sd_roads);
+    } = build_parcels(&frame, &nodes, &sd_roads, &hd_roads);
     expressway::grade_separate(&frame, &mut nodes, &mut sd_roads, &mut hd_roads, &layout);
     let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
     ModernCity {
