@@ -5,6 +5,7 @@ mod landscape;
 mod parcels;
 mod roads;
 mod suburb;
+mod tidy;
 
 pub use graph::junction_trim_m;
 use graph::{GraphOutput, build_graph, legacy_hash, modern_hash, modern_phase};
@@ -374,9 +375,10 @@ pub struct ExternalFields {
 /// where local metres are; `radius_km` bounds the area that gets buildings.
 pub fn generate_modern_chinese_city_from_streets(
     spec: ModernChinaSpec,
-    streets: ExternalStreets,
+    mut streets: ExternalStreets,
     fields: ExternalFields,
 ) -> ModernCity {
+    tidy::tidy(&mut streets);
     let mut frame = CityFrame::new(spec);
     frame.organic_footprint = true;
     let urban = std::sync::Arc::new(fields.urbanness);

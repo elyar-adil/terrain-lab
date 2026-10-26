@@ -837,8 +837,15 @@ pub fn junction_lane_guides(network: &Network, builder: &mut MeshBuilder) {
     // one produced a fan of crossing ticks. Only left turns cross the box, so only
     // they are guided.
     let mut drawn: std::collections::HashSet<(u32, i32, i32)> = std::collections::HashSet::new();
+    // Guides are painted only through a signalised box.
+    let signalised: std::collections::HashSet<u32> = network
+        .junctions
+        .iter()
+        .filter(|j| j.kind == urban::JunctionKind::Signalized)
+        .map(|j| j.node)
+        .collect();
     for connector in &network.connectors {
-        if connector.movement != Movement::Left {
+        if connector.movement != Movement::Left || !signalised.contains(&connector.node) {
             continue;
         }
         if connector.turn_degrees.abs() < 25.0 {

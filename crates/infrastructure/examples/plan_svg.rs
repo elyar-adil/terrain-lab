@@ -1,6 +1,8 @@
 //! Draw one town's plan as SVG: roads by class, blocks, building footprints, the river.
 //!
 //!   PLANNER=legacy|fabric cargo run --release -p infrastructure --example plan_svg -- OUT.svg [settlement-index]
+//!
+//! `PLAN_JSON=plan.json` also writes the town's plan itself, for measuring it.
 
 use std::{env, error::Error, fmt::Write as _};
 
@@ -82,6 +84,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
     }
     let city = &infra.modern_cities[index.min(infra.modern_cities.len() - 1)];
+    if let Ok(path) = env::var("PLAN_JSON") {
+        std::fs::write(&path, serde_json::to_vec(city)?)?;
+        eprintln!("wrote {path}");
+    }
     eprintln!(
         "town {index}: {} nodes, {} roads, {} blocks, {} parcels, {} buildings",
         city.nodes.len(),

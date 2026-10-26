@@ -9,7 +9,7 @@ use urban::JunctionKind;
 
 use crate::math::{Rng, Vec2, Vec3};
 use crate::mesh::MeshBuilder;
-use crate::network::{Junction, Road};
+use crate::network::{Junction, Network, Road};
 use crate::spec::{JunctionSpec, MM, Movement, arrow_polygons};
 
 use super::{Carriageway, WALK_Y, ribbon, sweep};
@@ -361,6 +361,66 @@ fn median_and_hazard(
     }
 }
 
+/// The arterial's median carried straight across a right-in, right-out
+/// junction: the side street meets an unbroken kerb, so it can only turn right.
+pub(super) fn median_across(network: &Network, junction: &Junction, builder: &mut MeshBuilder) {
+    let rank = |road: u32| {
+        network
+            .road(road)
+            .map(|r| crate::network::class_rank(r.class))
+            .unwrap_or(3)
+    };
+    let major = junction
+        .ports
+        .iter()
+        .map(|p| rank(p.road))
+        .min()
+        .unwrap_or(3);
+    let arms: Vec<_> = junction
+        .ports
+        .iter()
+        .filter(|p| rank(p.road) == major)
+        .collect();
+    let [a, b] = arms.as_slice() else {
+        return;
+    };
+    let Some(road) = network.road(a.road) else {
+        return;
+    };
+    if !road.section.has_median() {
+        return;
+    }
+    let half = road.section.median_metres * 0.5;
+    let (ma, mb) = ((a.left + a.right) * 0.5, (b.left + b.right) * 0.5);
+    let length = ma.distance(mb);
+    if length < 1.0 {
+        return;
+    }
+    let path = crate::math::Path::flat(vec![ma, mb]);
+    for side in [-1.0_f32, 1.0] {
+        builder.ribbon(
+            "kerb",
+            &path,
+            (side * half - 0.12).min(side * half + 0.12),
+            (side * half - 0.12).max(side * half + 0.12),
+            0.0,
+            length,
+            super::level::KERB,
+            None,
+        );
+    }
+    builder.ribbon(
+        "median.plant",
+        &path,
+        -half,
+        half,
+        0.0,
+        length,
+        super::level::MEDIAN,
+        None,
+    );
+}
+
 /// Diagonal black-and-yellow stripes across a band.
 ///
 /// Genuinely diagonal, which needs a parallelogram per stripe rather than a
@@ -551,6 +611,7 @@ pub(super) fn junction_geometry(
 /// The junction's own markings: the yellow no-stopping box on a large signalised
 /// junction, and the give-way line of triangles on every unsignalised approach.
 pub(super) fn junction_details(
+    network: &Network,
     junction: &Junction,
     builder: &mut MeshBuilder,
     spec: &JunctionSpec,
@@ -559,7 +620,7 @@ pub(super) fn junction_details(
     if grid {
         yellow_grid_box(junction, builder, spec);
     }
-    give_way_across_approach(junction, builder, spec);
+    give_way_across_approach(network, junction, builder, spec);
 }
 
 /// The yellow box (黄色网格线) that marks the no-stopping area inside a large
@@ -572,7 +633,10 @@ pub(super) fn junction_details(
 /// quads a junction, and past a handful of junctions that is a triangle budget
 /// spent on paint nobody sees from a car.
 fn yellow_grid_box(junction: &Junction, builder: &mut MeshBuilder, _spec: &JunctionSpec) {
-    if junction.roundabout || junction.ports.len() < 4 || junction.radius < 22.0 {
+    if junction.kind != JunctionKind::Signalized
+        || junction.ports.len() < 4
+        || junction.radius < 22.0
+    {
         return;
     }
     let inset = crate::math::inset_ring(&junction.ring, 2.6);
@@ -663,11 +727,33 @@ fn yellow_bar(builder: &mut MeshBuilder, a: Vec2, b: Vec2, half: f32) {
 /// at the driver, so from the saddle they read as a row of arrowheads telling you
 /// to stop.  China also paints a 400 mm stop bar behind them, which is what makes
 /// the line legible at night, so both go down.
-fn give_way_across_approach(junction: &Junction, builder: &mut MeshBuilder, spec: &JunctionSpec) {
-    if junction.kind == JunctionKind::Signalized || junction.ports.len() < 3 {
+fn give_way_across_approach(
+    network: &Network,
+    junction: &Junction,
+    builder: &mut MeshBuilder,
+    spec: &JunctionSpec,
+) {
+    if !matches!(
+        junction.kind,
+        JunctionKind::Priority | JunctionKind::RightInRightOut | JunctionKind::Channelized
+    ) || junction.ports.len() < 3
+    {
         return;
     }
-    for port in &junction.ports {
+    // Only the minor arms give way; the major street runs through unmarked.
+    let rank = |road: u32| {
+        network
+            .road(road)
+            .map(|r| crate::network::class_rank(r.class))
+            .unwrap_or(3)
+    };
+    let major = junction
+        .ports
+        .iter()
+        .map(|p| rank(p.road))
+        .min()
+        .unwrap_or(3);
+    for port in junction.ports.iter().filter(|p| rank(p.road) > major) {
         let width = port.left.distance(port.right).max(3.0);
         if width < 3.0 {
             continue;

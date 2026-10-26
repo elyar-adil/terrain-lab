@@ -258,6 +258,13 @@ pub enum JunctionKind {
     Channelized,
     Roundabout,
     GradeSeparated,
+    /// Unsignalised: the major street runs through, the minor arms give way
+    /// (让行). Collector against local, local against local.
+    Priority,
+    /// A local street on an arterial: the arterial's median runs straight
+    /// across, so the side street turns right in and right out only (右进右出),
+    /// and nobody crosses the arterial on foot here.
+    RightInRightOut,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

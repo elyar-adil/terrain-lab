@@ -385,6 +385,7 @@ pub fn build(network: &Network, builder: &mut MeshBuilder, seed: u32) -> StreetO
     for junction in &network.junctions {
         surfaces::junction_geometry(junction, builder, &spec);
         surfaces::junction_details(
+            network,
             junction,
             builder,
             &spec,
@@ -392,6 +393,9 @@ pub fn build(network: &Network, builder: &mut MeshBuilder, seed: u32) -> StreetO
         );
         if junction.kind == urban::JunctionKind::Roundabout {
             surfaces::roundabout(junction, builder, &spec);
+        }
+        if junction.kind == urban::JunctionKind::RightInRightOut {
+            surfaces::median_across(network, junction, builder);
         }
     }
     markings::junction_lane_guides(network, builder);

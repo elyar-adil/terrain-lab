@@ -311,6 +311,23 @@ pub fn derive(
         }
     }
 
+    // --- junction control -----------------------------------------------------
+    // Decided from the streets meeting at a node, before anything is drawn, so a
+    // street end knows whether it stops, gives way or runs straight through.
+    let layer_of: HashMap<u32, i8> = hd_roads.iter().map(|road| (road.id, road.layer)).collect();
+    let control: Vec<Control> = incidence
+        .iter()
+        .map(|list| {
+            let classes: Vec<ModernRoadClass> = list
+                .iter()
+                .filter_map(|id| sd_by_id.get(id))
+                .filter(|road| layer_of.get(&road.id).copied().unwrap_or(0) == 0)
+                .map(|road| road.class)
+                .collect();
+            control_for(&classes)
+        })
+        .collect();
+
     let sections: HashMap<u32, RoadCrossSection> = hd_roads
         .iter()
         .map(|road| (road.id, road.cross_section()))
@@ -466,8 +483,17 @@ pub fn derive(
 
         let centreline = Path::new(vertices);
         let carriageway = centreline.trim(trim_start, full_length - trim_end);
-        let crossing_start = incidence[from_index].len() > 2;
-        let crossing_end = incidence[to_index].len() > 2;
+        // An end is a controlled approach (a crosswalk and a stop or give-way
+        // line) at a signal, and at an unsignalised junction only when it is a
+        // minor arm: the major street runs through without stopping.
+        let controlled = |node: usize| {
+            incidence[node].len() > 2 && {
+                let c = control[node];
+                c.kind == JunctionKind::Signalized || class_rank(hd.class) > c.major
+            }
+        };
+        let crossing_start = controlled(from_index);
+        let crossing_end = controlled(to_index);
         // A bridge over another road must clear it.  A deck the span cannot lift
         // to that height would drive through the road below, so say so.
         if crosses_road && deck < CROSSING_CLEARANCE {
@@ -650,8 +676,22 @@ pub fn derive(
             // Every candidate is a lane on a *different* road, so a U-turn back
             // down the same carriageway is never generated.
             let mut candidates: Vec<(usize, Movement, f32, Vec2)> = Vec::new();
+            let here = control[node_index];
+            let rank_of = |road: u32| network.road(road).map(|r| class_rank(r.class)).unwrap_or(3);
             for &target_index in &outgoing {
                 let target = &network.lanes[target_index];
+                // Across an unbroken median only right turns are made: out of the
+                // side street, and into it.
+                if here.kind == JunctionKind::RightInRightOut && local.len() > node_index {
+                    let into_minor = rank_of(target.road) > here.major;
+                    let from_minor = rank_of(lane.road) > here.major;
+                    if into_minor || from_minor {
+                        let out = target.path.tangent_at(0.01);
+                        if classify_movement(dir, out).0 != Movement::Right {
+                            continue;
+                        }
+                    }
+                }
                 if target.road == lane.road
                     || target.use_kind != LaneUse::Through
                         && target.use_kind != LaneUse::LeftTurn
@@ -984,21 +1024,7 @@ pub fn derive(
         {
             JunctionKind::GradeSeparated
         } else if ports.len() >= 3 {
-            let has_major = network
-                .incident_roads(node)
-                .iter()
-                .filter_map(|id| network.road(*id))
-                .any(|road| {
-                    matches!(
-                        road.class,
-                        ModernRoadClass::Arterial | ModernRoadClass::Expressway
-                    )
-                });
-            if has_major {
-                JunctionKind::Signalized
-            } else {
-                JunctionKind::Channelized
-            }
+            control[node_index].kind
         } else {
             JunctionKind::Channelized
         };
@@ -1025,6 +1051,58 @@ impl Network {
             self.warnings.push(warning);
         }
     }
+}
+
+/// How a junction is controlled, and the rank of the street that has priority.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Control {
+    kind: JunctionKind,
+    /// `class_rank` of the major street; an arm of a lower rank is a minor arm.
+    major: u8,
+}
+
+pub(crate) fn class_rank(class: ModernRoadClass) -> u8 {
+    match class {
+        ModernRoadClass::Expressway => 0,
+        ModernRoadClass::Arterial => 1,
+        ModernRoadClass::Collector => 2,
+        ModernRoadClass::Local => 3,
+    }
+}
+
+/// The control of an at-grade junction from the classes of the streets meeting
+/// at it, as Chinese streets are controlled (CJJ 37, CJJ 152):
+///
+/// - wherever an arterial (or expressway) meets anything but local streets, and
+///   where four or more collector arms meet, there is a signal;
+/// - a local street on an arterial that runs through is right-in, right-out
+///   across an unbroken median;
+/// - everything else gives way to its major street (让行).
+///
+/// The major street is the best class present; an arm of a lower class is a
+/// minor arm.
+fn control_for(classes: &[ModernRoadClass]) -> Control {
+    let ranks: Vec<u8> = classes.iter().map(|c| class_rank(*c)).collect();
+    let Some(&major) = ranks.iter().min() else {
+        return Control {
+            kind: JunctionKind::Channelized,
+            major: 3,
+        };
+    };
+    let count = |r: u8| ranks.iter().filter(|x| **x == r).count();
+    let minors_all_local = ranks.iter().all(|r| *r == major || *r == 3);
+    let kind = if major <= 1 {
+        if count(major) >= 2 && minors_all_local && count(3) > 0 {
+            JunctionKind::RightInRightOut
+        } else {
+            JunctionKind::Signalized
+        }
+    } else if major == 2 && count(2) >= 4 {
+        JunctionKind::Signalized
+    } else {
+        JunctionKind::Priority
+    };
+    Control { kind, major }
 }
 
 /// Join every chain of streets that meet two at a time, end to end, at nodes
@@ -1366,6 +1444,8 @@ pub mod export {
             urban::JunctionKind::Channelized => "channelized",
             urban::JunctionKind::Roundabout => "roundabout",
             urban::JunctionKind::GradeSeparated => "gradeSeparated",
+            urban::JunctionKind::Priority => "priority",
+            urban::JunctionKind::RightInRightOut => "rightInRightOut",
         }
     }
 
@@ -1492,6 +1572,74 @@ mod tests {
             JunctionSpec::default(),
             city.seed,
         )
+    }
+
+    #[test]
+    fn junctions_are_controlled_by_the_streets_that_meet() {
+        use ModernRoadClass::{Arterial as A, Collector as C, Local as L};
+        let kind = |classes: &[ModernRoadClass]| control_for(classes).kind;
+        // A local street on a through arterial turns right in and right out.
+        assert_eq!(kind(&[A, A, L]), JunctionKind::RightInRightOut);
+        assert_eq!(kind(&[A, A, L, L]), JunctionKind::RightInRightOut);
+        // Major streets meeting, or a collector arm on an arterial, are signalised.
+        assert_eq!(kind(&[A, A, A, A]), JunctionKind::Signalized);
+        assert_eq!(kind(&[A, A, C]), JunctionKind::Signalized);
+        assert_eq!(kind(&[A, C, C]), JunctionKind::Signalized);
+        assert_eq!(kind(&[C, C, C, C]), JunctionKind::Signalized);
+        // Everything else gives way.
+        assert_eq!(kind(&[C, C, L]), JunctionKind::Priority);
+        assert_eq!(kind(&[C, C, C]), JunctionKind::Priority);
+        assert_eq!(kind(&[L, L, L, L]), JunctionKind::Priority);
+    }
+
+    #[test]
+    fn a_right_in_right_out_junction_only_turns_right_into_or_out_of_its_side_street() {
+        let mut checked = 0;
+        for seed in SEEDS {
+            let network = derived(seed);
+            let rank = |lane: &str| {
+                network
+                    .lane(lane)
+                    .and_then(|l| network.road(l.road))
+                    .map(|r| class_rank(r.class))
+                    .unwrap_or(3)
+            };
+            for junction in network
+                .junctions
+                .iter()
+                .filter(|j| j.kind == JunctionKind::RightInRightOut)
+            {
+                let major = junction
+                    .ports
+                    .iter()
+                    .filter_map(|p| network.road(p.road))
+                    .map(|r| class_rank(r.class))
+                    .min()
+                    .unwrap_or(3);
+                for connector in network
+                    .connectors
+                    .iter()
+                    .filter(|c| c.node == junction.node)
+                {
+                    let minor =
+                        rank(&connector.from_lane) > major || rank(&connector.to_lane) > major;
+                    if minor {
+                        assert_eq!(
+                            connector.movement,
+                            Movement::Right,
+                            "seed {seed}: {} across the median at node {}",
+                            connector.id,
+                            junction.node
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            checked > 0,
+            "no right-in, right-out junction in the test cities"
+        );
     }
 
     #[test]
