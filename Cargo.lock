@@ -1530,6 +1530,7 @@ dependencies = [
  "image",
  "rayon",
  "serde",
+ "serde_json",
  "terrain-core",
  "thiserror 2.0.19",
  "urban",

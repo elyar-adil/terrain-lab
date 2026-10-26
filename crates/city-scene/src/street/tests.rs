@@ -517,11 +517,15 @@ fn a_four_port_junction_is_complete_on_every_arm() {
             let (Some(x), Some(y)) = (per_arm[a], per_arm[b]) else {
                 continue;
             };
-            let overlap_x = (x[0] - y[2]).max(y[0] - x[2]);
-            let overlap_y = (x[1] - y[3]).max(y[1] - x[3]);
+            // The gap between the two boxes on each axis; they are apart when
+            // either gap is open.
+            let gap_x = (x[0] - y[2]).max(y[0] - x[2]);
+            let gap_y = (x[1] - y[3]).max(y[1] - x[3]);
             assert!(
-                overlap_x <= 0.0 || overlap_y <= 0.0,
-                "opposing crossings {a} and {b} overlap by {overlap_x:.2} x {overlap_y:.2} m"
+                gap_x > 0.0 || gap_y > 0.0,
+                "opposing crossings {a} and {b} overlap by {:.2} x {:.2} m",
+                -gap_x,
+                -gap_y
             );
         }
     }

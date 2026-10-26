@@ -758,10 +758,11 @@ fn give_way_across_approach(
         if width < 3.0 {
             continue;
         }
-        // Just inside the mouth, on the approach's side of the box.
+        // Just up the approach from the mouth (the box's kerb face), apex toward
+        // the driver coming in: `dir` points into the box.
         let along = -port.dir;
         let mouth = (port.left + port.right) * 0.5;
-        let base = mouth + along * (junction.radius + 1.4);
+        let base = mouth + along * 1.4;
         let right = Vec2::new(-along.y, along.x);
         let count = (width / spec.give_way_pitch).floor().max(1.0) as usize;
         let pitch = width / count as f32;

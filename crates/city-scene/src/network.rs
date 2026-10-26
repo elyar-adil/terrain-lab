@@ -95,7 +95,7 @@ pub struct Port {
     pub road: u32,
     /// `true` when the node is the road's `from` end.
     pub at_start: bool,
-    /// Outward direction along the road, pointing away from the node.
+    /// Direction out of the road into the junction: toward the node.
     pub dir: Vec2,
     /// Station of the kerb face on the untrimmed road.
     pub station: f32,
@@ -327,6 +327,7 @@ pub fn derive(
             control_for(&classes)
         })
         .collect();
+    let control = space_median_openings(control, &incidence, &sd_by_id, hd_roads, frame);
 
     let sections: HashMap<u32, RoadCrossSection> = hd_roads
         .iter()
@@ -1105,6 +1106,107 @@ fn control_for(classes: &[ModernRoadClass]) -> Control {
     Control { kind, major }
 }
 
+/// An arterial's median opens for a signal no closer than 300 m to the next
+/// opening (CJJ 37 §6.2.8, 断口间距). Where two signalised junctions on one
+/// arterial are closer, the one whose cross street is the lesser becomes
+/// right-in, right-out; a crossing of two arterials is never closed.
+fn space_median_openings(
+    mut control: Vec<Control>,
+    incidence: &[Vec<u32>],
+    sd_by_id: &HashMap<u32, &SdRoad>,
+    hd_roads: &[HdRoad],
+    frame: CityFrameInfo,
+) -> Vec<Control> {
+    const OPENING_M: f32 = 300.0;
+    let length: HashMap<u32, f32> = hd_roads
+        .iter()
+        .map(|road| {
+            let pts: Vec<Vec2> = road
+                .centreline
+                .iter()
+                .map(|p| {
+                    let [x, z] = frame.to_local(*p);
+                    Vec2::new(x, z)
+                })
+                .collect();
+            (road.id, pts.windows(2).map(|w| w[0].distance(w[1])).sum())
+        })
+        .collect();
+    // The best cross street at a node: the lowest rank among arms that are not
+    // the major street.
+    let cross = |node: usize, major: u8| {
+        incidence[node]
+            .iter()
+            .filter_map(|id| sd_by_id.get(id))
+            .map(|road| class_rank(road.class))
+            .filter(|r| *r > major)
+            .min()
+            .unwrap_or(major)
+    };
+    let opening = |c: &Control| c.kind == JunctionKind::Signalized && c.major <= 1;
+    for node in 0..incidence.len() {
+        if !opening(&control[node]) {
+            continue;
+        }
+        let major = control[node].major;
+        for &first in &incidence[node] {
+            let Some(road) = sd_by_id.get(&first) else {
+                continue;
+            };
+            if class_rank(road.class) != major {
+                continue;
+            }
+            // Walk along the arterial to the next opening.
+            let (mut at, mut via, mut walked) = (node, first, 0.0_f32);
+            let next = loop {
+                let Some(road) = sd_by_id.get(&via) else {
+                    break None;
+                };
+                walked += length.get(&via).copied().unwrap_or(0.0);
+                let far = if road.from as usize == at {
+                    road.to as usize
+                } else {
+                    road.from as usize
+                };
+                if walked >= OPENING_M || far >= control.len() {
+                    break None;
+                }
+                if opening(&control[far]) {
+                    break Some(far);
+                }
+                let onward = incidence[far].iter().copied().find(|id| {
+                    *id != via
+                        && sd_by_id
+                            .get(id)
+                            .is_some_and(|r| class_rank(r.class) == major)
+                });
+                match onward {
+                    Some(id) => {
+                        at = far;
+                        via = id;
+                    }
+                    None => break None,
+                }
+            };
+            let Some(other) = next else {
+                continue;
+            };
+            let (mine, theirs) = (cross(node, major), cross(other, control[other].major));
+            // The lesser cross street closes; a tie closes the one with fewer arms.
+            let close_mine =
+                mine > theirs || (mine == theirs && incidence[node].len() < incidence[other].len());
+            let target = if close_mine { node } else { other };
+            if cross(target, control[target].major) > 1 {
+                control[target].kind = JunctionKind::RightInRightOut;
+            }
+            if close_mine {
+                break;
+            }
+        }
+    }
+    control
+}
+
 /// Join every chain of streets that meet two at a time, end to end, at nodes
 /// where nothing else meets them, into one street with one centreline.
 ///
@@ -1590,6 +1692,48 @@ mod tests {
         assert_eq!(kind(&[C, C, L]), JunctionKind::Priority);
         assert_eq!(kind(&[C, C, C]), JunctionKind::Priority);
         assert_eq!(kind(&[L, L, L, L]), JunctionKind::Priority);
+    }
+
+    #[test]
+    fn arterial_median_openings_are_three_hundred_metres_apart() {
+        // CJJ 37 §6.2.8: no two signals on one arterial closer than 300 m,
+        // except where two arterials cross.
+        let mut closed = 0;
+        for seed in SEEDS {
+            let network = derived(seed);
+            let arterial = |road: u32| {
+                network
+                    .road(road)
+                    .is_some_and(|r| r.class == ModernRoadClass::Arterial)
+            };
+            let openings: Vec<&Junction> = network
+                .junctions
+                .iter()
+                .filter(|j| j.kind == JunctionKind::Signalized)
+                .filter(|j| j.ports.iter().filter(|p| arterial(p.road)).count() == 2)
+                .filter(|j| j.ports.len() >= 3)
+                .collect();
+            closed += network
+                .junctions
+                .iter()
+                .filter(|j| j.kind == JunctionKind::RightInRightOut)
+                .count();
+            for road in network
+                .roads
+                .iter()
+                .filter(|r| r.class == ModernRoadClass::Arterial)
+            {
+                let at = |node: u32| openings.iter().any(|j| j.node == node);
+                let both = at(road.from_node) && at(road.to_node);
+                assert!(
+                    !both || road.centreline.length() >= 300.0,
+                    "seed {seed}: arterial {} has signals {} m apart",
+                    road.id,
+                    road.centreline.length()
+                );
+            }
+        }
+        assert!(closed > 0, "no opening was ever closed");
     }
 
     #[test]
