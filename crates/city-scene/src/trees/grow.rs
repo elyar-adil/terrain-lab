@@ -759,6 +759,18 @@ impl<'a, 'b> Grower<'a, 'b> {
         // so a clump of flat cards shades as one soft, rounded bunch of leaves
         // (light wraps round it) and not as a heap of individually lit
         // rectangles.  The bend is a shading normal only: geometry is untouched.
+        // And the crown as a whole: each corner leans out from the crown's
+        // centre as well, as on an ellipsoid of the crown's own proportions, so
+        // the canopy has a lit side and a shaded side and reads as a volume.
+        // Bent only toward each clump, every clump was lit on its own and a
+        // crown was a flat, even noise of green from any side.
+        let (plan_base, plan_top, plan_radius) = (self.plan.base, self.plan.top, self.plan.radius);
+        let crown_centre = Vec3::new(0.0, (plan_base + plan_top) * 0.5, 0.0);
+        let crown_half = Vec3::new(
+            plan_radius.max(1.0e-3),
+            ((plan_top - plan_base) * 0.5).max(1.0e-3),
+            plan_radius.max(1.0e-3),
+        );
         let round = |corner: Vec3| {
             let away = (corner - cluster) / spread.max(1.0e-4);
             let away = if away.length() > 1.0e-4 {
@@ -766,7 +778,18 @@ impl<'a, 'b> Grower<'a, 'b> {
             } else {
                 shading
             };
-            (shading * 0.85 + away * 0.55).normalized_or_up()
+            let rel = corner - crown_centre;
+            let crown = Vec3::new(
+                rel.x / crown_half.x,
+                rel.y / crown_half.y,
+                rel.z / crown_half.z,
+            );
+            let crown = if crown.length() > 1.0e-4 {
+                crown.normalized_or_up()
+            } else {
+                shading
+            };
+            (shading * 0.45 + away * 0.35 + crown * 0.8).normalized_or_up()
         };
         let corners = [
             centre - axis_u * half - axis_v * half,
