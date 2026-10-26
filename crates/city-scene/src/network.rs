@@ -281,6 +281,11 @@ pub fn derive(
     spec: JunctionSpec,
     seed: u32,
 ) -> Network {
+    // A street the plan drew as a chain of short pieces, one per bend, is one
+    // street: built piece by piece it was trimmed at every bend, so its median,
+    // markings and kerbs broke every 80 - 100 m.
+    let (sd_merged, hd_merged) = merge_continuations(nodes.len(), sd_roads, hd_roads);
+    let (sd_roads, hd_roads) = (sd_merged.as_slice(), hd_merged.as_slice());
     let mut network = Network {
         node_count: nodes.len(),
         spec,
@@ -1022,6 +1027,136 @@ impl Network {
     }
 }
 
+/// Join every chain of streets that meet two at a time, end to end, at nodes
+/// where nothing else meets them, into one street with one centreline.
+///
+/// Only like is joined to like: the same class, the same layer, neither a
+/// bridge. A node where a third street meets, or where the class or layer
+/// changes, stays a junction. The joined street keeps the id, lanes and cross
+/// section of its first piece.
+fn merge_continuations(
+    node_count: usize,
+    sd_roads: &[SdRoad],
+    hd_roads: &[HdRoad],
+) -> (Vec<SdRoad>, Vec<HdRoad>) {
+    let hd_by_id: HashMap<u32, &HdRoad> = hd_roads.iter().map(|road| (road.id, road)).collect();
+    let mut incidence: Vec<Vec<usize>> = vec![Vec::new(); node_count];
+    for (index, road) in sd_roads.iter().enumerate() {
+        for node in [road.from as usize, road.to as usize] {
+            if node < node_count {
+                incidence[node].push(index);
+            }
+        }
+    }
+    let joinable = |a: usize, b: usize| {
+        let (ra, rb) = (&sd_roads[a], &sd_roads[b]);
+        let (Some(ha), Some(hb)) = (hd_by_id.get(&ra.id), hd_by_id.get(&rb.id)) else {
+            return false;
+        };
+        a != b
+            && ra.class == rb.class
+            && !ra.bridge
+            && !rb.bridge
+            && ha.layer == hb.layer
+            && ha.layer == 0
+    };
+    // A node a chain passes through.
+    let through = |node: usize| {
+        let list = &incidence[node];
+        list.len() == 2 && joinable(list[0], list[1])
+    };
+    let mut used = vec![false; sd_roads.len()];
+    let mut sd_out = Vec::with_capacity(sd_roads.len());
+    let mut hd_out = Vec::with_capacity(hd_roads.len());
+    for start in 0..sd_roads.len() {
+        if used[start] || !hd_by_id.contains_key(&sd_roads[start].id) {
+            continue;
+        }
+        // Walk back to the chain's first piece, so a chain is joined once and in
+        // order. A closed ring has no first piece; it starts here.
+        let mut first = start;
+        let mut first_from = sd_roads[start].from as usize;
+        let mut guard = 0;
+        loop {
+            guard += 1;
+            if guard > sd_roads.len() || !through(first_from) {
+                break;
+            }
+            let list = &incidence[first_from];
+            let prev = if list[0] == first { list[1] } else { list[0] };
+            if prev == start || used[prev] {
+                break;
+            }
+            let road = &sd_roads[prev];
+            first_from = if road.to as usize == first_from {
+                road.from as usize
+            } else {
+                road.to as usize
+            };
+            first = prev;
+        }
+        // Walk forward, gathering the centreline.
+        let mut pieces: Vec<(usize, bool)> = Vec::new();
+        let mut current = first;
+        let mut at = first_from;
+        loop {
+            used[current] = true;
+            let road = &sd_roads[current];
+            let forward = road.from as usize == at;
+            pieces.push((current, forward));
+            let next_node = if forward {
+                road.to as usize
+            } else {
+                road.from as usize
+            };
+            if !through(next_node) {
+                at = next_node;
+                break;
+            }
+            let list = &incidence[next_node];
+            let next = if list[0] == current { list[1] } else { list[0] };
+            if used[next] {
+                at = next_node;
+                break;
+            }
+            current = next;
+            at = next_node;
+        }
+        let head = &sd_roads[pieces[0].0];
+        let head_hd = hd_by_id[&head.id];
+        let mut centreline: Vec<urban::Point> = Vec::new();
+        for (index, forward) in &pieces {
+            let hd = hd_by_id[&sd_roads[*index].id];
+            let mut line = hd.centreline.clone();
+            if !forward {
+                line.reverse();
+            }
+            if !centreline.is_empty() && !line.is_empty() {
+                line.remove(0);
+            }
+            centreline.extend(line);
+        }
+        let from = first_from as u32;
+        sd_out.push(SdRoad {
+            id: head.id,
+            from,
+            to: at as u32,
+            class: head.class,
+            bridge: head.bridge,
+        });
+        // The first piece may run against the chain; its lanes are kept as they are,
+        // and they are symmetric about the centreline for every class but one-way
+        // ramps, which the plan never chains.
+        hd_out.push(HdRoad {
+            id: head.id,
+            sd_road: head.id,
+            centreline,
+            ..head_hd.clone()
+        });
+    }
+    (sd_out, hd_out)
+}
+
 fn lerp_height(from: f32, to: f32, t: f32) -> f32 {
     from + (to - from) * t
 }
@@ -1357,6 +1492,31 @@ mod tests {
             JunctionSpec::default(),
             city.seed,
         )
+    }
+
+    #[test]
+    fn a_street_is_one_road_from_junction_to_junction() {
+        // Built piece by piece, a street was trimmed at every bend and its median
+        // and paint broke there. No node may join exactly two at-grade, non-bridge
+        // roads of one class: that is a bend, and the two are one road.
+        for seed in SEEDS {
+            let network = derived(seed);
+            let mut at: HashMap<u32, Vec<&Road>> = HashMap::new();
+            for road in &network.roads {
+                at.entry(road.from_node).or_default().push(road);
+                at.entry(road.to_node).or_default().push(road);
+            }
+            let bends = at
+                .values()
+                .filter(|list| {
+                    list.len() == 2
+                        && list[0].id != list[1].id
+                        && list[0].class == list[1].class
+                        && list.iter().all(|r| r.layer == 0 && !r.bridge)
+                })
+                .count();
+            assert_eq!(bends, 0, "seed {seed}: {bends} bends still split a street");
+        }
     }
 
     #[test]

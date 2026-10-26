@@ -65,7 +65,8 @@ const SOLAR = 0x3a4048;
 const TANK = 0xd8d8d0;
 const PLANT = 0x5e5c58;
 const TERRACOTTA = 0x8a5a45;
-const ASPHALT = 0x4a4c4f;
+// Aged asphalt, as the detail bakes it (about 13 %, neutral grey).
+const ASPHALT = 0x64625e;
 // Paving, plazas and forecourts between the buildings of a block.
 const PAVING = 0x8b8982;
 

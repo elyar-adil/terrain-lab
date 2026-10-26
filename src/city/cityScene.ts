@@ -417,10 +417,8 @@ export function createMaterials(
     ) as THREE.MeshStandardMaterial;
 
   // --- ground ---------------------------------------------------------------
-  // Asphalt's albedo is 4-12%: it is nearly black, and it is *slightly blue*.
-  // Painting it mid-grey is the single most common way a rendered road looks
-  // like poured concrete, which is why the number here is low and the normal map
-  // carries the detail.
+  // A city street is an aged wearing course, 10-18 % and a neutral to faintly
+  // warm grey (`textures::asphalt_texture`); fresh blue-black asphalt read navy.
   const asphaltMap = textureFor("ground/asphalt");
   applyAntiTiling(standard(
     "asphalt",
@@ -432,10 +430,10 @@ export function createMaterials(
       // Wet-looking wheel tracks are a lower-roughness stripe, not a lighter
       // colour; the bake has already darkened them.
     },
-    asphaltMap ? 0xffffff : 0x2a2c30,
+    asphaltMap ? 0xffffff : 0x64625e,
   ), "asphalt");
   // The shoulder / carriageway sweep wall: weathered, dustier than the road.
-  standard("asphalt.pavement", { roughness: 0.95 }, 0x4a4a46);
+  standard("asphalt.pavement", { roughness: 0.95 }, 0x6f6c66);
 
   const pavingMap = textureFor("ground/paving");
   applyAntiTiling(standard(
@@ -749,7 +747,8 @@ export function createMaterials(
    * red asphalt, and the red strip is one of the most recognisable things about a
    * Chinese street. That is a one-line change here, not a scene-layer one.
    */
-  standard("asphalt.cycle", { roughness: 0.9 }, 0x3a3d42);
+  // The 非机动车道: the same aged asphalt, a shade lighter and dustier.
+  standard("asphalt.cycle", { roughness: 0.9 }, 0x6c6964);
   // Street furniture. Values come from the scene layer that authors the
   // geometry, so the two cannot drift apart.
   standard("furniture/bin", { roughness: 0.6, metalness: 0.05 }, 0x9aa0a2);

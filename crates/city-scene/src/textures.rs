@@ -126,28 +126,27 @@ pub fn roof_texture(size: usize) -> BakedTexture {
     crate::facades::roof_texture(size)
 }
 
-/// Asphalt: an old, patched, near-black surface.
+/// Asphalt: the aged, dusty wearing course of a Chinese city street.
 ///
-/// # Why this bake is mostly about value, not colour
+/// # Value
 ///
-/// Asphalt is **4-12% reflectance**.  In sRGB that is roughly 60-95, so a
-/// correct bake lives entirely in the bottom third of the range.  Baking it
-/// around 130-160 gives a *concrete* value, and a road that reads as light
-/// concrete cannot be rescued by a normal map, because the eye judges albedo
-/// before relief.  So the mean is pinned low and the variation is carried by
-/// four separate physical mechanisms, each of which is something you can point
-/// at on a real road:
+/// Fresh asphalt reflects about 5 %; a wearing course a few years old, its
+/// binder oxidised and its aggregate exposed and dusted, reflects 10 - 18 %. A
+/// city street is almost all the second kind: in street photographs of Beijing
+/// the carriageway reads as light as the stone and render beside it, and a warm
+/// grey, not a blue-black. The mean is pinned at about 13 % (sRGB ~100), dust
+/// keeps it a shade warm, and the variation comes from what is really there:
 ///
-/// * **oxidation and sun-bleaching** — broad, slow, +/-9/255 patches;
-/// * **screed passes** — the paving machine's own bands, +/-7/255;
-/// * **aggregate** — fine grain plus ~3% bright chert chips that catch raking
-///   light and are the only genuinely bright thing on a road;
-/// * **joints, cracks and chipping** — the linear features, which is what makes
-///   the surface read as *old* rather than as a noise field.
+/// * **oxidation and bleaching** — broad, slow patches;
+/// * **screed passes** — the paving machine's bands;
+/// * **aggregate** — fine grain, and ~3 % pale chert chips that catch raking light.
 ///
-/// The blue channel is pushed ~6% above red: real bituminous asphalt is a very
-/// slightly cool near-black, and that cast is what keeps it from reading brown
-/// under a warm sun.
+/// # No linear features in the tile
+///
+/// The road is mapped by world position, so this tile repeats every few metres
+/// across every street and junction alike. A joint or a crack drawn in it
+/// repeats with it, and a transverse joint every tile is what made streets read
+/// as a chain of sections. Lines belong to the road, not to the tile.
 pub fn asphalt_texture(size: usize) -> BakedTexture {
     let mut rgba = vec![0_u8; size * size * 4];
     for y in 0..size {
@@ -157,52 +156,24 @@ pub fn asphalt_texture(size: usize) -> BakedTexture {
             let ix = x as i32;
             let iy = y as i32;
 
-            // Broad oxidation / bleaching.  Three cells per 4 m tile keeps the
-            // period near 1.3 m, the scale of a genuinely weathered patch.
-            let oxidation = signed_noise(0x51d3, u * 3.0, v * 3.0, 3.0) * 9.0;
-            // The paving machine's pass: stretched along `V`, one per tile.
-            let screed = signed_noise(0x2a71, u * 8.0, v * 2.0, 8.0) * 7.0;
-            // Coarse aggregate clumps, then the grain itself.
-            let clump = signed_noise(0x77b1, u * 16.0, v * 16.0, 16.0) * 6.0;
-            let grain = (hash(17, ix, iy) - 0.5) * 9.0;
-            // Bright chert.  Three per cent, and the reason raking light matters.
+            let oxidation = signed_noise(0x51d3, u * 2.0, v * 2.0, 2.0) * 8.0;
+            let screed = signed_noise(0x2a71, u * 6.0, v * 2.0, 6.0) * 5.0;
+            let clump = signed_noise(0x77b1, u * 16.0, v * 16.0, 16.0) * 10.0;
+            let grain = (hash(17, ix, iy) - 0.5) * 30.0;
             let chip = if hash(109, ix, iy) < 0.032 {
-                20.0 + hash(113, ix, iy) * 22.0
+                22.0 + hash(113, ix, iy) * 26.0
             } else {
                 0.0
             };
+            // Dark specks: binder-rich spots where the aggregate is still covered.
+            let speck = if hash(127, ix, iy) < 0.06 { -24.0 } else { 0.0 };
 
-            // Linear features.  A construction joint in `U` — for a road running
-            // along `X` that is a joint *across* the carriageway, exactly where
-            // a paving pass ends — and a crack that wanders along `V`.
-            let joint_u = (u - 0.5 - 0.035 * signed_noise(0x1d0f, v * 4.0, 0.0, 4.0)).abs();
-            let joint = if joint_u < 0.010 {
-                -15.0 * (1.0 - joint_u / 0.010)
-            } else {
-                0.0
-            };
-            let crack_v = v - (0.66 + 0.055 * signed_noise(0x3ca7, u * 5.0, 0.0, 5.0));
-            let crack = if crack_v.abs() < 0.005 {
-                -20.0 * (1.0 - crack_v.abs() / 0.005)
-            } else {
-                0.0
-            };
-            // A finer crack branching off it.  One crack is a scratch; a
-            // branching network is forty years of maintenance deferred.
-            let branch = if (crack_v - 0.10).abs() < 0.004
-                && (u - 0.31).abs() < 0.17 * (0.10 - (crack_v - 0.10).abs()) / 0.10
-            {
-                -16.0
-            } else {
-                0.0
-            };
-
-            // 72 is ~6.6% linear reflectance: mid-range for a wearing course.
-            let value = 72.0 + oxidation + screed + clump + grain + chip + joint + crack + branch;
+            // 100 is ~13 % linear reflectance: an aged wearing course.
+            let value = 100.0 + oxidation + screed + clump + grain + chip + speck;
             let offset = (y * size + x) * 4;
-            rgba[offset] = value.clamp(0.0, 255.0) as u8;
+            rgba[offset] = (value * 1.02).clamp(0.0, 255.0) as u8;
             rgba[offset + 1] = value.clamp(0.0, 255.0) as u8;
-            rgba[offset + 2] = (value * 1.06).clamp(0.0, 255.0) as u8;
+            rgba[offset + 2] = (value * 0.96).clamp(0.0, 255.0) as u8;
             rgba[offset + 3] = 255;
         }
     }
@@ -633,15 +604,15 @@ mod tests {
     }
 
     #[test]
-    fn asphalt_is_near_black_and_the_footway_is_not() {
-        // The single most consequential number in the whole ground layer.  A road
-        // baked at a mid grey is a concrete road, and no amount of normal mapping
-        // or geometry rescues it, because albedo is judged first and hardest.
+    fn asphalt_is_aged_and_darker_than_the_footway() {
+        // The single most consequential number in the whole ground layer. A city
+        // street is an aged wearing course, 10 - 18 %: baked at fresh-asphalt
+        // black it read navy, and as concrete grey it would read as concrete.
         let asphalt = asphalt_texture(96);
         let (median, dark, bright) = reflectance(&asphalt);
         assert!(
-            (0.04..0.12).contains(&median),
-            "asphalt median reflectance {median:.3} is outside 4-12%"
+            (0.09..0.18).contains(&median),
+            "asphalt median reflectance {median:.3} is outside 9-18%"
         );
         // ... but it is not a flat fill: aggregate, seams and chips have to
         // survive, or the road reads as painted card.
@@ -656,15 +627,16 @@ mod tests {
             (0.22..0.40).contains(&median),
             "footway paving median reflectance {median:.3} is outside 25-35%"
         );
-        // The whole point of the contrast: kerb-line concrete against bitumen.
+        // The whole point of the contrast: kerb-line concrete against bitumen,
+        // about two to three times as bright as an aged wearing course.
         assert!(
-            median > reflectance(&asphalt).0 * 2.5,
+            median > reflectance(&asphalt).0 * 1.8,
             "paving is not clearly lighter than the road it borders"
         );
     }
 
     #[test]
-    fn asphalt_is_slightly_cool_not_brown() {
+    fn asphalt_is_a_neutral_grey() {
         let texture = asphalt_texture(96);
         let mut red = 0.0_f32;
         let mut blue = 0.0_f32;
@@ -672,11 +644,13 @@ mod tests {
             red += pixel[0] as f32;
             blue += pixel[2] as f32;
         }
-        // Bituminous asphalt is a very slightly cool near-black.  Under a warm
-        // sun an equal-channel bake reads as brown tarmac instead.
+        // Aged, dusty asphalt in street photographs is a neutral to faintly warm
+        // grey. A blue cast made every street read navy; much warmer and it reads
+        // as brown tarmac.
+        let ratio = blue / red;
         assert!(
-            blue > red * 1.02,
-            "asphalt blue {blue:.0} is not above red {red:.0}: it will read brown"
+            (0.90..1.0).contains(&ratio),
+            "asphalt blue to red {ratio:.3}: it reads blue above 1, brown below 0.9"
         );
     }
 
