@@ -1097,74 +1097,89 @@ fn spur_hits(ring: &[V], spurs: &[(V, V, ModernRoadClass)], clear: f32) -> bool 
 /// A block of 城中村: the village's old house plots, each rebuilt by its family
 /// as tall as it could get away with.
 ///
-/// The plots are the homestead plots (宅基地) of the old village, about 10 m by
-/// 12 m, laid back to back in pairs with a lane of 3 - 4 m between pairs, and a
-/// cross lane every few plots.  Within a pair, and from plot to plot along a
-/// lane, the houses stand 0.8 - 1.6 m apart: close enough to shake hands from the
-/// windows (握手楼).  Five to eight storeys, the odd older one lower, a plot here
-/// and there empty.
+/// Read off photographs of Shenzhen and Guangzhou villages and the published
+/// figures on them (`docs/city-visual-target.md`, 城中村):
+///
+/// - a house is 6 - 10 m across its lane front (two to four windows a floor)
+///   and 10 - 14 m deep, a footprint of 80 - 120 m²; about one plot in twelve is
+///   two or three merged and built higher;
+/// - houses stand back to back in pairs, a 2.5 m lane between pairs and a 4 m
+///   lane every few plots across them (Shuiwei: 2.5 m east-west, 4 m
+///   north-south), with a slit of 0.6 - 1.5 m between neighbours on a lane;
+/// - the rows do not line up: each starts at its own offset;
+/// - neighbours are of unrelated heights: mostly six to eight storeys, the odd
+///   two- or three-storey house of the 1980s left standing, merged plots to
+///   fourteen;
+/// - the houses on the village's edge and on its wide lanes have shops on the
+///   ground floor (marked by a second entrance, the shop's).
 fn village_block(env: &[V], spurs: &[(V, V, ModernRoadClass)], mut sink: PlanSink) {
-    let seed = sink.seed;
+    let (seed, key) = (sink.seed, sink.key);
     let ob = obb(env);
     let parcel_id = push_parcel(&mut sink, env, ParcelUse::Village);
-    let h = |salt: i32| modern_hash(seed, sink.key, 11, salt);
-    let frontage = 9.0 + 3.0 * h(801);
-    let plot_depth = 10.0 + 3.0 * h(803);
-    let gap = 0.8 + 0.8 * h(805);
-    let lane = 3.0 + 1.5 * h(807);
-    let cross_every = 3 + (h(809) * 3.0) as i32;
+    let h = |salt: i32| modern_hash(seed, key, 11, salt);
+    let plot_depth = 10.0 + 4.0 * h(803);
+    let back_gap = 0.6 + 0.6 * h(805);
+    let pair_lane = 2.5;
+    let cross_lane = 4.0;
     let mut v = ob.min_v + 1.0;
     let mut pair = 0_i32;
-    while v + plot_depth * 2.0 + gap < ob.max_v - 1.0 {
+    let pairs_total =
+        ((ob.max_v - ob.min_v) / (2.0 * plot_depth + back_gap + pair_lane)).floor() as i32;
+    while v + plot_depth * 2.0 + back_gap < ob.max_v - 1.0 {
         for half in 0..2_i32 {
-            let v0 = v + f32::from(half as u8) * (plot_depth + gap);
-            let mut u = ob.min_u + 1.0;
+            let v0 = v + f32::from(half as u8) * (plot_depth + back_gap);
+            let edge_row = (pair == 0 && half == 0) || (pair == pairs_total - 1 && half == 1);
+            // Each row starts at its own offset, so plots do not line up.
+            let row_h = |salt: i32| modern_hash(seed, key * 977 + pair * 131 + half * 61, 16, salt);
+            let mut u = ob.min_u + 1.0 + 6.0 * row_h(841);
+            let cross_every = 4 + (row_h(843) * 4.0) as i32;
             let mut plot = 0_i32;
-            while u + frontage < ob.max_u - 1.0 {
-                let ph = |salt: i32| {
-                    modern_hash(
-                        seed,
-                        sink.key * 977 + pair * 131 + half * 61 + plot,
-                        12,
-                        salt,
-                    )
-                };
-                // This plot's own width: no two families built to one line.
-                let w = frontage * (0.85 + 0.3 * ph(811));
-                let d = plot_depth * (0.9 + 0.1 * ph(813));
-                // Each family built out to its own line, a little proud of or
-                // behind its neighbours on the lane.
-                let proud = 0.6 * (2.0 * ph(821) - 1.0);
-                let (d0, d1) = if half == 0 {
-                    (v0 + plot_depth - d, v0 + plot_depth + proud.min(0.0))
+            while u + 6.0 < ob.max_u - 1.0 {
+                let cell = key * 977 + pair * 131 + half * 61 + plot * 7;
+                let ph = |salt: i32| modern_hash(seed, cell, 12, salt);
+                let merged = ph(823) < 0.08;
+                let w = if merged {
+                    15.0 + 10.0 * ph(811)
                 } else {
-                    (v0 - proud.min(0.0), v0 + d)
+                    6.0 + 4.0 * ph(811)
+                };
+                let w = w.min(ob.max_u - 1.0 - u);
+                let d = plot_depth * (0.88 + 0.12 * ph(813));
+                // Each family built out to its own line, a little behind its
+                // neighbours' on the lane.
+                let back = 0.6 * ph(821);
+                let (d0, d1) = if half == 0 {
+                    (v0 + plot_depth - d, v0 + plot_depth - back)
+                } else {
+                    (v0 + back, v0 + d)
                 };
                 let ring: Vec<V> = [(u, d0), (u + w, d0), (u + w, d1), (u, d1)]
                     .iter()
                     .map(|p| ob.to_world(p.0, p.1))
                     .collect();
-                if ph(815) > 0.05
+                let empty = ph(815) < 0.04;
+                if w >= 5.5
+                    && !empty
                     && ring.iter().all(|p| point_in(env, *p))
                     && !spur_hits(&ring, spurs, 3.0)
                 {
                     let r = ph(817);
-                    let floors: u16 = if r < 0.06 {
-                        3
-                    } else if r < 0.16 {
-                        4
-                    } else if r < 0.38 {
-                        5
-                    } else if r < 0.68 {
-                        6
-                    } else if r < 0.88 {
-                        7
+                    let floors: u16 = if merged {
+                        9 + (r * 6.0) as u16
+                    } else if r < 0.08 {
+                        2 + u16::from(r < 0.04)
+                    } else if r < 0.25 {
+                        4 + u16::from(r < 0.16)
+                    } else if r < 0.75 {
+                        6 + ((r - 0.25) / 0.5 * 3.0) as u16
+                    } else if r < 0.92 {
+                        9 + u16::from(r < 0.84)
                     } else {
-                        8
+                        11 + ((r - 0.92) / 0.08 * 2.0) as u16
                     };
-                    // About 3 m a storey and a parapet; the ground floor a little
-                    // taller where it is a shop on the lane.
+                    // About 3 m a storey and a parapet.
                     let height = f32::from(floors) * 3.0 + 0.4 + 0.6 * ph(819);
+                    let shop = edge_row || ph(825) < 0.3;
                     push_building(
                         &mut sink,
                         parcel_id,
@@ -1174,12 +1189,22 @@ fn village_block(env: &[V], spurs: &[(V, V, ModernRoadClass)], mut sink: PlanSin
                         ParcelUse::Village,
                         BuildingFacade::PlasterResidential,
                     );
+                    if shop {
+                        if let Some(b) = sink.buildings.last_mut() {
+                            b.entrance_count = 2;
+                        }
+                    }
                 }
                 plot += 1;
-                u += w + if plot % cross_every == 0 { lane } else { gap };
+                let slit = 0.6 + 0.9 * ph(827);
+                u += w + if plot % cross_every == 0 {
+                    cross_lane
+                } else {
+                    slit
+                };
             }
         }
-        v += plot_depth * 2.0 + gap + lane;
+        v += plot_depth * 2.0 + back_gap + pair_lane;
         pair += 1;
     }
 }
@@ -1929,7 +1954,16 @@ mod tests {
         };
         let houses = on(ParcelUse::Village);
         assert!(houses.len() > 100, "{} village houses", houses.len());
-        assert!(houses.iter().all(|b| (3..=8).contains(&b.floors)));
+        // Mostly six to eight storeys; a few old two-storey houses, merged plots to fourteen.
+        assert!(houses.iter().all(|b| (2..=14).contains(&b.floors)));
+        let mid = houses
+            .iter()
+            .filter(|b| (6..=8).contains(&b.floors))
+            .count() as f32;
+        assert!(
+            mid / houses.len() as f32 > 0.4,
+            "six to eight storeys is not the mode"
+        );
         let sheds: Vec<_> = on(ParcelUse::Industrial)
             .into_iter()
             .filter(|b| b.use_type == ParcelUse::Industrial && b.floors == 1)

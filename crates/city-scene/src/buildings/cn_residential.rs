@@ -80,6 +80,48 @@ fn design_of(building: &ModernBuilding, table: &mut FacadeTable) -> (Design, [u8
     )
 }
 
+/// Whether the ground floor is a shop: a mixed-use block, or a village house on
+/// a wide lane or the village's edge (the plan gives it a second entrance).
+fn shop_storey(building: &ModernBuilding) -> bool {
+    building.use_type == ParcelUse::MixedUse
+        || (building.use_type == ParcelUse::Village && building.entrance_count >= 2)
+}
+
+/// Wall colours of village houses: linear albedos measured from photographs of
+/// Shenzhen and Guangzhou villages, by clustering the lit wall pixels (k-means on
+/// an oblique Shenzhen view; greys from an overcast Guangzhou one), weighted by
+/// the share each cluster covers. One tile colour up the whole house, unrelated
+/// to the next house's: about 70 % warm pastels, 30 % grey and off-white, a few
+/// per cent blue, teal and mint.
+const VILLAGE_PAINTS: [([f32; 3], f32); 14] = [
+    ([0.62, 0.46, 0.36], 11.7),
+    ([0.53, 0.34, 0.27], 11.2),
+    ([0.41, 0.27, 0.23], 9.9),
+    ([0.68, 0.56, 0.46], 9.5),
+    ([0.36, 0.19, 0.17], 7.6),
+    ([0.72, 0.67, 0.60], 7.5),
+    ([0.55, 0.53, 0.50], 10.0),
+    ([0.36, 0.34, 0.32], 7.0),
+    ([0.75, 0.74, 0.71], 6.0),
+    ([0.27, 0.14, 0.12], 4.9),
+    ([0.53, 0.25, 0.18], 3.9),
+    ([0.15, 0.25, 0.30], 2.4),
+    ([0.41, 0.50, 0.55], 2.1),
+    ([0.40, 0.55, 0.45], 1.5),
+];
+
+fn village_paint(id: u32) -> [f32; 3] {
+    let total: f32 = VILLAGE_PAINTS.iter().map(|(_, w)| w).sum();
+    let mut r = hash_u32(id, 211, 7) * total;
+    for (paint, weight) in VILLAGE_PAINTS {
+        if r < weight {
+            return paint;
+        }
+        r -= weight;
+    }
+    VILLAGE_PAINTS[0].0
+}
+
 /// Where the elevations start and how many storeys they carry.  A mixed-use
 /// block stands on a 4.5 m shop storey; a compound block on a raised ground
 /// floor (首层抬高 0.45 m) behind a stone plinth; a block on another building's
@@ -87,7 +129,7 @@ fn design_of(building: &ModernBuilding, table: &mut FacadeTable) -> (Design, [u8
 fn storeys_of(building: &ModernBuilding, podium: Option<(f32, u16)>) -> (f32, u32) {
     match podium {
         Some((top, floors)) => (top, (building.floors.saturating_sub(floors) as u32).max(3)),
-        None if building.use_type == ParcelUse::MixedUse => (
+        None if shop_storey(building) => (
             level::GROUND + GROUND_STOREY_M,
             (building.floors as u32).saturating_sub(1).max(1),
         ),
@@ -187,6 +229,8 @@ fn notches_for(frame: &Frame, tower: bool, era: Era, id: u32) -> (Vec<Notch>, Ve
 struct Ctx<'a> {
     id: u32,
     design: &'a Design,
+    /// A colour that replaces the design's, top to bottom: a village house.
+    paint: Option<[f32; 3]>,
     base: f32,
     storeys: u32,
 }
@@ -194,6 +238,9 @@ struct Ctx<'a> {
 impl Ctx<'_> {
     /// The render colour of storey `s` (0 = lowest): 三段式.
     fn paint_at(&self, s: u32) -> [f32; 3] {
+        if let Some(paint) = self.paint {
+            return paint;
+        }
         let (base, base_n) = self.design.base;
         let (top, top_n) = self.design.top;
         if s < base_n && self.storeys > base_n + 2 {
@@ -230,7 +277,8 @@ pub(crate) fn shell(
 ) -> f32 {
     let id = building.id;
     let on_ground = podium.is_none();
-    let retail = on_ground && building.use_type == ParcelUse::MixedUse;
+    let retail = on_ground && shop_storey(building);
+    let village = building.use_type == ParcelUse::Village;
     let tower = is_tower(building);
     let (design, rows) = design_of(building, table);
     let storey = design.front.storey_m;
@@ -240,7 +288,9 @@ pub(crate) fn shell(
     if signed_area(&outward) > 0.0 {
         outward.reverse();
     }
-    let inset = inset_ring(&outward, 0.6);
+    // A village house stands nearly against its neighbours (握手楼): only a
+    // slit, so it is barely inset.
+    let inset = inset_ring(&outward, if village { 0.15 } else { 0.6 });
     let frame = Frame::fit(&inset);
     let plan = match &frame {
         Some(frame) => {
@@ -262,6 +312,7 @@ pub(crate) fn shell(
     let ctx = Ctx {
         id,
         design: &design,
+        paint: village.then(|| village_paint(id)),
         base,
         storeys,
     };

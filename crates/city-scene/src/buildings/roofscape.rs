@@ -210,6 +210,26 @@ pub fn roofscape(
         );
         stair_house = Some(point);
     }
+    // A village house's roof is the family's extra room (加建): a shed of blue
+    // steel sheet or white board over a third to two thirds of it, on about half
+    // the houses in photographs of Shenzhen and Guangzhou villages.
+    if building.use_type == urban::ParcelUse::Village && rng.chance(0.5) {
+        let share = rng.range(0.35, 0.7);
+        let (w, d) = if width >= depth {
+            (width * share, depth * 0.8)
+        } else {
+            (width * 0.8, depth * share)
+        };
+        if let Some(point) = place_box(&mut rng, w, d, 0.0) {
+            let h = 2.4 + rng.unit() * 0.4;
+            let material = if rng.chance(0.6) {
+                "roof.steel"
+            } else {
+                "trim.light"
+            };
+            crate::mesh::box_at(builder, material, point, deck + h * 0.5, w, h, d, 0.0);
+        }
+    }
     // The lift overrun beside the stair house: a second core, which a residential
     // roof does not carry.
     if !residential {

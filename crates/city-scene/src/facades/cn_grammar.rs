@@ -649,20 +649,26 @@ fn vocabulary(era: Era) -> Vocabulary {
             ],
             crowns: &[(Crown::NewChinese, 8.0), (Crown::Flat, 2.0)],
         },
-        // Self-built houses: white or pink tile on the lane front, bare grey
-        // render, and fair-faced red brick where the family never finished it.
+        // Self-built houses, read off photographs of Shenzhen and Guangzhou
+        // villages: wall tile in strong, unrelated pastels from house to house
+        // (pink, salmon, cream, beige, white, mint, teal, pale blue, yellow,
+        // terracotta), bare grey render, and fair-faced brick where the family
+        // never finished it.
         Era::Village => Vocabulary {
-            storey: (3.0, 3.1),
-            skins: &[(Skin::Tile, 6.0), (Skin::Render, 3.0), (Skin::Brick, 1.5)],
+            storey: (2.9, 3.1),
+            skins: &[(Skin::Tile, 7.0), (Skin::Render, 2.0), (Skin::Brick, 1.0)],
             paints: &[
-                ([0.72, 0.72, 0.70], 3.0),
-                ([0.70, 0.64, 0.52], 2.0),
-                ([0.68, 0.53, 0.50], 2.0),
-                ([0.74, 0.60, 0.56], 1.5),
-                ([0.76, 0.70, 0.56], 1.5),
-                ([0.50, 0.49, 0.46], 2.0),
-                ([0.56, 0.62, 0.68], 1.0),
-                ([0.58, 0.66, 0.58], 1.0),
+                ([0.80, 0.56, 0.53], 3.0),
+                ([0.82, 0.63, 0.50], 2.5),
+                ([0.85, 0.80, 0.66], 3.0),
+                ([0.78, 0.70, 0.58], 3.0),
+                ([0.86, 0.86, 0.83], 3.0),
+                ([0.60, 0.78, 0.68], 1.0),
+                ([0.45, 0.68, 0.70], 0.8),
+                ([0.62, 0.72, 0.82], 1.0),
+                ([0.86, 0.76, 0.48], 0.8),
+                ([0.70, 0.40, 0.33], 0.8),
+                ([0.60, 0.59, 0.56], 1.5),
             ],
             frames: &[(WHITE_FRAME, 3.0), (SILVER_FRAME, 3.0), (BLUE_FRAME, 1.0)],
             trim: &[(WHITE_TRIM, 2.0), ([0.52, 0.52, 0.50], 1.0)],
@@ -672,9 +678,10 @@ fn vocabulary(era: Era) -> Vocabulary {
             loggia: 0.0,
             ac_niche: 0.0,
             hung_ac: 0.9,
-            window_w: (1.0, 1.8),
+            window_w: (1.0, 1.6),
             sill: (0.9, 1.0),
-            glass: &[(Glass::Tinted, 2.0), (Glass::Residential, 2.0)],
+            // Green-tinted glass in most of them.
+            glass: &[(Glass::Tinted, 3.0), (Glass::Residential, 1.0)],
             grilles: (255, 255),
             weather: (0.5, 0.9),
             flags: &[(0, 1.0)],
