@@ -31,6 +31,7 @@ export interface CityMassFrame {
 }
 
 type Ring = Array<[number, number]>;
+type CityMassBuilding = ModernCityPayload["buildings"][number];
 
 /** Deterministic 0..1 from an integer id, so a building keeps its colour. */
 function hash01(id: number, salt: number): number {
@@ -51,12 +52,114 @@ const TOWER_WALLS = [0x5b6670, 0x6d7780, 0x8a939b, 0xb8bcc0, 0x4d5b66];
 // reflective membrane, the odd green-grey screed, and blue steel sheeting over a
 // rooftop shed. Mostly light; the dark greys made every roof a hole.
 const ROOFS = [0x9a978f, 0xa8a59d, 0x8c8a84, 0xb9b8b3, 0xc8c8c4, 0x8f948c, 0x6f8aa3];
+// Profiled steel cladding and the blue or grey steel roofs of sheds.
+const SHED_WALLS = [0xdcdedd, 0xc5c9cc, 0xaebccb, 0xd6cfbd, 0xbfc3bf];
+const SHED_ROOFS = [0x5c7d9e, 0x4f6f8f, 0x8a9399, 0xa5acb0, 0x6e8aa0];
+// Village houses: white and pink wall tile, bare render, grey concrete.
+const VILLAGE_WALLS = [0xe3e0d8, 0xd9c9b8, 0xc8c3bb, 0xb9b3a8, 0xe0d4c4, 0xcfc6b0];
+const STEEL_BLUE = 0x5f7f9f;
+const SOLAR = 0x3a4048;
 const TANK = 0xd8d8d0;
 const PLANT = 0x5e5c58;
 const TERRACOTTA = 0x8a5a45;
 const ASPHALT = 0x4a4c4f;
 // Paving, plazas and forecourts between the buildings of a block.
 const PAVING = 0x8b8982;
+
+// The whole part of a vertex's seed is its kind: 0 a wall with windows, 1 an
+// office (which alone may be a curtain wall), 2 a shed, 3 plant with no windows.
+const OFFICE_SEED = 1;
+const SHED_SEED = 2;
+const PLAIN_SEED = 3;
+
+/**
+ * What stands on a roof, as seen from the air, by the kind of building:
+ *
+ * - a residential slab carries a lift and stair head over every unit, about
+ *   every 16 - 20 m along it, and on a walk-up the rows of solar water heaters
+ *   (太阳能热水器) that cover most old Chinese roofs;
+ * - an office carries a plant screen and cooling towers;
+ * - a village house often has a blue steel room built on top (加建) and a tank;
+ * - a shed has a ridge vent along its length.
+ */
+function dressRoof(
+  builder: MassBuilder,
+  b: CityMassBuilding,
+  ring: Ring,
+  roofTop: number,
+  wall: number,
+  shed: boolean,
+  m: number,
+): void {
+  // The long axis from the longest edge, and the extent along and across it.
+  let ux = 1, uz = 0, best = 0;
+  for (let i = 0; i < ring.length; i += 1) {
+    const [ax, az] = ring[i];
+    const [bx, bz] = ring[(i + 1) % ring.length];
+    const len = Math.hypot(bx - ax, bz - az);
+    if (len > best) { best = len; ux = (bx - ax) / len; uz = (bz - az) / len; }
+  }
+  const cx = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+  const cz = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+  let a0 = Infinity, a1 = -Infinity, w0 = Infinity, w1 = -Infinity;
+  for (const [x, z] of ring) {
+    const a = (x - cx) * ux + (z - cz) * uz;
+    const w = -(x - cx) * uz + (z - cz) * ux;
+    a0 = Math.min(a0, a); a1 = Math.max(a1, a); w0 = Math.min(w0, w); w1 = Math.max(w1, w);
+  }
+  const length = a1 - a0, width = w1 - w0;
+  const along = (a: number, w: number): [number, number] => [cx + ux * a - uz * w, cz + uz * a + ux * w];
+  const h = (salt: number) => hash01(b.id, salt);
+  if (shed) {
+    if (length > 24 * m) {
+      const [x, z] = along((a0 + a1) * 0.5, (w0 + w1) * 0.5);
+      builder.orientedBox(x, z, ux, uz, length * 0.4, 0.8 * m, roofTop, roofTop + 0.7 * m, 0xc8cccf);
+    }
+    return;
+  }
+  if (b.useType === "village") {
+    if (h(71) < 0.45 && length > 6 * m) {
+      const share = 0.35 + 0.35 * h(72);
+      const [x, z] = along(a1 - length * share * 0.5, (w0 + w1) * 0.5);
+      builder.orientedBox(x, z, ux, uz, length * share * 0.5, width * 0.45, roofTop, roofTop + 2.6 * m, STEEL_BLUE);
+    }
+    if (h(73) < 0.6) {
+      const [x, z] = along(a0 + 1.5 * m, w0 + 1.5 * m);
+      builder.orientedBox(x, z, ux, uz, 0.8 * m, 0.8 * m, roofTop, roofTop + 1.6 * m, TANK);
+    }
+    return;
+  }
+  if (b.heightMetres < 9) return;
+  if (b.useType === "commercial") {
+    // A plant screen over a share of the roof, and a cooling tower or two.
+    const [x, z] = along((a0 + a1) * 0.5 + length * 0.1 * (h(74) - 0.5), (w0 + w1) * 0.5);
+    builder.orientedBox(x, z, ux, uz, length * (0.18 + 0.12 * h(75)), width * (0.2 + 0.1 * h(76)), roofTop, roofTop + 3.2 * m, PLANT);
+    const towers = 1 + Math.floor(h(77) * 2);
+    for (let k = 0; k < towers; k += 1) {
+      const [tx, tz] = along(a0 + length * (0.15 + 0.2 * k), w1 - width * 0.22);
+      builder.orientedBox(tx, tz, ux, uz, 2.0 * m, 2.0 * m, roofTop, roofTop + 3.5 * m, TANK);
+    }
+    return;
+  }
+  // Residential: a head over each unit's stair and lift.
+  const unit = (16 + 4 * h(78)) * m;
+  const heads = Math.max(1, Math.round(length / unit));
+  const tall = b.floors >= 8;
+  for (let k = 0; k < heads; k += 1) {
+    const a = a0 + (k + 0.5) * (length / heads);
+    const [x, z] = along(a, w0 + width * 0.62);
+    builder.orientedBox(x, z, ux, uz, (tall ? 3.2 : 2.0) * m, (tall ? 3.0 : 1.8) * m, roofTop, roofTop + (tall ? 3.6 : 2.6) * m, wall);
+  }
+  // Walk-ups: rows of solar water heaters across most of the roof.
+  if (b.floors <= 7 && h(79) < 0.75) {
+    const rows = Math.max(1, Math.floor((width - 3 * m) / (2.6 * m)));
+    for (let r = 0; r < rows; r += 1) {
+      const w = w0 + 1.6 * m + r * 2.6 * m;
+      const [x, z] = along((a0 + a1) * 0.5, w);
+      builder.orientedBox(x, z, ux, uz, length * (0.3 + 0.12 * h(80 + r)), 0.7 * m, roofTop, roofTop + 1.3 * m, SOLAR);
+    }
+  }
+}
 
 class MassBuilder {
   readonly positions: number[] = [];
@@ -143,10 +246,21 @@ class MassBuilder {
 
   /** A small box on a roof: plant, a tank, a stair house. */
   box(cx: number, cz: number, half: number, bottom: number, top: number, hex: number) {
-    const ring: Ring = [
-      [cx - half, cz - half], [cx + half, cz - half], [cx + half, cz + half], [cx - half, cz + half],
-    ];
+    this.orientedBox(cx, cz, 1, 0, half, half, bottom, top, hex);
+  }
+
+  /**
+   * A box turned to the unit direction (ux, uz), `halfLength` along it. Roof
+   * plant: drawn plain, with no window pattern, whatever the building's kind.
+   */
+  orientedBox(cx: number, cz: number, ux: number, uz: number, halfLength: number, halfWidth: number, bottom: number, top: number, hex: number) {
+    const vx = -uz, vz = ux;
+    const at = (a: number, b: number): [number, number] => [cx + ux * a + vx * b, cz + uz * a + vz * b];
+    const ring: Ring = [at(-halfLength, -halfWidth), at(halfLength, -halfWidth), at(halfLength, halfWidth), at(-halfLength, halfWidth)];
+    const seed = this.seed;
+    this.seed = PLAIN_SEED + (seed % 1);
     this.prism(ring, bottom, top, hex, hex);
+    this.seed = seed;
   }
 
   /** A flat polygon draped on the terrain, `lift` above it. */
@@ -255,36 +369,27 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     // Only office towers are glass. A residential tower is plaster or tile, as light
     // as the slabs, so a city of flats does not read as a city of dark glass.
     const towers = b.heightMetres >= 40 && b.useType === "commercial";
-    const palette = towers ? TOWER_WALLS : WALLS;
+    const shed = b.useType === "industrial" && b.floors <= 1;
+    const palette = shed ? SHED_WALLS : b.useType === "village" ? VILLAGE_WALLS : towers ? TOWER_WALLS : WALLS;
     let wall = palette[Math.floor(hash01(b.id, 1) * palette.length)];
     // A brick or red-tiled tower is rare; above about eight storeys it is plaster.
     if (wall === BRICK && b.heightMetres > 25) wall = WALLS[0];
-    const roof = b.roof === "terracotta" ? TERRACOTTA : ROOFS[Math.floor(hash01(b.id, 2) * ROOFS.length)];
+    const roof = shed
+      ? SHED_ROOFS[Math.floor(hash01(b.id, 2) * SHED_ROOFS.length)]
+      : b.roof === "terracotta"
+        ? TERRACOTTA
+        : ROOFS[Math.floor(hash01(b.id, 2) * ROOFS.length)];
     const podium = b.podiumHeightMetres ?? 0;
     const roofTop = base + total;
     // The whole part says whether the building is an office, which alone may be glass.
-    builder.seed = hash01(b.id, 61) * 0.999 + (b.useType === "commercial" ? 1 : 0);
+    builder.seed = hash01(b.id, 61) * 0.999 + (shed ? SHED_SEED : b.useType === "commercial" ? OFFICE_SEED : 0);
     if (b.tierRing && b.tierRing.length >= 3 && podium > 0 && podium * m < total) {
       builder.prism(ring, foot, base + podium * m, wall, roof);
       builder.prism(toRing(b.tierRing), base + podium * m, base + total, wall, roof);
     } else {
       builder.prism(ring, foot, base + total, wall, roof);
     }
-    // Roof plant on the taller blocks: a tank, a machine box, a stair house.
-    if (b.heightMetres >= 15) {
-      const cx = ring.reduce((s, p) => s + p[0], 0) / ring.length;
-      const cz = ring.reduce((s, p) => s + p[1], 0) / ring.length;
-      const reach = Math.sqrt(Math.max(...ring.map(([x, z]) => (x - cx) ** 2 + (z - cz) ** 2))) * 0.4;
-      const count = 1 + Math.floor(hash01(b.id, 3) * 3);
-      for (let k = 0; k < count; k += 1) {
-        const angle = hash01(b.id, 10 + k) * Math.PI * 2;
-        const dist = reach * hash01(b.id, 20 + k);
-        const half = (1.2 + 2.2 * hash01(b.id, 30 + k)) * m;
-        const h = (1.5 + 2.5 * hash01(b.id, 40 + k)) * m;
-        const hex = hash01(b.id, 50 + k) < 0.4 ? TANK : PLANT;
-        builder.box(cx + Math.cos(angle) * dist, cz + Math.sin(angle) * dist, half, roofTop, roofTop + h, hex);
-      }
-    }
+    dressRoof(builder, b, ring, roofTop, wall, shed, m);
   }
 
   const geometry = builder.geometry();
@@ -327,7 +432,10 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         float hM = (vMassWorld.y - vBase) / uMetre;
         // Each building has its own bay and storey, its own kind of facade, and some
         // faces with no windows at all, so no two towers repeat one grid.
-        bool office = vSeed >= 1.0;
+        float kind = floor(vSeed);
+        bool office = kind > 0.5 && kind < 1.5;
+        // Sheds and roof plant have no windows and no floor slabs.
+        bool blank = kind > 1.5;
         float seed = fract(vSeed);
         float r1 = fract(seed * 7.13);
         float r2 = fract(seed * 13.71);
@@ -335,7 +443,7 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         float bayM = mix(2.8, 4.2, r1);
         float storeyM = mix(3.0, 3.9, r2);
         float faceR = fract(sin(dot(vMassNormal.xz, vec2(12.9898, 78.233)) + seed * 19.19) * 43758.5453);
-        float faceOpen = step(0.18, faceR);
+        float faceOpen = blank ? 0.0 : step(0.18, faceR);
         float fh = max(fwidth(hM), 1e-4) / storeyM;
         float fs = max(fwidth(s), 1e-4) / bayM;
         float storey = fract(hM / storeyM);
@@ -390,7 +498,7 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         float bandFade = 1.0 - smoothstep(0.05, 0.15, fh);
         float slabEdge = mix(0.07, smoothstep(-fh, fh, storey) * (1.0 - smoothstep(0.07 - fh, 0.07 + fh, storey)), bandFade);
         float soffit = mix(0.08, smoothstep(0.07 - fh, 0.07 + fh, storey) * (1.0 - smoothstep(0.15 - fh, 0.15 + fh, storey)), bandFade);
-        float slabs = office ? 0.0 : wallness * faceOpen;
+        float slabs = office || blank ? 0.0 : wallness * faceOpen;
         diffuseColor.rgb *= (1.0 + 0.12 * slabEdge * slabs) * (1.0 - 0.22 * soffit * slabs);
         massGlass = glass;
         `,

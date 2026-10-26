@@ -46,6 +46,8 @@ pub(crate) fn applies(building: &ModernBuilding) -> bool {
         ParcelUse::Residential => building.floors >= 3,
         // Shops with flats over them, however low.
         ParcelUse::MixedUse => building.floors >= 2,
+        // The self-built houses of a 城中村.
+        ParcelUse::Village => true,
         _ => false,
     }
 }
@@ -63,6 +65,14 @@ fn is_tower(building: &ModernBuilding) -> bool {
 
 /// The design of a building's development, and its table rows.
 fn design_of(building: &ModernBuilding, table: &mut FacadeTable) -> (Design, [u8; 3]) {
+    // Every village house was built by its own family, but the elevation table
+    // has 256 rows for a whole tile: a village draws from ten designs, and its
+    // houses differ by those, their widths and their heights.
+    if building.use_type == ParcelUse::Village {
+        let variant = building.id.wrapping_mul(0x9e37_79b1) >> 28;
+        let seed = development_seed(building) ^ (variant % 10).wrapping_mul(0x2c1b_3c6d);
+        return table.village(seed, building.floors);
+    }
     table.residential(
         development_seed(building),
         building.floors,

@@ -14,6 +14,12 @@ pub enum ParcelUse {
     Villa,
     /// A farmhouse and its yard, standing alone beside a country road.
     Farmstead,
+    /// 城中村: a village the city grew round, rebuilt plot by plot as five- to
+    /// eight-storey self-built houses an arm's length apart (握手楼).
+    Village,
+    /// Factories and warehouses: portal-frame sheds, a yard, an office block at
+    /// the gate.
+    Industrial,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

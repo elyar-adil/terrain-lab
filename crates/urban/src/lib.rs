@@ -165,8 +165,11 @@ mod tests {
         assert!(
             city.buildings
                 .iter()
-                // Two storeys at the least: the shop runs that front the compounds.
-                .all(|building| building.height_metres.is_finite() && building.floors >= 2)
+                // Two storeys at the least (the shop runs that front the compounds),
+                // but a portal-frame shed is a single tall storey.
+                .all(|building| building.height_metres.is_finite()
+                    && (building.floors >= 2
+                        || (building.use_type == ParcelUse::Industrial && building.floors == 1)))
         );
         assert!(city.hd_roads.iter().any(|road| road.bridge));
         assert!(city.hd_roads.iter().all(|road| !road.lanes.is_empty()));

@@ -431,7 +431,6 @@ pub fn residential_era(seed: u32, floors: u16) -> Era {
                 (Era::WalkUp, 4.0),
                 (Era::Euro, 2.0),
                 (Era::NewChinese, 1.5),
-                (Era::Village, 1.5),
                 (Era::Modern, 1.0),
                 (Era::Tile, 1.0),
             ],
@@ -650,13 +649,18 @@ fn vocabulary(era: Era) -> Vocabulary {
             ],
             crowns: &[(Crown::NewChinese, 8.0), (Crown::Flat, 2.0)],
         },
+        // Self-built houses: white or pink tile on the lane front, bare grey
+        // render, and fair-faced red brick where the family never finished it.
         Era::Village => Vocabulary {
             storey: (3.0, 3.1),
-            skins: &[(Skin::Tile, 7.0), (Skin::Render, 3.0)],
+            skins: &[(Skin::Tile, 6.0), (Skin::Render, 3.0), (Skin::Brick, 1.5)],
             paints: &[
                 ([0.72, 0.72, 0.70], 3.0),
                 ([0.70, 0.64, 0.52], 2.0),
                 ([0.68, 0.53, 0.50], 2.0),
+                ([0.74, 0.60, 0.56], 1.5),
+                ([0.76, 0.70, 0.56], 1.5),
+                ([0.50, 0.49, 0.46], 2.0),
                 ([0.56, 0.62, 0.68], 1.0),
                 ([0.58, 0.66, 0.58], 1.0),
             ],
@@ -1141,6 +1145,26 @@ impl FacadeTable {
         (design, ids)
     }
 
+    /// The design of one 城中村 house: the village vocabulary, whatever its height.
+    pub fn village(&mut self, seed: u32, floors: u16) -> (Design, [u8; 3]) {
+        // A village elevation does not change with its height (flat crown, no
+        // top storeys), so the height is left out of the key and a village's
+        // designs cost three table rows each, whatever its houses' heights.
+        let key = (1_u64 << 63) | ((seed as u64) << 16);
+        if let (Some(design), Some(ids)) = (self.designs.get(&key), self.ids.get(&key)) {
+            return (design.clone(), *ids);
+        }
+        let design = residential_design(seed, Era::Village, floors, false);
+        let ids = [
+            self.add(design.front.clone(), key),
+            self.add(design.back.clone(), key ^ 1),
+            self.add(design.gable.clone(), key ^ 2),
+        ];
+        self.designs.insert(key, design.clone());
+        self.ids.insert(key, ids);
+        (design, ids)
+    }
+
     /// The row of one commercial elevation.
     pub fn office(&mut self, seed: u32, skin: OfficeSkin, cladding: [f32; 3]) -> (Elevation, u8) {
         let key = ((seed as u64) << 2)
@@ -1313,7 +1337,9 @@ mod tests {
             low.insert(residential_era(seed, 6));
             tall.insert(residential_era(seed, 26));
         }
-        assert!(low.contains(&Era::WalkUp) && low.contains(&Era::Village));
+        // A planned walk-up is never drawn as a village house; those come from
+        // the plan's own villages (`FacadeTable::village`).
+        assert!(low.contains(&Era::WalkUp) && !low.contains(&Era::Village));
         assert!(tall.contains(&Era::Modern) && tall.contains(&Era::Euro));
         assert!(!tall.contains(&Era::Village));
     }

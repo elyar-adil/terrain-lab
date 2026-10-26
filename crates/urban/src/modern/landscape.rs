@@ -67,6 +67,9 @@ pub(super) fn derive_compounds_and_trees(
             ParcelUse::Civic => 4,
             ParcelUse::Villa => 4,
             ParcelUse::Farmstead => 3,
+            // Not a tree between the houses of a village; a few along a factory fence.
+            ParcelUse::Village => 0,
+            ParcelUse::Industrial => 3,
         };
         if parcel.ring.len() < 2 {
             continue;

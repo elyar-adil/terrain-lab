@@ -241,7 +241,13 @@ pub(super) fn build_parcels(
         // block, a school or hospital a whole campus, and only the commercial
         // blocks of the core and the arterials are cut plot by plot.
         let zone = if chinese && !park_block {
-            block_zone(face, face_area, centrality, modern_hash(seed, fi, 6, 707))
+            block_zone(
+                face,
+                face_area,
+                centrality,
+                modern_hash(seed, fi, 6, 707),
+                modern_hash(seed, fi, 6, 708),
+            )
         } else {
             Zone::Lots
         };
@@ -259,6 +265,26 @@ pub(super) fn build_parcels(
         } else {
             900.0 + 1500.0 * (1.0 - centrality) * (0.6 + 0.8 * modern_hash(seed, fi, 3, 761))
         };
+        if matches!(zone, Zone::Village | Zone::Industrial) {
+            for (env_index, env) in envelopes.iter().enumerate() {
+                let sink = PlanSink {
+                    seed,
+                    key: fi * 8 + env_index as i32,
+                    block_id: block_base + (env_index as u32).min(block_rings.len() as u32 - 1),
+                    to_world: &to_world,
+                    parcels: &mut parcels,
+                    buildings: &mut buildings,
+                    next_parcel: &mut next_parcel,
+                    next_building: &mut next_building,
+                };
+                if zone == Zone::Village {
+                    village_block(env, &spurs, sink);
+                } else {
+                    industrial_block(env, &spurs, sink);
+                }
+            }
+            continue;
+        }
         for (env_index, env) in envelopes.iter().enumerate() {
             let mut lots: Vec<Vec<V>> = Vec::new();
             subdivide(env, target, seed, fi * 8 + env_index as i32, 0, &mut lots);
@@ -277,7 +303,7 @@ pub(super) fn build_parcels(
                         lot,
                         face,
                         &spurs,
-                        ShopSink {
+                        PlanSink {
                             seed,
                             key: fi * 64 + (env_index as i32) * 16 + lot_index as i32,
                             block_id: block_base
@@ -451,9 +477,11 @@ pub(super) fn build_parcels(
                         ParcelUse::Commercial => procedural::FacadeKind::CurtainWall,
                         ParcelUse::MixedUse => procedural::FacadeKind::ConcreteGlass,
                         ParcelUse::Civic => procedural::FacadeKind::StoneCivic,
+                        ParcelUse::Industrial => procedural::FacadeKind::ConcreteGlass,
                         ParcelUse::Residential
                         | ParcelUse::Villa
                         | ParcelUse::Farmstead
+                        | ParcelUse::Village
                         | ParcelUse::Park => procedural::FacadeKind::Residential,
                     };
                     let mut floors = floors;
@@ -773,7 +801,11 @@ pub(super) fn build_parcels(
                             }
                         }
                     }
-                    ParcelUse::Park | ParcelUse::Villa | ParcelUse::Farmstead => {}
+                    ParcelUse::Park
+                    | ParcelUse::Villa
+                    | ParcelUse::Farmstead
+                    | ParcelUse::Village
+                    | ParcelUse::Industrial => {}
                 }
             }
         }
@@ -820,6 +852,10 @@ enum Zone {
     Homes,
     /// One campus over the whole block: a school, a hospital, an institute.
     Campus,
+    /// 城中村: the whole block a village of self-built houses.
+    Village,
+    /// Factory and warehouse yards.
+    Industrial,
 }
 
 /// The zone of a block, from how central it is, whether an arterial passes it
@@ -829,7 +865,19 @@ enum Zone {
 /// 25 - 40 % of all urban land, against 5 - 15 % commercial and 5 - 8 % public
 /// service), and it comes as compounds, not plots.  Offices and malls gather in
 /// the core and along the arterials.
-fn block_zone(face: &super::blocks::Face, area: f32, centrality: f32, r: f32) -> Zone {
+fn block_zone(face: &super::blocks::Face, area: f32, centrality: f32, r: f32, r_land: f32) -> Zone {
+    // Industry is 15 - 30 % of a Chinese city's land (GB 50137), almost all of it
+    // in parks on the edge; the villages the city swallowed are in the band
+    // between the old town and the new districts.
+    let industrial = 0.32 * (1.0 - smoothstep(0.08, 0.32, centrality));
+    let village =
+        0.12 * smoothstep(0.10, 0.25, centrality) * (1.0 - smoothstep(0.45, 0.65, centrality));
+    if r_land < industrial && area > 8_000.0 {
+        return Zone::Industrial;
+    }
+    if r_land >= industrial && r_land < industrial + village && area > 5_000.0 {
+        return Zone::Village;
+    }
     let arterial = (0..face.ring.len()).any(|i| {
         !face.open[i]
             && matches!(
@@ -854,8 +902,8 @@ fn block_zone(face: &super::blocks::Face, area: f32, centrality: f32, r: f32) ->
 /// behind it.
 const SHOP_BAND_M: f32 = 14.0;
 
-/// Where a compound's frontage shops go.
-struct ShopSink<'a> {
+/// Where the parcels and buildings a block generator makes go.
+struct PlanSink<'a> {
     seed: u32,
     key: i32,
     block_id: u32,
@@ -876,8 +924,9 @@ fn street_shops(
     lot: &[V],
     face: &super::blocks::Face,
     spurs: &[(V, V, ModernRoadClass)],
-    sink: ShopSink,
+    sink: PlanSink,
 ) -> Vec<V> {
+    let seed = sink.seed;
     let mut rest = lot.to_vec();
     for j in 0..lot.len() {
         let (a, b) = (lot[j], lot[(j + 1) % lot.len()]);
@@ -936,7 +985,7 @@ fn street_shops(
         let mut t = 5.0;
         let mut run = 0_i32;
         while t < len - 5.0 - 16.0 {
-            let h = |salt: i32| modern_hash(sink.seed, sink.key * 31 + j as i32 * 7 + run, 8, salt);
+            let h = |salt: i32| modern_hash(seed, sink.key * 31 + j as i32 * 7 + run, 8, salt);
             let length = (24.0 + 24.0 * h(711)).min(len - 5.0 - t);
             if length < 16.0 {
                 break;
@@ -982,6 +1031,268 @@ fn street_shops(
         }
     }
     rest
+}
+
+/// A building the block generators place directly, without the lot fitting.
+fn push_building(
+    sink: &mut PlanSink,
+    parcel_id: u32,
+    ring: &[V],
+    floors: u16,
+    height_metres: f32,
+    use_type: ParcelUse,
+    facade: BuildingFacade,
+) {
+    let side = |i: usize| {
+        let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+        (b.0 - a.0).hypot(b.1 - a.1)
+    };
+    let (w, d) = (side(0), side(1));
+    let kind = match use_type {
+        ParcelUse::Village | ParcelUse::Residential => procedural::FacadeKind::Residential,
+        _ => procedural::FacadeKind::ConcreteGlass,
+    };
+    let metrics = procedural::facade_metrics(w.max(d), w.min(d), floors, kind);
+    sink.buildings.push(ModernBuilding {
+        id: *sink.next_building,
+        parcel_id,
+        footprint: (sink.to_world)(ring),
+        height_metres,
+        floors,
+        use_type,
+        roof: RoofStyle::Flat,
+        facade,
+        podium_height_metres: 0.0,
+        window_bays: metrics.bays,
+        balcony_bays: 0,
+        entrance_count: 1,
+    });
+    *sink.next_building += 1;
+}
+
+/// A new parcel over `ring`, returning its id.
+fn push_parcel(sink: &mut PlanSink, ring: &[V], use_type: ParcelUse) -> u32 {
+    let id = *sink.next_parcel;
+    *sink.next_parcel += 1;
+    sink.parcels.push(Parcel {
+        id,
+        block_id: sink.block_id,
+        ring: (sink.to_world)(ring),
+        use_type,
+        compound: false,
+        gate_edge: 0,
+    });
+    id
+}
+
+/// Whether a dead-end street runs within `clear` metres of `ring`.
+fn spur_hits(ring: &[V], spurs: &[(V, V, ModernRoadClass)], clear: f32) -> bool {
+    spurs.iter().any(|(p, q, _)| {
+        ring.iter()
+            .zip(ring.iter().cycle().skip(1))
+            .any(|(x, y)| seg_seg_dist(*x, *y, *p, *q) < clear)
+    })
+}
+
+/// A block of 城中村: the village's old house plots, each rebuilt by its family
+/// as tall as it could get away with.
+///
+/// The plots are the homestead plots (宅基地) of the old village, about 10 m by
+/// 12 m, laid back to back in pairs with a lane of 3 - 4 m between pairs, and a
+/// cross lane every few plots.  Within a pair, and from plot to plot along a
+/// lane, the houses stand 0.8 - 1.6 m apart: close enough to shake hands from the
+/// windows (握手楼).  Five to eight storeys, the odd older one lower, a plot here
+/// and there empty.
+fn village_block(env: &[V], spurs: &[(V, V, ModernRoadClass)], mut sink: PlanSink) {
+    let seed = sink.seed;
+    let ob = obb(env);
+    let parcel_id = push_parcel(&mut sink, env, ParcelUse::Village);
+    let h = |salt: i32| modern_hash(seed, sink.key, 11, salt);
+    let frontage = 9.0 + 3.0 * h(801);
+    let plot_depth = 10.0 + 3.0 * h(803);
+    let gap = 0.8 + 0.8 * h(805);
+    let lane = 3.0 + 1.5 * h(807);
+    let cross_every = 3 + (h(809) * 3.0) as i32;
+    let mut v = ob.min_v + 1.0;
+    let mut pair = 0_i32;
+    while v + plot_depth * 2.0 + gap < ob.max_v - 1.0 {
+        for half in 0..2_i32 {
+            let v0 = v + f32::from(half as u8) * (plot_depth + gap);
+            let mut u = ob.min_u + 1.0;
+            let mut plot = 0_i32;
+            while u + frontage < ob.max_u - 1.0 {
+                let ph = |salt: i32| {
+                    modern_hash(
+                        seed,
+                        sink.key * 977 + pair * 131 + half * 61 + plot,
+                        12,
+                        salt,
+                    )
+                };
+                // This plot's own width: no two families built to one line.
+                let w = frontage * (0.85 + 0.3 * ph(811));
+                let d = plot_depth * (0.9 + 0.1 * ph(813));
+                // Each family built out to its own line, a little proud of or
+                // behind its neighbours on the lane.
+                let proud = 0.6 * (2.0 * ph(821) - 1.0);
+                let (d0, d1) = if half == 0 {
+                    (v0 + plot_depth - d, v0 + plot_depth + proud.min(0.0))
+                } else {
+                    (v0 - proud.min(0.0), v0 + d)
+                };
+                let ring: Vec<V> = [(u, d0), (u + w, d0), (u + w, d1), (u, d1)]
+                    .iter()
+                    .map(|p| ob.to_world(p.0, p.1))
+                    .collect();
+                if ph(815) > 0.05
+                    && ring.iter().all(|p| point_in(env, *p))
+                    && !spur_hits(&ring, spurs, 3.0)
+                {
+                    let r = ph(817);
+                    let floors: u16 = if r < 0.06 {
+                        3
+                    } else if r < 0.16 {
+                        4
+                    } else if r < 0.38 {
+                        5
+                    } else if r < 0.68 {
+                        6
+                    } else if r < 0.88 {
+                        7
+                    } else {
+                        8
+                    };
+                    // About 3 m a storey and a parapet; the ground floor a little
+                    // taller where it is a shop on the lane.
+                    let height = f32::from(floors) * 3.0 + 0.4 + 0.6 * ph(819);
+                    push_building(
+                        &mut sink,
+                        parcel_id,
+                        &ring,
+                        floors,
+                        height,
+                        ParcelUse::Village,
+                        BuildingFacade::PlasterResidential,
+                    );
+                }
+                plot += 1;
+                u += w + if plot % cross_every == 0 { lane } else { gap };
+            }
+        }
+        v += plot_depth * 2.0 + gap + lane;
+        pair += 1;
+    }
+}
+
+/// A block of factories: one yard, or several on a large block.
+///
+/// Each yard has a drive round it inside its fence (8 m: a truck lane and the
+/// parking along it), an office block of four or five storeys at the street
+/// end, and portal-frame sheds in rows behind it: spans of 24 - 48 m, 60 - 120 m
+/// long, eaves at 8 - 12 m, with 12 - 15 m between them for trucks and for the
+/// fire spacing GB 50016 asks between such sheds.  A share of the yards are a
+/// standard-factory estate (标准厂房) of four- and five-storey blocks instead.
+fn industrial_block(env: &[V], spurs: &[(V, V, ModernRoadClass)], mut sink: PlanSink) {
+    let seed = sink.seed;
+    let mut yards: Vec<Vec<V>> = Vec::new();
+    subdivide(env, 22_000.0, sink.seed, sink.key * 3 + 1, 0, &mut yards);
+    for (index, yard) in yards.iter().enumerate() {
+        if yard.len() < 4 || signed_area(yard) < 3_000.0 {
+            continue;
+        }
+        let ob = obb(yard);
+        if ob.width().min(ob.depth()) < 45.0 {
+            continue;
+        }
+        let parcel_id = push_parcel(&mut sink, yard, ParcelUse::Industrial);
+        let key = sink.key * 16 + index as i32;
+        let h = |salt: i32| modern_hash(seed, key, 13, salt);
+        let (u0, u1) = (ob.min_u + 8.0, ob.max_u - 8.0);
+        let (v0, v1) = (ob.min_v + 8.0, ob.max_v - 8.0);
+        let place = |sink: &mut PlanSink,
+                     uv: [(f32, f32); 4],
+                     floors: u16,
+                     height: f32,
+                     use_type: ParcelUse,
+                     facade: BuildingFacade| {
+            let ring: Vec<V> = uv.iter().map(|p| ob.to_world(p.0, p.1)).collect();
+            if ring.iter().all(|p| point_in(yard, *p)) && !spur_hits(&ring, spurs, 4.0) {
+                push_building(sink, parcel_id, &ring, floors, height, use_type, facade);
+                true
+            } else {
+                false
+            }
+        };
+        // The office block, across the street end of the yard.
+        let office_len = (30.0 + 15.0 * h(821)).min(u1 - u0);
+        let office_dep = 14.0 + 2.0 * h(823);
+        let office_floors: u16 = 4 + u16::from(h(825) < 0.4);
+        place(
+            &mut sink,
+            [
+                (u0, v0),
+                (u0 + office_len, v0),
+                (u0 + office_len, v0 + office_dep),
+                (u0, v0 + office_dep),
+            ],
+            office_floors,
+            f32::from(office_floors) * 3.8 + 1.2,
+            ParcelUse::Commercial,
+            BuildingFacade::ConcreteGlass,
+        );
+        let estate = h(827) < 0.25;
+        let mut v = v0 + office_dep + 15.0;
+        let mut row = 0_i32;
+        while v < v1 - 20.0 {
+            let rh = |salt: i32| modern_hash(seed, key * 61 + row, 14, salt);
+            let span = if estate {
+                18.0 + 4.0 * rh(831)
+            } else {
+                24.0 + 24.0 * rh(831)
+            };
+            let span = span.min(v1 - v);
+            if span < 18.0 {
+                break;
+            }
+            let mut u = u0;
+            let mut slot = 0_i32;
+            while u < u1 - 30.0 {
+                let sh = |salt: i32| modern_hash(seed, key * 977 + row * 31 + slot, 15, salt);
+                let length = if estate {
+                    48.0 + 24.0 * sh(833)
+                } else {
+                    60.0 + 60.0 * sh(833)
+                };
+                let length = length.min(u1 - u);
+                if length < 30.0 {
+                    break;
+                }
+                let (floors, height) = if estate {
+                    let f: u16 = 4 + u16::from(sh(835) < 0.5);
+                    (f, f32::from(f) * 4.5 + 1.0)
+                } else {
+                    (1, 8.0 + 4.0 * sh(835))
+                };
+                place(
+                    &mut sink,
+                    [
+                        (u, v),
+                        (u + length, v),
+                        (u + length, v + span),
+                        (u, v + span),
+                    ],
+                    floors,
+                    height,
+                    ParcelUse::Industrial,
+                    BuildingFacade::MetalIndustrial,
+                );
+                u += length + 10.0 + 5.0 * sh(837);
+                slot += 1;
+            }
+            v += span + 12.0 + 3.0 * rh(839);
+            row += 1;
+        }
+    }
 }
 
 /// Recursive oriented-box bisection into lots no larger than `target` m².
@@ -1430,7 +1741,7 @@ mod tests {
                 ..ModernChinaSpec::default()
             });
             assert!(
-                rows.len() > 150,
+                rows.len() > 100,
                 "seed {seed}: {} residential buildings",
                 rows.len()
             );
@@ -1587,7 +1898,7 @@ mod tests {
                     (b.parcel_id, metres)
                 })
                 .collect();
-            assert!(homes.len() > 150, "seed {seed}: {} homes", homes.len());
+            assert!(homes.len() > 100, "seed {seed}: {} homes", homes.len());
             for (i, (pa, a)) in homes.iter().enumerate() {
                 for (pb, b) in &homes[i + 1..] {
                     let gap = convex_separation(a, b);
@@ -1595,6 +1906,52 @@ mod tests {
                         gap > 0.0,
                         "seed {seed}: buildings on parcels {pa} and {pb} overlap ({gap} m)"
                     );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn villages_and_industrial_parks_have_their_own_buildings() {
+        let city = generate_modern_chinese_city(ModernChinaSpec {
+            seed: 42,
+            radius_km: 3.0,
+            block_size_metres: 180.0,
+            ..ModernChinaSpec::default()
+        });
+        let uses: HashMap<u32, ParcelUse> =
+            city.parcels.iter().map(|p| (p.id, p.use_type)).collect();
+        let on = |use_type: ParcelUse| -> Vec<&crate::ModernBuilding> {
+            city.buildings
+                .iter()
+                .filter(|b| uses.get(&b.parcel_id) == Some(&use_type))
+                .collect()
+        };
+        let houses = on(ParcelUse::Village);
+        assert!(houses.len() > 100, "{} village houses", houses.len());
+        assert!(houses.iter().all(|b| (3..=8).contains(&b.floors)));
+        let sheds: Vec<_> = on(ParcelUse::Industrial)
+            .into_iter()
+            .filter(|b| b.use_type == ParcelUse::Industrial && b.floors == 1)
+            .collect();
+        assert!(sheds.len() > 20, "{} sheds", sheds.len());
+        assert!(
+            sheds
+                .iter()
+                .all(|b| (8.0..=12.5).contains(&b.height_metres))
+        );
+        // Neither the houses of a village nor the sheds of a yard touch.
+        let metres = |b: &crate::ModernBuilding| -> Metres {
+            b.footprint
+                .iter()
+                .map(|p| (p.x_km * 1000.0, p.y_km * 1000.0))
+                .collect()
+        };
+        for group in [&houses, &sheds] {
+            let rings: Vec<Metres> = group.iter().map(|b| metres(b)).collect();
+            for (i, a) in rings.iter().enumerate() {
+                for b in &rings[i + 1..] {
+                    assert!(convex_separation(a, b) > 0.5, "two buildings touch");
                 }
             }
         }

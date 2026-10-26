@@ -20,6 +20,7 @@ import * as THREE from "three";
 import { applyAntiTiling } from "./antiTile";
 import { patchElevationMaterial } from "./elevation";
 import { createFacadeMaterial, facadeTableTexture } from "./facade";
+import { patchCorrugation } from "./corrugated";
 import { patchWeathering } from "./weathering";
 import { applyGrassFur } from "./grassFur";
 
@@ -719,6 +720,13 @@ export function createMaterials(
   patchWeathering(standard("metal.ac", { roughness: 0.5, metalness: 0.05 }, 0xb8b6ae), 0.5);
   standard("awning", { roughness: 0.55 }, 0x1c262c);
   patchWeathering(standard("wall.render", { roughness: 0.88 }, 0x9c968a));
+  // Industrial sheds: profiled steel cladding tinted per shed, roller shutters
+  // and polycarbonate skylight strips.
+  const clad = standard("metal.clad", { roughness: 0.42, metalness: 0.3, vertexColors: true }, 0xffffff);
+  patchCorrugation(clad, 0.25, 0.55, 0);
+  patchWeathering(clad, 0.5);
+  patchCorrugation(standard("metal.door", { roughness: 0.5, metalness: 0.35 }, 0x8f9396), 0.11, 0.6, 1);
+  standard("roof.skylight", { roughness: 0.3, metalness: 0, emissive: 0x2a2f30 }, 0xc9d3d6);
 
   // --- street furniture and signals ----------------------------------------
   standard("pole.concrete", { roughness: 0.9 }, 0x807c74);

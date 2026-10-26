@@ -48,6 +48,7 @@ mod cn_kit;
 pub(crate) mod cn_residential;
 pub(crate) mod details;
 pub(crate) mod house;
+mod industrial;
 pub(crate) mod roofscape;
 mod shell;
 
@@ -480,6 +481,11 @@ pub fn build(
         builder.ambient_tint = Some(building_tint(building.id));
         if matches!(building.use_type, ParcelUse::Villa | ParcelUse::Farmstead) {
             house::house_volume(building, &ring, style, builder);
+            builder.ambient_tint = None;
+            continue;
+        }
+        if industrial::applies(building) {
+            industrial::shell(building, &ring, builder);
             builder.ambient_tint = None;
             continue;
         }
