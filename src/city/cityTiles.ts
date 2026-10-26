@@ -12,6 +12,7 @@ import * as THREE from "three";
 
 import { type CityLayer, type CityLayerBuild, beginCityLayer } from "./cityLayer";
 import type { CityScene } from "./cityScene";
+import { offerFoliageMask } from "./post";
 
 /** Side of one tile, city-local metres. */
 export const CITY_TILE_M = 500;
@@ -169,6 +170,7 @@ export class CityTileStreamer {
         if (this.disposed) return;
         // A tile with no buildings, roads or trees has nothing to build.
         const empty = scene.meshes.length === 0 && scene.instances.every((list) => list.count === 0);
+        if (!empty) offerFoliageMask(scene.textures);
         tile.scene = empty ? null : scene;
         tile.state = empty ? "empty" : "ready";
       })

@@ -311,7 +311,8 @@ fn median_and_hazard(
     spec: &JunctionSpec,
 ) {
     let section = road.section;
-    if !section.has_median() {
+    // A viaduct's median is a concrete barrier (`viaduct`), not a planted strip.
+    if !section.has_median() || (road.is_motorway() && road.layer != 0) {
         return;
     }
     let median_half = section.median_metres * 0.5;

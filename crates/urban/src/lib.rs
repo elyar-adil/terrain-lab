@@ -13,7 +13,8 @@ pub use model::{
     ModernRoadClass, MorphologyPrior, MorphologyStats, Movement, Parcel, ParcelUse, Point,
     RoadConnector, RoadCrossSection, RoofStyle, SdNode, SdRoad, SignalHead, SignalStyle,
     SplitMix64, StreetClass, StreetSegment, TrafficRules, TreeInstance, TreeSpecies, Tributary,
-    TurnArrow, UrbanBlock, UrbanModel, cross_section, measure, sample_action, synthesize_junction,
+    TurnArrow, UrbanBlock, UrbanModel, cross_section, measure, ramp_cross_section, sample_action,
+    synthesize_junction,
 };
 pub use modern::{
     CityOptions, ExternalFields, ExternalNode, ExternalRoad, ExternalStreets,

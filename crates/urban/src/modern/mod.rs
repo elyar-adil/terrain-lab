@@ -1,4 +1,5 @@
 mod blocks;
+mod expressway;
 mod geom;
 mod graph;
 mod landscape;
@@ -302,12 +303,15 @@ pub fn generate_modern_chinese_city_with_options(
         river,
         morphology_score,
     } = build_graph(&frame, approaches);
+    let (mut nodes, mut sd_roads, mut hd_roads, layout) =
+        expressway::lay_out(&frame, nodes, sd_roads, hd_roads, &roads::china_rules());
     let ParcelOutput {
         blocks,
         parcels,
         buildings,
         fields,
     } = build_parcels(&frame, &nodes, &sd_roads);
+    expressway::grade_separate(&frame, &mut nodes, &mut sd_roads, &mut hd_roads, &layout);
     let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
     ModernCity {
         version: 3,
@@ -470,11 +474,14 @@ pub fn generate_modern_chinese_city_from_streets(
             centreline,
             bridge: road.bridge,
             layer: i8::from(road.bridge),
+            oneway: false,
             lanes: roads::lanes_for_modern_road(id, road.class, &rules),
             connectors: Vec::new(),
         });
     }
     position.clear();
+    let (mut nodes, mut sd_roads, mut hd_roads, layout) =
+        expressway::lay_out(&frame, nodes, sd_roads, hd_roads, &rules);
     let morphology_score = crate::MorphologyPrior::default().score(&graph::GraphProbe {
         nodes: &nodes,
         sd_roads: &sd_roads,
@@ -486,6 +493,7 @@ pub fn generate_modern_chinese_city_from_streets(
         buildings,
         fields,
     } = build_parcels(&frame, &nodes, &sd_roads);
+    expressway::grade_separate(&frame, &mut nodes, &mut sd_roads, &mut hd_roads, &layout);
     let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
     ModernCity {
         version: 3,

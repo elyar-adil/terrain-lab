@@ -1046,7 +1046,16 @@ mod tests {
                 // bound that still catches a graph discontinuity — and it is the
                 // assertion that failed before routes were rebuilt to include the
                 // connector curves.
-                assert!(jump < 6.0, "vehicle {index} jumped {jump:.2} m in one step");
+                assert!(
+                    jump < 6.0,
+                    "vehicle {index} jumped {jump:.2} m in one step from ({:.1},{:.1},{:.1}) to ({:.1},{:.1},{:.1})",
+                    previous_pose.x,
+                    previous_pose.y,
+                    previous_pose.z,
+                    pose.x,
+                    pose.y,
+                    pose.z
+                );
             }
             previous = state.agents;
         }

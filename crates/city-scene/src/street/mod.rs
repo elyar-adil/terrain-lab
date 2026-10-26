@@ -50,6 +50,7 @@ mod signals;
 mod surfaces;
 #[cfg(test)]
 mod tests;
+mod viaduct;
 
 pub use markings::junction_lane_guides;
 pub use signals::{SignalLamp, SignalRig, signal_axis};
@@ -375,11 +376,18 @@ fn declare(builder: &mut MeshBuilder) {
 pub fn build(network: &Network, builder: &mut MeshBuilder, seed: u32) -> StreetOutput {
     declare(builder);
     let spec = network.spec;
+    let joins = viaduct::joins(network);
     for road in &network.roads {
         surfaces::road_surface(road, builder, &spec);
         markings::road_markings(network, road, builder, &spec);
         markings::approach_taper(road, builder, &spec);
-        bridge::bridge_structure(road, builder);
+        // An expressway's deck and its ramps are a viaduct; anything else on
+        // a structure is a bridge.
+        if road.is_motorway() && road.layer != 0 {
+            viaduct::structure(network, road, &joins, builder);
+        } else {
+            bridge::bridge_structure(road, builder);
+        }
     }
     let mut output = StreetOutput::default();
     for junction in &network.junctions {

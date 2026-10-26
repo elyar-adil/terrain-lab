@@ -24,6 +24,7 @@ import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 
 import { patchTreeMaterial } from "../trees/shaders";
+import { type SceneTexture, foliageMaskTexture } from "./cityScene";
 
 export interface Post {
   composer: EffectComposer;
@@ -69,36 +70,8 @@ export function createPost(
   const renderPass = new RenderPass(scene, options.camera);
   const gtao = new GTAOPass(scene, options.camera, size.x, size.y);
 
-  if (options.foliageMask) {
-    // The G-buffer pass redraws the whole scene with one override
-    // `MeshNormalMaterial`, so per-object leaf knowledge has to travel through
-    // geometry: every foliage prototype carries an `aLeafCard` vertex
-    // attribute (written by `buildCityScene`), and fragments whose card
-    // texture is transparent are discarded from the G-buffer only.
-    const material = gtao.normalMaterial;
-    const mask = options.foliageMask;
-    material.onBeforeCompile = (shader) => {
-      shader.uniforms.foliageMask = { value: mask };
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          "#include <common>",
-          "#include <common>\nattribute float aLeafCard;\nvarying vec2 vCardUv;\nvarying float vLeafCard;",
-        )
-        .replace(
-          "#include <begin_vertex>",
-          "#include <begin_vertex>\nvCardUv = uv; vLeafCard = aLeafCard;",
-        );
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          "void main() {",
-          "uniform sampler2D foliageMask;\nvarying vec2 vCardUv;\nvarying float vLeafCard;\nvoid main() {",
-        )
-        .replace(
-          "#include <normal_fragment_begin>",
-          "#include <normal_fragment_begin>\nif (vLeafCard > 0.5 && texture2D(foliageMask, vCardUv).a < 0.45) discard;",
-        );
-    };
-  }
+  if (options.foliageMask) occlusionFoliageMask.value = options.foliageMask;
+  patchOcclusionFoliage(gtao.normalMaterial);
 
   // The occlusion pass draws the whole scene with one override material, so the
   // individually grown trees (which are raised in the vertex shader, not stored
@@ -189,4 +162,53 @@ export function sanitizePass(): ShaderPass {
         gl_FragColor = vec4(min(c.rgb, vec3(64.0)), c.a);
       }`,
   });
+}
+
+/**
+ * The leaf-card alpha the occlusion pass discards by, shared by every GTAO pass
+ * on the page. A streamed city only has it once its first tile has arrived, so
+ * it is a uniform that is filled in late (`offerFoliageMask`), and until then
+ * cards are drawn whole.
+ */
+export const occlusionFoliageMask: { value: THREE.Texture | null } = { value: null };
+
+/** Take the leaf mask from a city's textures, if none is set yet. */
+export function offerFoliageMask(textures: SceneTexture[]): void {
+  if (!occlusionFoliageMask.value) occlusionFoliageMask.value = foliageMaskTexture(textures);
+}
+
+/**
+ * Punch the transparent corners of foliage cards out of GTAO's normal/depth
+ * G-buffer. The pass redraws the whole scene with one override material, so
+ * per-object leaf knowledge travels through geometry: every foliage prototype
+ * carries an `aLeafCard` vertex attribute (written by `buildCityScene`). Without
+ * it the occluder pass sees every card as a solid quad and each canopy
+ * self-occludes into a black blob.
+ */
+export function patchOcclusionFoliage(material: THREE.Material): void {
+  const hasMask = {
+    get value() {
+      return occlusionFoliageMask.value ? 1 : 0;
+    },
+  };
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.foliageMask = occlusionFoliageMask;
+    shader.uniforms.foliageMaskOn = hasMask;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nattribute float aLeafCard;\nvarying vec2 vCardUv;\nvarying float vLeafCard;",
+      )
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvCardUv = uv; vLeafCard = aLeafCard;");
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "void main() {",
+        "uniform sampler2D foliageMask;\nuniform float foliageMaskOn;\nvarying vec2 vCardUv;\nvarying float vLeafCard;\nvoid main() {",
+      )
+      .replace(
+        "#include <normal_fragment_begin>",
+        "#include <normal_fragment_begin>\nif (foliageMaskOn > 0.5 && vLeafCard > 0.5 && texture2D(foliageMask, vCardUv).a < 0.45) discard;",
+      );
+  };
+  material.needsUpdate = true;
 }

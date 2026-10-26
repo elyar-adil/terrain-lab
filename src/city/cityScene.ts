@@ -519,6 +519,27 @@ export function createMaterials(
   // the sky rather than from its own albedo.
   standard("rail.steel", { roughness: 0.42, metalness: 0.75, envMapIntensity: 0.9 }, 0x8f9498);
   standard("bridge.concrete", { roughness: 0.9 }, 0x7c7a72);
+  // An expressway viaduct (高架) and its ramps: the pale fair-faced concrete of
+  // the Shenzhen and Shanghai photographs, the fascia lighter than the soffit in
+  // its shade (vertex colours), streaked where rain runs off the deck edge.
+  patchWeathering(standard("viaduct.concrete", { roughness: 0.86, vertexColors: true }, 0xffffff), 0.7);
+  // Sound barrier on a flyover past homes: tinted laminated glass in steel posts.
+  standard(
+    "viaduct.glass",
+    {
+      roughness: 0.12,
+      metalness: 0.1,
+      transparent: true,
+      opacity: 0.42,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      envMapIntensity: 1.2,
+    },
+    0x6fa9a2,
+  );
+  // The planted trough hung on a Guangzhou or Shenzhen parapet: bougainvillea
+  // (簕杜鹃) over the edge, green with magenta in it (vertex colours).
+  standard("viaduct.planter", { roughness: 0.9, vertexColors: true }, 0xffffff);
   standard("bridge.stone", { roughness: 0.88, side: THREE.DoubleSide, vertexColors: true }, 0xb4aca0);
   // Dressed river-wall stone and paving: vertex colours carry the wet base and coping.
   standard("quay.stone", { roughness: 0.9, side: THREE.DoubleSide, vertexColors: true }, 0xc4bcb0);

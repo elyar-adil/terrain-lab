@@ -33,18 +33,27 @@ fn main() {
     };
     for r in &city.hd_roads {
         println!(
-            "R\t{:?}\t{:.1}\t{}\t{}",
+            "R\t{:?}\t{:.1}\t{}\t{}\t{}",
             r.class,
             r.width_metres,
-            r.bridge as u8,
-            pts(&r.centreline)
+            r.bridge as u8 + 2 * r.oneway as u8 + 4 * (r.layer != 0) as u8,
+            pts(&r.centreline),
+            r.id
+        );
+    }
+    for n in &city.nodes {
+        println!(
+            "N\t{}\t{:.1},{:.1}",
+            n.role,
+            n.point.x_km * 1000.0,
+            n.point.y_km * 1000.0
         );
     }
     for b in &city.blocks {
         println!("K\t{}", pts(&b.boundary));
     }
     for p in &city.parcels {
-        println!("P\t{:?}\t{}", p.use_type, pts(&p.ring));
+        println!("P\t{:?}\t{}\t{}", p.use_type, pts(&p.ring), p.id);
     }
     for b in &city.buildings {
         println!(

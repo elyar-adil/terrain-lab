@@ -787,6 +787,7 @@ fn a_waiting_box_straddles_the_junction_edge() {
         to_node: 2,
         layer: 0,
         bridge: false,
+        oneway: false,
         centreline: centreline.clone(),
         carriageway: centreline.trim(14.0, 106.0),
         trim_start: 14.0,

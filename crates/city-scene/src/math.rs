@@ -169,6 +169,10 @@ impl Vec3 {
         (self - other).length()
     }
 
+    pub fn lerp(self, other: Self, t: f32) -> Self {
+        self + (other - self) * t
+    }
+
     pub fn length(self) -> f32 {
         (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
     }

@@ -33,6 +33,23 @@ pub const ROAD_PAVEMENT: f32 = 0.25;
 /// Vertical clearance an elevated road keeps above the road it crosses.  Only a
 /// grade-separated crossing needs it; a bridge over water does not.
 pub const STRUCTURE_HEIGHT: f32 = 6.4;
+/// Deck surface of an expressway viaduct above the street it runs over: 5 m
+/// of clearance for a bus and the signal heads under it (CJJ 37 gives 5.0 m
+/// for motor traffic), a 2 m box girder and its surfacing. The reference
+/// photographs of Shenzhen and Shanghai put the soffit at 7 - 8 m.
+pub const VIADUCT_Y: f32 = 9.0;
+/// Grade a ramp falls at between its vertical curves (CJJ 129 allows 5 - 6 %
+/// on a 40 km/h ramp; 4.5 % leaves a margin under the limit).
+const RAMP_GRADE: f32 = 0.045;
+/// Length of each vertical curve at the top and foot of a ramp.
+const VERTICAL_CURVE_M: f32 = 40.0;
+/// A ramp is level with the deck for this long past the end of its taper, so
+/// the nose where it parts from the deck is flat.
+const RAMP_HOLD_M: f32 = 30.0;
+/// The gap left between two decks that meet in the air.
+const AIR_GAP_M: f32 = 0.5;
+/// A ramp reaches the ground this far before the junction it lands at.
+const RAMP_LANDING_M: f32 = 15.0;
 /// Steepest longitudinal grade an elevated road may reach: 5 %, the design limit
 /// this crate assumes for urban elevated roads.  A ramp steeper than this is
 /// reported as a warning.
@@ -137,6 +154,8 @@ pub struct Road {
     pub to_node: u32,
     pub layer: i8,
     pub bridge: bool,
+    /// One way, from `from_node` to `to_node`: an expressway ramp.
+    pub oneway: bool,
     /// Full centreline, kerb face to kerb face, including the junction boxes.
     pub centreline: Path,
     /// `centreline.trim(trim_start, length - trim_end)`.
@@ -191,6 +210,8 @@ pub struct Network {
     /// Engineering problems found while deriving — an impossible ramp, a
     /// degenerate trim.  Reported, never hidden.
     pub warnings: Vec<String>,
+    /// Nodes in the air, by node index: where decks meet with no junction box.
+    pub air: Vec<bool>,
     road_by_id: HashMap<u32, usize>,
     lane_by_id: HashMap<String, usize>,
 }
@@ -202,6 +223,11 @@ impl Network {
 
     pub fn lane(&self, id: &str) -> Option<&Lane> {
         self.lane_by_id.get(id).map(|index| &self.lanes[*index])
+    }
+
+    /// Is `node` in the air, where decks meet with no junction box?
+    pub fn is_air(&self, node: u32) -> bool {
+        self.air.get(node as usize).copied().unwrap_or(false)
     }
 
     pub fn junction(&self, node: u32) -> Option<&Junction> {
@@ -311,10 +337,36 @@ pub fn derive(
         }
     }
 
+    // --- elevation of each node ---------------------------------------------
+    // A node every road of which is on a structure is in the air: where an
+    // expressway's ramps leave and join it, or where two pieces of a viaduct
+    // meet. It has no junction box; the decks meet there at viaduct height.
+    let layer_of_road: HashMap<u32, i8> =
+        hd_roads.iter().map(|road| (road.id, road.layer)).collect();
+    let air: Vec<bool> = incidence
+        .iter()
+        .map(|list| {
+            list.len() >= 2
+                && list
+                    .iter()
+                    .all(|id| layer_of_road.get(id).copied().unwrap_or(0) != 0)
+                && list
+                    .iter()
+                    .all(|id| sd_by_id.get(id).is_some_and(|road| !road.bridge))
+        })
+        .collect();
+    let node_y = |node: usize| if air[node] { VIADUCT_Y } else { ROADBED_Y };
+    network.air = air.clone();
+
     // --- junction control -----------------------------------------------------
     // Decided from the streets meeting at a node, before anything is drawn, so a
     // street end knows whether it stops, gives way or runs straight through.
     let layer_of: HashMap<u32, i8> = hd_roads.iter().map(|road| (road.id, road.layer)).collect();
+    let ramp_ids: std::collections::HashSet<u32> = hd_roads
+        .iter()
+        .filter(|road| road.oneway)
+        .map(|road| road.id)
+        .collect();
     let control: Vec<Control> = incidence
         .iter()
         .map(|list| {
@@ -324,6 +376,20 @@ pub fn derive(
                 .filter(|road| layer_of.get(&road.id).copied().unwrap_or(0) == 0)
                 .map(|road| road.class)
                 .collect();
+            // Where ramps come down to a street, the terminal is signalised (a
+            // diamond's two terminals run as one coordinated pair) and the
+            // street is the major road through it.
+            if list.iter().any(|id| ramp_ids.contains(id)) {
+                return Control {
+                    kind: JunctionKind::Signalized,
+                    major: classes
+                        .iter()
+                        .map(|class| class_rank(*class))
+                        .min()
+                        .unwrap_or(1),
+                    terminal: true,
+                };
+            }
             control_for(&classes)
         })
         .collect();
@@ -339,6 +405,12 @@ pub fn derive(
     // its trim like a crossing is what digs a broken box out of every corner.
     let mut radius = vec![0.0_f32; nodes.len()];
     for (index, list) in incidence.iter().enumerate() {
+        if air[index] {
+            // Decks meet end to end in the air: a hair of a gap, so the lane
+            // joining them has a length.
+            radius[index] = AIR_GAP_M;
+            continue;
+        }
         if list.len() < 2 {
             continue;
         }
@@ -457,8 +529,22 @@ pub fn derive(
         // rises `h` over `r` peaks at `SMOOTHSTEP_PEAK * h / r`, so the limit gives
         // `h <= MAX_GRADE * r / SMOOTHSTEP_PEAK` on the shorter of the two ramps.
         // A span too short for a ramp takes the causeway floor and reports below.
-        let deck = if elevated {
-            (MAX_GRADE * rise_len.min(fall_len) / SMOOTHSTEP_PEAK).clamp(MIN_DECK, STRUCTURE_HEIGHT)
+        // An expressway flies over at viaduct height; any other structure at the
+        // height its clearance needs.
+        let ceiling = if hd.class == ModernRoadClass::Expressway {
+            VIADUCT_Y
+        } else {
+            STRUCTURE_HEIGHT
+        };
+        let (y_from, y_to) = (node_y(from_index), node_y(to_index));
+        // A deck that meets another in the air: level between two air nodes, or
+        // a ramp from the deck to the ground (`RampProfile`).
+        let ramp = (elevated && (y_from > 0.0 || y_to > 0.0))
+            .then(|| RampProfile::new(full_length, trim_start, trim_end, y_from, y_to));
+        let deck = if let Some(ramp) = &ramp {
+            ramp.top
+        } else if elevated {
+            (MAX_GRADE * rise_len.min(fall_len) / SMOOTHSTEP_PEAK).clamp(MIN_DECK, ceiling)
         } else {
             0.0
         };
@@ -471,7 +557,9 @@ pub fn derive(
             if index > 0 {
                 station += path_points[index - 1].distance(path_points[index]);
             }
-            let elevation = if elevated {
+            let elevation = if let Some(ramp) = &ramp {
+                ramp.height(station)
+            } else if elevated {
                 let rise = smootherstep((station - trim_start - 10.0) / rise_len);
                 let fall = smootherstep((full_length - trim_end - 10.0 - station) / fall_len);
                 let t = station / full_length.max(1.0);
@@ -526,6 +614,7 @@ pub fn derive(
             to_node: sd.to,
             layer: hd.layer,
             bridge: hd.bridge,
+            oneway: hd.oneway,
             centreline,
             carriageway,
             trim_start,
@@ -558,8 +647,11 @@ pub fn derive(
         let carriageway = network.roads[road_index].carriageway.clone();
         let length = carriageway.length();
         let count = section.motor_lanes_per_direction;
+        let oneway = network.roads[road_index].oneway;
         let mut ids = Vec::with_capacity((count as usize + 1) * 2);
-        for direction in [1_i8, -1_i8] {
+        // A one-way ramp has lanes in its own direction only, centred on its deck.
+        let directions: &[i8] = if oneway { &[1] } else { &[1, -1] };
+        for &direction in directions {
             for index in 0..count {
                 // `RoadCrossSection::lane_offset` counts from the *kerb* inward,
                 // which is the opposite of this crate's `Lane::index` contract
@@ -567,25 +659,32 @@ pub fn derive(
                 // is what keeps `index == 0` meaning "the median lane" for the
                 // arrow stencils, the waiting box, the guide lanes and the
                 // exported payload alike.
-                let offset = section.lane_offset(direction, count - 1 - index);
+                let offset = if oneway {
+                    // Index 0 on the driver's left, as on a carriageway with a
+                    // median: the kerb side is the centreline's left normal.
+                    (index as f32 - (count as f32 - 1.0) * 0.5) * section.motor_lane_width
+                } else {
+                    section.lane_offset(direction, count - 1 - index)
+                };
                 // A lane path starts and ends exactly at the kerb face of the
                 // junction box, so its arc length is the distance a vehicle
                 // really travels between two decision points.
+                // On the deck's own surface, so a lane on a viaduct is driven
+                // at the viaduct's height and a ramp's lane falls with it.
                 let steps = ((length / 10.0).ceil() as usize).max(1);
-                let mut points: Vec<Vec2> = Vec::with_capacity(steps + 1);
+                let mut points: Vec<Vec3> = Vec::with_capacity(steps + 1);
                 for step in 0..=steps {
                     let station = length * step as f32 / steps as f32;
-                    points.push(
-                        carriageway.plan_at(station)
-                            + carriageway.tangent_at(station).left_normal() * offset,
-                    );
+                    let (at, tangent) = carriageway.sample(station);
+                    let side = tangent.left_normal() * offset;
+                    points.push(Vec3::new(at.x + side.x, at.y, at.z + side.y));
                 }
                 if direction < 0 {
                     // Right-hand traffic: the `+1` carriageway runs forward along
                     // the centreline, the `-1` one runs back.
                     points.reverse();
                 }
-                let path = Path::flat(points);
+                let path = Path::new(points);
                 let (use_kind, _) = lane_use_for(class, index);
                 let id = format!(
                     "road/{road_id}/lane/{}/{index}",
@@ -648,6 +747,14 @@ pub fn derive(
     // --- connectors ----------------------------------------------------------
     for node_index in 0..local.len() {
         let node = node_index as u32;
+        if air[node_index] {
+            free_flow_connectors(&mut network, node);
+            continue;
+        }
+        if incidence[node_index].len() == 1 {
+            dead_end_turns(&mut network, node);
+            continue;
+        }
         let incoming: Vec<usize> = network
             .lanes
             .iter()
@@ -886,6 +993,10 @@ pub fn derive(
     let mut rng = Rng::new(seed ^ 0x6a75_6e63);
     for node_index in 0..local.len() {
         let node = node_index as u32;
+        // Decks meeting in the air have no junction box.
+        if air[node_index] {
+            continue;
+        }
         let centre = local[node_index];
         let mut ports: Vec<Port> = Vec::new();
         for road in &network.roads {
@@ -895,7 +1006,8 @@ pub fn derive(
             // A river bridge *ends* at this node and lands in its box like any
             // other arm, ramping down to road level; a flyover that merely passes
             // over has no kerb face here and must not grow a second box.
-            if road.layer != 0 && !road.bridge {
+            // A ramp lands here and is an arm like any other.
+            if road.layer != 0 && !road.bridge && !road.oneway {
                 continue;
             }
             let at_start = road.from_node == node;
@@ -1021,7 +1133,7 @@ pub fn derive(
                 .incident_roads(node)
                 .iter()
                 .filter_map(|id| network.road(*id))
-                .any(|road| road.layer != 0)
+                .any(|road| road.layer != 0 && !road.oneway)
         {
             JunctionKind::GradeSeparated
         } else if ports.len() >= 3 {
@@ -1057,6 +1169,8 @@ impl Network {
 /// How a junction is controlled, and the rank of the street that has priority.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Control {
+    /// A ramp terminal: its spacing from the next signal is the interchange's.
+    terminal: bool,
     kind: JunctionKind,
     /// `class_rank` of the major street; an arm of a lower rank is a minor arm.
     major: u8,
@@ -1086,6 +1200,7 @@ fn control_for(classes: &[ModernRoadClass]) -> Control {
     let ranks: Vec<u8> = classes.iter().map(|c| class_rank(*c)).collect();
     let Some(&major) = ranks.iter().min() else {
         return Control {
+            terminal: false,
             kind: JunctionKind::Channelized,
             major: 3,
         };
@@ -1103,7 +1218,11 @@ fn control_for(classes: &[ModernRoadClass]) -> Control {
     } else {
         JunctionKind::Priority
     };
-    Control { kind, major }
+    Control {
+        terminal: false,
+        kind,
+        major,
+    }
 }
 
 /// An arterial's median opens for a signal no closer than 300 m to the next
@@ -1143,7 +1262,7 @@ fn space_median_openings(
             .min()
             .unwrap_or(major)
     };
-    let opening = |c: &Control| c.kind == JunctionKind::Signalized && c.major <= 1;
+    let opening = |c: &Control| c.kind == JunctionKind::Signalized && c.major <= 1 && !c.terminal;
     for node in 0..incidence.len() {
         if !opening(&control[node]) {
             continue;
@@ -1211,9 +1330,11 @@ fn space_median_openings(
 /// where nothing else meets them, into one street with one centreline.
 ///
 /// Only like is joined to like: the same class, the same layer, neither a
-/// bridge. A node where a third street meets, or where the class or layer
-/// changes, stays a junction. The joined street keeps the id, lanes and cross
-/// section of its first piece.
+/// bridge, both one-way and end to start or neither. A node where a third
+/// street meets, or where the class or layer changes, stays a junction. The
+/// joined street keeps the id, lanes and cross section of its first piece. A
+/// chain that closes on itself (a ring road with nothing on it) is joined as
+/// two halves, so no street starts and ends at one node.
 fn merge_continuations(
     node_count: usize,
     sd_roads: &[SdRoad],
@@ -1228,22 +1349,25 @@ fn merge_continuations(
             }
         }
     }
-    let joinable = |a: usize, b: usize| {
+    let joinable = |a: usize, b: usize, node: usize| {
         let (ra, rb) = (&sd_roads[a], &sd_roads[b]);
         let (Some(ha), Some(hb)) = (hd_by_id.get(&ra.id), hd_by_id.get(&rb.id)) else {
             return false;
         };
+        let end_to_start =
+            |x: &SdRoad, y: &SdRoad| x.to as usize == node && y.from as usize == node;
         a != b
             && ra.class == rb.class
             && !ra.bridge
             && !rb.bridge
             && ha.layer == hb.layer
-            && ha.layer == 0
+            && ha.oneway == hb.oneway
+            && (!ha.oneway || end_to_start(ra, rb) || end_to_start(rb, ra))
     };
     // A node a chain passes through.
     let through = |node: usize| {
         let list = &incidence[node];
-        list.len() == 2 && joinable(list[0], list[1])
+        list.len() == 2 && joinable(list[0], list[1], node)
     };
     let mut used = vec![false; sd_roads.len()];
     let mut sd_out = Vec::with_capacity(sd_roads.len());
@@ -1302,39 +1426,321 @@ fn merge_continuations(
             current = next;
             at = next_node;
         }
-        let head = &sd_roads[pieces[0].0];
-        let head_hd = hd_by_id[&head.id];
-        let mut centreline: Vec<urban::Point> = Vec::new();
-        for (index, forward) in &pieces {
-            let hd = hd_by_id[&sd_roads[*index].id];
-            let mut line = hd.centreline.clone();
-            if !forward {
-                line.reverse();
+        // A closed chain is joined as two halves, meeting at the node where the
+        // second half starts.
+        let halves: Vec<&[(usize, bool)]> = if at == first_from && pieces.len() >= 2 {
+            let (a, b) = pieces.split_at(pieces.len() / 2);
+            vec![a, b]
+        } else {
+            vec![&pieces[..]]
+        };
+        for half in halves {
+            let head = &sd_roads[half[0].0];
+            let head_hd = hd_by_id[&head.id];
+            let mut centreline: Vec<urban::Point> = Vec::new();
+            for (index, forward) in half {
+                let hd = hd_by_id[&sd_roads[*index].id];
+                let mut line = hd.centreline.clone();
+                if !forward {
+                    line.reverse();
+                }
+                if !centreline.is_empty() && !line.is_empty() {
+                    line.remove(0);
+                }
+                centreline.extend(line);
             }
-            if !centreline.is_empty() && !line.is_empty() {
-                line.remove(0);
-            }
-            centreline.extend(line);
+            let end = |piece: (usize, bool), last: bool| {
+                let road = &sd_roads[piece.0];
+                if piece.1 == last { road.to } else { road.from }
+            };
+            sd_out.push(SdRoad {
+                id: head.id,
+                from: end(half[0], false),
+                to: end(half[half.len() - 1], true),
+                class: head.class,
+                bridge: head.bridge,
+            });
+            // The first piece may run against the chain; its lanes are kept as
+            // they are, and they are symmetric about the centreline for every
+            // class but a one-way ramp, whose pieces only ever join end to start.
+            hd_out.push(HdRoad {
+                id: head.id,
+                sd_road: head.id,
+                centreline,
+                ..head_hd.clone()
+            });
         }
-        let from = first_from as u32;
-        sd_out.push(SdRoad {
-            id: head.id,
-            from,
-            to: at as u32,
-            class: head.class,
-            bridge: head.bridge,
-        });
-        // The first piece may run against the chain; its lanes are kept as they are,
-        // and they are symmetric about the centreline for every class but one-way
-        // ramps, which the plan never chains.
-        hd_out.push(HdRoad {
-            id: head.id,
-            sd_road: head.id,
-            centreline,
-            ..head_hd.clone()
-        });
     }
     (sd_out, hd_out)
+}
+
+/// Lane connections where decks meet in the air, with no junction: each main
+/// lane runs on into the lane of the same index; a ramp that leaves takes the
+/// kerb-side lane of the carriageway running its way, and one that joins runs
+/// into it (exits and entries are on the right, CJJ 129).
+///
+/// A ramp's deck end is beside the main deck, a taper's length from the node,
+/// so its connector is the lane change a driver makes along the taper.
+fn free_flow_connectors(network: &mut Network, node: u32) {
+    let motor = |lane: &Lane| lane.use_kind != LaneUse::Bike && lane.use_kind != LaneUse::Shoulder;
+    let incoming: Vec<usize> = (0..network.lanes.len())
+        .filter(|&i| network.lanes[i].to_node == node && motor(&network.lanes[i]))
+        .collect();
+    let outgoing: Vec<usize> = (0..network.lanes.len())
+        .filter(|&i| network.lanes[i].from_node == node && motor(&network.lanes[i]))
+        .collect();
+    let oneway = |lane: usize| {
+        network
+            .road(network.lanes[lane].road)
+            .is_some_and(|road| road.oneway)
+    };
+    let end_dir = |lane: &Lane| lane.path.tangent_at(lane.path.length() - 0.01);
+    let start_dir = |lane: &Lane| lane.path.tangent_at(0.01);
+    let mut links: Vec<(usize, usize, Movement)> = Vec::new();
+    for &a in &incoming {
+        let lane = &network.lanes[a];
+        let dir = end_dir(lane);
+        // Lanes leaving the node the same way, by road.
+        let mut roads: Vec<u32> = outgoing
+            .iter()
+            .map(|&b| network.lanes[b].road)
+            .filter(|&road| road != lane.road)
+            .collect();
+        roads.sort_unstable();
+        roads.dedup();
+        for road in roads {
+            let mut targets: Vec<usize> = outgoing
+                .iter()
+                .copied()
+                .filter(|&b| network.lanes[b].road == road)
+                .collect();
+            targets.sort_by_key(|&b| network.lanes[b].index);
+            let Some(&first) = targets.first() else {
+                continue;
+            };
+            if start_dir(&network.lanes[first]).dot(dir) < 0.3 {
+                continue;
+            }
+            let kerb_in = incoming
+                .iter()
+                .filter(|&&x| network.lanes[x].road == lane.road)
+                .map(|&x| network.lanes[x].index)
+                .max()
+                .unwrap_or(0);
+            match (oneway(a), oneway(first)) {
+                // Main line on into main line, lane for lane.
+                (false, false) => {
+                    if let Some(&b) = targets.get(lane.index as usize) {
+                        links.push((a, b, Movement::Straight));
+                    }
+                }
+                // Off the main line: from its kerb-side lane only.
+                (false, true) => {
+                    if lane.index == kerb_in {
+                        for &b in &targets {
+                            links.push((a, b, Movement::Right));
+                        }
+                    }
+                }
+                // Onto the main line: into its kerb-side lane.
+                (true, false) => {
+                    if let Some(&b) = targets.last() {
+                        links.push((a, b, Movement::Straight));
+                    }
+                }
+                // A ramp on into a ramp.
+                (true, true) => {
+                    if let Some(&b) = targets.get(lane.index as usize) {
+                        links.push((a, b, Movement::Straight));
+                    }
+                }
+            }
+        }
+    }
+    for (a, b, movement) in links {
+        let (from, to) = (network.lanes[a].clone(), network.lanes[b].clone());
+        let (p, q) = (from.path.end(), to.path.start());
+        let (dir, out) = (end_dir(&from), start_dir(&to));
+        let gap = Vec2::new(q.x - p.x, q.z - p.z).length();
+        let handle = (gap * 0.4).max(0.2);
+        let plan = cubic_points(
+            Vec2::new(p.x, p.z),
+            Vec2::new(p.x, p.z) + dir * handle,
+            Vec2::new(q.x, q.z) - out * handle,
+            Vec2::new(q.x, q.z),
+            20,
+        );
+        let steps = plan.len() - 1;
+        let points: Vec<Vec3> = plan
+            .iter()
+            .enumerate()
+            .map(|(index, point)| {
+                let t = index as f32 / steps.max(1) as f32;
+                Vec3::from_plan(*point, lerp_height(p.y, q.y, t))
+            })
+            .collect();
+        let id = format!("{}>{}", from.id, to.id);
+        if network.connectors.iter().any(|c| c.id == id) {
+            continue;
+        }
+        network.lanes[a].successors.push(to.id.clone());
+        network.lanes[b].predecessors.push(from.id.clone());
+        network.connectors.push(Connector {
+            id,
+            node,
+            from_lane: from.id.clone(),
+            to_lane: to.id.clone(),
+            movement,
+            turn_degrees: classify_movement(dir, out).1,
+            path: Path::new(points),
+            width: from.width,
+        });
+    }
+}
+
+/// A street that ends goes back the way it came: each lane arriving at the
+/// end turns into the lane of the same index leaving it, round a turning head.
+/// Without it a vehicle that reached a dead end had nowhere to go.
+fn dead_end_turns(network: &mut Network, node: u32) {
+    let motor = |lane: &Lane| lane.use_kind != LaneUse::Bike && lane.use_kind != LaneUse::Shoulder;
+    let pairs: Vec<(usize, usize)> = (0..network.lanes.len())
+        .filter(|&a| network.lanes[a].to_node == node && motor(&network.lanes[a]))
+        .filter_map(|a| {
+            let lane = &network.lanes[a];
+            (0..network.lanes.len())
+                .find(|&b| {
+                    let other = &network.lanes[b];
+                    other.from_node == node
+                        && other.road == lane.road
+                        && other.index == lane.index
+                        && motor(other)
+                })
+                .map(|b| (a, b))
+        })
+        .collect();
+    for (a, b) in pairs {
+        let (from, to) = (network.lanes[a].clone(), network.lanes[b].clone());
+        let (p, q) = (from.path.end(), to.path.start());
+        let dir = from.path.tangent_at(from.path.length() - 0.01);
+        let out = to.path.tangent_at(0.01);
+        let across = Vec2::new(q.x - p.x, q.z - p.z).length();
+        // Out past the end and round: the handles reach as far as the turn is wide.
+        let reach = across * 0.9 + 3.0;
+        let plan = cubic_points(
+            Vec2::new(p.x, p.z),
+            Vec2::new(p.x, p.z) + dir * reach,
+            Vec2::new(q.x, q.z) - out * reach,
+            Vec2::new(q.x, q.z),
+            20,
+        );
+        let points: Vec<Vec3> = plan
+            .iter()
+            .enumerate()
+            .map(|(index, point)| {
+                let t = index as f32 / 20.0;
+                Vec3::from_plan(*point, lerp_height(p.y, q.y, t))
+            })
+            .collect();
+        let id = format!("{}>{}", from.id, to.id);
+        network.lanes[a].successors.push(to.id.clone());
+        network.lanes[b].predecessors.push(from.id.clone());
+        network.connectors.push(Connector {
+            id,
+            node,
+            from_lane: from.id.clone(),
+            to_lane: to.id.clone(),
+            movement: Movement::UTurn,
+            turn_degrees: 180.0,
+            path: Path::new(points),
+            width: from.width,
+        });
+    }
+}
+
+/// The long section of a deck that meets another in the air.
+///
+/// Between two air nodes it is level at viaduct height. From an air node to the
+/// ground it is a ramp as a road engineer draws one: level beside the deck for
+/// the taper, then a parabolic vertical curve into a constant grade and another
+/// out of it, landing short of the junction. A short ramp steepens rather than
+/// leaves the deck in the air, and the grade check reports it.
+struct RampProfile {
+    top: f32,
+    length: f32,
+    /// Station of the ground end's kerb face, and which end that is.
+    ground_at: f32,
+    ground_is_end: bool,
+    /// Grade and vertical-curve length of the fall.
+    grade: f32,
+    curve: f32,
+    level: Option<(f32, f32)>,
+}
+
+impl RampProfile {
+    fn new(length: f32, trim_start: f32, trim_end: f32, y_from: f32, y_to: f32) -> Self {
+        let top = y_from.max(y_to);
+        if y_from > 0.0 && y_to > 0.0 {
+            return Self {
+                top,
+                length,
+                ground_at: 0.0,
+                ground_is_end: true,
+                grade: 0.0,
+                curve: 1.0,
+                level: Some((y_from, y_to)),
+            };
+        }
+        let ground_is_end = y_to <= 0.0;
+        let ground_at = if ground_is_end {
+            length - trim_end
+        } else {
+            trim_start
+        };
+        // The run the fall has: from the end of the level hold beside the deck
+        // to the landing short of the ground end's junction.
+        let run = (length - trim_start - trim_end - RAMP_HOLD_M - RAMP_LANDING_M).max(20.0);
+        let curve = VERTICAL_CURVE_M.min(run / 3.0);
+        let wanted = top / RAMP_GRADE + curve;
+        let grade = if run >= wanted {
+            RAMP_GRADE
+        } else {
+            top / (run - curve)
+        };
+        Self {
+            top,
+            length,
+            ground_at,
+            ground_is_end,
+            grade,
+            curve,
+            level: None,
+        }
+    }
+
+    fn height(&self, station: f32) -> f32 {
+        if let Some((a, b)) = self.level {
+            return a + (b - a) * (station / self.length.max(1.0));
+        }
+        // Distance up the ramp from its landing.
+        let from_ground = if self.ground_is_end {
+            self.ground_at - station
+        } else {
+            station - self.ground_at
+        } - RAMP_LANDING_M;
+        let (g, lv, h) = (self.grade, self.curve, self.top);
+        let run = h / g + lv;
+        if from_ground <= 0.0 {
+            ROADBED_Y
+        } else if from_ground >= run {
+            h
+        } else if from_ground < lv {
+            g * from_ground * from_ground / (2.0 * lv)
+        } else if from_ground < run - lv {
+            g * lv * 0.5 + g * (from_ground - lv)
+        } else {
+            h - g * (run - from_ground).powi(2) / (2.0 * lv)
+        }
+    }
 }
 
 fn lerp_height(from: f32, to: f32, t: f32) -> f32 {
@@ -1706,10 +2112,13 @@ mod tests {
                     .road(road)
                     .is_some_and(|r| r.class == ModernRoadClass::Arterial)
             };
+            let ramp = |road: u32| network.road(road).is_some_and(|r| r.oneway);
             let openings: Vec<&Junction> = network
                 .junctions
                 .iter()
                 .filter(|j| j.kind == JunctionKind::Signalized)
+                // A diamond's terminals are spaced by the interchange.
+                .filter(|j| !j.ports.iter().any(|p| ramp(p.road)))
                 .filter(|j| j.ports.iter().filter(|p| arterial(p.road)).count() == 2)
                 .filter(|j| j.ports.len() >= 3)
                 .collect();
@@ -1814,23 +2223,85 @@ mod tests {
     #[test]
     fn elevated_roads_meet_the_roadbed_at_both_junction_edges() {
         // Where an elevated road meets its junction box it must already be at
-        // roadbed level.  The tolerance is 1 mm, well under anything visible.
+        // roadbed level, and where it meets another deck in the air (no box,
+        // two or more decks) it must be at viaduct height, the same as the deck
+        // it meets.  The tolerance is 1 mm, well under anything visible.
         for seed in SEEDS {
             let network = derived(seed);
+            let degree = |node: u32| network.incident_roads(node).len();
             for road in network.roads.iter().filter(|road| road.layer != 0) {
                 let length = road.centreline.length();
-                for station in [road.trim_start, length - road.trim_end] {
+                for (station, node) in [
+                    (road.trim_start, road.from_node),
+                    (length - road.trim_end, road.to_node),
+                ] {
                     let (point, _) = road.centreline.sample(station);
+                    let in_air = degree(node) >= 2 && network.junction(node).is_none();
+                    let expected = if in_air { VIADUCT_Y } else { ROADBED_Y };
                     assert!(
-                        point.y.abs() < 1.0e-3,
+                        (point.y - expected).abs() < 1.0e-3,
                         "seed {seed}: road {} stands {:.3} m above roadbed where it meets \
-                         its junction box (station {station:.1} m)",
+                         its {} (station {station:.1} m)",
                         road.id,
-                        point.y
+                        point.y,
+                        if in_air { "deck" } else { "junction box" }
                     );
                 }
             }
         }
+    }
+
+    #[test]
+    fn an_expressway_meets_no_street_and_is_reached_by_ramps() {
+        // CJJ 129: an expressway is fully access-controlled. Its main line meets
+        // no street at grade, every ramp leaves or joins it on the kerb side in
+        // the air, and lands at a signalised terminal on a street.
+        let mut ramps = 0;
+        for seed in SEEDS {
+            let network = derived(seed);
+            // A town whose expressway has no interchange keeps it at grade:
+            // lifted, it would be an island nobody can reach.
+            if !network.roads.iter().any(|road| road.oneway) {
+                continue;
+            }
+            for junction in &network.junctions {
+                let main_line = junction.ports.iter().any(|port| {
+                    network
+                        .road(port.road)
+                        .is_some_and(|road| road.is_motorway() && !road.oneway)
+                });
+                assert!(
+                    !main_line,
+                    "seed {seed}: the expressway meets a street at grade at node {}",
+                    junction.node
+                );
+            }
+            for road in network.roads.iter().filter(|road| road.oneway) {
+                ramps += 1;
+                let deck = [road.from_node, road.to_node]
+                    .into_iter()
+                    .filter(|node| network.junction(*node).is_none())
+                    .count();
+                let terminal = [road.from_node, road.to_node]
+                    .into_iter()
+                    .filter_map(|node| network.junction(node))
+                    .find(|junction| junction.kind == JunctionKind::Signalized);
+                assert!(
+                    deck == 1 && terminal.is_some(),
+                    "seed {seed}: ramp {} does not run from the deck to a signalised terminal",
+                    road.id
+                );
+                // Every lane of a ramp is reached from the network and leads on.
+                for id in &road.lane_ids {
+                    let lane = network.lane(id).expect("a ramp's lane exists");
+                    assert!(
+                        !lane.successors.is_empty() && !lane.predecessors.is_empty(),
+                        "seed {seed}: ramp lane {id} is a dead end"
+                    );
+                }
+            }
+        }
+        assert!(ramps >= 4, "no interchange was built in any test city");
     }
 
     #[test]
@@ -1855,7 +2326,7 @@ mod tests {
             let grade_warnings = network
                 .warnings
                 .iter()
-                .filter(|w| w.contains("% grade:"))
+                .filter(|w| w.contains("% grade on a"))
                 .count();
             assert_eq!(
                 grade_warnings,

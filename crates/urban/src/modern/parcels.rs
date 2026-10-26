@@ -113,6 +113,20 @@ pub(super) fn build_parcels(
         if signed_area(&face.ring) < 900.0 {
             continue;
         }
+        // The land between an expressway and its ramps, or inside a loop of
+        // them, is verge: nobody builds where the only frontage is a deck.
+        let perimeter: f32 = face.edge_len.iter().sum();
+        let on_expressway: f32 = face
+            .edge_len
+            .iter()
+            .zip(&face.classes)
+            .zip(&face.open)
+            .filter(|((_, class), open)| **class == ModernRoadClass::Expressway && !**open)
+            .map(|((l, _), _)| *l)
+            .sum();
+        if on_expressway > perimeter * 0.45 {
+            continue;
+        }
         let fi = face_index as i32;
         let centrality = frame.core_weight(centre.0, centre.1)
             * if frame.organic_footprint {

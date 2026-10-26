@@ -103,6 +103,30 @@ pub fn cross_section(class: ModernRoadClass) -> RoadCrossSection {
     }
 }
 
+/// A one-lane ramp (单车道匝道), one way: a 3.5 m lane with a 0.75 m strip each
+/// side inside the barriers, which is the deck the reference photographs of
+/// Shenzhen and Shanghai show (CJJ 129). The lane is centred on the deck; a
+/// ramp carries no footway and no cycle lane.
+pub fn ramp_cross_section() -> RoadCrossSection {
+    RoadCrossSection {
+        width_metres: 8.5,
+        median_metres: 0.0,
+        motor_lanes_per_direction: 1,
+        motor_lane_width: 3.5,
+        shoulder_width: 0.75,
+        bike_lane_width: 0.0,
+        inner_shoulder: 0.0,
+        sidewalk_metres: 0.0,
+    }
+}
+
+/// The ramp's declared width is its component sum, like every class's.
+#[test]
+fn ramp_width_matches_components() {
+    let section = ramp_cross_section();
+    assert!((section.width_metres - section.derived_width()).abs() < 1.0e-3);
+}
+
 /// The declared ribbon width must equal the component sum for every class.
 #[test]
 fn cross_section_widths_match_components() {
@@ -157,13 +181,20 @@ pub struct HdRoad {
     pub centreline: Vec<Point>,
     pub bridge: bool,
     pub layer: i8,
+    /// A one-way road: an expressway ramp (匝道), driven from `from` to `to`.
+    #[serde(default)]
+    pub oneway: bool,
     pub lanes: Vec<HdLane>,
     pub connectors: Vec<RoadConnector>,
 }
 
 impl HdRoad {
     pub fn cross_section(&self) -> RoadCrossSection {
-        cross_section(self.class)
+        if self.oneway {
+            ramp_cross_section()
+        } else {
+            cross_section(self.class)
+        }
     }
 }
 

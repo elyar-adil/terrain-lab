@@ -13,7 +13,8 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { sanitizePass } from "../city/post";
+import { offerFoliageMask, patchOcclusionFoliage, sanitizePass } from "../city/post";
+import { patchTreeMaterial } from "../trees";
 import { bakeSkyEnvironment } from "../city/sky";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { buildFarTreeSet } from "./farTrees";
@@ -408,6 +409,11 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
         samples: 16,
       });
       gtaoPass.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 4, rings: 2, samples: 8 });
+      // The same G-buffer lessons as the city viewer's chain: leaf cards are cut
+      // to their leaves and grown trees are raised, or every crown occludes
+      // itself to black.
+      patchOcclusionFoliage(gtaoPass.normalMaterial);
+      patchTreeMaterial(gtaoPass.normalMaterial, "normal");
       const bloomPass = new UnrealBloomPass(new THREE.Vector2(960, 540), 0.14, 0.5, 1.05);
       post.addPass(renderPass);
       post.addPass(gtaoPass);
@@ -1676,6 +1682,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
         cityAnchor = null;
       }
       if (!data) return;
+      offerFoliageMask(data.textures);
       cityBuild = beginCityLayer(data);
       cityBuildData = data;
       // Known up front so the unload test in `requestNearbyCity` works mid-build.
@@ -3570,7 +3577,9 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       const hide = new Set((new URLSearchParams(window.location.search).get("hide") ?? "").split(","));
       if (hide.has("clouds")) clouds.visible = false;
       if (hide.has("water")) water.visible = false;
+      if (hide.has("forest")) trees.visible = false;
     }
+    const forestHidden = new URLSearchParams(window.location.search).get("hide")?.split(",").includes("forest") ?? false;
 
     const shadowUniforms = {
       uTime: { value: 0 },
@@ -3767,7 +3776,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       const detailTreeFade = smoothFadeIn(viewSpanMetres, 3_200, 7_200);
       const regionalTreeFade = smoothFadeOut(viewSpanMetres, 3_800, 19_000);
       const showDetailTrees = detailTreeFade > 0.001;
-      for (const mesh of detailMeshes) mesh.visible = showDetailTrees;
+      for (const mesh of detailMeshes) mesh.visible = showDetailTrees && !forestHidden;
       fadeMaterial(detailCrownMaterial, detailTreeFade);
       // Do not draw the sparse regional markers over the detailed trees at
       // full strength: they are deliberately blended in the overlap band.

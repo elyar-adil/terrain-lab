@@ -23,7 +23,7 @@ pub use probability::{
 pub use roads::{
     CityJunction, HdLane, HdRoad, JunctionKind, JunctionPhase, LaneMarking, LaneUse, MarkingKind,
     Movement, RoadConnector, RoadCrossSection, SdNode, SdRoad, SignalHead, TurnArrow,
-    cross_section,
+    cross_section, ramp_cross_section,
 };
 pub use scene::{CityFrameInfo, ModernCity, Tributary};
 pub use traffic::{ApproachSpec, synthesize_junction};

@@ -879,10 +879,13 @@ mod tests {
     use crate::math::{point_in_ring, ring_centroid};
     use urban::{ModernChinaSpec, generate_modern_chinese_city};
 
+    /// A town big enough to hold every kind of building the layer draws: at
+    /// 0.5 km the ring expressway's interchange took the land of its one civic
+    /// building, and the tests below had nothing of theirs to look at.
     fn city() -> urban::ModernCity {
         generate_modern_chinese_city(ModernChinaSpec {
             seed: 42,
-            radius_km: 0.5,
+            radius_km: 0.6,
             block_size_metres: 110.0,
             ..ModernChinaSpec::default()
         })
@@ -1524,8 +1527,11 @@ mod tests {
     /// facade designs were retuned for ChineseModern.  The designs are shared by
     /// both styles (`WesternMixed` draws the same 24 designs by index), so their
     /// window and pier fields moved the western walls too.  Splitting the two
-    /// design tables would restore the old western geometry exactly.
-    const WESTERN_MIXED_LAYER_HASH: u64 = 5_338_084_166_160_266_908;
+    /// design tables would restore the old western geometry exactly.  It was
+    /// re-pinned again when expressways got interchanges: the fixture's ring
+    /// road now has a diamond, whose ramps take land and whose verges are left
+    /// unbuilt, so the plan under the buildings changed, not the buildings.
+    const WESTERN_MIXED_LAYER_HASH: u64 = 14_961_707_648_642_689_310;
 
     #[test]
     fn western_mixed_building_layer_is_bit_identical() {

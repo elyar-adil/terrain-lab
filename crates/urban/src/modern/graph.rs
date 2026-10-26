@@ -1365,6 +1365,7 @@ pub(super) fn build_graph(
             centreline: smooth_centreline(frame, &pts, &kept, &adjacency, id as usize, p0, p1),
             bridge: *bridge,
             layer: if *bridge { 1 } else { 0 },
+            oneway: false,
             lanes: lanes_for_modern_road(id, s.class, &rules),
             connectors: Vec::new(),
         });

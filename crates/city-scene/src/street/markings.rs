@@ -221,6 +221,10 @@ pub(super) fn road_markings(
     // signals; an elevated road keeps everything except the pedestrian realm it
     // has no kerb for.  Split the three conditions apart explicitly rather than
     // short-circuiting, or a viaduct silently loses its paint.
+    if road.oneway {
+        ramp_markings(network, road, builder, spec);
+        return;
+    }
     if road.is_motorway() {
         motorway_markings(road, builder, spec);
         return;
@@ -547,9 +551,12 @@ fn motorway_markings(road: &Road, builder: &mut MeshBuilder, spec: &JunctionSpec
     let section = road.section;
     let surface = Carriageway::for_road(road, spec);
     let median_half = section.median_metres * 0.5;
+    // The lanes start past the marginal strip by the median; the lines sit on
+    // the lane boundaries the lanes themselves are laid on.
+    let first_lane = median_half + section.inner_shoulder;
     for direction in [1.0_f32, -1.0] {
         for index in 1..section.motor_lanes_per_direction {
-            let offset = direction * (median_half + index as f32 * section.motor_lane_width);
+            let offset = direction * (first_lane + index as f32 * section.motor_lane_width);
             dashed_stripe(
                 builder,
                 "marking.dashed-6-9",
@@ -561,31 +568,32 @@ fn motorway_markings(road: &Road, builder: &mut MeshBuilder, spec: &JunctionSpec
                 0.0,
             );
         }
-        for side in [median_half, section.half_width() - 0.4] {
-            stripe(
-                builder,
-                "marking.white",
-                &surface,
-                direction * side,
-                0.0,
-                length,
-                spec.edge_line_width,
-            );
-        }
-    }
-    for side in [-1.0_f32, 1.0] {
+        // The left edge by the median is yellow on a Chinese expressway (GB
+        // 5768.3), the right edge white, at the start of the hard shoulder.
         stripe(
             builder,
             "marking.yellow",
             &surface,
-            side * median_half,
+            direction * (first_lane - 0.15),
             0.0,
             length,
             spec.yellow_line_width,
         );
+        let kerb_lane =
+            first_lane + section.motor_lanes_per_direction as f32 * section.motor_lane_width;
+        stripe(
+            builder,
+            "marking.white",
+            &surface,
+            direction * (kerb_lane + 0.1),
+            0.0,
+            length,
+            spec.edge_line_width,
+        );
     }
-    // A crash barrier down the middle: a motorway median is not a planted strip.
-    if section.median_metres > 0.5 {
+    // Crash barriers on the verges of an expressway at grade; on a viaduct the
+    // parapets and the median barrier are the structure's (`viaduct`).
+    if section.median_metres > 0.5 && road.layer == 0 {
         for side in [-1.0_f32, 1.0] {
             let cap = super::offset_path(&surface, side * (road.half_width() - 0.42));
             let cap_surface = Carriageway::on_path(cap, 0.2);
@@ -612,6 +620,89 @@ fn motorway_markings(road: &Road, builder: &mut MeshBuilder, spec: &JunctionSpec
                 super::level::ROAD + 0.85,
             );
         }
+    }
+}
+
+/// Lane paint on a one-way ramp: white edge lines either side of its lane(s),
+/// and where it meets a signalised terminal at grade, the stop line across
+/// the whole carriageway, the crossing, and the arrows of the turns it may
+/// make there.
+fn ramp_markings(network: &Network, road: &Road, builder: &mut MeshBuilder, spec: &JunctionSpec) {
+    let length = road.carriageway.length();
+    if length < 2.0 {
+        return;
+    }
+    let section = road.section;
+    let surface = Carriageway::for_road(road, spec);
+    let count = section.motor_lanes_per_direction;
+    let lanes_half = count as f32 * section.motor_lane_width * 0.5;
+    let mark_from = road.marking_start.clamp(0.0, length);
+    let mark_to = (length - road.marking_end).clamp(0.0, length);
+    for side in [-1.0_f32, 1.0] {
+        stripe(
+            builder,
+            "marking.white",
+            &surface,
+            side * (lanes_half + 0.1),
+            mark_from,
+            mark_to,
+            spec.edge_line_width,
+        );
+    }
+    for index in 1..count {
+        let offset = -lanes_half + index as f32 * section.motor_lane_width;
+        dashed_stripe(
+            builder,
+            "marking.dashed-6-9",
+            &surface,
+            offset,
+            mark_from,
+            mark_to,
+            spec.white_line_width,
+            mark_from,
+        );
+    }
+    let half = section.half_width();
+    for approach in approaches(road, spec) {
+        let centre = approach.crosswalk_centre;
+        if centre - spec.crosswalk.depth * 0.5 < -0.01
+            || centre + spec.crosswalk.depth * 0.5 > length + 0.01
+        {
+            continue;
+        }
+        crosswalk_band(builder, &surface, centre, half, spec.crosswalk.depth);
+        // Traffic arrives only at the terminal end of an off-ramp; an on-ramp's
+        // terminal end is where it is entered, and has no stop line.
+        let arriving = if approach.outward > 0.0 {
+            network
+                .lanes
+                .iter()
+                .any(|l| l.road == road.id && l.to_node == road.to_node)
+        } else {
+            network
+                .lanes
+                .iter()
+                .any(|l| l.road == road.id && l.to_node == road.from_node)
+        };
+        if arriving {
+            transverse_stripe(
+                builder,
+                "marking.white",
+                &surface,
+                -(half - 0.2),
+                half - 0.2,
+                approach.stop_near,
+                approach.stop_far,
+                super::level::PAINT,
+            );
+        }
+    }
+    for lane in network.lanes.iter().filter(|lane| {
+        lane.road == road.id
+            && lane.path.length() > spec.arrow.tip_gap + 1.5 + 2.4
+            && network.junction(lane.to_node).is_some()
+    }) {
+        drive_arrow(builder, lane, spec);
     }
 }
 
