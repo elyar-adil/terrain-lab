@@ -362,6 +362,20 @@ pub fn modern_road_class(class: RoadClass) -> urban::ModernRoadClass {
     }
 }
 
+/// The stretch of `run` from arc length `from` to `to`, its ends exact.
+fn slice_run(run: &Polyline, from: f64, to: f64) -> Vec<V2> {
+    let mut out = vec![run.at(from).map_or(run.0[0], |p| p.0)];
+    let mut travelled = 0.0;
+    for w in run.0.windows(2) {
+        travelled += w[0].dist(w[1]);
+        if travelled > from + 1e-6 && travelled < to - 1e-6 {
+            out.push(w[1]);
+        }
+    }
+    out.push(run.at(to).map_or(*run.0.last().unwrap(), |p| p.0));
+    out
+}
+
 /// Where a polyline is inside a circle, cut exactly at the circle. Each run says
 /// whether it was cut at its start and at its end.
 fn clip_circle(line: &Polyline, centre: V2, radius: f64) -> Vec<(Polyline, bool, bool)> {
@@ -441,14 +455,51 @@ impl WorldFabric {
             .filter(|(_, width)| *width >= 9.0)
             .collect();
         waterways.sort_by(|a, b| b.0.length().total_cmp(&a.0.length()));
-        let over_drawn_water = |edge: &worldgen_contracts::RoadEdge| {
-            edge.spans.iter().any(|span| {
-                let mid = span.from.lerp(span.to, 0.5);
-                waterways.iter().any(|(line, width)| {
-                    line.closest(mid)
-                        .is_some_and(|(d, _)| d < width * 0.5 + 14.0)
+        // Where along `run` the road is on a bridge over drawn water: each span
+        // over a drawn waterway, as arc lengths on the run, with an abutment's
+        // length either side, merged. Only that is a bridge: the rest of the
+        // edge is a street on the ground, however long it is.
+        let bridged = |edge: &worldgen_contracts::RoadEdge, run: &Polyline| -> Vec<(f64, f64)> {
+            const ABUTMENT_M: f64 = 15.0;
+            let length = run.length();
+            let mut out: Vec<(f64, f64)> = edge
+                .spans
+                .iter()
+                .filter(|span| {
+                    let mid = span.from.lerp(span.to, 0.5);
+                    waterways.iter().any(|(line, width)| {
+                        line.closest(mid)
+                            .is_some_and(|(d, _)| d < width * 0.5 + 14.0)
+                    })
                 })
-            })
+                .filter_map(|span| {
+                    let (a, b) = (run.closest(span.from)?, run.closest(span.to)?);
+                    // A span on another piece of the edge, not this run.
+                    if a.0 > 5.0 && b.0 > 5.0 {
+                        return None;
+                    }
+                    let (lo, hi) = (a.1.min(b.1), a.1.max(b.1));
+                    Some(((lo - ABUTMENT_M).max(0.0), (hi + ABUTMENT_M).min(length)))
+                })
+                .collect();
+            out.sort_by(|x, y| x.0.total_cmp(&y.0));
+            let mut merged: Vec<(f64, f64)> = Vec::new();
+            for (lo, hi) in out {
+                match merged.last_mut() {
+                    Some(last) if lo <= last.1 + 10.0 => last.1 = last.1.max(hi),
+                    _ => merged.push((lo, hi)),
+                }
+            }
+            // A stub of street left between a bridge and the run's end is bridge.
+            for piece in &mut merged {
+                if piece.0 < 10.0 {
+                    piece.0 = 0.0;
+                }
+                if length - piece.1 < 10.0 {
+                    piece.1 = length;
+                }
+            }
+            merged
         };
         let mut node_points: std::collections::HashMap<u64, urban::Point> =
             std::collections::HashMap::new();
@@ -493,13 +544,52 @@ impl WorldFabric {
                     }
                     node_points.entry(from).or_insert_with(|| km(first));
                     node_points.entry(to).or_insert_with(|| km(last));
-                    roads.push(urban::ExternalRoad {
-                        from,
-                        to,
-                        class: modern_road_class(edge.class),
-                        bridge: over_drawn_water(edge),
-                        centreline: run.0.iter().map(|p| km(*p)).collect(),
-                    });
+                    // The run as pieces on the ground and on bridges, split where
+                    // a bridge begins and ends.
+                    let length = run.length();
+                    let mut stops: Vec<(f64, bool)> = Vec::new(); // (start, bridge)
+                    let mut at = 0.0;
+                    for (lo, hi) in bridged(edge, &run) {
+                        if lo > at {
+                            stops.push((at, false));
+                        }
+                        stops.push((lo, true));
+                        at = hi;
+                    }
+                    if at < length || stops.is_empty() {
+                        stops.push((at, false));
+                    }
+                    for (k, &(start, bridge)) in stops.iter().enumerate() {
+                        let end = stops.get(k + 1).map_or(length, |next| next.0);
+                        if end - start < 0.5 {
+                            continue;
+                        }
+                        // A split point is one node for the pieces either side.
+                        let node_at = |s: f64| -> u64 {
+                            if s <= 1e-6 {
+                                from
+                            } else if s >= length - 1e-6 {
+                                to
+                            } else {
+                                hash_words(&[edge.id.0, 3, s.to_bits()])
+                            }
+                        };
+                        let (a, b) = (node_at(start), node_at(end));
+                        let piece = slice_run(&run, start, end);
+                        node_points
+                            .entry(a)
+                            .or_insert_with(|| km(*piece.first().unwrap()));
+                        node_points
+                            .entry(b)
+                            .or_insert_with(|| km(*piece.last().unwrap()));
+                        roads.push(urban::ExternalRoad {
+                            from: a,
+                            to: b,
+                            class: modern_road_class(edge.class),
+                            bridge,
+                            centreline: piece.iter().map(|p| km(*p)).collect(),
+                        });
+                    }
                 }
             }
         }

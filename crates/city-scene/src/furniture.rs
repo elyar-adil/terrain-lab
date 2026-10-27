@@ -1534,7 +1534,7 @@ mod tests {
                     laterals.iter().map(|value| value.abs()).sum::<f32>() / laterals.len() as f32;
                 // It has to actually be beside it, not a distant road that happens
                 // to be marginally closer.
-                let limit = road.section.half_width() + road.section.sidewalk_metres + 3.0;
+                let limit = road.section.half_width() + 3.0;
                 if mean > limit {
                     continue;
                 }

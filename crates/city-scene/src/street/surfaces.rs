@@ -82,7 +82,7 @@ pub(super) fn road_surface(
     let section = road.section;
     let surface = Carriageway::for_road(road, spec);
     let length = surface.length;
-    let half = section.half_width();
+    let half = road.half_width();
 
     // The carriageway proper.
     ribbon(
@@ -172,25 +172,78 @@ pub(super) fn road_surface(
     // carriageways, never over them: where two streets meet too acutely for
     // their footways to part before the box, one footway would otherwise run
     // out across the other street.
-    let mut near_start = super::road_near(network, road, true);
-    let mut near_end = super::road_near(network, road, false);
+    // Each end's zone reaches as far as its footways still lie over the
+    // junction's other carriageways: further than `JUNCTION_ZONE_M` where two
+    // streets part at a narrow angle.
+    let reach = half + section.sidewalk_metres;
+    let zone_at = |at_start: bool| -> (f32, Vec<Vec<Vec2>>) {
+        let mut zone = super::JUNCTION_ZONE_M;
+        loop {
+            let rings = super::road_near_within(network, road, at_start, zone + 20.0);
+            let edge = zone.min(length);
+            let station = if at_start { edge } else { length - edge };
+            let clear = [-reach, reach].iter().all(|lateral| {
+                let p = surface.point(station, *lateral, 0.0);
+                let p = Vec2::new(p.x, p.z);
+                !rings.iter().any(|ring| crate::math::point_in_ring(p, ring))
+            });
+            if clear || zone >= length * 0.5 {
+                return (zone, rings);
+            }
+            zone = (zone * 1.5).min(length * 0.5);
+        }
+    };
+    let ((zone_start, mut near_start), (zone_end, mut near_end)) = (zone_at(true), zone_at(false));
     // A street shorter than its two junction zones is near both junctions
     // all along.
-    if length < 2.0 * super::JUNCTION_ZONE_M {
+    if length < zone_start + zone_end {
         let both: Vec<Vec<Vec2>> = near_start.iter().chain(&near_end).cloned().collect();
         near_start = both.clone();
         near_end = both;
     }
-    let zone = super::JUNCTION_ZONE_M.min(length * 0.5);
+    let (zone_start, zone_end) = (zone_start.min(length * 0.5), zone_end.min(length * 0.5));
+    // Round a bend tighter than the footway's own reach, the footway on the
+    // inside folds back over the carriageway: there the street's own
+    // carriageway is cut out of it too, the carriageway winning as everywhere.
+    // And wherever another street runs beside this one, its carriageway too.
+    let mut own: Vec<Vec<Vec2>> = super::road_beside(network, road);
+    near_start.extend(own.iter().cloned());
+    near_end.extend(own.iter().cloned());
+    let tight = surface.stations(0.0, length, 2.0).windows(2).any(|w| {
+        let turn = surface
+            .path
+            .tangent_at(w[0])
+            .dot(surface.path.tangent_at(w[1]))
+            .clamp(-1.0, 1.0)
+            .acos();
+        turn > 1e-4 && (w[1] - w[0]) / turn < reach + 1.0
+    });
+    if tight {
+        let run = surface.stations(0.0, length, 2.0);
+        let mut ring: Vec<Vec2> = run
+            .iter()
+            .map(|s| {
+                let p = surface.point(*s, half - 0.05, 0.0);
+                Vec2::new(p.x, p.z)
+            })
+            .collect();
+        ring.extend(run.iter().rev().map(|s| {
+            let p = surface.point(*s, -(half - 0.05), 0.0);
+            Vec2::new(p.x, p.z)
+        }));
+        own.push(ring);
+        near_start.extend(own.iter().cloned());
+        near_end.extend(own.iter().cloned());
+    }
     let mut footway: Vec<(f32, f32, &[Vec<Vec2>])> = Vec::new();
     for (from, to) in remaining(length, &cut) {
         let edges = [
             from,
-            zone.clamp(from, to),
-            (length - zone).clamp(from, to),
+            zone_start.clamp(from, to),
+            (length - zone_end).clamp(from, to),
             to,
         ];
-        let clips: [&[Vec<Vec2>]; 3] = [&near_start, &[], &near_end];
+        let clips: [&[Vec<Vec2>]; 3] = [&near_start, &own, &near_end];
         for k in 0..3 {
             if edges[k + 1] - edges[k] > 0.05 {
                 footway.push((edges[k], edges[k + 1], clips[k]));
@@ -611,11 +664,11 @@ fn road_furniture_marks(
 }
 
 pub(super) fn junction_geometry(
+    network: &Network,
     junction: &Junction,
     builder: &mut MeshBuilder,
     spec: &JunctionSpec,
 ) {
-    let _ = spec;
     if junction.ports.len() == 1 {
         dead_end(builder, &junction.ports[0]);
         return;
@@ -641,15 +694,50 @@ pub(super) fn junction_geometry(
     // joins, with the same kerb as theirs along its edge.  Built from the
     // streets' own kerb and footway lines (`network::Corner`), so it meets each
     // footway along its end and the block behind along its back edge.
+    // Each arm's carriageway over its first 60 m, as it is drawn, bends and
+    // approach widenings included: the corner paving is never laid on it.
+    let approaches: Vec<Vec<Vec2>> = junction
+        .ports
+        .iter()
+        .map(|port| match network.road(port.road) {
+            Some(road) if road.carriageway.length() > 0.5 => {
+                let surface = Carriageway::for_road(road, spec);
+                let length = surface.length;
+                let (from, to) = if port.at_start {
+                    (0.0, length.min(60.0))
+                } else {
+                    ((length - 60.0).max(0.0), length)
+                };
+                let half = road.half_width();
+                let run = surface.stations(from, to, 2.0);
+                let edge = |s: f32, lateral: f32| {
+                    let p = surface.point(s, lateral, 0.0);
+                    Vec2::new(p.x, p.z)
+                };
+                let mut ring: Vec<Vec2> = run.iter().map(|s| edge(*s, half)).collect();
+                ring.extend(run.iter().rev().map(|s| edge(*s, -half)));
+                ring
+            }
+            _ => {
+                let back = -port.dir * 60.0;
+                vec![port.left, port.right, port.right + back, port.left + back]
+            }
+        })
+        .collect();
     for corner in &junction.corners {
-        corner_paving(builder, junction, corner);
+        corner_paving(builder, junction, corner, &approaches);
     }
 }
 
 /// Width of the kerb's top, from the carriageway edge back onto the footway.
 pub(super) const KERB_TOP: f32 = 0.25;
 
-fn corner_paving(builder: &mut MeshBuilder, junction: &Junction, corner: &crate::network::Corner) {
+fn corner_paving(
+    builder: &mut MeshBuilder,
+    junction: &Junction,
+    corner: &crate::network::Corner,
+    approaches: &[Vec<Vec2>],
+) {
     let kerb = &corner.kerb;
     if kerb.len() < 2 {
         return;
@@ -672,15 +760,7 @@ fn corner_paving(builder: &mut MeshBuilder, junction: &Junction, corner: &crate:
     // would spill into the box and up the approaches, so both are cut out
     // of it.  Everywhere else this takes nothing.
     let mut road: Vec<Vec<Vec2>> = vec![junction.ring.clone()];
-    for port in &junction.ports {
-        let back = -port.dir * 60.0;
-        road.push(vec![
-            port.left,
-            port.right,
-            port.right + back,
-            port.left + back,
-        ]);
-    }
+    road.extend(approaches.iter().cloned());
     for piece in crate::buildings::cut_away(plan, &road) {
         if crate::math::signed_area(&piece).abs() <= 0.05 {
             continue;

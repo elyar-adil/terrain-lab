@@ -855,7 +855,9 @@ fn a_waiting_box_starts_at_the_junction_edge_and_curves_with_the_left_turn() {
                 furthest = furthest.max(p.distance(start));
             }
             assert!(
-                furthest <= depth + 0.5,
+                // Measured from the box's start, its front corners stand half
+                // a lane to the side.
+                furthest <= depth + 1.0,
                 "road {}: the box runs {furthest:.1} m",
                 road.id
             );
@@ -1256,6 +1258,51 @@ fn every_junction_is_covered_by_the_surface_it_should_be() {
                 p.y
             ));
         };
+        // Every street, its whole length: road from above at its centre and
+        // near both kerbs, and no building standing on it.
+        // As drawn: a building the plan stood on a street is not built.
+        let footprints: Vec<Vec<Vec2>> = city
+            .buildings
+            .iter()
+            .map(|b| crate::buildings::ring_of(&b.footprint, city.frame))
+            .map(|ring| {
+                if crate::buildings::on_a_street(&ring, &streets) {
+                    Vec::new()
+                } else {
+                    ring
+                }
+            })
+            .collect();
+        for road in network.roads.iter().filter(|r| r.layer == 0 && !r.oneway) {
+            // Sampled on the carriageway as it is drawn: mitred at its bends,
+            // moved out where it is widened.
+            let surface = Carriageway::for_road(road, &network.spec);
+            let length = road.carriageway.length();
+            let half = road.half_width();
+            let mut station = 2.0;
+            while station < length - 2.0 {
+                for lateral in [0.0, -(half - 0.6), half - 0.6] {
+                    let q = surface.point(station, lateral, 0.0);
+                    let p = Vec2::new(q.x, q.z);
+                    if let Some(id) = footprints
+                        .iter()
+                        .position(|ring| crate::math::point_in_ring(p, ring))
+                    {
+                        let on = format!("building {}", city.buildings[id].id);
+                        report(&format!("road {}", road.id), p, Some(&on));
+                    }
+                    let found = top.top(p);
+                    if !found.is_some_and(road_ok) {
+                        report(
+                            &format!("a street's carriageway [road {}]", road.id),
+                            p,
+                            found,
+                        );
+                    }
+                }
+                station += 5.0;
+            }
+        }
         for junction in network.junctions.iter().filter(|j| j.ports.len() >= 3) {
             let at_grade = junction.ports.iter().all(|port| {
                 network
@@ -1271,7 +1318,9 @@ fn every_junction_is_covered_by_the_surface_it_should_be() {
                 .ports
                 .iter()
                 .filter_map(|port| network.road(port.road).map(|road| (road, port.at_start)))
-                .flat_map(|(road, at_start)| super::road_near(&network, road, at_start))
+                .flat_map(|(road, at_start)| {
+                    super::road_near_within(&network, road, at_start, super::JUNCTION_ZONE_M)
+                })
                 .flat_map(|ring| crate::buildings::normalise(&ring))
                 .collect();
             let on_a_street = |p: Vec2| {
@@ -1329,9 +1378,15 @@ fn every_junction_is_covered_by_the_surface_it_should_be() {
                 // The road the footway is cut round where it is drawn: this
                 // end's, and on a street shorter than two junction zones, the
                 // other end's too.
-                let mut near_rings = super::road_near(&network, road, port.at_start);
+                let mut near_rings =
+                    super::road_near_within(&network, road, port.at_start, super::JUNCTION_ZONE_M);
                 if road.carriageway.length() < 2.0 * super::JUNCTION_ZONE_M {
-                    near_rings.extend(super::road_near(&network, road, !port.at_start));
+                    near_rings.extend(super::road_near_within(
+                        &network,
+                        road,
+                        !port.at_start,
+                        super::JUNCTION_ZONE_M,
+                    ));
                 }
                 let near: Vec<Vec<Vec2>> = near_rings
                     .iter()
@@ -1341,16 +1396,13 @@ fn every_junction_is_covered_by_the_surface_it_should_be() {
                 let reach = 30.0_f32.min(length * 0.5);
                 let half = road.half_width();
                 let walk = half + road.section.sidewalk_metres;
+                let drawn = Carriageway::for_road(road, &network.spec);
                 let mut s = 0.5;
                 while s < reach {
                     let station = if port.at_start { s } else { length - s };
                     let mut offset = -half + 0.4;
                     while offset < half - 0.4 {
-                        let q = road.carriageway.offset_at(
-                            station,
-                            road.kerbside(station, offset),
-                            0.0,
-                        );
+                        let q = drawn.point(station, offset, 0.0);
                         let p = Vec2::new(q.x, q.z);
                         let found = top.top(p);
                         if !found.is_some_and(road_ok) {
@@ -1368,8 +1420,7 @@ fn every_junction_is_covered_by_the_surface_it_should_be() {
                     for side in [-1.0_f32, 1.0] {
                         let mut offset = half + 0.4;
                         while offset < walk - 0.3 {
-                            let lateral = road.kerbside(station, side * offset);
-                            let q = road.carriageway.offset_at(station, lateral, 0.0);
+                            let q = drawn.point(station, side * offset, 0.0);
                             let p = Vec2::new(q.x, q.z);
                             if near.iter().any(|ring| {
                                 distance_to_ring(p, ring) < 0.35

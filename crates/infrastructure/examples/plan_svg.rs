@@ -2,7 +2,8 @@
 //!
 //!   PLANNER=legacy|fabric cargo run --release -p infrastructure --example plan_svg -- OUT.svg [settlement-index]
 //!
-//! `PLAN_JSON=plan.json` also writes the town's plan itself, for measuring it.
+//! `PLAN_JSON=plan.json` also writes the town's plan itself, for measuring it;
+//! `PLAN_DIR=dir` writes every town's, as `dir/plan<i>.json`. `SEED=n` picks the world.
 
 use std::{env, error::Error, fmt::Write as _};
 
@@ -23,7 +24,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(512);
     let config = SimulationConfig {
-        seed: 284_735,
+        seed: env::var("SEED")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(284_735),
         preset: TerrainPreset::Temperate,
         landform: match env::var("LANDFORM").as_deref() {
             Ok("coastal") => Landform::Coastal,
@@ -84,6 +88,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
     }
     let city = &infra.modern_cities[index.min(infra.modern_cities.len() - 1)];
+    if let Ok(dir) = env::var("PLAN_DIR") {
+        for (i, c) in infra.modern_cities.iter().enumerate() {
+            std::fs::write(format!("{dir}/plan{i}.json"), serde_json::to_vec(c)?)?;
+        }
+        eprintln!("wrote {} plans to {dir}", infra.modern_cities.len());
+    }
     if let Ok(path) = env::var("PLAN_JSON") {
         std::fs::write(&path, serde_json::to_vec(city)?)?;
         eprintln!("wrote {path}");

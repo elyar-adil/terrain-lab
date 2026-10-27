@@ -8,7 +8,7 @@
 
 use urban::ModernRoadClass;
 
-use crate::math::{Path, Vec2};
+use crate::math::{Path, Vec2, Vec3};
 use crate::mesh::MeshBuilder;
 use crate::network::{Lane, LaneUse, Network, Road};
 use crate::spec::{ARROW_LENGTH_MM, JunctionSpec, Movement};
@@ -53,7 +53,7 @@ impl Approach {
 /// real crossing at either end — a motorway, or a street whose ends are bends.
 pub(super) fn approaches(road: &Road, spec: &JunctionSpec) -> Vec<Approach> {
     let length = road.carriageway.length();
-    let half = road.section.half_width();
+    let half = road.half_width();
     let median = road.section.median_metres * 0.5;
     let mut result = Vec::new();
     for (base, outward, crossing) in [
@@ -126,17 +126,14 @@ fn transverse_stripe(
     if across_to - across_from < 0.02 || to - from < 0.02 {
         return;
     }
-    ribbon(
+    straight_band(
         builder,
         material,
         surface,
-        across_from.min(across_to),
-        across_from.max(across_to),
-        from.min(to),
-        from.max(to),
+        (across_from.min(across_to), across_from.max(across_to)),
+        (from.min(to), from.max(to)),
         lift,
         None,
-        Uvs::None,
     );
 }
 
@@ -192,18 +189,62 @@ pub(super) fn crosswalk_band(
     if outer <= inner {
         return;
     }
-    ribbon(
+    straight_band(
         builder,
         "marking.crosswalk",
         surface,
-        inner,
-        outer,
-        centre - depth * 0.5,
-        centre + depth * 0.5,
+        (inner, outer),
+        (centre - depth * 0.5, centre + depth * 0.5),
         super::level::CROSSWALK,
-        None,
-        Uvs::Along(centre),
+        Some(centre),
     );
+}
+
+/// A short band across the road, from lateral `across.0` to `across.1` and
+/// from station `along.0` to `along.1`, laid square to the road at its middle
+/// station in one straight piece: a crossing or a stop line is straight paint
+/// even where the street bends under it, and following the bend would twist a
+/// wide one into a wedge. `anchor` gives it `V` texture coordinates along the
+/// road from that station, as [`Uvs::Along`] does.
+fn straight_band(
+    builder: &mut MeshBuilder,
+    material: &str,
+    surface: &Carriageway,
+    across: (f32, f32),
+    along: (f32, f32),
+    lift: f32,
+    anchor: Option<f32>,
+) {
+    let middle = ((along.0 + along.1) * 0.5).clamp(0.0, surface.length);
+    let tangent = surface.path.tangent_at(middle);
+    let a = surface.point(middle, across.0, lift);
+    let b = surface.point(middle, across.1, lift);
+    let at = |p: Vec3, station: f32| {
+        let d = station - middle;
+        Vec3::new(p.x + tangent.x * d, p.y, p.z + tangent.y * d)
+    };
+    let (pa, pb, qb, qa) = (
+        at(a, along.0),
+        at(b, along.0),
+        at(b, along.1),
+        at(a, along.1),
+    );
+    match anchor {
+        None => builder.quad(material, pa, pb, qb, qa, None),
+        Some(anchor) => {
+            let (v1, v0) = (along.0 - anchor, along.1 - anchor);
+            let width = across.1 - across.0;
+            builder.quad_uv(
+                material,
+                pa,
+                pb,
+                qb,
+                qa,
+                [(0.0, v1), (width, v1), (width, v0), (0.0, v0)],
+                None,
+            );
+        }
+    }
 }
 
 pub(super) fn road_markings(
@@ -235,7 +276,7 @@ pub(super) fn road_markings(
     }
     let section = road.section;
     let surface = Carriageway::for_road(road, spec);
-    let half = section.half_width();
+    let half = road.half_width();
     let median = section.median_metres;
     let expressway = road.class == ModernRoadClass::Expressway;
 
@@ -722,7 +763,7 @@ fn ramp_markings(network: &Network, road: &Road, builder: &mut MeshBuilder, spec
             mark_from,
         );
     }
-    let half = section.half_width();
+    let half = road.half_width();
     for approach in approaches(road, spec) {
         let centre = approach.crosswalk_centre;
         if centre - spec.crosswalk.depth * 0.5 < -0.01
@@ -795,7 +836,7 @@ fn elevated_markings(road: &Road, builder: &mut MeshBuilder, spec: &JunctionSpec
             builder,
             "marking.white",
             &surface,
-            direction * (section.half_width() - 0.35),
+            direction * (road.half_width() - 0.35),
             0.0,
             length,
             spec.edge_line_width,

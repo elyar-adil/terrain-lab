@@ -491,6 +491,20 @@ fn road_report(network: &city_scene::Network, id: u32) {
         r.carriageway.length()
     );
     let p = r.carriageway.points();
+    // Each vertex with how sharply the carriageway turns there.
+    let mut station = 0.0;
+    for k in 1..p.len().saturating_sub(1) {
+        station += ((p[k].x - p[k - 1].x).powi(2) + (p[k].z - p[k - 1].z).powi(2)).sqrt();
+        let (ax, az) = (p[k].x - p[k - 1].x, p[k].z - p[k - 1].z);
+        let (bx, bz) = (p[k + 1].x - p[k].x, p[k + 1].z - p[k].z);
+        let turn = (ax * bz - az * bx).atan2(ax * bx + az * bz).to_degrees();
+        if turn.abs() > 8.0 {
+            println!(
+                "  vertex at {station:.1} m ({:.0},{:.0}) turns {turn:.0} deg",
+                p[k].x, p[k].z
+            );
+        }
+    }
     println!(
         "  first {:?} {:?} last {:?}",
         p[0],

@@ -13,7 +13,9 @@
 //!
 //! This merges each cluster into one junction, drops each duplicate, and prunes
 //! the short dead ends that result. It never drops an arterial or an expressway,
-//! and never a bridge.
+//! and never a bridge. A longer street a dropped duplicate leaves ending short of
+//! the street it used to meet is carried on to it, so it ends in a junction and
+//! not in a kerb a few metres from the road it obviously meets.
 
 use std::collections::{HashMap, HashSet};
 
@@ -22,6 +24,9 @@ use crate::{ModernRoadClass, Point};
 
 /// Junctions closer than this are one junction.
 const CLUSTER_M: f32 = 30.0;
+/// ... and closer than this they are one even if that makes a five-way
+/// junction: two boxes this near overlap, and no staggered pair is built so.
+const STAR_M: f32 = 18.0;
 /// A street this close to a parallel one, for most of its length, duplicates it.
 const DUPLICATE_M: f32 = 40.0;
 /// ... and "parallel" is within this many degrees.
@@ -30,6 +35,13 @@ const DUPLICATE_DEG: f32 = 15.0;
 const DUPLICATE_SHARE: f32 = 0.6;
 /// A dead end left behind shorter than this goes too.
 const STUB_M: f32 = 70.0;
+/// A piece of street free at both ends and shorter than this, left after the
+/// dead ends are joined, is a fragment and not a street.
+const ORPHAN_M: f32 = 120.0;
+/// A dead end that points at a street this close ahead is carried on to it.
+const JOIN_M: f32 = 60.0;
+/// ... "points at" meaning within this many degrees of its own heading.
+const JOIN_DEG: f32 = 35.0;
 
 fn rank(class: ModernRoadClass) -> u8 {
     match class {
@@ -60,7 +72,14 @@ pub(super) fn tidy(streets: &mut ExternalStreets) {
     merge_clusters(streets);
     drop_overlaps(streets);
     drop_duplicates(streets);
+    cut_squeezed(streets);
     prune_stubs(streets);
+    drop_orphans(streets, false);
+    join_dead_ends(streets);
+    drop_orphans(streets, true);
+    // Joined ends make junctions too, and some land close to others.
+    merge_clusters(streets);
+    drop_overlaps(streets);
 }
 
 /// Heading a road leaves `node` on, over its first 15 m.
@@ -205,7 +224,7 @@ fn merge_nodes(streets: &mut ExternalStreets, radius: f32, min_degree: usize) {
         .iter()
         .map(|(id, _)| (*id, degree.get(id).copied().unwrap_or(0)))
         .collect();
-    for (_, i, j) in pairs {
+    for (d, i, j) in pairs {
         let (a, b) = (
             find(&mut parent, junctions[i].0),
             find(&mut parent, junctions[j].0),
@@ -223,8 +242,9 @@ fn merge_nodes(streets: &mut ExternalStreets, radius: f32, min_degree: usize) {
         let joined = arms[&a] + arms[&b] - 2 * links;
         // Junctions join only while the result has at most four arms; past that
         // two T-junctions stay a staggered pair (错位交叉口) rather than become
-        // a five-way star. Copies of one node (`min_degree` 0) always join.
-        if min_degree >= 3 && joined > 4 {
+        // a five-way star, unless they are so close their boxes would overlap.
+        // Copies of one node (`min_degree` 0) always join.
+        if min_degree >= 3 && joined > 4 && d >= STAR_M {
             continue;
         }
         parent.insert(a, b);
@@ -442,6 +462,410 @@ fn prune_stubs(streets: &mut ExternalStreets) {
         if streets.roads.len() == before {
             break;
         }
+    }
+    let used: HashSet<u64> = streets.roads.iter().flat_map(|r| [r.from, r.to]).collect();
+    streets.nodes.retain(|n| used.contains(&n.id));
+}
+
+/// The point of `line` nearest `p`: (distance, segment index, parameter, point).
+fn nearest_on(line: &[(f32, f32)], p: (f32, f32)) -> Option<(f32, usize, f32, (f32, f32))> {
+    let mut best: Option<(f32, usize, f32, (f32, f32))> = None;
+    for (index, w) in line.windows(2).enumerate() {
+        let (a, b) = (w[0], w[1]);
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let l2 = dx * dx + dy * dy;
+        let t = if l2 < 1e-9 {
+            0.0
+        } else {
+            (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / l2).clamp(0.0, 1.0)
+        };
+        let q = (a.0 + dx * t, a.1 + dy * t);
+        let d = dist(p, q);
+        if best.is_none_or(|b| d < b.0) {
+            best = Some((d, index, t, q));
+        }
+    }
+    best
+}
+
+/// Do the open segments `a b` and `c d` cross?
+fn crosses(a: (f32, f32), b: (f32, f32), c: (f32, f32), d: (f32, f32)) -> bool {
+    let side = |p: (f32, f32), q: (f32, f32), r: (f32, f32)| {
+        (q.0 - p.0) * (r.1 - p.1) - (q.1 - p.1) * (r.0 - p.0)
+    };
+    let (d1, d2) = (side(c, d, a), side(c, d, b));
+    let (d3, d4) = (side(a, b, c), side(a, b, d));
+    d1 * d2 < 0.0 && d3 * d4 < 0.0
+}
+
+fn point_of(p: (f32, f32)) -> Point {
+    Point {
+        x_km: p.0 / 1000.0,
+        y_km: p.1 / 1000.0,
+    }
+}
+
+/// Carry each dead end on to the street it points at, if one is close ahead:
+/// to that street's nearer junction if one is within a cluster's reach of the
+/// meeting point, or else into a new T junction that splits the street there.
+/// An expressway is never met at grade and a bridge is never split.
+/// A dead end to carry on: (end node, its road, the road it meets, that
+/// road's segment, the meeting point).
+type Join = (u64, usize, usize, usize, (f32, f32));
+
+fn join_dead_ends(streets: &mut ExternalStreets) {
+    let cos_limit = JOIN_DEG.to_radians().cos();
+    let mut next_id = streets
+        .nodes
+        .iter()
+        .map(|n| n.id)
+        .max()
+        .unwrap_or(0)
+        .wrapping_add(1);
+    // Each pass joins one dead end, then looks again: a join changes the streets.
+    for _ in 0..streets.roads.len() {
+        let degree = degrees(&streets.roads);
+        let points: HashMap<u64, (f32, f32)> = streets
+            .nodes
+            .iter()
+            .map(|n| (n.id, metres(n.point)))
+            .collect();
+        let lines: Vec<Vec<(f32, f32)>> = streets
+            .roads
+            .iter()
+            .map(|r| r.centreline.iter().map(|p| metres(*p)).collect())
+            .collect();
+        let mut ends: Vec<(u64, usize)> = streets
+            .roads
+            .iter()
+            .enumerate()
+            .flat_map(|(index, road)| [(road.from, index), (road.to, index)])
+            .filter(|(node, index)| {
+                degree.get(node) == Some(&1)
+                    && streets.roads[*index].class != ModernRoadClass::Expressway
+                    && !streets.roads[*index].bridge
+            })
+            .collect();
+        ends.sort_unstable();
+        let mut join: Option<Join> = None;
+        'ends: for (node, index) in ends {
+            let Some(&end) = points.get(&node) else {
+                continue;
+            };
+            let heading = leaving(&streets.roads[index], node);
+            // Out of the end, away from the street's own body.
+            let ahead = (-(heading.cos()), -(heading.sin()));
+            let mut best: Option<(f32, usize, usize, (f32, f32))> = None;
+            for (target, line) in lines.iter().enumerate() {
+                let other = &streets.roads[target];
+                if target == index || other.class == ModernRoadClass::Expressway {
+                    continue;
+                }
+                // The nearest point of it ahead: a street meeting another at a
+                // slant meets it ahead of its end, not abreast.
+                for (segment, w) in line.windows(2).enumerate() {
+                    let length = dist(w[0], w[1]);
+                    let steps = ((length / 2.0).ceil() as usize).max(1);
+                    for k in 0..=steps {
+                        let f = k as f32 / steps as f32;
+                        let q = (
+                            w[0].0 + (w[1].0 - w[0].0) * f,
+                            w[0].1 + (w[1].1 - w[0].1) * f,
+                        );
+                        let d = dist(end, q);
+                        if !(0.5..=JOIN_M).contains(&d) {
+                            continue;
+                        }
+                        let toward = ((q.0 - end.0) / d, (q.1 - end.1) / d);
+                        if toward.0 * ahead.0 + toward.1 * ahead.1 < cos_limit {
+                            continue;
+                        }
+                        if best.is_none_or(|b| d < b.0) {
+                            best = Some((d, target, segment, q));
+                        }
+                    }
+                }
+            }
+            let Some((_, target, segment, q)) = best else {
+                continue;
+            };
+            // The extension must not cross another street on its way.
+            for (other, line) in lines.iter().enumerate() {
+                if other == index || other == target {
+                    continue;
+                }
+                if line.windows(2).any(|w| crosses(end, q, w[0], w[1])) {
+                    continue 'ends;
+                }
+            }
+            if streets.roads[target].bridge {
+                // Not split; met at its end only, below.
+                let road = &streets.roads[target];
+                let near_end = [road.from, road.to]
+                    .into_iter()
+                    .any(|n| points.get(&n).is_some_and(|p| dist(*p, q) < CLUSTER_M));
+                if !near_end {
+                    continue;
+                }
+            }
+            join = Some((node, index, target, segment, q));
+            break;
+        }
+        let Some((node, index, target, segment, q)) = join else {
+            break;
+        };
+        // The junction it meets: the target's nearer end if close enough, else a
+        // new node splitting the target at the meeting point.
+        let target_road = &streets.roads[target];
+        let near = [target_road.from, target_road.to]
+            .into_iter()
+            .filter_map(|n| points.get(&n).map(|p| (dist(*p, q), n)))
+            .filter(|(d, _)| *d < CLUSTER_M)
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        let meet = match near {
+            Some((_, n)) => n,
+            None => {
+                let id = next_id;
+                next_id = next_id.wrapping_add(1);
+                streets.nodes.push(super::ExternalNode {
+                    id,
+                    point: point_of(q),
+                });
+                let line = &lines[target];
+                let mut first: Vec<Point> = line[..=segment].iter().map(|p| point_of(*p)).collect();
+                first.push(point_of(q));
+                let mut second = vec![point_of(q)];
+                second.extend(line[segment + 1..].iter().map(|p| point_of(*p)));
+                let (to, class, bridge) = (target_road.to, target_road.class, target_road.bridge);
+                streets.roads[target].to = id;
+                streets.roads[target].centreline = first;
+                streets.roads.push(ExternalRoad {
+                    from: id,
+                    to,
+                    class,
+                    bridge,
+                    centreline: second,
+                });
+                id
+            }
+        };
+        let meet_point = streets
+            .nodes
+            .iter()
+            .find(|n| n.id == meet)
+            .map(|n| n.point)
+            .unwrap_or(point_of(q));
+        let road = &mut streets.roads[index];
+        if road.from == node {
+            road.centreline.insert(0, meet_point);
+            road.from = meet;
+        } else {
+            road.centreline.push(meet_point);
+            road.to = meet;
+        }
+    }
+    let used: HashSet<u64> = streets.roads.iter().flat_map(|r| [r.from, r.to]).collect();
+    streets.nodes.retain(|n| used.contains(&n.id));
+}
+
+/// A street free at both ends joins nothing: a fragment a cut or a dropped
+/// duplicate left. Before the dead ends are joined, the ones lying on top of
+/// another street (within `DUPLICATE_M` of one for half their length, whatever
+/// its class) go; after, the short ones that found nothing to join (`ORPHAN_M`).
+/// A bridge stays.
+fn drop_orphans(streets: &mut ExternalStreets, short: bool) {
+    let degree = degrees(&streets.roads);
+    let lines: Vec<Vec<(f32, f32)>> = streets
+        .roads
+        .iter()
+        .map(|r| r.centreline.iter().map(|p| metres(*p)).collect())
+        .collect();
+    let orphan: Vec<bool> = streets
+        .roads
+        .iter()
+        .enumerate()
+        .map(|(index, road)| {
+            if road.bridge || degree[&road.from] != 1 || degree[&road.to] != 1 {
+                return false;
+            }
+            if short {
+                return length(road) < ORPHAN_M;
+            }
+            let points = samples(road);
+            if points.is_empty() {
+                return length(road) < ORPHAN_M;
+            }
+            let on_another = points
+                .iter()
+                .filter(|(p, _)| {
+                    lines.iter().enumerate().any(|(other, line)| {
+                        other != index && nearest_on(line, *p).is_some_and(|n| n.0 < DUPLICATE_M)
+                    })
+                })
+                .count();
+            on_another * 2 >= points.len()
+        })
+        .collect();
+    let mut index = 0;
+    streets.roads.retain(|_| {
+        let keep = !orphan[index];
+        index += 1;
+        keep
+    });
+    let used: HashSet<u64> = streets.roads.iter().flat_map(|r| [r.from, r.to]).collect();
+    streets.nodes.retain(|n| used.contains(&n.id));
+}
+
+/// Where a street's corridor runs into another's (two streets converging
+/// side by side, footway on carriageway, without ever crossing) the lesser
+/// street is cut back to the longer of its clear parts, left as a dead end for
+/// `join_dead_ends` to carry on to the other street in a proper T. Near a
+/// junction the two share, converging is what streets do, and that is left.
+fn cut_squeezed(streets: &mut ExternalStreets) {
+    const STEP_M: f32 = 5.0;
+    const BACK_M: f32 = 8.0;
+    let mut next_id = streets
+        .nodes
+        .iter()
+        .map(|n| n.id)
+        .max()
+        .unwrap_or(0)
+        .wrapping_add(1);
+    for _ in 0..streets.roads.len() {
+        let points: HashMap<u64, (f32, f32)> = streets
+            .nodes
+            .iter()
+            .map(|n| (n.id, metres(n.point)))
+            .collect();
+        let lines: Vec<Vec<(f32, f32)>> = streets
+            .roads
+            .iter()
+            .map(|r| r.centreline.iter().map(|p| metres(*p)).collect())
+            .collect();
+        let half: Vec<f32> = streets
+            .roads
+            .iter()
+            .map(|r| r.class.width_metres() * 0.5)
+            .collect();
+        let bounds: Vec<(f32, f32, f32, f32)> = lines
+            .iter()
+            .map(|l| {
+                l.iter()
+                    .fold((f32::MAX, f32::MAX, f32::MIN, f32::MIN), |b, p| {
+                        (b.0.min(p.0), b.1.min(p.1), b.2.max(p.0), b.3.max(p.1))
+                    })
+            })
+            .collect();
+        let lesser = |a: usize, b: usize| {
+            let (ra, rb) = (&streets.roads[a], &streets.roads[b]);
+            (rank(ra.class), -length(ra)) > (rank(rb.class), -length(rb))
+        };
+        // (road, first and last squeezed arc, its length)
+        let mut found: Option<(usize, f32, f32, f32)> = None;
+        'roads: for (i, line) in lines.iter().enumerate() {
+            let road = &streets.roads[i];
+            if road.bridge || road.class == ModernRoadClass::Expressway {
+                continue;
+            }
+            let total = length(road);
+            let mut squeezed: Vec<f32> = Vec::new();
+            for (j, other) in lines.iter().enumerate() {
+                let o = &streets.roads[j];
+                if j == i || !lesser(i, j) || o.class == ModernRoadClass::Expressway {
+                    continue;
+                }
+                let reach = half[i] + half[j];
+                let (a, b) = (bounds[i], bounds[j]);
+                if a.0 > b.2 + reach || b.0 > a.2 + reach || a.1 > b.3 + reach || b.1 > a.3 + reach
+                {
+                    continue;
+                }
+                let shared: Vec<(f32, f32)> = [road.from, road.to]
+                    .into_iter()
+                    .filter(|n| *n == o.from || *n == o.to)
+                    .filter_map(|n| points.get(&n).copied())
+                    .collect();
+                let mut travelled = 0.0;
+                for w in line.windows(2) {
+                    let segment = dist(w[0], w[1]);
+                    let mut t = 0.0;
+                    while t < segment {
+                        let f = t / segment.max(1e-6);
+                        let p = (
+                            w[0].0 + (w[1].0 - w[0].0) * f,
+                            w[0].1 + (w[1].1 - w[0].1) * f,
+                        );
+                        let near_shared = shared.iter().any(|q| dist(*q, p) < reach + 15.0);
+                        if !near_shared && nearest_on(other, p).is_some_and(|n| n.0 < reach - 1.0) {
+                            squeezed.push(travelled + t);
+                        }
+                        t += STEP_M;
+                    }
+                    travelled += segment;
+                }
+            }
+            if let (Some(&lo), Some(&hi)) = (
+                squeezed.iter().min_by(|a, b| a.total_cmp(b)),
+                squeezed.iter().max_by(|a, b| a.total_cmp(b)),
+            ) {
+                found = Some((i, lo, hi, total));
+                break 'roads;
+            }
+        }
+        let Some((i, lo, hi, total)) = found else {
+            break;
+        };
+        // Keep the longer clear part, ending a little short of the squeeze.
+        let (keep_from, keep_to) = if lo >= total - hi {
+            (0.0, (lo - BACK_M).max(0.0))
+        } else {
+            ((hi + BACK_M).min(total), total)
+        };
+        if keep_to - keep_from < STUB_M {
+            streets.roads.remove(i);
+            continue;
+        }
+        let line = &lines[i];
+        let at = |s: f32| -> (f32, f32) {
+            let mut travelled = 0.0;
+            for w in line.windows(2) {
+                let segment = dist(w[0], w[1]);
+                if travelled + segment >= s {
+                    let f = ((s - travelled) / segment.max(1e-6)).clamp(0.0, 1.0);
+                    return (
+                        w[0].0 + (w[1].0 - w[0].0) * f,
+                        w[0].1 + (w[1].1 - w[0].1) * f,
+                    );
+                }
+                travelled += segment;
+            }
+            *line.last().unwrap()
+        };
+        let mut kept: Vec<Point> = vec![point_of(at(keep_from))];
+        let mut travelled = 0.0;
+        for w in line.windows(2) {
+            travelled += dist(w[0], w[1]);
+            if travelled > keep_from + 0.5 && travelled < keep_to - 0.5 {
+                kept.push(point_of(w[1]));
+            }
+        }
+        kept.push(point_of(at(keep_to)));
+        let id = next_id;
+        next_id = next_id.wrapping_add(1);
+        let road = &mut streets.roads[i];
+        if keep_from <= 0.0 {
+            streets.nodes.push(super::ExternalNode {
+                id,
+                point: *kept.last().unwrap(),
+            });
+            road.to = id;
+        } else {
+            streets
+                .nodes
+                .push(super::ExternalNode { id, point: kept[0] });
+            road.from = id;
+        }
+        road.centreline = kept;
     }
     let used: HashSet<u64> = streets.roads.iter().flat_map(|r| [r.from, r.to]).collect();
     streets.nodes.retain(|n| used.contains(&n.id));

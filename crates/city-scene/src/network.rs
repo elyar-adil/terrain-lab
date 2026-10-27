@@ -262,8 +262,9 @@ impl Road {
         self.class == ModernRoadClass::Expressway
     }
 
+    /// Centreline to kerb face: the carriageway's half.
     pub fn half_width(&self) -> f32 {
-        self.section.half_width()
+        kerb_half(&self.section)
     }
 }
 
@@ -493,9 +494,9 @@ pub fn derive(
                 // A dead end that the plan left running into another street (a
                 // street cut short, its end not moved off the road it was cut
                 // from) stops behind that street's footway instead.
-                if let Some(trim) =
-                    dead_end_clearance(index, list[0], &local, &sd_by_id, &hd_by_id, frame)
-                {
+                if let Some(trim) = dead_end_clearance(
+                    index, list[0], &local, &incidence, &sd_by_id, &hd_by_id, frame,
+                ) {
                     trims.insert(
                         (
                             list[0],
@@ -545,7 +546,7 @@ pub fn derive(
                 if !dir.is_finite() || dir.length_squared() < 0.5 {
                     continue;
                 }
-                let half = section.half_width();
+                let half = kerb_half(section);
                 arms.push((
                     *id,
                     at_start,
@@ -663,7 +664,7 @@ pub fn derive(
                                 Vec2::new(x, z)
                             })
                             .collect();
-                        let half = road.cross_section().half_width();
+                        let half = kerb_half(&road.cross_section());
                         (crate::math::distance_to_polyline(start, &plan), plan, half)
                     })
                     .min_by(|a, b| a.0.total_cmp(&b.0));
@@ -671,7 +672,7 @@ pub fn derive(
                     if !at_start {
                         line.reverse();
                     }
-                    merge_ramp(&mut line, &decks, half_main, section.half_width());
+                    merge_ramp(&mut line, &decks, half_main, kerb_half(&section));
                     if !at_start {
                         line.reverse();
                     }
@@ -1478,6 +1479,7 @@ fn dead_end_clearance(
     node: usize,
     road: u32,
     local: &[Vec2],
+    incidence: &[Vec<u32>],
     sd_by_id: &HashMap<u32, &SdRoad>,
     hd_by_id: &HashMap<u32, &HdRoad>,
     frame: CityFrameInfo,
@@ -1501,34 +1503,57 @@ fn dead_end_clearance(
         .filter(|other| other.id != road && other.layer == 0 && other.centreline.len() >= 2)
         .map(|other| {
             let section = other.cross_section();
-            (
-                plan(other),
-                section.half_width() + section.sidewalk_metres + 0.5,
-            )
+            (plan(other), section.half_width() + 0.5)
         })
         .filter(|(line, reach)| crate::math::distance_to_polyline(local[node], line) < *reach)
         .collect();
-    if others.is_empty() {
+    let own_section = hd.cross_section();
+    let own_reach = own_section.half_width();
+    // Nor in another junction's box, whose corners reach past the corridors
+    // of its streets: a circle of its widest street's half and a kerb return.
+    let boxes: Vec<(Vec2, f32)> = incidence
+        .iter()
+        .enumerate()
+        .filter(|(k, list)| *k != node && list.len() >= 3)
+        .map(|(k, list)| {
+            let widest = list
+                .iter()
+                .filter_map(|id| hd_by_id.get(id))
+                .filter(|r| r.layer == 0)
+                .map(|r| r.cross_section().half_width())
+                .fold(0.0_f32, f32::max);
+            (local[k], widest + 12.0)
+        })
+        .filter(|(centre, reach)| centre.distance(local[node]) < reach + own_reach)
+        .collect();
+    if others.is_empty() && boxes.is_empty() {
         return None;
     }
     let path = Path::flat(own);
     let length = path.length();
-    let own_section = hd.cross_section();
-    let own_reach = own_section.half_width() + own_section.sidewalk_metres;
     // A dead end needs only a few metres of street left: it may be trimmed
     // back as far as that to get clear, across its whole width.
     let limit = (length - 6.0).max(0.0);
     let mut station = 0.0;
+    // The footway that closes the end stands a footway's width ahead of it.
+    let band = own_section.sidewalk_metres;
     while station < limit {
-        let (centre, across) = (
-            path.plan_at(station),
-            path.tangent_at(station).left_normal(),
-        );
-        let clear = [-1.0_f32, 0.0, 1.0].iter().all(|side| {
-            let p = centre + across * (side * own_reach);
-            others
-                .iter()
-                .all(|(line, reach)| crate::math::distance_to_polyline(p, line) >= *reach)
+        let ahead = (station - band).max(0.0);
+        let rows = [
+            (
+                path.plan_at(station),
+                path.tangent_at(station).left_normal(),
+            ),
+            (path.plan_at(ahead), path.tangent_at(ahead).left_normal()),
+        ];
+        let clear = rows.iter().all(|(centre, across)| {
+            [-1.0_f32, 0.0, 1.0].iter().all(|side| {
+                let p = *centre + *across * (side * own_reach);
+                others
+                    .iter()
+                    .all(|(line, reach)| crate::math::distance_to_polyline(p, line) >= *reach)
+                    && boxes.iter().all(|(c, reach)| c.distance(p) >= *reach)
+            })
         });
         if clear {
             return Some(station);
@@ -1536,6 +1561,13 @@ fn dead_end_clearance(
         station += 1.0;
     }
     Some(limit)
+}
+
+/// Centreline to kerb face. A cross-section's width runs from property line to
+/// property line, footways included (`RoadCrossSection::derived_width`): the
+/// kerb stands a footway in from its half, and the footway fills the rest.
+pub fn kerb_half(section: &urban::RoadCrossSection) -> f32 {
+    section.half_width() - section.sidewalk_metres
 }
 
 /// The width of an added queue lane: an entry lane is 3.25 m (CJJ 152 §4.2.9).
@@ -1914,6 +1946,32 @@ fn merge_continuations(
         };
         let end_to_start =
             |x: &SdRoad, y: &SdRoad| x.to as usize == node && y.from as usize == node;
+        // The way a piece leaves the node, over its first 15 m, in metres.
+        let leaving = |sd: &SdRoad, hd: &HdRoad| -> Option<(f64, f64)> {
+            let mut pts: Vec<(f64, f64)> = hd
+                .centreline
+                .iter()
+                .map(|p| (f64::from(p.x_km) * 1000.0, f64::from(p.y_km) * 1000.0))
+                .collect();
+            if sd.from as usize != node {
+                pts.reverse();
+            }
+            let start = *pts.first()?;
+            let end = pts
+                .iter()
+                .copied()
+                .find(|p| (p.0 - start.0).hypot(p.1 - start.1) > 15.0)
+                .or_else(|| pts.last().copied())?;
+            let (dx, dy) = (end.0 - start.0, end.1 - start.1);
+            let l = dx.hypot(dy);
+            (l > 1e-6).then(|| (dx / l, dy / l))
+        };
+        // A street turning sharply at the node is not one street running on:
+        // left as a corner, it gets a kerb return; joined, its kerb would fold.
+        let gentle = match (leaving(ra, ha), leaving(rb, hb)) {
+            (Some(u), Some(v)) => u.0 * v.0 + u.1 * v.1 < -(35.0_f64.to_radians().cos()),
+            _ => true,
+        };
         a != b
             && ra.class == rb.class
             && !ra.bridge
@@ -1921,6 +1979,7 @@ fn merge_continuations(
             && ha.layer == hb.layer
             && ha.oneway == hb.oneway
             && (!ha.oneway || end_to_start(ra, rb) || end_to_start(rb, ra))
+            && gentle
     };
     // A node a chain passes through.
     let through = |node: usize| {
@@ -2757,7 +2816,8 @@ mod tests {
     fn a_street_is_one_road_from_junction_to_junction() {
         // Built piece by piece, a street was trimmed at every bend and its median
         // and paint broke there. No node may join exactly two at-grade, non-bridge
-        // roads of one class: that is a bend, and the two are one road.
+        // roads of one class: that is a bend, and the two are one road. A corner
+        // sharper than 35 degrees is not a bend but a corner, and stays one.
         for seed in SEEDS {
             let network = derived(seed);
             let mut at: HashMap<u32, Vec<&Road>> = HashMap::new();
@@ -2766,12 +2826,29 @@ mod tests {
                 at.entry(road.to_node).or_default().push(road);
             }
             let bends = at
-                .values()
-                .filter(|list| {
+                .iter()
+                .filter(|(node, list)| {
+                    // As the join reads it: the chord over the first 15 m.
+                    let out = |r: &Road| {
+                        let length = r.centreline.length();
+                        let (a, b) = if r.from_node == **node {
+                            (
+                                r.centreline.plan_at(0.0),
+                                r.centreline.plan_at(length.min(15.0)),
+                            )
+                        } else {
+                            (
+                                r.centreline.plan_at(length),
+                                r.centreline.plan_at((length - 15.0).max(0.0)),
+                            )
+                        };
+                        (b - a).normalize()
+                    };
                     list.len() == 2
                         && list[0].id != list[1].id
                         && list[0].class == list[1].class
                         && list.iter().all(|r| r.layer == 0 && !r.bridge)
+                        && out(list[0]).dot(out(list[1])) < -(35.0_f32.to_radians().cos())
                 })
                 .count();
             assert_eq!(bends, 0, "seed {seed}: {bends} bends still split a street");

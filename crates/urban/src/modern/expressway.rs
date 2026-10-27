@@ -1745,16 +1745,30 @@ fn ease_corner(
         }
     }
     let (len_a, len_b) = (polyline_len(&la), polyline_len(&lb));
-    let reach = 45.0_f32.min(len_a * 0.45).min(len_b * 0.45);
+    let longest = (len_a * 0.45).min(len_b * 0.45);
+    let mut reach = 45.0_f32.min(longest);
     if reach < 4.0 {
         return;
     }
     let corner = la[la.len() - 1];
-    let (pa, _) = sample(&la, len_a - reach);
-    let (pb, _) = sample(&lb, len_b - reach);
-    // Unit vectors from the corner back along each piece.
-    let (ua, ub) = (unit(sub(pa, corner)), unit(sub(pb, corner)));
-    let opening = dot(ua, ub).clamp(-1.0, 1.0).acos();
+    let ends = |reach: f32| {
+        let (pa, _) = sample(&la, len_a - reach);
+        let (pb, _) = sample(&lb, len_b - reach);
+        // Unit vectors from the corner back along each piece.
+        let (ua, ub) = (unit(sub(pa, corner)), unit(sub(pb, corner)));
+        (pa, pb, ua, ub, dot(ua, ub).clamp(-1.0, 1.0).acos())
+    };
+    let (mut pa, mut pb, mut ua, mut ub, mut opening) = ends(reach);
+    // The arc's radius is at least the street's half and a margin, or its inner
+    // kerb and footway would fold over themselves round the bend: a sharp turn
+    // takes a longer reach to get it, as far as the pieces allow.
+    let least = sd[a].class.width_metres() * 0.5 + 4.0;
+    if (0.3..std::f32::consts::PI - 0.01).contains(&opening)
+        && reach * (opening * 0.5).tan() < least
+    {
+        reach = (least / (opening * 0.5).tan()).min(longest).max(reach);
+        (pa, pb, ua, ub, opening) = ends(reach);
+    }
     // Straight through already, or a hairpin no arc should round.
     if !(0.3..=std::f32::consts::PI - 0.01).contains(&opening) {
         return;

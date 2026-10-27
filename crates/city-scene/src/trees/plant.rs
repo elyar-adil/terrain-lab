@@ -414,7 +414,7 @@ fn plant_with(
             continue;
         }
         let section = road.section;
-        let half = section.half_width();
+        let half = crate::network::kerb_half(&section);
         // A boulevard gets a double row; a local street gets one on the sunnier
         // side only, which is both what is built and what keeps the count sane.
         let double_row = matches!(

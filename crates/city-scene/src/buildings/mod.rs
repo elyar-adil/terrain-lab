@@ -419,7 +419,11 @@ pub fn cut_streets(plate: Vec<Vec2>, streets: &[Vec<Vec2>]) -> Vec<Vec<Vec2>> {
         return vec![plate];
     }
     let subject: Vec<[f32; 2]> = plate.iter().map(|p| [p.x, p.y]).collect();
-    let style = OutlineStyle::new(PLATE_GROWTH).line_join(LineJoin::Bevel);
+    // Mitred, so a block's corner grows into the corner of the junction it
+    // faces instead of being bevelled off and leaving a wedge behind the
+    // corner paving; past a 29 degree point it is bevelled after all, and what
+    // reaches into the junction the cut takes away.
+    let style = OutlineStyle::new(PLATE_GROWTH).line_join(LineJoin::Miter(0.5));
     let grown = vec![subject].outline(&style);
     let outer = match grown
         .into_iter()
@@ -453,6 +457,17 @@ pub fn normalise(ring: &[Vec2]) -> Vec<Vec<Vec2>> {
 
 /// `subject` with every ring of `clips` that reaches it cut out, as rings
 /// without holes.
+fn area_of(pieces: &[Vec<Vec2>]) -> f32 {
+    pieces.iter().map(|p| signed_area(p).abs()).sum()
+}
+
+/// Does `ring` take more than half a square metre of a street's footprint? A
+/// building or a compound fence there would stand on the road.
+pub(crate) fn on_a_street(ring: &[Vec2], streets: &[Vec<Vec2>]) -> bool {
+    let whole = signed_area(ring).abs();
+    area_of(&cut_away(ring.to_vec(), streets)) < whole - 0.5
+}
+
 pub fn cut_away(subject: Vec<Vec2>, clips: &[Vec<Vec2>]) -> Vec<Vec<Vec2>> {
     use i_overlay::core::fill_rule::FillRule;
     use i_overlay::core::overlay_rule::OverlayRule;
@@ -555,7 +570,7 @@ pub const PLATE_UNDER_PAVING: f32 = 0.5;
 /// How far a plate is grown before the streets are cut out of it, so it
 /// reaches every footway beside it (`cut_streets`).  Less than the 4 m a
 /// block keeps from a river bank, so it never reaches the water.
-const PLATE_GROWTH: f32 = 2.5;
+const PLATE_GROWTH: f32 = 3.8;
 
 /// [`build`], with the ground the streets take ([`crate::street::footprints`]):
 /// each block plate has it cut out.  The plate sits above the carriageway, so
@@ -605,7 +620,12 @@ pub fn build_among(
             continue;
         }
         let standing = on_parcel.get(&parcel.id).map(Vec::as_slice).unwrap_or(&[]);
-        if style == CityStyle::ChineseModern
+        // A parcel the plan laid over a street (a dead-end spur no block was
+        // cut by) keeps only its ground off the street: the street wins.
+        let off_street = cut_away(ring.clone(), streets);
+        let crossed = area_of(&off_street) < signed_area(&ring).abs() - 0.5;
+        if !crossed
+            && style == CityStyle::ChineseModern
             && parcel.use_type == ParcelUse::Residential
             && compound_ground(&ring, standing, frame, builder)
         {
@@ -621,7 +641,13 @@ pub fn build_among(
         } else {
             "parcel.paving"
         };
-        builder.ground_uv(material, &ring, level::GROUND - 0.004, None);
+        if crossed {
+            for piece in off_street.iter().filter(|p| p.len() >= 3) {
+                builder.ground_uv(material, piece, level::GROUND - 0.004, None);
+            }
+        } else {
+            builder.ground_uv(material, &ring, level::GROUND - 0.004, None);
+        }
     }
     for field in fields {
         let ring = ring_of(&field.ring, frame);
@@ -633,7 +659,7 @@ pub fn build_among(
     let podiums = podiums_of(buildings, frame, style, &mut table);
     for (building, podium) in buildings.iter().zip(podiums) {
         let ring = ring_of(&building.footprint, frame);
-        if ring.len() < 3 {
+        if ring.len() < 3 || on_a_street(&ring, streets) {
             continue;
         }
         builder.ambient_tint = Some(building_tint(building.id));
@@ -658,7 +684,7 @@ pub fn build_among(
     }
     for compound in compounds {
         let ring = ring_of(&compound.boundary, frame);
-        if ring.len() < 3 {
+        if ring.len() < 3 || on_a_street(&ring, streets) {
             continue;
         }
         compound_shell(compound, &ring, frame, builder);

@@ -130,7 +130,7 @@ pub struct Carriageway {
 impl Carriageway {
     pub fn for_road(road: &Road, spec: &crate::spec::JunctionSpec) -> Self {
         let length = road.carriageway.length();
-        let half = road.section.half_width();
+        let half = road.half_width();
         let crest = (road.section.median_metres * 0.5).min(half * 0.5);
         // A 1.2% cross-fall across the carriageway, capped so a 36 m expressway
         // does not become a trough.
@@ -341,6 +341,89 @@ pub(crate) fn stations(path: &Path, from: f32, to: f32, step: f32) -> Vec<f32> {
     out
 }
 
+/// The stretches of other streets' carriageways that come within reach of
+/// `road`'s footways anywhere along it, not only at its junctions: two streets
+/// the plan ran side by side, their footways on each other's road. Empty for
+/// almost every street.
+pub(super) fn road_beside(network: &Network, road: &Road) -> Vec<Vec<Vec2>> {
+    let own: Vec<Vec2> = road
+        .carriageway
+        .points()
+        .iter()
+        .map(|p| Vec2::new(p.x, p.z))
+        .collect();
+    if own.len() < 2 {
+        return Vec::new();
+    }
+    let reach = road.half_width() + road.section.sidewalk_metres;
+    let bounds = |points: &[Vec2], grow: f32| {
+        let (x0, z0, x1, z1) = points.iter().fold(
+            (f32::MAX, f32::MAX, f32::MIN, f32::MIN),
+            |(x0, z0, x1, z1), p| (x0.min(p.x), z0.min(p.y), x1.max(p.x), z1.max(p.y)),
+        );
+        (x0 - grow, z0 - grow, x1 + grow, z1 + grow)
+    };
+    let mine = bounds(&own, reach);
+    let mut out = Vec::new();
+    for other in network
+        .roads
+        .iter()
+        .filter(|r| r.id != road.id && r.layer == 0)
+    {
+        let surface = Carriageway::for_road(other, &network.spec);
+        if surface.length < 1.0 {
+            continue;
+        }
+        let half = other.half_width();
+        let line: Vec<Vec2> = other
+            .carriageway
+            .points()
+            .iter()
+            .map(|p| Vec2::new(p.x, p.z))
+            .collect();
+        let theirs = bounds(&line, half);
+        if theirs.0 > mine.2 || theirs.2 < mine.0 || theirs.1 > mine.3 || theirs.3 < mine.1 {
+            continue;
+        }
+        let run = surface.stations(0.0, surface.length, 3.0);
+        let close: Vec<bool> = run
+            .iter()
+            .map(|s| {
+                let p = surface.path.plan_at(*s);
+                crate::math::distance_to_polyline(p, &own) < reach + half + ROAD_WIDEN_SLACK
+            })
+            .collect();
+        let mut k = 0;
+        while k < run.len() {
+            if !close[k] {
+                k += 1;
+                continue;
+            }
+            let first = k.saturating_sub(1);
+            while k < run.len() && close[k] {
+                k += 1;
+            }
+            let last = k.min(run.len() - 1);
+            let stretch = &run[first..=last];
+            if stretch.len() < 2 {
+                continue;
+            }
+            let edge = |s: f32, lateral: f32| {
+                let p = surface.point(s, lateral, 0.0);
+                Vec2::new(p.x, p.z)
+            };
+            let mut ring: Vec<Vec2> = stretch.iter().map(|s| edge(*s, half)).collect();
+            ring.extend(stretch.iter().rev().map(|s| edge(*s, -half)));
+            out.push(ring);
+        }
+    }
+    out
+}
+
+/// A widened approach stands up to a lane further out than its section, and
+/// a stretch is taken with a few metres to spare.
+const ROAD_WIDEN_SLACK: f32 = 6.0;
+
 /// Within this distance of a junction a road's footway and kerb are cut
 /// against the junction's other carriageways ([`ribbon_clipped`]).
 pub(super) const JUNCTION_ZONE_M: f32 = 70.0;
@@ -349,7 +432,16 @@ pub(super) const JUNCTION_ZONE_M: f32 = 70.0;
 /// box, and every other street's carriageway that comes within
 /// `JUNCTION_ZONE_M` of the junction, whether it meets there or at a
 /// junction a few metres off.  Empty where the road's end is not a junction.
-pub(super) fn road_near(network: &Network, road: &Road, at_start: bool) -> Vec<Vec<Vec2>> {
+///
+/// Within `zone` metres of the junction, `JUNCTION_ZONE_M` or more: two
+/// streets meeting at a narrow angle run side by side further than that
+/// before their footways part.
+pub(super) fn road_near_within(
+    network: &Network,
+    road: &Road,
+    at_start: bool,
+    zone: f32,
+) -> Vec<Vec<Vec2>> {
     let node = if at_start {
         road.from_node
     } else {
@@ -381,7 +473,7 @@ pub(super) fn road_near(network: &Network, road: &Road, at_start: bool) -> Vec<V
                 )
             },
         );
-        let reach = JUNCTION_ZONE_M + other.half_width();
+        let reach = zone + other.half_width();
         if centre.x < lo.x - reach
             || centre.x > hi.x + reach
             || centre.y < lo.y - reach
@@ -400,7 +492,7 @@ pub(super) fn road_near(network: &Network, road: &Road, at_start: bool) -> Vec<V
             .into_iter()
             .filter(|s| {
                 let p = surface.path.plan_at(*s);
-                p.distance(centre) < JUNCTION_ZONE_M
+                p.distance(centre) < zone
             })
             .collect();
         let (Some(&from), Some(&to)) = (near.first(), near.last()) else {
@@ -430,7 +522,7 @@ pub(super) fn road_near(network: &Network, road: &Road, at_start: bool) -> Vec<V
     for other in &network.junctions {
         if other.node != node
             && other.ports.len() >= 2
-            && other.centre.distance(centre) < JUNCTION_ZONE_M
+            && other.centre.distance(centre) < zone
             && other.ring.len() >= 3
         {
             out.push(other.ring.clone());
@@ -723,7 +815,7 @@ pub fn build(network: &Network, builder: &mut MeshBuilder, seed: u32) -> StreetO
     }
     let mut output = StreetOutput::default();
     for junction in &network.junctions {
-        surfaces::junction_geometry(junction, builder, &spec);
+        surfaces::junction_geometry(network, junction, builder, &spec);
         surfaces::junction_details(
             network,
             junction,
