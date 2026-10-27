@@ -418,7 +418,22 @@ pub(super) fn road_markings(
         );
     }
 
-    // Crosswalk band and stop line, one set per crossing end, on the correct leg.
+    // A crosswalk at every end people cross, and a stop line at every end
+    // traffic stops: at an unsignalised junction the street that runs through
+    // has its zebra but no stop line.
+    for (base, outward, walked) in [
+        (0.0_f32, -1.0_f32, road.walk_start),
+        (length, 1.0_f32, road.walk_end),
+    ] {
+        let centre = base - outward * spec.crosswalk.gap;
+        if !walked
+            || centre - spec.crosswalk.depth * 0.5 < -0.01
+            || centre + spec.crosswalk.depth * 0.5 > length + 0.01
+        {
+            continue;
+        }
+        crosswalk_band(builder, &surface, centre, half, spec.crosswalk.depth);
+    }
     for approach in approaches(road, spec) {
         let centre = approach.crosswalk_centre;
         if centre - spec.crosswalk.depth * 0.5 < -0.01
@@ -426,7 +441,6 @@ pub(super) fn road_markings(
         {
             continue;
         }
-        crosswalk_band(builder, &surface, centre, half, spec.crosswalk.depth);
         transverse_stripe(
             builder,
             "marking.white",

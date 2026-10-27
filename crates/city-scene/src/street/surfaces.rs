@@ -167,7 +167,7 @@ pub(super) fn road_surface(
         road_furniture_marks(builder, road, &surface, spec);
         return;
     }
-    let cut = dropped_kerb(&surface, spec, road.crossing_start, road.crossing_end);
+    let cut = dropped_kerb(&surface, spec, road.walk_start, road.walk_end);
     // Near each junction the footway is laid round the junction's other
     // carriageways, never over them: where two streets meet too acutely for
     // their footways to part before the box, one footway would otherwise run
@@ -236,7 +236,22 @@ pub(super) fn road_surface(
         near_end.extend(own.iter().cloned());
     }
     let mut footway: Vec<(f32, f32, &[Vec<Vec2>])> = Vec::new();
-    for (from, to) in remaining(length, &cut) {
+    // Each piece reaches 5 cm under the ramp beside it, so a clipped footway
+    // and a clipped ramp overlap instead of meeting edge to edge in a crack.
+    let overlap = |(from, to): (f32, f32)| {
+        let lo = if from > 0.0 {
+            (from - 0.05).max(0.0)
+        } else {
+            from
+        };
+        let hi = if to < length {
+            (to + 0.05).min(length)
+        } else {
+            to
+        };
+        (lo, hi)
+    };
+    for (from, to) in remaining(length, &cut).into_iter().map(overlap) {
         let edges = [
             from,
             zone_start.clamp(from, to),
@@ -453,8 +468,17 @@ fn median_and_hazard(
     // box is clear.  Run on into the box, the median of a divided street
     // pokes into the turning paths of every left turn.
     let nose = spec.crosswalk.gap + spec.crosswalk.depth * 0.5 + 0.4;
-    let from = if road.crossing_start { nose } else { 0.0 };
-    let to = surface.length - if road.crossing_end { nose } else { 0.0 };
+    let from = if road.crossing_start || road.walk_start {
+        nose
+    } else {
+        0.0
+    };
+    let to = surface.length
+        - if road.crossing_end || road.walk_end {
+            nose
+        } else {
+            0.0
+        };
     if to - from < 1.0 {
         return;
     }
@@ -487,8 +511,8 @@ fn median_and_hazard(
     // The nose: the black-and-yellow diagonal on the median's end, the single
     // most recognisable piece of Chinese junction furniture there is.
     for (start, outward, crossing) in [
-        (from, 1.0_f32, road.crossing_start),
-        (to, -1.0_f32, road.crossing_end),
+        (from, 1.0_f32, road.crossing_start || road.walk_start),
+        (to, -1.0_f32, road.crossing_end || road.walk_end),
     ] {
         if !crossing {
             continue;
@@ -753,8 +777,25 @@ fn corner_paving(
             n
         }
     };
-    let mut plan: Vec<Vec2> = kerb.clone();
+    // Reaching 10 cm back up each footway it joins, so the two overlap and no
+    // crack opens along the mouth where they meet; what that puts on a
+    // carriageway is cut away below.
+    let back = |line: &[Vec2], first: bool| -> Option<Vec2> {
+        let (a, b) = if first {
+            (*line.first()?, *line.get(1)?)
+        } else {
+            (*line.last()?, *line.get(line.len().checked_sub(2)?)?)
+        };
+        let d = (a - b).normalize();
+        d.is_finite().then(|| a + d * 0.1)
+    };
+    let mut plan: Vec<Vec2> = Vec::new();
+    plan.extend(back(kerb, true));
+    plan.extend(kerb.iter().copied());
+    plan.extend(back(kerb, false));
+    plan.extend(back(&corner.walk, false));
     plan.extend(corner.walk.iter().rev().copied());
+    plan.extend(back(&corner.walk, true));
     // Never over the road: where two streets meet so acutely that no kerb
     // return fits between them, the paving's outline crosses itself and
     // would spill into the box and up the approaches, so both are cut out

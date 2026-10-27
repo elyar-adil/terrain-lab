@@ -1252,7 +1252,7 @@ fn every_junction_is_covered_by_the_surface_it_should_be() {
                 return;
             }
             offenders.push(format!(
-                "{label}: {what} shows {} at ({:.0}, {:.0})",
+                "{label}: {what} shows {} at ({:.1}, {:.1})",
                 found.unwrap_or("bare ground"),
                 p.x,
                 p.y
@@ -1559,5 +1559,49 @@ fn a_widened_approach_has_its_queue_lane_kerb_and_right_turn() {
     assert!(
         widened >= 4,
         "only {widened} widened approaches in the test city"
+    );
+}
+
+#[test]
+fn people_cross_every_arm_of_a_town_junction_and_traffic_stops_only_where_controlled() {
+    // A local street meeting a local street has its zebras, though no one
+    // gives way there; a street that runs through an unsignalised junction has
+    // its crosswalk and no stop line (`Road::walk_*` against `crossing_*`).
+    let network = city_network();
+    let mut through_with_zebra = 0;
+    for junction in network.junctions.iter().filter(|j| j.ports.len() >= 3) {
+        let roads: Vec<&crate::network::Road> = junction
+            .ports
+            .iter()
+            .filter_map(|p| network.road(p.road))
+            .collect();
+        if roads.iter().any(|r| r.layer != 0 || !r.has_sidewalk()) {
+            continue;
+        }
+        for (port, road) in junction.ports.iter().zip(&roads) {
+            let (walk, stop) = if port.at_start {
+                (road.walk_start, road.crossing_start)
+            } else {
+                (road.walk_end, road.crossing_end)
+            };
+            let other = if port.at_start {
+                road.walk_end
+            } else {
+                road.walk_start
+            };
+            let short = road.carriageway.length()
+                < 2.0 * (network.spec.crosswalk.gap + network.spec.crosswalk.depth) + 4.0;
+            assert!(
+                walk || junction.kind == urban::JunctionKind::RightInRightOut || (short && other),
+                "road {} has no crossing at junction {}",
+                road.id,
+                junction.node
+            );
+            through_with_zebra += usize::from(walk && !stop);
+        }
+    }
+    assert!(
+        through_with_zebra > 0,
+        "no uncontrolled arm has a crosswalk"
     );
 }

@@ -189,6 +189,12 @@ pub struct Road {
     /// `true` when either end is a real crossing (degree ≥ 3), not a bend.
     pub crossing_start: bool,
     pub crossing_end: bool,
+    /// Pedestrians cross the road at this end: a crosswalk and dropped kerbs at
+    /// every at-grade junction of streets with footways, whether or not traffic
+    /// stops there (`crossing_*` says that). A local street meeting a local
+    /// street has its zebra too, as it does in town.
+    pub walk_start: bool,
+    pub walk_end: bool,
     /// Set-back from the junction edge at which longitudinal paint begins, in
     /// metres, on the **trimmed** `carriageway`.  The crossing, the stop line and
     /// the approach taper own the ground between the edge and this station, so
@@ -799,6 +805,28 @@ pub fn derive(
         };
         let crossing_start = controlled(from_index);
         let crossing_end = controlled(to_index);
+        // A crossing for people at every junction of streets with footways,
+        // except across a major street whose median runs unbroken past a
+        // right-in, right-out side street: no one is meant to cross there.
+        let footways = hd.layer == 0 && !hd.oneway && section.sidewalk_metres >= 1.0;
+        let walked = |node: usize| {
+            footways && !air[node] && incidence[node].len() > 2 && {
+                let c = control[node];
+                c.kind != JunctionKind::RightInRightOut || class_rank(hd.class) > c.major
+            }
+        };
+        let (mut walk_start, mut walk_end) = (walked(from_index), walked(to_index));
+        // A link too short for two crossings has one, at its controlled end
+        // if only one is, else at its start: two zebras back to back, their
+        // kerbs dropped into each other, is not a street anyone builds.
+        let room = 2.0 * (spec.crosswalk.gap + spec.crosswalk.depth) + 4.0;
+        if walk_start && walk_end && carriageway.length() < room {
+            if crossing_end && !crossing_start {
+                walk_start = false;
+            } else {
+                walk_end = false;
+            }
+        }
         // A bridge over another road must clear it.  A deck the span cannot lift
         // to that height would drive through the road below, so say so.
         if crosses_road && deck < CROSSING_CLEARANCE {
@@ -840,11 +868,17 @@ pub fn derive(
             max_grade,
             crossing_start,
             crossing_end,
+            walk_start,
+            walk_end,
             // Seven metres of clear approach at a crossing: the 4 m crossing plus
             // the stop line and its clearance, which is exactly the ground the
             // crossing and the queue own.  A bend gets half a metre.
-            marking_start: if crossing_start { 7.0 } else { 0.5 },
-            marking_end: if crossing_end { 7.0 } else { 0.5 },
+            marking_start: if crossing_start || walk_start {
+                7.0
+            } else {
+                0.5
+            },
+            marking_end: if crossing_end || walk_end { 7.0 } else { 0.5 },
             lane_ids: Vec::new(),
             widen: [
                 widen.get(&(id, true)).copied().unwrap_or_default(),
@@ -2528,6 +2562,8 @@ pub mod export {
         pub max_grade: f32,
         pub crossing_start: bool,
         pub crossing_end: bool,
+        pub walk_start: bool,
+        pub walk_end: bool,
         pub has_sidewalk: bool,
         pub centreline: Vec<[f32; 3]>,
     }
@@ -2655,6 +2691,8 @@ pub mod export {
             max_grade: road.max_grade,
             crossing_start: road.crossing_start,
             crossing_end: road.crossing_end,
+            walk_start: road.walk_start,
+            walk_end: road.walk_end,
             has_sidewalk: road.has_sidewalk(),
             centreline: points(&road.centreline),
         }
