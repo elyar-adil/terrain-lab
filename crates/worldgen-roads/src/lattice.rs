@@ -122,6 +122,13 @@ impl Layer for ChordLayer {
     }
 }
 
+/// The closest two streets may meet the same street, or a street end may come to a
+/// junction, as a share of the local spacing; never more than this, or the wide
+/// spacing at the thin edge of a town would keep whole faces empty. Real towns
+/// rarely put junctions closer than 70 to 90 m on the same street
+/// (`docs/city-visual-target.md` §7, quartiles of junction spacing).
+pub(crate) const MIN_GAP_M: f64 = 90.0;
+
 /// Divide a chord at every rung. A pure function of the chord's ends, its id and
 /// the urban field.
 pub(crate) fn make_chord(fabric: Seed, urban: &dyn UrbanField, id: u64, a: V2, b: V2) -> Chord {
@@ -240,13 +247,13 @@ pub(crate) fn make_chord_reaching(
             let pos = a.lerp(b, t);
             let local = spacing(spec, at(t)).unwrap_or(spec.base_spacing_m);
             let from_ends = (t * len).min((1.0 - t) * len);
-            if from_ends < (0.22 * local).max(16.0) {
+            if from_ends < (0.35 * local).clamp(16.0, MIN_GAP_M) {
                 continue;
             }
             // A finer street too close to a coarser one is absorbed by it.
-            let crowded = kept
-                .iter()
-                .any(|d| d.level > spec.level && (d.t - t).abs() * len < 0.25 * local);
+            let crowded = kept.iter().any(|d| {
+                d.level > spec.level && (d.t - t).abs() * len < (0.4 * local).min(MIN_GAP_M)
+            });
             if crowded {
                 continue;
             }

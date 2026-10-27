@@ -23,7 +23,8 @@ use worldgen_core::{Cell, Context, Dependency, Error, Layer, LayerId, Seed};
 
 use crate::config::{RoadsConfig, TOP_RUNG};
 use crate::lattice::{
-    CHORDS, CellChords, Chord, Division, corner, corner_id, fabric_seed, make_chord_reaching,
+    CHORDS, CellChords, Chord, Division, MIN_GAP_M, corner, corner_id, fabric_seed,
+    make_chord_reaching,
 };
 
 pub const QUADS: LayerId = LayerId("roads.quads");
@@ -32,6 +33,14 @@ pub const QUADS: LayerId = LayerId("roads.quads");
 /// The finest streets are the ones most often left out, which is what gives a
 /// town blocks of different sizes instead of one uniform grid.
 const PRESENT: [f64; 5] = [0.78, 0.88, 0.95, 0.99, 1.0];
+
+/// The finest rungs, up to this one, stagger one family of streets (see
+/// `Build::expand`); the arterial and collector grids cross in full.
+const STAGGER_TOP: u8 = 2;
+
+/// Of a staggered family, the share of streets that still cross every through
+/// street: real towns keep some crossroads among their T junctions.
+const CROSSROADS_SHARE: f64 = 0.15;
 
 /// One road between two nodes inside a quadrilateral, before the grid is bent.
 #[derive(Debug, Clone, PartialEq)]
@@ -262,13 +271,17 @@ struct Grid {
 }
 
 impl Build<'_> {
-    fn divisions_on(&self, side: &FaceSide, rung: u8) -> Vec<(f64, usize)> {
+    /// The divisions of `rung` on a side of a face that a street of the face may
+    /// leave from. `inside_left` says the face lies to the left of the chord's own
+    /// direction.
+    fn divisions_on(&self, side: &FaceSide, rung: u8, inside_left: bool) -> Vec<(f64, usize)> {
         let chord = &self.chords[side.chord].chord;
         let mut out: Vec<(f64, usize)> = chord
             .divisions
             .iter()
             .enumerate()
             .filter(|(_, d)| d.level == rung && d.t > side.t0 + 1e-9 && d.t < side.t1 - 1e-9)
+            .filter(|(_, d)| self.usable_from(d, inside_left))
             .map(|(k, d)| {
                 let s = (d.t - side.t0) / (side.t1 - side.t0);
                 (if side.forward { s } else { 1.0 - s }, k)
@@ -288,10 +301,24 @@ impl Build<'_> {
         let len = |a: V2, b: V2| a.dist(b);
         let [bl, br, tr, tl] = face.corners;
         let extent = 0.25 * (len(bl, br) + len(br, tr) + len(tr, tl) + len(tl, bl));
-        let a_pairs =
-            self.match_sides(&face.bottom, &face.top, r, len(bl, br), len(tl, tr), extent);
-        let b_pairs =
-            self.match_sides(&face.left, &face.right, r, len(bl, tl), len(br, tr), extent);
+        let a_pairs = self.match_sides(
+            &face.bottom,
+            &face.top,
+            r,
+            len(bl, br),
+            len(tl, tr),
+            extent,
+            true,
+        );
+        let b_pairs = self.match_sides(
+            &face.left,
+            &face.right,
+            r,
+            len(bl, tl),
+            len(br, tr),
+            extent,
+            false,
+        );
         if a_pairs.is_empty() && b_pairs.is_empty() {
             return self.expand(face, rung - 1);
         }
@@ -309,24 +336,73 @@ impl Build<'_> {
         };
         let a_reach = reaches(&grid, na_of(&a_lines), true);
         let b_reach = reaches(&grid, na_of(&b_lines), false);
-        let a_index = self.commit(a_lines, r, &a_reach);
-        let b_index = self.commit(b_lines, r, &b_reach);
+        let (na, nb) = (a_lines.len(), b_lines.len());
 
-        let (na, nb) = (a_index.len(), b_index.len());
+        // At the finer rungs one family runs through and the other is staggered:
+        // each of its streets is built only between alternate pairs of the through
+        // streets, so where it meets one it ends in a T instead of crossing. Real
+        // towns are mostly T junctions (65 to 79 % of them, `docs/city-visual-target.md`
+        // §7); a face cut by both families in full would be all crossroads.
+        let staggered = r <= STAGGER_TOP && na > 0 && nb > 0;
+        let face_id = hash_words(&[face.ids[0].0, face.ids[1].0, face.ids[2].0, face.ids[3].0]);
+        let a_through = !staggered
+            || to_unit(hash_words(&[self.fabric.0, face_id, u64::from(r), 0x57A6])) < 0.5;
+        // `present[k][s]`: the staggered family's street `k` is built across strip `s`,
+        // the strip between through streets `s` and `s + 1` (0 and the last being the
+        // face's own sides).
+        let (n_through, cross_lines) = if a_through {
+            (na, &b_lines)
+        } else {
+            (nb, &a_lines)
+        };
+        let cross_ids: Vec<u64> = cross_lines.iter().map(|line| line.chord.id).collect();
+        let present: Vec<Vec<bool>> = cross_ids
+            .iter()
+            .map(|&id| {
+                let h = hash_words(&[self.fabric.0, id, 0x57A7]);
+                let through = !staggered || to_unit(h) < CROSSROADS_SHARE;
+                let phase = (h >> 40) as usize & 1;
+                (0..=n_through)
+                    .map(|s| through || (s + phase).is_multiple_of(2))
+                    .collect()
+            })
+            .collect();
+        // A through street meets a staggered one only where it is built on one side.
+        let meets = |k: usize, i: usize| present[k][i - 1] || present[k][i];
+        if staggered {
+            let through_lines = if a_through {
+                &mut a_lines
+            } else {
+                &mut b_lines
+            };
+            for (i, line) in through_lines.iter_mut().enumerate() {
+                let mut k = 0;
+                line.crossings.retain(|_| {
+                    k += 1;
+                    meets(k - 1, i + 1)
+                });
+            }
+        }
+        let (a_index, b_index, pieces) = if !staggered {
+            let a_index = self.commit(a_lines, r, &a_reach);
+            let b_index = self.commit(b_lines, r, &b_reach);
+            (a_index, b_index, Vec::new())
+        } else if a_through {
+            let a_index = self.commit(a_lines, r, &a_reach);
+            let pieces = self.commit_pieces(&b_lines, &present, &grid, false, r, &b_reach);
+            (a_index, Vec::new(), pieces)
+        } else {
+            let b_index = self.commit(b_lines, r, &b_reach);
+            let pieces = self.commit_pieces(&a_lines, &present, &grid, true, r, &a_reach);
+            (Vec::new(), b_index, pieces)
+        };
+
         let whole = |chord: usize| Boundary {
             chord,
             t0: 0.0,
             t1: 1.0,
             forward: true,
         };
-        let row_bounds: Vec<Boundary> = std::iter::once(Boundary::of(&face.bottom))
-            .chain(b_index.iter().map(|&k| whole(k)))
-            .chain(std::iter::once(Boundary::of(&face.top)))
-            .collect();
-        let col_bounds: Vec<Boundary> = std::iter::once(Boundary::of(&face.left))
-            .chain(a_index.iter().map(|&k| whole(k)))
-            .chain(std::iter::once(Boundary::of(&face.right)))
-            .collect();
         let side = |b: &Boundary, s0: f64, s1: f64| {
             let (ta, tb) = (b.param(s0), b.param(s1));
             FaceSide {
@@ -336,46 +412,165 @@ impl Build<'_> {
                 forward: b.forward,
             }
         };
-        for c in 1..=na + 1 {
-            for rw in 1..=nb + 1 {
-                let child = Face {
-                    corners: [
-                        grid.pos[c - 1][rw - 1],
-                        grid.pos[c][rw - 1],
-                        grid.pos[c][rw],
-                        grid.pos[c - 1][rw],
-                    ],
-                    ids: [
-                        grid.id[c - 1][rw - 1],
-                        grid.id[c][rw - 1],
-                        grid.id[c][rw],
-                        grid.id[c - 1][rw],
-                    ],
-                    bottom: side(
-                        &row_bounds[rw - 1],
-                        grid.along_row[c - 1][rw - 1],
-                        grid.along_row[c][rw - 1],
-                    ),
-                    top: side(
-                        &row_bounds[rw],
-                        grid.along_row[c - 1][rw],
-                        grid.along_row[c][rw],
-                    ),
-                    left: side(
-                        &col_bounds[c - 1],
-                        grid.along_col[c - 1][rw - 1],
-                        grid.along_col[c - 1][rw],
-                    ),
-                    right: side(
-                        &col_bounds[c],
-                        grid.along_col[c][rw - 1],
-                        grid.along_col[c][rw],
-                    ),
-                    finest: r,
-                };
-                self.expand(child, rung - 1);
+        let piece = |k: usize, s: usize| FaceSide {
+            chord: pieces[k][s].expect("a face is bounded by built pieces"),
+            t0: 0.0,
+            t1: 1.0,
+            forward: true,
+        };
+        // Column boundary `c` (the left side, an A street, the right side) from row
+        // `r0` to row `r1`, and row boundary `rw` from column `c0` to `c1`.
+        let col_side = |c: usize, r0: usize, r1: usize| {
+            if c == 0 {
+                side(
+                    &Boundary::of(&face.left),
+                    grid.along_col[0][r0],
+                    grid.along_col[0][r1],
+                )
+            } else if c == na + 1 {
+                side(
+                    &Boundary::of(&face.right),
+                    grid.along_col[c][r0],
+                    grid.along_col[c][r1],
+                )
+            } else if a_through {
+                side(
+                    &whole(a_index[c - 1]),
+                    grid.along_col[c][r0],
+                    grid.along_col[c][r1],
+                )
+            } else {
+                piece(c - 1, r0)
             }
+        };
+        let row_side = |rw: usize, c0: usize, c1: usize| {
+            if rw == 0 {
+                side(
+                    &Boundary::of(&face.bottom),
+                    grid.along_row[c0][0],
+                    grid.along_row[c1][0],
+                )
+            } else if rw == nb + 1 {
+                side(
+                    &Boundary::of(&face.top),
+                    grid.along_row[c0][rw],
+                    grid.along_row[c1][rw],
+                )
+            } else if !a_through || !staggered {
+                side(
+                    &whole(b_index[rw - 1]),
+                    grid.along_row[c0][rw],
+                    grid.along_row[c1][rw],
+                )
+            } else {
+                piece(rw - 1, c0)
+            }
+        };
+        // The faces: rectangles of grid cells. Through streets split the face into
+        // strips; the staggered streets built across a strip split it again.
+        let mut cells: Vec<(usize, usize, usize, usize)> = Vec::new(); // (c0, c1, r0, r1)
+        for s in 0..=n_through {
+            let mut lo = 0;
+            for (k, built) in present.iter().enumerate() {
+                if built[s] {
+                    cells.push(if a_through {
+                        (s, s + 1, lo, k + 1)
+                    } else {
+                        (lo, k + 1, s, s + 1)
+                    });
+                    lo = k + 1;
+                }
+            }
+            let hi = present.len() + 1;
+            cells.push(if a_through {
+                (s, s + 1, lo, hi)
+            } else {
+                (lo, hi, s, s + 1)
+            });
         }
+        for (c0, c1, r0, r1) in cells {
+            let child = Face {
+                corners: [
+                    grid.pos[c0][r0],
+                    grid.pos[c1][r0],
+                    grid.pos[c1][r1],
+                    grid.pos[c0][r1],
+                ],
+                ids: [
+                    grid.id[c0][r0],
+                    grid.id[c1][r0],
+                    grid.id[c1][r1],
+                    grid.id[c0][r1],
+                ],
+                bottom: row_side(r0, c0, c1),
+                top: row_side(r1, c0, c1),
+                left: col_side(c0, r0, r1),
+                right: col_side(c1, r0, r1),
+                finest: r,
+            };
+            self.expand(child, rung - 1);
+        }
+    }
+
+    /// Make the built pieces of a staggered family part of the world, each piece a
+    /// street of its own from one through street (or side of the face) to the next.
+    /// `columns` says the family runs bottom to top. Returns, for each street and
+    /// strip, the chord of the piece built there.
+    fn commit_pieces(
+        &mut self,
+        lines: &[Street],
+        present: &[Vec<bool>],
+        grid: &Grid,
+        columns: bool,
+        rung: u8,
+        reach_m: &[f64],
+    ) -> Vec<Vec<Option<usize>>> {
+        let strips = present.first().map_or(0, Vec::len);
+        let mut out = Vec::new();
+        for (k, line) in lines.iter().enumerate() {
+            let mut row = Vec::with_capacity(strips);
+            for s in 0..strips {
+                if !present[k][s] {
+                    row.push(None);
+                    continue;
+                }
+                let at = |i: usize| {
+                    if columns {
+                        (grid.pos[k + 1][i], grid.id[k + 1][i])
+                    } else {
+                        (grid.pos[i][k + 1], grid.id[i][k + 1])
+                    }
+                };
+                let ((a, start), (b, end)) = (at(s), at(s + 1));
+                if s == 0 {
+                    self.chords[line.from.0].used.insert(line.from.1);
+                }
+                if s + 1 == strips {
+                    self.chords[line.to.0].used.insert(line.to.1);
+                }
+                let id = hash_words(&[line.chord.id, s as u64, 0x91EC]);
+                let chord = make_chord_reaching(
+                    self.fabric,
+                    self.urban,
+                    id,
+                    a,
+                    b,
+                    i8::try_from(rung).unwrap() - 1,
+                    reach_m[k].max(1.0),
+                );
+                self.chords.push(ChordObj {
+                    chord,
+                    used: BTreeSet::new(),
+                    crossings: Vec::new(),
+                    rung,
+                    start,
+                    end,
+                });
+                row.push(Some(self.chords.len() - 1));
+            }
+            out.push(row);
+        }
+        out
     }
 
     fn finish(&mut self, face: Face) {
@@ -385,6 +580,17 @@ impl Build<'_> {
             corners: face.corners,
             rung: face.finest,
         });
+    }
+
+    /// A fine street meets the street it reaches from one side only, in a T, unless
+    /// it is one of the few that cross it: which side, of each division, is decided
+    /// by the division alone, so the faces on either side of a chord agree.
+    fn usable_from(&self, d: &Division, inside_left: bool) -> bool {
+        if d.level > STAGGER_TOP {
+            return true;
+        }
+        let h = hash_words(&[self.fabric.0, d.id.0, 0x51DE]);
+        to_unit(h) < CROSSROADS_SHARE || ((h >> 40) & 1 == 1) == inside_left
     }
 
     /// Match divisions of one rung on two opposite sides. A division with no partner
@@ -399,8 +605,14 @@ impl Build<'_> {
         len_from: f64,
         len_to: f64,
         extent: f64,
+        bottom_to_top: bool,
     ) -> Vec<(usize, f64, usize, f64)> {
-        let (f, t) = (self.divisions_on(from, rung), self.divisions_on(to, rung));
+        // A face walks every side left to right or bottom to top: the inside is on
+        // the left of its bottom and right sides, on the right of its top and left.
+        let (f, t) = (
+            self.divisions_on(from, rung, from.forward == bottom_to_top),
+            self.divisions_on(to, rung, to.forward != bottom_to_top),
+        );
         let mean_len = 0.5 * (len_from + len_to);
         let mut pairs: Vec<(usize, f64, usize, f64)> = Vec::new(); // (division on from, s, division on to, s)
         let (mut from_taken, mut to_taken) = (vec![false; f.len()], vec![false; t.len()]);
@@ -479,7 +691,7 @@ impl Build<'_> {
             if side.forward { f } else { 1.0 - f }
         };
         // An existing node close by is the node: reuse it rather than put another beside it.
-        let keep_apart = (0.35 * spacing).max(26.0);
+        let keep_apart = (0.4 * spacing).clamp(26.0, MIN_GAP_M);
         if let Some((k, d)) = chord
             .divisions
             .iter()
@@ -573,7 +785,7 @@ impl Build<'_> {
             chord.divisions.retain(|d| {
                 st.crossings
                     .iter()
-                    .all(|c| (c.0 - d.t).abs() * len > 0.3 * d.spacing_m)
+                    .all(|c| (c.0 - d.t).abs() * len > (0.4 * d.spacing_m).min(MIN_GAP_M))
             });
             self.chords.push(ChordObj {
                 chord,

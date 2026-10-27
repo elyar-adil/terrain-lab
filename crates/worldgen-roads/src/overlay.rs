@@ -34,6 +34,12 @@ pub const OVERLAY: LayerId = LayerId("roads.overlay");
 /// duplicates it.
 const SHADOW_M: f64 = 18.0;
 
+/// Nor does one that runs alongside a given road this close, as near parallel to it
+/// as `PARALLEL_COS` says: half a block from a road that already serves the
+/// frontage, it would only add a ladder of short links between the two.
+const ALONGSIDE_M: f64 = 60.0;
+const PARALLEL_COS: f64 = 0.9; // within about 25 degrees
+
 pub struct OverlayLayer {
     pub config: RoadsConfig,
     pub fields: Fields,
@@ -98,11 +104,13 @@ fn crossings(line: &Polyline, near: &Near) -> Vec<Crossing> {
     out
 }
 
-fn distance_to(near: &Near, p: V2) -> f64 {
-    near.segments
-        .iter()
-        .map(|&(a, b)| closest_on_segment(a, b, p).2)
-        .fold(f64::INFINITY, f64::min)
+/// Is a point of a street heading `dir` beside this given road: very close to it, or
+/// close and running the same way?
+fn runs_beside(near: &Near, p: V2, dir: V2) -> bool {
+    near.segments.iter().any(|&(a, b)| {
+        let d = closest_on_segment(a, b, p).2;
+        d < SHADOW_M || (d < ALONGSIDE_M && (b - a).norm().dot(dir).abs() > PARALLEL_COS)
+    })
 }
 
 /// The slice of a polyline between two arc lengths, with the end points given
@@ -131,8 +139,8 @@ impl OverlayLayer {
     fn near_edge(&self, line: &Polyline) -> Vec<Near> {
         let b = bounds_of(line);
         let window = Rect {
-            min: [b.min[0] - SHADOW_M, b.min[1] - SHADOW_M],
-            max: [b.max[0] + SHADOW_M, b.max[1] + SHADOW_M],
+            min: [b.min[0] - ALONGSIDE_M, b.min[1] - ALONGSIDE_M],
+            max: [b.max[0] + ALONGSIDE_M, b.max[1] + ALONGSIDE_M],
         };
         self.fields
             .pinned
@@ -156,7 +164,7 @@ impl OverlayLayer {
         let n = (total / 10.0).ceil() as usize;
         let (mut counted, mut beside) = (0, 0);
         for k in 0..=n {
-            let p = line.at(total * k as f64 / n as f64).unwrap().0;
+            let (p, dir) = line.at(total * k as f64 / n as f64).unwrap();
             // The last stretch into a junction is supposed to converge.
             if ends.iter().any(|q| q.dist(p) < 35.0) {
                 continue;
@@ -164,7 +172,7 @@ impl OverlayLayer {
             counted += 1;
             if near
                 .iter()
-                .any(|r| r.road.class >= e.class && distance_to(r, p) < SHADOW_M)
+                .any(|r| r.road.class >= e.class && runs_beside(r, p, dir))
             {
                 beside += 1;
             }

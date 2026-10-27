@@ -37,19 +37,19 @@ pub const LEVELS: [LevelSpec; 5] = [
     },
     LevelSpec {
         level: 1,
-        base_spacing_m: 150.0,
+        base_spacing_m: 180.0,
         min_urban: 0.5,
         reach_m: 110.0,
     },
     LevelSpec {
         level: 2,
-        base_spacing_m: 290.0,
+        base_spacing_m: 330.0,
         min_urban: 0.3,
         reach_m: 240.0,
     },
     LevelSpec {
         level: 3,
-        base_spacing_m: 520.0,
+        base_spacing_m: 600.0,
         min_urban: 0.15,
         reach_m: 500.0,
     },
