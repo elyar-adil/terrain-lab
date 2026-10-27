@@ -26,7 +26,7 @@ use crate::{ModernRoadClass, Point};
 const CLUSTER_M: f32 = 30.0;
 /// ... and closer than this they are one even if that makes a five-way
 /// junction: two boxes this near overlap, and no staggered pair is built so.
-const STAR_M: f32 = 18.0;
+const STAR_M: f32 = 26.0;
 /// A street this close to a parallel one, for most of its length, duplicates it.
 const DUPLICATE_M: f32 = 40.0;
 /// ... and "parallel" is within this many degrees.
