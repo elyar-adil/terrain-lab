@@ -316,6 +316,7 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
         &mut builder,
         city.seed,
         city.style,
+        &trees::open_ground_trees(city),
     );
     let mut buildings = city.buildings.clone();
     buildings.truncate(budget.max_buildings);

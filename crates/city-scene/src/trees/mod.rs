@@ -60,7 +60,7 @@ pub use cards::{
     mean_albedo_rgb, opaque_albedo, target_coverage, tuft_texture,
 };
 pub use far::{FAR_SPECIES, FarTree, FarTreePayload, far_tree_payload, far_tree_set};
-pub use plant::{TreeOutput, TreeRole, plant, plant_styled, species_for_parcel};
+pub use plant::{TreeOutput, TreeRole, open_ground_trees, plant, plant_styled, species_for_parcel};
 pub use shrub::{build_shrub_prototype, build_tuft_prototype, plant_median_shrubs};
 
 use crate::math::Rng;

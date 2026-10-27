@@ -258,6 +258,7 @@ pub fn plant(
         builder,
         seed,
         Lists::LEGACY,
+        &[],
     )
 }
 
@@ -279,6 +280,7 @@ pub fn plant_styled(
     builder: &mut MeshBuilder,
     seed: u32,
     style: CityStyle,
+    open_ground: &[Vec2],
 ) -> TreeOutput {
     plant_with(
         network,
@@ -292,6 +294,7 @@ pub fn plant_styled(
         builder,
         seed,
         Lists::for_style(style),
+        open_ground,
     )
 }
 
@@ -335,6 +338,7 @@ fn plant_with(
     builder: &mut MeshBuilder,
     seed: u32,
     lists: Lists,
+    open_ground: &[Vec2],
 ) -> TreeOutput {
     super::declare(builder);
     let mut rng = Rng::new(seed ^ 0x74ee);
@@ -669,6 +673,25 @@ fn plant_with(
         }
     }
 
+    // --- open ground -----------------------------------------------------------
+    // The plan's own trees on land no lot was cut from (a verge, ground not yet
+    // built on), where the far form draws them too, so they do not appear or
+    // vanish as the detail takes over. A stream of their own, so the rest of the
+    // planting is what it always was.
+    let mut open_rng = Rng::new(seed ^ 0x0be7);
+    for point in open_ground {
+        place(
+            TreeRole::Park,
+            *point,
+            lists.park,
+            prototypes,
+            &mut open_rng,
+            builder,
+            &mut output,
+            &mut counts,
+        );
+    }
+
     // --- low shrubs and grass tufts -----------------------------------------
     let mut tufts = 0;
     'tufts: for parcel in parcels {
@@ -738,6 +761,18 @@ fn plant_with(
         .map(|(role, key, count)| (role_name(role), key.to_string(), count))
         .collect();
     output
+}
+
+/// The plan's trees on open ground, in the plan's local metres.
+pub fn open_ground_trees(city: &urban::ModernCity) -> Vec<Vec2> {
+    city.trees
+        .iter()
+        .filter(|tree| tree.open_ground)
+        .map(|tree| {
+            let [x, z] = city.frame.to_local(tree.point);
+            Vec2::new(x, z)
+        })
+        .collect()
 }
 
 /// Distance from a point to a segment, plan metres.

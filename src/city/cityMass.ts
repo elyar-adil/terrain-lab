@@ -107,20 +107,18 @@ const LOT_GROUND: Record<string, number> = {
 };
 // Paved lots, whose ground the shader breaks up with planted beds and tree pits.
 const PAVED_LOTS = new Set(["commercial", "mixedUse", "civic", "industrial"]);
-// Each crop in its three looks, as the detail's field textures average from afar:
-// green young wheat to straw, rice paddy to ripe gold, rapeseed in flower.
+// Each crop in its three looks: the mean of the detail's own field texture for that
+// look (linear average, back to sRGB), so a field does not change colour when the
+// detail replaces it.
 const CROP_GROUND: Record<string, number[]> = {
-  wheat: [0x6f7e45, 0x8d8a4e, 0xa79a62],
-  rice: [0x5f7a4a, 0x6f8a46, 0x9c9150],
-  rapeseed: [0x75823f, 0x9e9a4a, 0x6d7a44],
-  corn: [0x55703a, 0x617a3e, 0x8f8a5c],
-  vegetables: [0x5b7442, 0x6b7b4c, 0x7a7656],
-  fallow: [0x7d7058, 0x857a62, 0x736a52],
-  orchard: [0x4f673a, 0x5a7041, 0x627446],
+  wheat: [0x4a5d38, 0x57683d, 0x85754c],
+  rice: [0x5b6768, 0x476434, 0x837543],
+  rapeseed: [0xa19d2f, 0xa09a33, 0x4d6c3c],
+  corn: [0x535b3c, 0x57603d, 0x6c6044],
+  vegetables: [0x554f3b, 0x333430, 0x544d3f],
+  fallow: [0x5c4d3f, 0x5b673e, 0x857757],
+  orchard: [0x50663a, 0x595b40, 0x50663a],
 };
-// Crowns from afar: the detail's species range, from the dark of camphor and
-// pine to the light green of a plane or a willow.
-const CROWNS = [0x3e5a33, 0x47633a, 0x51703f, 0x3a5230, 0x5b7845, 0x34492f];
 
 // The whole part of a vertex's seed is its kind: 0 a wall with windows, 1 an
 // office (which alone may be a curtain wall), 2 a shed, 3 plant with no windows.
@@ -614,7 +612,7 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
             float strip = floor(w / mix(4.0, 9.0, groundR));
             float stripR = massHash(vec2(strip, groundR * 17.0));
             float stripFade = 1.0 - smoothstep(1.5, 4.0, px);
-            diffuseColor.rgb *= mix(1.0, 0.84 + 0.32 * stripR, stripFade);
+            diffuseColor.rgb *= mix(1.0, 0.92 + 0.16 * stripR, stripFade);
             // The furrows themselves, under a metre apart, only as the camera nears.
             float row = abs(fract(w / 0.75) - 0.5) * 2.0;
             diffuseColor.rgb *= mix(1.0, 0.85 + 0.25 * row, 1.0 - smoothstep(0.1, 0.3, px));
@@ -723,6 +721,7 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
   // The sun's frustum is fitted to the view, so the towers cast shadows across the
   // streets they stand over, and a tower in another's shadow goes dark on its wall.
   mesh.castShadow = true;
+  mesh.customDepthMaterial = hiddenDepthMaterial(hidden);
   mesh.receiveShadow = true;
   return {
     mesh,
@@ -734,9 +733,89 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     dispose() {
       geometry.dispose();
       material.dispose();
+      mesh.customDepthMaterial?.dispose();
       trees?.dispose();
     },
   };
+}
+
+/**
+ * The shadow pass of a far-form mesh, which drops a hidden tile's share as the
+ * colour pass does. Without it a tile the detail has replaced still cast the far
+ * form's shadows: tree shadows on a lawn with no trees, a second shadow beside
+ * each building.
+ */
+function hiddenDepthMaterial(hidden: Float32Array): THREE.MeshDepthMaterial {
+  const material = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uHidden = { value: hidden };
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nattribute float aTile;\nvarying float vTile;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvTile = aTile;");
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform float uHidden[256];\nvarying float vTile;")
+      .replace("#include <clipping_planes_fragment>", "if (vTile >= 0.0 && uHidden[int(vTile + 0.5)] > 0.5) discard;\n#include <clipping_planes_fragment>");
+  };
+  material.customProgramCacheKey = () => "far-depth";
+  return material;
+}
+
+/**
+ * How each species' crown sits from afar: its spread against the plan's crown
+ * radius, its height against that spread, how far the crown's foot is below the
+ * top (in crown heights), and its colours. A plane tree is broad and dense, a
+ * ginkgo narrow and upright with lighter leaves, a willow wide, low and pale.
+ */
+const CROWN_FORMS: Record<string, { spread: number; tall: number; lift: number; colours: number[] }> = {
+  chinesePlane: { spread: 1.0, tall: 1.0, lift: 1.0, colours: [0x3e5a33, 0x47633a, 0x51703f, 0x3a5230] },
+  ginkgo: { spread: 0.75, tall: 1.6, lift: 1.0, colours: [0x55743d, 0x5f7c42, 0x4d6a38] },
+  willow: { spread: 1.1, tall: 1.05, lift: 1.25, colours: [0x5f7c46, 0x6a8650, 0x58743f] },
+  cedar: { spread: 0.65, tall: 2.0, lift: 1.0, colours: [0x34492f, 0x2f4330] },
+};
+
+/**
+ * A crown from afar: a clump of lobes, not one smooth ball, so its outline is
+ * ragged and its sunlit side broken by the shade between the lobes. Shaded darker
+ * underneath and toward the inside, where the leaves are in each other's shadow;
+ * normals bent toward the clump's own centre so the light falls on the crown
+ * as a whole and not on each lobe as a separate ball.
+ */
+function farCrown(): THREE.BufferGeometry {
+  const lobes: Array<[number, number, number, number]> = [[0, 0.05, 0, 0.62]];
+  for (let i = 0; i < 6; i += 1) {
+    const a = (i / 6) * Math.PI * 2 + (i % 2) * 0.4;
+    const up = i % 2 ? 0.28 : -0.12;
+    lobes.push([Math.cos(a) * 0.48, up, Math.sin(a) * 0.48, 0.42 + 0.08 * ((i * 7) % 3)]);
+  }
+  lobes.push([0.1, 0.48, -0.05, 0.4]);
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const colours: number[] = [];
+  const lobe = new THREE.IcosahedronGeometry(1, 0);
+  const p = lobe.attributes.position;
+  const n = lobe.attributes.normal;
+  for (const [cx, cy, cz, r] of lobes) {
+    for (let i = 0; i < p.count; i += 1) {
+      // A little jitter on each lobe's vertices, so no facet repeats another.
+      const j = 1 + 0.12 * Math.sin(i * 12.9898 + cx * 78.233 + cz * 37.719);
+      const x = cx + p.getX(i) * r * j, y = cy + p.getY(i) * r * j, z = cz + p.getZ(i) * r * j;
+      positions.push(x, y, z);
+      const len = Math.hypot(x, y, z) || 1;
+      const bx = n.getX(i) * 0.45 + (x / len) * 0.8, by = n.getY(i) * 0.45 + (y / len) * 0.8, bz = n.getZ(i) * 0.45 + (z / len) * 0.8;
+      const bl = Math.hypot(bx, by, bz) || 1;
+      normals.push(bx / bl, by / bl, bz / bl);
+      const height = 0.5 + 0.5 * Math.max(-1, Math.min(1, y / 0.9));
+      const outer = Math.min(1, len / 0.95);
+      const k = 0.42 + 0.33 * height + 0.25 * outer;
+      colours.push(k, k, k);
+    }
+  }
+  lobe.dispose();
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colours, 3));
+  return geometry;
 }
 
 /**
@@ -756,18 +835,7 @@ function buildFarTrees(
   const trees = city.trees ?? [];
   if (!trees.length) return null;
   const m = frame.metresToScene;
-  const crown = new THREE.IcosahedronGeometry(1, 1);
-  // Shade from the underside to the sunlit top, in the geometry's own colours.
-  const position = crown.attributes.position;
-  const shades = new Float32Array(position.count * 3);
-  for (let i = 0; i < position.count; i += 1) {
-    const y = position.getY(i);
-    const k = 0.55 + 0.45 * (y * 0.5 + 0.5);
-    shades[i * 3] = k;
-    shades[i * 3 + 1] = k;
-    shades[i * 3 + 2] = k;
-  }
-  crown.setAttribute("color", new THREE.BufferAttribute(shades, 3));
+  const crown = farCrown();
   const tiles = new Float32Array(trees.length);
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
   material.onBeforeCompile = (shader) => {
@@ -791,14 +859,19 @@ function buildFarTrees(
     if (point.x_km === undefined || point.y_km === undefined) continue;
     const [x, z] = frame.toScene(point.x_km, point.y_km);
     const height = Math.max(tree.heightMetres ?? 9, 3);
-    const spread = Math.max(tree.crownRadiusMetres ?? height * 0.3, 1.2);
-    const tall = Math.min(spread * 1.1, height * 0.45);
-    const y = frame.heightAt(x, z) + (height - tall) * m;
-    matrix.compose(new THREE.Vector3(x, y, z), quaternion, new THREE.Vector3(spread * m, tall * m, spread * m));
-    mesh.setMatrixAt(count, matrix);
     const id = tree.id ?? i;
-    colour.setHex(CROWNS[Math.floor(hash01(id, 5) * CROWNS.length)]);
-    colour.multiplyScalar(0.9 + 0.2 * hash01(id, 6));
+    const form = CROWN_FORMS[tree.species ?? ""] ?? CROWN_FORMS.chinesePlane;
+    const spread = Math.max(tree.crownRadiusMetres ?? height * 0.3, 1.2) * form.spread;
+    const tall = Math.min(spread * form.tall, height * 0.5);
+    // The crown's foot is where the clear trunk ends, so a willow hangs low and a
+    // ginkgo carries its crown high.
+    const y = frame.heightAt(x, z) + (height - tall * form.lift) * m;
+    // Each crown turned and leaning a little its own way, so the lobes never repeat.
+    quaternion.setFromEuler(new THREE.Euler((hash01(id, 7) - 0.5) * 0.15, hash01(id, 8) * Math.PI * 2, (hash01(id, 9) - 0.5) * 0.15));
+    matrix.compose(new THREE.Vector3(x, y, z), quaternion, new THREE.Vector3(spread * m, tall * m, spread * m * (0.85 + 0.3 * hash01(id, 10))));
+    mesh.setMatrixAt(count, matrix);
+    colour.setHex(form.colours[Math.floor(hash01(id, 5) * form.colours.length)]);
+    colour.multiplyScalar(0.88 + 0.24 * hash01(id, 6));
     mesh.setColorAt(count, colour);
     builder.select(...tileOfPoint(city.frame, point));
     tiles[count] = builder.tileIndex.get(tileKey(...tileOfPoint(city.frame, point))) ?? -1;
@@ -811,6 +884,7 @@ function buildFarTrees(
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   mesh.computeBoundingSphere();
   mesh.castShadow = true;
+  mesh.customDepthMaterial = hiddenDepthMaterial(hidden);
   mesh.receiveShadow = true;
   mesh.name = "cityMass/trees";
   return {
@@ -818,6 +892,7 @@ function buildFarTrees(
     dispose() {
       crown.dispose();
       material.dispose();
+      mesh.customDepthMaterial?.dispose();
     },
   };
 }

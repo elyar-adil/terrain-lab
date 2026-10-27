@@ -75,6 +75,7 @@ fn planted(
             &mut builder,
             city.seed,
             style,
+            &[],
         ),
     };
     let lists = builder

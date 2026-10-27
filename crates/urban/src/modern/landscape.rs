@@ -119,6 +119,7 @@ pub(super) fn derive_compounds_and_trees(
                 height_metres: height * variation,
                 crown_radius_metres: crown * variation,
                 trunk_radius_metres: trunk * variation,
+                open_ground: false,
             });
             tree_id += 1;
         }
@@ -175,6 +176,7 @@ pub(super) fn plant_open_ground(
                 height_metres: height * variation,
                 crown_radius_metres: crown * variation,
                 trunk_radius_metres: trunk * variation,
+                open_ground: true,
             });
             id += 1;
         };

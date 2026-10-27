@@ -498,6 +498,20 @@ fn push_building(
     let _ = centroid;
 }
 
+/// The crop of one plot: the neighbourhood's own (`preferred`) when `follows`, else
+/// a household's choice `own`. Rape is grown as a field system, its flowers a sheet
+/// of yellow across a village's land; a household alone does not sow it, so a lone
+/// choice of rape is a plot of vegetables instead.
+fn household_crop(choices: &[CropKind], preferred: f32, follows: bool, own: f32) -> CropKind {
+    let at = |t: f32| choices[((t * choices.len() as f32) as usize).min(choices.len() - 1)];
+    let crop = at(if follows { preferred } else { own });
+    if !follows && crop == CropKind::Rapeseed && at(preferred) != CropKind::Rapeseed {
+        CropKind::Vegetables
+    } else {
+        crop
+    }
+}
+
 /// The crops a place grows, by how far out it is. At the edge of town: market
 /// gardens, orchards, a little rape and wheat; further out the plain's own mix.
 fn crop_choices(zone: Zone) -> &'static [CropKind] {
@@ -603,13 +617,7 @@ pub(super) fn place_fields(f: &Frontage<'_>, lots: &[Vec<V>], sink: &mut Sink<'_
                         continue;
                     }
                     let choices = crop_choices(zone(built));
-                    let pick = if noise(1215) < 0.66 {
-                        preferred
-                    } else {
-                        noise(1217)
-                    };
-                    let crop =
-                        choices[((pick * choices.len() as f32) as usize).min(choices.len() - 1)];
+                    let crop = household_crop(choices, preferred, noise(1215) < 0.66, noise(1217));
                     sink.fields.push(Field {
                         id: *sink.next_field,
                         ring: corners.iter().map(|p| f.frame.to_world(p.0, p.1)).collect(),
@@ -710,13 +718,7 @@ pub(super) fn roadside_fields(
                         continue;
                     }
                     let choices = crop_choices(zone(frame.urbanness(c.0, c.1)));
-                    let pick = if noise(1311) < 0.66 {
-                        preferred
-                    } else {
-                        noise(1313)
-                    };
-                    let crop =
-                        choices[((pick * choices.len() as f32) as usize).min(choices.len() - 1)];
+                    let crop = household_crop(choices, preferred, noise(1311) < 0.66, noise(1313));
                     fields.push(Field {
                         id: *next_field,
                         ring: corners.iter().map(|p| frame.to_world(p.0, p.1)).collect(),
@@ -731,6 +733,236 @@ pub(super) fn roadside_fields(
                 off += width + 1.6;
             }
         }
+    }
+}
+
+/// The plain's field system over all the open country the streets leave: farmland
+/// in China is not plots dotted on grass but land worked edge to edge. It is laid
+/// out in tracts (条田) a hundred and fifty to two hundred and fifty metres on a
+/// side, bounded by farm tracks and ditches, all on one bearing (the bearing of the
+/// town's streets, which were laid on the same survey). Each tract is split into
+/// household strips ten to thirty metres wide that run its whole length, sown more
+/// often than not with the tract's crop. Where a strip meets a street, a house, the
+/// water or the town, it is shortened, not dropped, so the fields reach the road.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn fill_farmland(
+    frame: &CityFrame,
+    pts: &[V],
+    edges: &[(usize, usize, ModernRoadClass)],
+    town: &[Vec<V>],
+    seed: u32,
+    occupied: &mut Vec<Vec<V>>,
+    fields: &mut Vec<Field>,
+    next_field: &mut u32,
+) {
+    const TRACT_U: f32 = 200.0;
+    const TRACT_V: f32 = 160.0;
+    const TRACK_M: f32 = 4.0;
+    const BUND_M: f32 = 1.2;
+    const BUCKET_M: f32 = 120.0;
+    // The bearing of the streets, length-weighted, folded to a quarter turn.
+    let (mut sx, mut sy) = (0.0_f32, 0.0_f32);
+    for &(a, b, _) in edges {
+        let (dx, dy) = (pts[b].0 - pts[a].0, pts[b].1 - pts[a].1);
+        let len = dx.hypot(dy);
+        if len > 1.0 {
+            let t = 4.0 * dy.atan2(dx);
+            sx += len * t.cos();
+            sy += len * t.sin();
+        }
+    }
+    let angle = sy.atan2(sx) * 0.25;
+    let u = (angle.cos(), angle.sin());
+    let v = (-u.1, u.0);
+    let world = |pu: f32, pv: f32| -> V { (u.0 * pu + v.0 * pv, u.1 * pu + v.1 * pv) };
+
+    // Streets, town blocks and what is already placed, bucketed so a strip is tested
+    // only against what is near it.
+    let key = |p: V| {
+        (
+            (p.0 / BUCKET_M).floor() as i32,
+            (p.1 / BUCKET_M).floor() as i32,
+        )
+    };
+    let mut street_cells: std::collections::HashMap<(i32, i32), Vec<usize>> = Default::default();
+    for (ei, &(a, b, class)) in edges.iter().enumerate() {
+        let reach = right_of_way(class) + 2.0;
+        let (pa, pb) = (pts[a], pts[b]);
+        let (k0, k1) = (
+            key((pa.0.min(pb.0) - reach, pa.1.min(pb.1) - reach)),
+            key((pa.0.max(pb.0) + reach, pa.1.max(pb.1) + reach)),
+        );
+        for x in k0.0..=k1.0 {
+            for y in k0.1..=k1.1 {
+                street_cells.entry((x, y)).or_default().push(ei);
+            }
+        }
+    }
+    let bounds = |r: &[V]| {
+        r.iter()
+            .fold((f32::MAX, f32::MAX, f32::MIN, f32::MIN), |b, p| {
+                (b.0.min(p.0), b.1.min(p.1), b.2.max(p.0), b.3.max(p.1))
+            })
+    };
+    let mut area_cells: std::collections::HashMap<(i32, i32), Vec<(bool, usize)>> =
+        Default::default();
+    let file = |cells: &mut std::collections::HashMap<(i32, i32), Vec<(bool, usize)>>,
+                ring: &[V],
+                entry: (bool, usize)| {
+        let b = bounds(ring);
+        let (k0, k1) = (key((b.0, b.1)), key((b.2, b.3)));
+        for x in k0.0..=k1.0 {
+            for y in k0.1..=k1.1 {
+                cells.entry((x, y)).or_default().push(entry);
+            }
+        }
+    };
+    for (i, r) in town.iter().enumerate() {
+        file(&mut area_cells, r, (true, i));
+    }
+    for (i, r) in occupied.iter().enumerate() {
+        file(&mut area_cells, r, (false, i));
+    }
+
+    let radius = frame.radius_m * 0.97;
+    let free = |corners: &Vec<V>, wet: bool| -> bool {
+        // Land the town has zoned but not yet laid streets over is still farmed, as
+        // the edge of a Chinese town is: only its blocks, lots and streets are not.
+        if !corners.iter().all(|c| c.0.hypot(c.1) <= radius) {
+            return false;
+        }
+        if wet && frame.near_water(corners, 6.0) {
+            return false;
+        }
+        let bb = bounds(corners);
+        let (k0, k1) = (key((bb.0, bb.1)), key((bb.2, bb.3)));
+        for x in k0.0..=k1.0 {
+            for y in k0.1..=k1.1 {
+                for &ei in street_cells.get(&(x, y)).map_or(&[][..], |l| &l[..]) {
+                    let (ja, jb, cl) = edges[ei];
+                    let ro = right_of_way(cl) + 2.0;
+                    if corners
+                        .iter()
+                        .any(|p| point_seg_dist(*p, pts[ja], pts[jb]) < ro)
+                        || super::geom::seg_seg_dist(corners[0], corners[2], pts[ja], pts[jb]) < ro
+                        || super::geom::seg_seg_dist(corners[1], corners[3], pts[ja], pts[jb]) < ro
+                    {
+                        return false;
+                    }
+                }
+                for &(is_town, i) in area_cells.get(&(x, y)).map_or(&[][..], |l| &l[..]) {
+                    let clash = if is_town {
+                        corners.iter().any(|p| point_in(&town[i], *p))
+                            || town[i].iter().any(|p| point_in(corners, *p))
+                    } else {
+                        overlap(corners, &occupied[i], 2.0)
+                    };
+                    if clash {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    };
+    let span = (radius / TRACT_U).ceil() as i32 + 1;
+    let span_v = (radius / TRACT_V).ceil() as i32 + 1;
+    let mut placed = Vec::new();
+    for tu in -span..=span {
+        for tv in -span_v..=span_v {
+            let tract = tu * 4096 + tv;
+            let h = |salt: i32| modern_hash(seed, tract, 17, salt);
+            let (u0, v0) = (tu as f32 * TRACT_U, tv as f32 * TRACT_V);
+            let (u1, v1) = (u0 + TRACT_U - TRACK_M, v0 + TRACT_V - TRACK_M);
+            let centre = world((u0 + u1) * 0.5, (v0 + v1) * 0.5);
+            if centre.0.hypot(centre.1) > radius + TRACT_U {
+                continue;
+            }
+            // The water is tested strip by strip only in a tract it comes near.
+            let wet = frame.near_water(
+                &[world(u0, v0), world(u1, v0), world(u1, v1), world(u0, v1)],
+                6.0,
+            );
+            // Neighbouring tracts tend to the same crop, as a village plants its land.
+            let region = modern_hash(seed, tu.div_euclid(3) * 977 + tv.div_euclid(3), 19, 1401);
+            let preferred = if h(1403) < 0.6 { region } else { h(1405) };
+            // And the land of one village is at one stage of the season.
+            let stage = modern_hash(seed, tu.div_euclid(3) * 977 + tv.div_euclid(3), 19, 1419);
+            let stage = if h(1421) < 0.7 { stage } else { h(1423) };
+            // Strips across the tract's short side, so each runs its whole length.
+            let along_u = h(1407) < 0.7;
+            let (a0, a1, b0, b1) = if along_u {
+                (u0, u1, v0, v1)
+            } else {
+                (v0, v1, u0, u1)
+            };
+            let at = |a: f32, b: f32| if along_u { world(a, b) } else { world(b, a) };
+            let mut b = b0;
+            let mut strip = 0;
+            while b < b1 - 6.0 {
+                strip += 1;
+                let n = |salt: i32| modern_hash(seed, tract * 64 + strip, 21, salt);
+                let w = (10.0 + 20.0 * n(1409) * n(1411).sqrt()).min(b1 - b);
+                // A strip is tested in eighths; the runs of eighths that fit become
+                // plots, so a strip that meets a road or a house is shortened, not lost.
+                const PIECES: usize = 8;
+                let step = (a1 - a0) / PIECES as f32;
+                let mut run: Option<(f32, f32)> = None;
+                for j in 0..=PIECES {
+                    let fits = j < PIECES && {
+                        let (s0, s1) = (a0 + step * j as f32, a0 + step * (j + 1) as f32);
+                        let corners = vec![
+                            at(s0, b),
+                            at(s1, b),
+                            at(s1, b + w - BUND_M),
+                            at(s0, b + w - BUND_M),
+                        ];
+                        free(&corners, wet)
+                    };
+                    if fits {
+                        let s1 = a0 + step * (j + 1) as f32;
+                        run = Some((run.map_or(a0 + step * j as f32, |r| r.0), s1));
+                    } else if let Some((r0, r1)) = run.take() {
+                        // A plot under twenty metres long is not worth a farmer's while.
+                        if r1 - r0 >= 20.0 {
+                            let r1 = if r1 < a1 - 0.1 { r1 - BUND_M } else { r1 };
+                            placed.push((
+                                vec![
+                                    at(r0, b),
+                                    at(r1, b),
+                                    at(r1, b + w - BUND_M),
+                                    at(r0, b + w - BUND_M),
+                                ],
+                                (preferred, stage),
+                            ));
+                        }
+                    }
+                }
+                b += w;
+            }
+        }
+    }
+    for (corners, (preferred, stage)) in placed {
+        let c = centroid(&corners);
+        let id = *next_field as i32;
+        let noise = |salt: i32| modern_hash(seed, id, 23, salt);
+        let choices = crop_choices(zone(frame.urbanness(c.0, c.1)));
+        // Most strips are the tract's crop; the rest are a household's own choice.
+        let crop = household_crop(choices, preferred, noise(1413) < 0.82, noise(1415));
+        let (dx, dy) = (corners[1].0 - corners[0].0, corners[1].1 - corners[0].1);
+        fields.push(Field {
+            id: *next_field,
+            ring: corners.iter().map(|p| frame.to_world(p.0, p.1)).collect(),
+            crop,
+            row_angle: dy.atan2(dx),
+            variant: ((if noise(1417) < 0.8 {
+                stage
+            } else {
+                noise(1425)
+            }) * 3.0) as u8,
+        });
+        *next_field += 1;
+        occupied.push(corners);
     }
 }
 

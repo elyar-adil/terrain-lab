@@ -846,6 +846,20 @@ pub(super) fn build_parcels(
             &mut fields,
             &mut next_field,
         );
+        let town: Vec<Vec<V>> = blocks
+            .iter()
+            .map(|b| b.boundary.iter().map(|q| frame.to_local(*q)).collect())
+            .collect();
+        suburb::fill_farmland(
+            frame,
+            &pts,
+            &edges,
+            &town,
+            seed,
+            &mut occupied,
+            &mut fields,
+            &mut next_field,
+        );
     }
     ParcelOutput {
         blocks,

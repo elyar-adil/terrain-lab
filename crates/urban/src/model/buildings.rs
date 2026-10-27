@@ -102,6 +102,11 @@ pub struct TreeInstance {
     pub height_metres: f32,
     pub crown_radius_metres: f32,
     pub trunk_radius_metres: f32,
+    /// On ground no lot was cut from (a verge, land not yet built on), where the
+    /// detail plants the tree as the plan places it; a lot's trees it plants by its
+    /// own lists.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub open_ground: bool,
 }
 
 /// What a field is sown with.
