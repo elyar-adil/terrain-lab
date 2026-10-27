@@ -682,7 +682,7 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
             let mut station = 16.0;
             while station < length - 16.0 {
                 let offset = lamp_side * (kerb + 0.55);
-                let point = path.offset_at(station, offset, 0.0);
+                let point = path.offset_at(station, road.kerbside(station, offset), 0.0);
                 // The bracket reaches *over the carriageway*, so the prototype's
                 // local `+Z` axis is pointed back at the road.  The prototype is
                 // at true metres, so the scale is 1.
@@ -712,7 +712,8 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
             let pole_height = 9.0_f32;
             let mut pole_station = 20.0_f32;
             while pole_station < length - 14.0 {
-                let base = path.offset_at(pole_station, pole_offset, 0.0);
+                let base =
+                    path.offset_at(pole_station, road.kerbside(pole_station, pole_offset), 0.0);
                 // The cross-arms run perpendicular to the line of poles, so the
                 // conductors pass over the footway rather than over the road. The
                 // prototype authors its arms along local +X, and a rotation of
@@ -779,7 +780,7 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
                     let offset = side * (kerb + 0.35);
                     let mut station = 8.0;
                     while station < length - 8.0 {
-                        let point = path.offset_at(station, offset, 0.0);
+                        let point = path.offset_at(station, road.kerbside(station, offset), 0.0);
                         builder.add_instance(
                             "furniture/railing",
                             Instance::new(
@@ -800,7 +801,7 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
                 let offset = section.median_metres * 0.5 + 0.24;
                 let mut station = 6.0;
                 while station < length - 6.0 {
-                    let point = path.offset_at(station, offset, 0.0);
+                    let point = path.offset_at(station, road.kerbside(station, offset), 0.0);
                     builder.add_instance(
                         "furniture/railing",
                         Instance::new(
@@ -848,11 +849,8 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
                     output.signs += 2;
                 }
                 for side in [-1.0_f32, 1.0] {
-                    let guide = path.offset_at(
-                        (base + toward * 27.0 + rng.unit() * 7.0).clamp(2.0, length - 2.0),
-                        side * (kerb + 0.55),
-                        0.0,
-                    );
+                    let at = (base + toward * 27.0 + rng.unit() * 7.0).clamp(2.0, length - 2.0);
+                    let guide = path.offset_at(at, road.kerbside(at, side * (kerb + 0.55)), 0.0);
                     let facing = -path.tangent_at(base) * toward;
                     // The sign board is authored in the prototype's XY plane, so
                     // its local `+Z` faces the driver.
@@ -869,11 +867,9 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
                     );
                     output.signs += 1;
                     if rng.chance(0.72) {
-                        let crossing = path.offset_at(
-                            (base + toward * 10.5).clamp(2.0, length - 2.0),
-                            side * (kerb + 0.55),
-                            0.0,
-                        );
+                        let at = (base + toward * 10.5).clamp(2.0, length - 2.0);
+                        let crossing =
+                            path.offset_at(at, road.kerbside(at, side * (kerb + 0.55)), 0.0);
                         builder.add_instance(
                             "furniture/sign.crossing",
                             Instance::new(
@@ -899,7 +895,8 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
             // signature, and a scene with one shelter per block and nothing else
             // reads as a render.
             if road.class == ModernRoadClass::Arterial && length > 120.0 {
-                let point = path.offset_at(length * 0.45, kerb + 1.7, 0.0);
+                let point =
+                    path.offset_at(length * 0.45, road.kerbside(length * 0.45, kerb + 1.7), 0.0);
                 builder.add_instance(
                     "furniture/shelter",
                     Instance::new(
@@ -924,7 +921,11 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
                     let mut bin_station = 22.0_f32;
                     while bin_station < length - 22.0 {
                         for pair in [-0.62_f32, 0.62] {
-                            let point = path.offset_at(bin_station + pair, offset, 0.0);
+                            let point = path.offset_at(
+                                bin_station + pair,
+                                road.kerbside(bin_station + pair, offset),
+                                0.0,
+                            );
                             let shade = 0.86 + rng.unit() * 0.22;
                             builder.add_instance(
                                 "furniture/bin",
@@ -951,7 +952,11 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
                     let offset = side * (kerb + 0.75);
                     let mut kiosk_station = 30.0_f32;
                     while kiosk_station < length - 30.0 {
-                        let point = path.offset_at(kiosk_station, offset, 0.0);
+                        let point = path.offset_at(
+                            kiosk_station,
+                            road.kerbside(kiosk_station, offset),
+                            0.0,
+                        );
                         builder.add_instance(
                             "furniture/kiosk",
                             Instance::new(
@@ -1210,7 +1215,7 @@ pub fn park_cars(network: &Network, builder: &mut MeshBuilder, seed: u32) -> usi
                 let roll = rng.unit();
                 if roll < layby {
                     // In the lay-by, or in the kerbside lane pretending to be one.
-                    let point = path.offset_at(station, side * curb, 0.0);
+                    let point = path.offset_at(station, road.kerbside(station, side * curb), 0.0);
                     // The nose points the way the traffic on that side runs, and
                     // `side > 0` is the `+1` direction, which runs forward.
                     let heading = path.tangent_at(station) * if side > 0.0 { 1.0 } else { -1.0 };
@@ -1234,7 +1239,8 @@ pub fn park_cars(network: &Network, builder: &mut MeshBuilder, seed: u32) -> usi
                 }
                 if roll < layby + 0.14 {
                     // 违停: half on the footway, blocking nothing but the pavement.
-                    let point = path.offset_at(station, side * (kerb + 0.45), 0.0);
+                    let point =
+                        path.offset_at(station, road.kerbside(station, side * (kerb + 0.45)), 0.0);
                     let heading = path.tangent_at(station) * if side > 0.0 { 1.0 } else { -1.0 };
                     let yaw = yaw_along_x(heading)
                         + if rng.chance(0.5) {

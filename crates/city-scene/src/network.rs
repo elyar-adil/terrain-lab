@@ -197,9 +197,61 @@ pub struct Road {
     /// The same at the far end, as a set-back from that end's edge.
     pub marking_end: f32,
     pub lane_ids: Vec<String>,
+    /// The approach widening (进口道展宽) at the start and at the end: an extra
+    /// queue lane on the side whose traffic arrives at that end.
+    pub widen: [Widening; 2],
+}
+
+/// One end of a road widened by a queue lane before its junction (CJJ 152
+/// §4.2.13): full width for `hold` metres back from the junction edge, then
+/// narrowing to nothing over `taper` metres. Everything outside the motor lanes
+/// on that side (cycle lane, kerb, footway) moves out by the width.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Widening {
+    pub width: f32,
+    pub hold: f32,
+    pub taper: f32,
+}
+
+impl Widening {
+    /// The extra width `distance` metres back from the junction edge.
+    pub fn at(&self, distance: f32) -> f32 {
+        if self.width <= 0.0 {
+            return 0.0;
+        }
+        if distance <= self.hold {
+            return self.width;
+        }
+        let t = (1.0 - (distance - self.hold) / self.taper.max(1.0)).clamp(0.0, 1.0);
+        self.width * t * t * (3.0 - 2.0 * t)
+    }
+
+    pub fn is_some(&self) -> bool {
+        self.width > 0.0
+    }
 }
 
 impl Road {
+    /// A lateral offset at carriageway `station` moved out with the approach
+    /// widening, if it lies at or beyond the motor lanes: where a roadside
+    /// object at `lateral` really stands.
+    pub fn kerbside(&self, station: f32, lateral: f32) -> f32 {
+        if lateral.abs() < self.section.half_carriageway() - 0.45 {
+            return lateral;
+        }
+        lateral + lateral.signum() * self.widening(station, lateral)
+    }
+
+    /// The extra width at carriageway `station` on the side `side` (the sign of a
+    /// lateral offset): the start's inbound side is negative, the end's positive.
+    pub fn widening(&self, station: f32, side: f32) -> f32 {
+        if side < 0.0 {
+            self.widen[0].at(station)
+        } else {
+            self.widen[1].at(self.carriageway.length() - station)
+        }
+    }
+
     /// Does this road get sidewalks, kerbs and street trees?  Elevated
     /// structures and motorways do not.
     pub fn has_sidewalk(&self) -> bool {
@@ -424,95 +476,108 @@ pub fn derive(
     // return is a true arc tangent to both kerbs and no two footways overlap.
     // A node in the air keeps a hair of a gap, so the lane joining two decks
     // has a length.
+    //
+    // Twice: an approach widening needs the length the street has left
+    // between its trims, and a widened kerb in turn asks its corners for a
+    // little more trim.
     let hd_by_id: HashMap<u32, &HdRoad> = hd_roads.iter().map(|road| (road.id, road)).collect();
-    let mut radius = vec![0.0_f32; nodes.len()];
-    let mut trims: HashMap<(u32, bool), f32> = HashMap::new();
-    for (index, list) in incidence.iter().enumerate() {
-        if air[index] {
-            radius[index] = AIR_GAP_M;
-            continue;
-        }
-        if list.len() == 1 {
-            // A dead end that the plan left running into another street (a
-            // street cut short, its end not moved off the road it was cut
-            // from) stops behind that street's footway instead.
-            if let Some(trim) =
-                dead_end_clearance(index, list[0], &local, &sd_by_id, &hd_by_id, frame)
-            {
-                trims.insert(
-                    (
-                        list[0],
-                        sd_by_id
-                            .get(&list[0])
-                            .is_some_and(|r| r.from as usize == index),
-                    ),
-                    trim,
-                );
-                radius[index] = trim;
-            }
-            continue;
-        }
-        if list.len() < 2 {
-            continue;
-        }
-        // (road, at_start, arm, length)
-        let mut arms: Vec<(u32, bool, crate::corner::Arm, f32)> = Vec::new();
-        for id in list {
-            let (Some(sd), Some(hd), Some(section)) =
-                (sd_by_id.get(id), hd_by_id.get(id), sections.get(id))
-            else {
-                continue;
-            };
-            if !is_port(hd) || sd.from == sd.to {
+    let trim_all = |widen: &HashMap<(u32, bool), Widening>| {
+        let mut radius = vec![0.0_f32; nodes.len()];
+        let mut trims: HashMap<(u32, bool), f32> = HashMap::new();
+        for (index, list) in incidence.iter().enumerate() {
+            if air[index] {
+                radius[index] = AIR_GAP_M;
                 continue;
             }
-            let at_start = sd.from as usize == index;
-            let mut line: Vec<Vec2> = hd
-                .centreline
-                .iter()
-                .map(|point| {
-                    let [x, z] = frame.to_local(*point);
-                    Vec2::new(x, z)
-                })
-                .collect();
-            if line.len() < 2 {
+            if list.len() == 1 {
+                // A dead end that the plan left running into another street (a
+                // street cut short, its end not moved off the road it was cut
+                // from) stops behind that street's footway instead.
+                if let Some(trim) =
+                    dead_end_clearance(index, list[0], &local, &sd_by_id, &hd_by_id, frame)
+                {
+                    trims.insert(
+                        (
+                            list[0],
+                            sd_by_id
+                                .get(&list[0])
+                                .is_some_and(|r| r.from as usize == index),
+                        ),
+                        trim,
+                    );
+                    radius[index] = trim;
+                }
                 continue;
             }
-            if !at_start {
-                line.reverse();
-            }
-            let path = Path::flat(line);
-            let length = path.length();
-            let probe = path.plan_at((length * 0.3).min(12.0));
-            let dir = (probe - local[index]).normalize();
-            if !dir.is_finite() || dir.length_squared() < 0.5 {
+            if list.len() < 2 {
                 continue;
             }
-            let half = section.half_width();
-            arms.push((
-                *id,
-                at_start,
-                crate::corner::Arm {
-                    dir,
-                    kerb: half,
-                    walk: half + section.sidewalk_metres,
-                    radius: kerb_return_radius(hd.class, hd.oneway),
-                },
-                length,
-            ));
+            // (road, at_start, arm, length)
+            let mut arms: Vec<(u32, bool, crate::corner::Arm, f32)> = Vec::new();
+            for id in list {
+                let (Some(sd), Some(hd), Some(section)) =
+                    (sd_by_id.get(id), hd_by_id.get(id), sections.get(id))
+                else {
+                    continue;
+                };
+                if !is_port(hd) || sd.from == sd.to {
+                    continue;
+                }
+                let at_start = sd.from as usize == index;
+                let mut line: Vec<Vec2> = hd
+                    .centreline
+                    .iter()
+                    .map(|point| {
+                        let [x, z] = frame.to_local(*point);
+                        Vec2::new(x, z)
+                    })
+                    .collect();
+                if line.len() < 2 {
+                    continue;
+                }
+                if !at_start {
+                    line.reverse();
+                }
+                let path = Path::flat(line);
+                let length = path.length();
+                let probe = path.plan_at((length * 0.3).min(12.0));
+                let dir = (probe - local[index]).normalize();
+                if !dir.is_finite() || dir.length_squared() < 0.5 {
+                    continue;
+                }
+                let half = section.half_width();
+                arms.push((
+                    *id,
+                    at_start,
+                    crate::corner::Arm {
+                        dir,
+                        kerb: half,
+                        walk: half + section.sidewalk_metres,
+                        radius: kerb_return_radius(hd.class, hd.oneway),
+                        widen: widen.get(&(*id, at_start)).map_or(0.0, |w| w.width),
+                    },
+                    length,
+                ));
+            }
+            arms.sort_by(|a, b| a.2.dir.angle().total_cmp(&b.2.dir.angle()));
+            let geometry: Vec<crate::corner::Arm> = arms.iter().map(|arm| arm.2).collect();
+            let wanted = crate::corner::trims(&geometry);
+            // A crossing keeps at least a metre of box; two streets meeting end to
+            // end, half a metre, as two decks do.
+            let floor = if arms.len() >= 3 { 1.0 } else { AIR_GAP_M };
+            for (k, (id, at_start, _, length)) in arms.iter().enumerate() {
+                let value = wanted[k].max(floor).min(length * 0.45);
+                trims.insert((*id, *at_start), value);
+                radius[index] = radius[index].max(value);
+            }
         }
-        arms.sort_by(|a, b| a.2.dir.angle().total_cmp(&b.2.dir.angle()));
-        let geometry: Vec<crate::corner::Arm> = arms.iter().map(|arm| arm.2).collect();
-        let wanted = crate::corner::trims(&geometry);
-        // A crossing keeps at least a metre of box; two streets meeting end to
-        // end, half a metre, as two decks do.
-        let floor = if arms.len() >= 3 { 1.0 } else { AIR_GAP_M };
-        for (k, (id, at_start, _, length)) in arms.iter().enumerate() {
-            let value = wanted[k].max(floor).min(length * 0.45);
-            trims.insert((*id, *at_start), value);
-            radius[index] = radius[index].max(value);
-        }
-    }
+        (radius, trims)
+    };
+    let (_, unwidened) = trim_all(&HashMap::new());
+    let widen = plan_widening(
+        &incidence, &air, &control, &sd_by_id, hd_roads, frame, &unwidened,
+    );
+    let (radius, trims) = trim_all(&widen);
 
     // The main line's decks, for laying ramps flush against them.
     let decks: Vec<Vec<Vec2>> = hd_roads
@@ -780,6 +845,10 @@ pub fn derive(
             marking_start: if crossing_start { 7.0 } else { 0.5 },
             marking_end: if crossing_end { 7.0 } else { 0.5 },
             lane_ids: Vec::new(),
+            widen: [
+                widen.get(&(id, true)).copied().unwrap_or_default(),
+                widen.get(&(id, false)).copied().unwrap_or_default(),
+            ],
         });
         network.road_by_id.insert(id, network.roads.len() - 1);
     }
@@ -857,14 +926,67 @@ pub fn derive(
                     predecessors: Vec::new(),
                 });
             }
+            // An approach widening: a queue lane outside the curb lane over the
+            // last stretch before the junction this direction arrives at. It is
+            // a lane of the whole road, running in the curb lane until the taper
+            // and then drawing out to its own place, so the route graph reaches
+            // it the way a driver does, by keeping right.
+            let widen = network.roads[road_index].widen;
+            let arriving = widen[usize::from(direction > 0)];
+            if arriving.is_some() && !oneway {
+                let curb = section.lane_offset(direction, 0).abs();
+                let full = section.half_carriageway() + arriving.width * 0.5;
+                let road = &network.roads[road_index];
+                let steps = ((length / 2.0).ceil() as usize).max(1);
+                let mut points: Vec<Vec3> = Vec::with_capacity(steps + 1);
+                for step in 0..=steps {
+                    let station = length * step as f32 / steps as f32;
+                    let share = road.widening(station, f32::from(direction)) / arriving.width;
+                    let offset = f32::from(direction) * (curb + (full - curb) * share);
+                    let (at, tangent) = carriageway.sample(station);
+                    let side = tangent.left_normal() * offset;
+                    points.push(Vec3::new(at.x + side.x, at.y, at.z + side.y));
+                }
+                if direction < 0 {
+                    points.reverse();
+                }
+                let index = count;
+                let id = format!(
+                    "road/{road_id}/lane/{}/{index}",
+                    if direction > 0 { "f" } else { "b" }
+                );
+                ids.push(id.clone());
+                network.lanes.push(Lane {
+                    id,
+                    road: road_id,
+                    index,
+                    direction,
+                    width: arriving.width,
+                    offset: f32::from(direction) * full,
+                    use_kind: LaneUse::RightTurn,
+                    path: Path::new(points),
+                    from_node: if direction > 0 { from_node } else { to_node },
+                    to_node: if direction > 0 { to_node } else { from_node },
+                    allowed: Vec::new(),
+                    successors: Vec::new(),
+                    predecessors: Vec::new(),
+                });
+            }
             if let Some(offset) = section.bike_offset(direction) {
-                let steps = 4;
+                // Out with the kerb where an approach widening moves it.
+                let road = &network.roads[road_index];
+                let steps = if widen.iter().any(|w| w.is_some()) {
+                    ((length / 4.0).ceil() as usize).max(4)
+                } else {
+                    4
+                };
                 let mut points = Vec::with_capacity(steps + 1);
                 for step in 0..=steps {
                     let station = length * step as f32 / steps as f32;
                     let position = carriageway.plan_at(station);
                     let tangent = carriageway.tangent_at(station);
-                    points.push(position + tangent.left_normal() * offset);
+                    let shifted = offset + offset.signum() * road.widening(station, offset);
+                    points.push(position + tangent.left_normal() * shifted);
                 }
                 if direction < 0 {
                     points.reverse();
@@ -979,7 +1101,14 @@ pub fn derive(
             let inbound_on_road = network
                 .lanes
                 .iter()
-                .filter(|other| other.road == lane.road && other.to_node == node)
+                // Motor lanes only: the cycle lane has no movements of its own,
+                // and counted in it would push the right turn onto a lane index
+                // no lane has.
+                .filter(|other| {
+                    other.road == lane.road
+                        && other.to_node == node
+                        && other.use_kind != LaneUse::Bike
+                })
                 .count();
             // Reserved turn bays, decided **per approach** and not per lane.
             //
@@ -1000,7 +1129,10 @@ pub fn derive(
             } else {
                 0
             };
-            let dedicated_right = 0_usize;
+            // A widened approach's queue lane is the right-turn bay.
+            let dedicated_right = usize::from(network.road(lane.road).is_some_and(|road| {
+                road.widen[usize::from(road.to_node == node && road.from_node != node)].is_some()
+            }));
             let allowed =
                 lane_movement_sets(inbound_on_road, &available, dedicated_left, dedicated_right);
             let Some(allowed_set) = allowed.get(lane.index as usize) else {
@@ -1173,9 +1305,15 @@ pub fn derive(
             let side = if at_start { -1.0 } else { 1.0 };
             let half = road.half_width();
             let outer = half + road.section.sidewalk_metres;
-            let left = road.centreline.offset_at(station, side * half, 0.0);
+            // The left kerb is the arriving traffic's, moved out by its queue lane.
+            let extra = road.widen[usize::from(!at_start)].width;
+            let left = road
+                .centreline
+                .offset_at(station, side * (half + extra), 0.0);
             let right = road.centreline.offset_at(station, -side * half, 0.0);
-            let outer_left = road.centreline.offset_at(station, side * outer, 0.0);
+            let outer_left = road
+                .centreline
+                .offset_at(station, side * (outer + extra), 0.0);
             let outer_right = road.centreline.offset_at(station, -side * outer, 0.0);
             ports.push(Port {
                 road: road.id,
@@ -1398,6 +1536,120 @@ fn dead_end_clearance(
         station += 1.0;
     }
     Some(limit)
+}
+
+/// The width of an added queue lane: an entry lane is 3.25 m (CJJ 152 §4.2.9).
+pub(crate) const ENTRY_LANE_M: f32 = 3.25;
+
+/// Which street ends get an approach widening, and how long.
+///
+/// CJJ 152 §4.2.13: at a signalised junction the arterial and collector
+/// approaches gain a queue lane; the taper is 30 m on an arterial and 25 m on
+/// a collector, and the widened length with no traffic counts is 70 to 90 m on
+/// an arterial and 50 to 70 m on a collector, the upper value where the cross
+/// street is an arterial. A street too short for it is not widened at all
+/// rather than given a stub (`docs/city-visual-target.md` §8).
+fn plan_widening(
+    incidence: &[Vec<u32>],
+    air: &[bool],
+    control: &[Control],
+    sd_by_id: &HashMap<u32, &SdRoad>,
+    hd_roads: &[HdRoad],
+    frame: CityFrameInfo,
+    trims: &HashMap<(u32, bool), f32>,
+) -> HashMap<(u32, bool), Widening> {
+    let hd_by_id: HashMap<u32, &HdRoad> = hd_roads.iter().map(|road| (road.id, road)).collect();
+    let mut out = HashMap::new();
+    for (index, list) in incidence.iter().enumerate() {
+        if air[index] || control[index].kind != JunctionKind::Signalized {
+            continue;
+        }
+        let at_grade: Vec<&HdRoad> = list
+            .iter()
+            .filter_map(|id| hd_by_id.get(id).copied())
+            .filter(|road| road.layer == 0)
+            .collect();
+        if at_grade.len() < 3 {
+            continue;
+        }
+        // Each arm's direction out of the junction, 12 m along it.
+        let out_dir = |road: &HdRoad| -> Option<Vec2> {
+            let sd = sd_by_id.get(&road.id)?;
+            let mut line: Vec<Vec2> = road
+                .centreline
+                .iter()
+                .map(|p| {
+                    let [x, z] = frame.to_local(*p);
+                    Vec2::new(x, z)
+                })
+                .collect();
+            if sd.from as usize != index {
+                line.reverse();
+            }
+            let path = Path::flat(line);
+            let d = path.plan_at(path.length().min(12.0)) - path.plan_at(0.0);
+            (d.length() > 0.1).then(|| d.normalize())
+        };
+        for road in &at_grade {
+            // The queue lane is a right-turn bay: no right turn, no bay.
+            let Some(own) = out_dir(road) else {
+                continue;
+            };
+            let turns_right = at_grade.iter().any(|other| {
+                other.id != road.id
+                    && out_dir(other).is_some_and(|exit| {
+                        crate::spec::classify_movement(-own, exit).0 == Movement::Right
+                    })
+            });
+            if !turns_right {
+                continue;
+            }
+            let (taper, short, long) = match road.class {
+                ModernRoadClass::Arterial => (30.0, 70.0, 90.0),
+                ModernRoadClass::Collector => (25.0, 50.0, 70.0),
+                _ => continue,
+            };
+            let section = road.cross_section();
+            if road.oneway || section.motor_lanes_per_direction < 2 {
+                continue;
+            }
+            let Some(sd) = sd_by_id.get(&road.id) else {
+                continue;
+            };
+            let crosses_arterial = at_grade.iter().any(|other| {
+                other.id != road.id
+                    && class_rank(other.class) <= class_rank(ModernRoadClass::Arterial)
+            });
+            let length: f32 = road
+                .centreline
+                .windows(2)
+                .map(|w| {
+                    let [ax, az] = frame.to_local(w[0]);
+                    let [bx, bz] = frame.to_local(w[1]);
+                    Vec2::new(ax, az).distance(Vec2::new(bx, bz))
+                })
+                .sum();
+            // The carriageway between the two boxes, less a margin for the
+            // extra trim the widened corners ask for: the taper must end on
+            // the street, not in the next junction's mouth.
+            let trim = |at_start: bool| trims.get(&(road.id, at_start)).copied().unwrap_or(0.0);
+            let room = length - trim(true) - trim(false) - 12.0;
+            let hold = if crosses_arterial { long } else { short };
+            let hold = if hold + taper <= room { hold } else { short };
+            if hold + taper > room {
+                continue;
+            }
+            out.insert(
+                (road.id, sd.from as usize == index),
+                Widening {
+                    width: ENTRY_LANE_M,
+                    hold,
+                    taper,
+                },
+            );
+        }
+    }
+    out
 }
 
 /// Share of eligible junctions built as roundabouts (see `derive`).

@@ -74,8 +74,6 @@ pub mod level {
     /// Crosswalk and stop-line paint, one step above lane paint so the two
     /// never z-fight where they overlap.
     pub const CROSSWALK: f32 = 0.020;
-    /// Approach taper asphalt, a hair above the carriageway it widens.
-    pub const TAPER: f32 = 0.008;
     /// Block ground plate, just below the sidewalk so no step shows.
     pub const BLOCK: f32 = 0.138;
     /// Paved parcel and junction corner paving.
@@ -122,6 +120,11 @@ pub struct Carriageway {
     pub crest: f32,
     /// Height of the crest above the gutter datum, metres.
     pub rise: f32,
+    /// Approach widenings at the start and the end (see [`crate::network::Widening`]).
+    pub widen: [crate::network::Widening; 2],
+    /// Offsets at least this far out move out with a widening: the outer edge
+    /// of the motor lanes and everything beyond it.
+    pub widen_from: f32,
 }
 
 impl Carriageway {
@@ -139,6 +142,8 @@ impl Carriageway {
             flatten: 20.0,
             crest,
             rise,
+            widen: road.widen,
+            widen_from: road.section.half_carriageway() - 0.45,
         }
     }
 
@@ -152,7 +157,46 @@ impl Carriageway {
             flatten: 0.0,
             crest: 0.0,
             rise: (half * 0.012).min(0.20),
+            widen: Default::default(),
+            widen_from: f32::INFINITY,
         }
+    }
+
+    /// How far a point at `offset` moves out at `station`, for the widening on
+    /// its side.
+    pub fn widening(&self, station: f32, offset: f32) -> f32 {
+        if offset.abs() < self.widen_from {
+            return 0.0;
+        }
+        if offset < 0.0 {
+            -self.widen[0].at(station)
+        } else {
+            self.widen[1].at(self.length - station)
+        }
+    }
+
+    /// Stations from `from` to `to` at most `step` apart, at every vertex, and
+    /// at most two metres apart along a widening's taper so its curve is smooth.
+    pub fn stations(&self, from: f32, to: f32, step: f32) -> Vec<f32> {
+        let mut out = stations(&self.path, from, to, step);
+        for (k, w) in self.widen.iter().enumerate() {
+            if !w.is_some() {
+                continue;
+            }
+            let (a, b) = if k == 0 {
+                (w.hold, w.hold + w.taper)
+            } else {
+                (self.length - w.hold - w.taper, self.length - w.hold)
+            };
+            let (a, b) = (a.max(from), b.min(to));
+            if b > a {
+                let n = ((b - a) / 2.0).ceil() as usize;
+                out.extend((0..=n).map(|i| a + (b - a) * i as f32 / n as f32));
+            }
+        }
+        out.sort_by(f32::total_cmp);
+        out.dedup_by(|a, b| (*a - *b).abs() < 0.05);
+        out
     }
 
     /// How much of the crown survives at `station`, blending to zero at each end.
@@ -178,6 +222,8 @@ impl Carriageway {
 
     /// A point on the crowned surface, `lift` metres above the gutter datum.
     pub fn point(&self, station: f32, offset: f32, lift: f32) -> Vec3 {
+        let crown = self.lift(offset, station);
+        let offset = offset + self.widening(station, offset);
         let (position, tangent) = self.path.sample(station);
         // At a vertex the offset is mitred, so the edges of the two segments
         // meet there instead of leaving a notch on the outside of the bend.
@@ -193,7 +239,7 @@ impl Carriageway {
             };
         Vec3::new(
             position.x + lateral.x,
-            position.y + lift + self.lift(offset, station),
+            position.y + lift + crown,
             position.z + lateral.y,
         )
     }
@@ -236,7 +282,7 @@ pub(super) fn ribbon(
         return;
     }
     let mut previous: Option<(Vec3, Vec3, f32)> = None;
-    for station in stations(&road.path, from, to, MAX_RESAMPLE_METRES) {
+    for station in road.stations(from, to, MAX_RESAMPLE_METRES) {
         let a = road.point(station, inner, lift);
         let b = road.point(station, outer, lift);
         if let Some((pa, pb, previous_station)) = previous {
@@ -349,7 +395,8 @@ pub(super) fn road_near(network: &Network, road: &Road, at_start: bool) -> Vec<V
             continue;
         }
         // The stretch of the other road near this junction, if any.
-        let near: Vec<f32> = stations(&surface.path, 0.0, length, 4.0)
+        let near: Vec<f32> = surface
+            .stations(0.0, length, 4.0)
             .into_iter()
             .filter(|s| {
                 let p = surface.path.plan_at(*s);
@@ -363,7 +410,7 @@ pub(super) fn road_near(network: &Network, road: &Road, at_start: bool) -> Vec<V
             continue;
         }
         let half = other.half_width();
-        let run = stations(&surface.path, from, to, 4.0);
+        let run = surface.stations(from, to, 4.0);
         let mut ring: Vec<Vec2> = run
             .iter()
             .map(|s| {
@@ -416,7 +463,7 @@ pub(super) fn ribbon_clipped(
     if road.length <= 1.0e-4 || to <= from {
         return;
     }
-    let run = stations(&road.path, from, to, 2.0);
+    let run = road.stations(from, to, 2.0);
     for pair in run.windows(2) {
         let quad = [
             road.point(pair[0], inner, lift),
@@ -527,7 +574,7 @@ pub(super) fn sweep_clipped(
         );
         return;
     }
-    let run = stations(&surface.path, from, to, 2.0);
+    let run = surface.stations(from, to, 2.0);
     for pair in run.windows(2) {
         for offset in [inner, outer] {
             let (p, q) = (
@@ -566,7 +613,7 @@ pub(super) fn sweep(
         return;
     }
     let mut previous: Option<(Vec3, Vec3)> = None;
-    for station in stations(&surface.path, from, to, 14.0) {
+    for station in surface.stations(from, to, 14.0) {
         let (a, b) = (
             surface.point(station, inner, 0.0),
             surface.point(station, outer, 0.0),
@@ -665,7 +712,7 @@ pub fn build(network: &Network, builder: &mut MeshBuilder, seed: u32) -> StreetO
     for road in &network.roads {
         surfaces::road_surface(network, road, builder, &spec, joins.tapers(road.id));
         markings::road_markings(network, road, builder, &spec, joins.tapers(road.id));
-        markings::approach_taper(road, builder, &spec);
+        markings::widening_markings(road, builder, &spec);
         // An expressway's deck and its ramps are a viaduct; anything else on
         // a structure is a bridge.
         if road.is_motorway() && road.layer != 0 {
@@ -751,7 +798,7 @@ pub fn footprints(network: &Network, under_footway: f32) -> Vec<Vec<Vec2>> {
             }
             run.clear();
         };
-        for station in stations(&surface.path, 0.0, surface.length, 6.0) {
+        for station in surface.stations(0.0, surface.length, 6.0) {
             if surface.path.sample(station).0.y < 1.0 {
                 run.push(station);
             } else {

@@ -440,7 +440,11 @@ fn plant_with(
             let sides: &[f32] = if double_row { &[-1.0, 1.0] } else { &[side] };
             for direction in sides {
                 let wobble = (rng.unit() - 0.5) * 0.9;
-                let point = path.offset_at(offset, *direction * (lateral + wobble), 0.0);
+                let point = path.offset_at(
+                    offset,
+                    road.kerbside(offset, *direction * (lateral + wobble)),
+                    0.0,
+                );
                 place(
                     TreeRole::Street,
                     Vec2::new(point.x, point.z),

@@ -122,7 +122,7 @@ pub(super) fn build_signals(network: &Network, builder: &mut MeshBuilder) -> Vec
             let station = (edge + into * (spec.stop_line_gap + 1.3)).clamp(0.5, length - 0.5);
             let side = if port.at_start { -1.0_f32 } else { 1.0_f32 };
             let lateral = side * (road.half_width() + road.section.sidewalk_metres * 0.35 + 0.6);
-            let base = path.offset_at(station, lateral, 0.0);
+            let base = path.offset_at(station, road.kerbside(station, lateral), 0.0);
             let tangent = path.tangent_at(station);
             // The head faces back down the approach, at the queue.
             let facing = tangent * -into;

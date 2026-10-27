@@ -4,6 +4,7 @@
 //!
 //! cargo run --release -p city-scene --example plan_raster -- \
 //!     [--radius-km 1.6] [--seed 42] [--centre x,z] [--span 160] [--px 800]
+//!     [--plan plan.json]          a plan from `plan_svg` (PLAN_JSON) instead
 //!     [--out plan.ppm] [--list]   print junctions and air nodes, and stop
 //!     [--layer N]                 draw only what is at or below N metres up
 
@@ -46,14 +47,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let seed = flag("--seed")
         .and_then(|v| v.parse().ok())
         .unwrap_or(42_u32);
-    let city = generate_modern_chinese_city(ModernChinaSpec {
-        seed,
-        radius_km,
-        block_size_metres: flag("--block-m")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(ModernChinaSpec::default().block_size_metres),
-        ..ModernChinaSpec::default()
-    });
+    // `--plan plan.json`: a plan written elsewhere (`plan_svg` with `PLAN_JSON`,
+    // the towns the game builds) instead of a generated test city.
+    let city = match flag("--plan") {
+        Some(path) => serde_json::from_slice::<urban::ModernCity>(&std::fs::read(path)?)?,
+        None => generate_modern_chinese_city(ModernChinaSpec {
+            seed,
+            radius_km,
+            block_size_metres: flag("--block-m")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(ModernChinaSpec::default().block_size_metres),
+            ..ModernChinaSpec::default()
+        }),
+    };
     let network = city_scene::derive(
         &city.nodes,
         &city.sd_roads,

@@ -56,10 +56,6 @@ pub struct JunctionSpec {
     pub arrow: ArrowSpec,
     pub waiting_box: WaitingBoxSpec,
     pub sidewalk_min: f32,
-    /// Approach-widening taper length, 58 m.
-    pub taper_len: f32,
-    /// Width of one widened lane, 3.4 m.
-    pub taper_lane_width: f32,
     /// Kerb height.  Every surface elevation in the crate is expressed against
     /// this datum: roadbed `0`, kerb top `+kerb_height`, sidewalk above that.
     pub kerb_height: f32,
@@ -115,8 +111,6 @@ impl Default for JunctionSpec {
             },
             waiting_box: WaitingBoxSpec { depth: 11.0 },
             sidewalk_min: 2.0,
-            taper_len: 58.0,
-            taper_lane_width: 3.4,
             kerb_height: 0.15,
             median_arterial: 1.6,
             median_expressway: 2.0,

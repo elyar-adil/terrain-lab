@@ -811,6 +811,7 @@ fn a_waiting_box_straddles_the_junction_edge() {
         marking_start: 7.0,
         marking_end: 7.0,
         lane_ids: Vec::new(),
+        widen: Default::default(),
     };
     // The innermost inbound lane, offset exactly as the network derives it.
     let count = section.motor_lanes_per_direction;
@@ -896,7 +897,6 @@ fn no_marking_is_emitted_outside_its_carriageway() {
     // Markings are the one part of the layer that is visible from a driver's
     // seat at a metre's height, so paint on a footway is not a small error.
     let network = city_network();
-    let spec = JunctionSpec::default();
     let mut builder = MeshBuilder::new();
     build(&network, &mut builder, 42);
     let scene = builder.build();
@@ -978,7 +978,7 @@ fn no_marking_is_emitted_outside_its_carriageway() {
             // A marking may sit on the carriageway, on the taper that widens
             // it, on a viaduct's own deck, or inside a junction box.  Nowhere
             // else.
-            let slack = spec.taper_lane_width + 0.5;
+            let slack = crate::network::ENTRY_LANE_M + 0.5;
             if clearance(point) <= slack || (near_a_join(point) && taper_clearance(point) <= 0.5) {
                 continue;
             }
@@ -1183,13 +1183,35 @@ fn every_junction_is_covered_by_the_surface_it_should_be() {
     };
     let walk_ok = |m: &str| m == "sidewalk" || m == "kerb" || m.starts_with("marking.");
     let mut offenders: Vec<String> = Vec::new();
-    for (seed, radius_km) in [(42_u32, 0.5_f32), (1, 0.5), (7, 0.5), (42, 1.6)] {
-        let city = generate_modern_chinese_city(ModernChinaSpec {
-            seed,
-            radius_km,
-            block_size_metres: 110.0,
-            ..ModernChinaSpec::default()
-        });
+    // The test cities, and any plans named in `COVERAGE_PLANS` (paths joined by
+    // `:`, written by `infrastructure`'s `plan_svg` with `PLAN_JSON`): the
+    // towns the game builds come from another planner and are checked the
+    // same way by hand.
+    let mut cities: Vec<(String, urban::ModernCity)> =
+        [(42_u32, 0.5_f32), (1, 0.5), (7, 0.5), (42, 1.6)]
+            .into_iter()
+            .map(|(seed, radius_km)| {
+                let city = generate_modern_chinese_city(ModernChinaSpec {
+                    seed,
+                    radius_km,
+                    block_size_metres: 110.0,
+                    ..ModernChinaSpec::default()
+                });
+                (format!("seed {seed} r {radius_km}"), city)
+            })
+            .collect();
+    for path in std::env::var("COVERAGE_PLANS")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|p| !p.is_empty())
+    {
+        let text = std::fs::read(path).expect("a readable plan");
+        cities.push((
+            path.to_string(),
+            serde_json::from_slice(&text).expect("a plan"),
+        ));
+    }
+    for (label, city) in cities {
         let network = derive(
             &city.nodes,
             &city.sd_roads,
@@ -1223,7 +1245,7 @@ fn every_junction_is_covered_by_the_surface_it_should_be() {
                 return;
             }
             offenders.push(format!(
-                "seed {seed} r {radius_km}: {what} shows {} at ({:.0}, {:.0})",
+                "{label}: {what} shows {} at ({:.0}, {:.0})",
                 found.unwrap_or("bare ground"),
                 p.x,
                 p.y
@@ -1319,7 +1341,11 @@ fn every_junction_is_covered_by_the_surface_it_should_be() {
                     let station = if port.at_start { s } else { length - s };
                     let mut offset = -half + 0.4;
                     while offset < half - 0.4 {
-                        let q = road.carriageway.offset_at(station, offset, 0.0);
+                        let q = road.carriageway.offset_at(
+                            station,
+                            road.kerbside(station, offset),
+                            0.0,
+                        );
                         let p = Vec2::new(q.x, q.z);
                         let found = top.top(p);
                         if !found.is_some_and(road_ok) {
@@ -1337,7 +1363,8 @@ fn every_junction_is_covered_by_the_surface_it_should_be() {
                     for side in [-1.0_f32, 1.0] {
                         let mut offset = half + 0.4;
                         while offset < walk - 0.3 {
-                            let q = road.carriageway.offset_at(station, side * offset, 0.0);
+                            let lateral = road.kerbside(station, side * offset);
+                            let q = road.carriageway.offset_at(station, lateral, 0.0);
                             let p = Vec2::new(q.x, q.z);
                             if near.iter().any(|ring| {
                                 distance_to_ring(p, ring) < 0.35
@@ -1386,5 +1413,95 @@ fn every_junction_is_covered_by_the_surface_it_should_be() {
         "{} points of junctions are not the surface they should be:\n{}",
         offenders.len(),
         summary.join("\n")
+    );
+}
+
+#[test]
+fn a_widened_approach_has_its_queue_lane_kerb_and_right_turn() {
+    // CJJ 152 §4.2.13: a signalised arterial or collector approach gains a
+    // queue lane over a taper and a held length (`docs/city-visual-target.md`
+    // §8). The lane must be a real lane that turns right, the kerb at the
+    // junction must stand out by the lane, and the taper must end on the
+    // street rather than in the next junction's mouth.
+    let city = generate_modern_chinese_city(ModernChinaSpec {
+        seed: 42,
+        radius_km: 1.6,
+        block_size_metres: 110.0,
+        ..ModernChinaSpec::default()
+    });
+    let network = derive(
+        &city.nodes,
+        &city.sd_roads,
+        &city.hd_roads,
+        city.frame,
+        JunctionSpec::default(),
+        city.seed,
+    );
+    let mut widened = 0;
+    for road in &network.roads {
+        for (k, w) in road.widen.iter().enumerate() {
+            if !w.is_some() {
+                continue;
+            }
+            widened += 1;
+            assert!(
+                matches!(
+                    road.class,
+                    ModernRoadClass::Arterial | ModernRoadClass::Collector
+                ),
+                "road {} is widened but is {:?}",
+                road.id,
+                road.class
+            );
+            let length = road.carriageway.length();
+            assert!(
+                w.hold + w.taper <= length,
+                "road {}: a {:.0} + {:.0} m widening on a {length:.0} m street",
+                road.id,
+                w.hold,
+                w.taper
+            );
+            let at_end = k == 1;
+            let node = if at_end { road.to_node } else { road.from_node };
+            let count = road.section.motor_lanes_per_direction;
+            let lane = network
+                .lanes
+                .iter()
+                .find(|l| l.road == road.id && l.to_node == node && l.index == count)
+                .unwrap_or_else(|| panic!("road {} has no queue lane into {node}", road.id));
+            assert!(
+                lane.allowed.contains(&Movement::Right) && !lane.allowed.contains(&Movement::Left),
+                "road {}: the queue lane allows {:?}",
+                road.id,
+                lane.allowed
+            );
+            // The kerb at the junction edge, on the arriving side, by the lane.
+            let station = if at_end { length } else { 0.0 };
+            let side = if at_end { 1.0 } else { -1.0 };
+            let moved = road.kerbside(station, side * road.half_width()).abs() - road.half_width();
+            assert!(
+                (moved - crate::network::ENTRY_LANE_M).abs() < 1e-3,
+                "road {}: the kerb moved {moved:.2} m",
+                road.id
+            );
+            // And none at all past the taper.
+            let past = if at_end {
+                length - w.hold - w.taper - 0.5
+            } else {
+                w.hold + w.taper + 0.5
+            };
+            if past > 0.0 && past < length {
+                let still = road.kerbside(past, side * road.half_width()).abs() - road.half_width();
+                assert!(
+                    still.abs() < 1e-3,
+                    "road {}: {still:.2} m past the taper",
+                    road.id
+                );
+            }
+        }
+    }
+    assert!(
+        widened >= 4,
+        "only {widened} widened approaches in the test city"
     );
 }

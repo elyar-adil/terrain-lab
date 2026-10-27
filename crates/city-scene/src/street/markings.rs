@@ -12,7 +12,6 @@ use crate::math::{Path, Vec2, Vec3};
 use crate::mesh::MeshBuilder;
 use crate::network::{Lane, LaneUse, Network, Road};
 use crate::spec::{ARROW_LENGTH_MM, JunctionSpec, Movement};
-use worldgen_core::smootherstep;
 
 use super::{Carriageway, Uvs, ribbon};
 
@@ -882,76 +881,37 @@ pub(super) fn drive_arrow(builder: &mut MeshBuilder, lane: &Lane, spec: &Junctio
 
 /// The approach widening taper (进口道拓宽渐变).
 ///
-/// Arterial and collector junction approaches gain one extra 3.4 m queue lane
-/// over the last ~58 m, eating the verge the way real Chinese arterials do.
-/// The widening's edge line is a **160 mm line hugging the moving outer edge**
-/// — the source kernel paints `outerAt(s) .. outerAt(s) + 0.16` — not a solid
-/// wedge: filling between a fixed inner edge and the growing outer edge paints
-/// a three-metre-wide sheet of white across the taper, which reads as a spill,
-/// not as a lane line.
-pub(super) fn approach_taper(road: &Road, builder: &mut MeshBuilder, spec: &JunctionSpec) {
-    if road.layer != 0 || road.class == ModernRoadClass::Local || road.is_motorway() {
+/// The lane line that parts an approach widening's queue lane from the lane it
+/// grew beside: solid over the widened length, the way a lane is marked inside
+/// the guide zone before a stop line (`docs/city-visual-target.md` §8). The
+/// taper itself needs no paint of its own; the edge line follows the kerb out.
+pub(super) fn widening_markings(road: &Road, builder: &mut MeshBuilder, spec: &JunctionSpec) {
+    if road.layer != 0 || !road.widen.iter().any(|w| w.is_some()) {
         return;
     }
     let length = road.carriageway.length();
-    let section = road.section;
-    if section.motor_lanes_per_direction < 2 {
-        return;
-    }
-    let surface = Carriageway::for_road(road, spec);
+    // The line stands where the motor lanes ended before the widening, so it is
+    // drawn on the carriageway as it was, not moved out with the kerb.
+    let mut fixed = Carriageway::for_road(road, spec);
+    fixed.widen = Default::default();
+    let edge = road.section.half_carriageway();
     for approach in approaches(road, spec) {
-        let edge = approach.outward * (section.half_width() - 0.15);
-        let from = approach.back(spec.taper_len + 4.0);
-        let to = approach.back(4.0);
-        if from < 0.0 || to > length || to <= from {
+        let w = road.widen[usize::from(approach.outward > 0.0)];
+        if !w.is_some() {
             continue;
         }
-        // The extra queue lane grows as the road nears the junction.
-        let extra = |station: f32| {
-            let distance = (approach.base - station) * approach.outward;
-            spec.taper_lane_width
-                * smootherstep((1.0 - (distance - 4.0) / spec.taper_len).clamp(0.0, 1.0))
-        };
-        let steps = ((to - from) / 4.0).ceil().max(1.0) as usize;
-        let mut previous: Option<(Vec3, Vec3, Vec3, Vec3)> = None;
-        for step in 0..=steps {
-            let station = from + (to - from) * step as f32 / steps as f32;
-            let inner = surface.point(station, edge, super::level::TAPER);
-            let outer = surface.point(
-                station,
-                edge + approach.outward * (0.2 + extra(station)),
-                super::level::TAPER,
-            );
-            let line_inner = surface.point(
-                station,
-                edge + approach.outward * (0.20 + extra(station)),
-                super::level::PAINT,
-            );
-            let line_outer = surface.point(
-                station,
-                edge + approach.outward * (0.36 + extra(station)),
-                super::level::PAINT,
-            );
-            if let Some((a, b, c, d)) = previous {
-                // The taper is part of the `asphalt` group, which carries
-                // world-space metre UVs everywhere else; a bare quad here
-                // desyncs the UV layer from the vertex count, and a padded
-                // one samples a single texel as a flat patch.  World UVs, on
-                // the shared 4 m grid, so the widened lane is the *same*
-                // asphalt as the lane it widens.
-                builder.quad_uv(
-                    "asphalt",
-                    a,
-                    b,
-                    c,
-                    d,
-                    [(a.x, a.z), (b.x, b.z), (c.x, c.z), (d.x, d.z)],
-                    None,
-                );
-                builder.quad("marking.white", c, d, line_outer, line_inner, None);
-            }
-            previous = Some((inner, outer, line_inner, line_outer));
-        }
+        let a = approach.back(spec.stop_line_gap + spec.stop_line_width);
+        let b = approach.back(w.hold);
+        let (from, to) = (a.min(b).clamp(0.0, length), a.max(b).clamp(0.0, length));
+        stripe(
+            builder,
+            "marking.white",
+            &fixed,
+            approach.outward * edge,
+            from,
+            to,
+            spec.white_line_width,
+        );
     }
 }
 

@@ -38,6 +38,9 @@ pub struct Arm {
     pub walk: f32,
     /// Kerb return radius this street asks for at its corners.
     pub radius: f32,
+    /// How much further out the kerb and footway on the clockwise side stand:
+    /// the side of the arriving traffic, widened by a queue lane.
+    pub widen: f32,
 }
 
 /// Where `p + s * d` meets `q + t * e`, as `(s, t)`.
@@ -86,7 +89,10 @@ pub fn trims(arms: &[Arm]) -> Vec<f32> {
         let radius = bend_radius(g, a.radius.min(b.radius));
         let tangent = radius / (g * 0.5).tan();
         let (na, nb) = (a.dir.left_normal(), b.dir.left_normal());
-        for (offset_a, offset_b, extra) in [(a.kerb, b.kerb, tangent), (a.walk, b.walk, 0.0)] {
+        for (offset_a, offset_b, extra) in [
+            (a.kerb, b.kerb + b.widen, tangent),
+            (a.walk, b.walk + b.widen, 0.0),
+        ] {
             let Some((s, t)) = intersect(na * offset_a, a.dir, nb * -offset_b, b.dir) else {
                 continue;
             };
@@ -210,6 +216,7 @@ mod tests {
             kerb,
             walk,
             radius: 12.0,
+            widen: 0.0,
         }
     }
 
