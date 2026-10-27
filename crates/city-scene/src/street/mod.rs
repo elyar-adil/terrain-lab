@@ -279,7 +279,7 @@ pub(super) fn ribbon(
 /// `path` between them.  A ribbon that skipped a vertex would cut the corner
 /// of every bend in its street, and the footway's back edge would pull off the
 /// block beside it.
-pub(super) fn stations(path: &Path, from: f32, to: f32, step: f32) -> Vec<f32> {
+pub(crate) fn stations(path: &Path, from: f32, to: f32, step: f32) -> Vec<f32> {
     let steps = (((to - from) / step).ceil().max(1.0)) as usize;
     let mut out: Vec<f32> = (0..=steps)
         .map(|k| from + (to - from) * k as f32 / steps as f32)
@@ -293,6 +293,262 @@ pub(super) fn stations(path: &Path, from: f32, to: f32, step: f32) -> Vec<f32> {
     out.sort_by(f32::total_cmp);
     out.dedup_by(|a, b| (*a - *b).abs() < 0.05);
     out
+}
+
+/// Within this distance of a junction a road's footway and kerb are cut
+/// against the junction's other carriageways ([`ribbon_clipped`]).
+pub(super) const JUNCTION_ZONE_M: f32 = 70.0;
+
+/// The road near a junction a footway must never be laid on: the junction
+/// box, and every other street's carriageway that comes within
+/// `JUNCTION_ZONE_M` of the junction, whether it meets there or at a
+/// junction a few metres off.  Empty where the road's end is not a junction.
+pub(super) fn road_near(network: &Network, road: &Road, at_start: bool) -> Vec<Vec<Vec2>> {
+    let node = if at_start {
+        road.from_node
+    } else {
+        road.to_node
+    };
+    let Some(junction) = network.junction(node) else {
+        return Vec::new();
+    };
+    if junction.ports.len() < 2 {
+        return Vec::new();
+    }
+    let centre = junction.centre;
+    let mut out = Vec::new();
+    if junction.ring.len() >= 3 {
+        out.push(junction.ring.clone());
+    }
+    for other in network
+        .roads
+        .iter()
+        .filter(|r| r.id != road.id && r.layer == 0)
+    {
+        // Cheaply out of reach: the junction is nowhere near the road's box.
+        let (lo, hi) = other.carriageway.points().iter().fold(
+            (Vec2::new(f32::MAX, f32::MAX), Vec2::new(f32::MIN, f32::MIN)),
+            |(lo, hi), p| {
+                (
+                    Vec2::new(lo.x.min(p.x), lo.y.min(p.z)),
+                    Vec2::new(hi.x.max(p.x), hi.y.max(p.z)),
+                )
+            },
+        );
+        let reach = JUNCTION_ZONE_M + other.half_width();
+        if centre.x < lo.x - reach
+            || centre.x > hi.x + reach
+            || centre.y < lo.y - reach
+            || centre.y > hi.y + reach
+        {
+            continue;
+        }
+        let surface = Carriageway::for_road(other, &network.spec);
+        let length = surface.length;
+        if length < 1.0 {
+            continue;
+        }
+        // The stretch of the other road near this junction, if any.
+        let near: Vec<f32> = stations(&surface.path, 0.0, length, 4.0)
+            .into_iter()
+            .filter(|s| {
+                let p = surface.path.plan_at(*s);
+                p.distance(centre) < JUNCTION_ZONE_M
+            })
+            .collect();
+        let (Some(&from), Some(&to)) = (near.first(), near.last()) else {
+            continue;
+        };
+        if to - from < 0.5 {
+            continue;
+        }
+        let half = other.half_width();
+        let run = stations(&surface.path, from, to, 4.0);
+        let mut ring: Vec<Vec2> = run
+            .iter()
+            .map(|s| {
+                let p = surface.point(*s, half, 0.0);
+                Vec2::new(p.x, p.z)
+            })
+            .collect();
+        ring.extend(run.iter().rev().map(|s| {
+            let p = surface.point(*s, -half, 0.0);
+            Vec2::new(p.x, p.z)
+        }));
+        if ring.len() >= 3 {
+            out.push(ring);
+        }
+    }
+    // Junction boxes a few metres off, too.
+    for other in &network.junctions {
+        if other.node != node
+            && other.ports.len() >= 2
+            && other.centre.distance(centre) < JUNCTION_ZONE_M
+            && other.ring.len() >= 3
+        {
+            out.push(other.ring.clone());
+        }
+    }
+    out
+}
+
+/// [`ribbon`] on a flat surface (a footway, a kerb top), with `clips` cut out
+/// of every quad that reaches one, so it is never laid over a carriageway.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn ribbon_clipped(
+    builder: &mut MeshBuilder,
+    material: &str,
+    road: &Carriageway,
+    inner: f32,
+    outer: f32,
+    from: f32,
+    to: f32,
+    lift: f32,
+    uv: Uvs,
+    clips: &[Vec<Vec2>],
+) {
+    if clips.is_empty() {
+        ribbon(
+            builder, material, road, inner, outer, from, to, lift, None, uv,
+        );
+        return;
+    }
+    if road.length <= 1.0e-4 || to <= from {
+        return;
+    }
+    let run = stations(&road.path, from, to, 2.0);
+    for pair in run.windows(2) {
+        let quad = [
+            road.point(pair[0], inner, lift),
+            road.point(pair[0], outer, lift),
+            road.point(pair[1], outer, lift),
+            road.point(pair[1], inner, lift),
+        ];
+        let plan: Vec<Vec2> = quad.iter().map(|p| Vec2::new(p.x, p.z)).collect();
+        let y = quad.iter().map(|p| p.y).sum::<f32>() * 0.25;
+        for piece in crate::buildings::cut_away(plan, clips) {
+            if crate::math::signed_area(&piece).abs() < 1.0e-3 {
+                continue;
+            }
+            for [i, j, k] in crate::math::triangulate(&piece) {
+                let (a, b, c) = (
+                    Vec3::from_plan(piece[i], y),
+                    Vec3::from_plan(piece[j], y),
+                    Vec3::from_plan(piece[k], y),
+                );
+                let (a, b, c) = if crate::mesh::face_normal(a, c, b).y >= 0.0 {
+                    (a, c, b)
+                } else {
+                    (a, b, c)
+                };
+                match uv {
+                    Uvs::None => builder.tri_flat(material, a, b, c, None),
+                    _ => builder.tri_uv(
+                        material,
+                        a,
+                        b,
+                        c,
+                        [(a.x, a.z), (b.x, b.z), (c.x, c.z)],
+                        None,
+                    ),
+                }
+            }
+        }
+    }
+}
+
+/// One quad (`a b c d` round its edge, possibly sloped) with `clips` cut out,
+/// each remaining point at the height the quad has there.
+pub(super) fn quad_clipped(
+    builder: &mut MeshBuilder,
+    material: &str,
+    quad: [Vec3; 4],
+    clips: &[Vec<Vec2>],
+) {
+    let plan: Vec<Vec2> = quad.iter().map(|p| Vec2::new(p.x, p.z)).collect();
+    // Height on the quad's two triangles (a b c) and (a c d), by barycentric.
+    let height = |p: Vec2| -> f32 {
+        for [i, j, k] in [[0, 1, 2], [0, 2, 3]] {
+            let (a, b, c) = (plan[i], plan[j], plan[k]);
+            let area = (b - a).cross(c - a);
+            if area.abs() < 1.0e-6 {
+                continue;
+            }
+            let w1 = (p - a).cross(c - a) / area;
+            let w2 = (b - a).cross(p - a) / area;
+            let w0 = 1.0 - w1 - w2;
+            if w0 >= -1.0e-3 && w1 >= -1.0e-3 && w2 >= -1.0e-3 {
+                return w0 * quad[i].y + w1 * quad[j].y + w2 * quad[k].y;
+            }
+        }
+        quad.iter().map(|q| q.y).sum::<f32>() * 0.25
+    };
+    for piece in crate::buildings::cut_away(plan.clone(), clips) {
+        for [i, j, k] in crate::math::triangulate(&piece) {
+            let (a, b, c) = (
+                Vec3::from_plan(piece[i], height(piece[i])),
+                Vec3::from_plan(piece[j], height(piece[j])),
+                Vec3::from_plan(piece[k], height(piece[k])),
+            );
+            let (a, b, c) = if crate::mesh::face_normal(a, c, b).y >= 0.0 {
+                (a, c, b)
+            } else {
+                (a, b, c)
+            };
+            builder.tri_uv(
+                material,
+                a,
+                b,
+                c,
+                [(a.x, a.z), (b.x, b.z), (c.x, c.z)],
+                None,
+            );
+        }
+    }
+}
+
+/// [`sweep`]'s two walls, leaving out every piece that would stand on a
+/// carriageway in `clips`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn sweep_clipped(
+    builder: &mut MeshBuilder,
+    material: &str,
+    surface: &Carriageway,
+    inner: f32,
+    outer: f32,
+    from: f32,
+    to: f32,
+    thickness: f32,
+    clips: &[Vec<Vec2>],
+) {
+    if clips.is_empty() {
+        sweep(
+            builder, material, surface, inner, outer, from, to, thickness,
+        );
+        return;
+    }
+    let run = stations(&surface.path, from, to, 2.0);
+    for pair in run.windows(2) {
+        for offset in [inner, outer] {
+            let (p, q) = (
+                surface.point(pair[0], offset, 0.0),
+                surface.point(pair[1], offset, 0.0),
+            );
+            let mid = Vec2::new((p.x + q.x) * 0.5, (p.z + q.z) * 0.5);
+            if clips
+                .iter()
+                .any(|ring| crate::math::point_in_ring(mid, ring))
+            {
+                continue;
+            }
+            let (a, b) = if offset == inner {
+                (Vec2::new(p.x, p.z), Vec2::new(q.x, q.z))
+            } else {
+                (Vec2::new(q.x, q.z), Vec2::new(p.x, p.z))
+            };
+            builder.wall(material, a, b, p.y - thickness, p.y, None);
+        }
+    }
 }
 
 /// Side walls and a bottom slab for a ribbon, giving a surface real thickness.
@@ -407,7 +663,7 @@ pub fn build(network: &Network, builder: &mut MeshBuilder, seed: u32) -> StreetO
     let spec = network.spec;
     let joins = viaduct::joins(network);
     for road in &network.roads {
-        surfaces::road_surface(road, builder, &spec, joins.tapers(road.id));
+        surfaces::road_surface(network, road, builder, &spec, joins.tapers(road.id));
         markings::road_markings(network, road, builder, &spec, joins.tapers(road.id));
         markings::approach_taper(road, builder, &spec);
         // An expressway's deck and its ramps are a viaduct; anything else on
@@ -440,6 +696,93 @@ pub fn build(network: &Network, builder: &mut MeshBuilder, seed: u32) -> StreetO
     output.traffic_lights_built = output.signals.len() as u32;
     let _ = seed;
     output
+}
+
+/// The ground the streets take, as closed rings: every road from the back of
+/// one footway to the back of the other, and every junction to the back of
+/// its corner footways, each pulled in by `under_footway` so whatever is laid
+/// beside the streets runs on that far under the paving.  An elevated road
+/// takes only the ground where it is down at street level.
+///
+/// The block plates are cut out of this, so a plate can never be drawn over a
+/// street: not at a junction corner the kerb rounds, not over a dead-end
+/// street running into the block, not where a street bows off the line the
+/// block was cut along.
+pub fn footprints(network: &Network, under_footway: f32) -> Vec<Vec<Vec2>> {
+    let mut rings = Vec::new();
+    for road in &network.roads {
+        if road.carriageway.length() < 1.0 {
+            continue;
+        }
+        let surface = Carriageway::for_road(road, &network.spec);
+        let half = road.half_width();
+        let reach = if road.has_sidewalk() {
+            (half + road.section.sidewalk_metres - under_footway).max(half)
+        } else {
+            half + 0.3
+        };
+        let mut run: Vec<f32> = Vec::new();
+        // A metre on past either end of the road, straight on, so the road's
+        // ground overlaps its junction's rather than leaving a seam across
+        // the mouth where neither reaches.
+        let at = |station: f32, offset: f32| -> Vec2 {
+            let (from, past) = if station <= 0.0 {
+                (0.0, station)
+            } else if station >= surface.length {
+                (surface.length, station - surface.length)
+            } else {
+                (station, 0.0)
+            };
+            let p = surface.point(from, offset, 0.0);
+            let along = surface.path.tangent_at(from) * past;
+            Vec2::new(p.x + along.x, p.z + along.y)
+        };
+        let flush = |run: &mut Vec<f32>, rings: &mut Vec<Vec<Vec2>>| {
+            if run.len() >= 2 {
+                if run[0] <= 0.0 {
+                    run.insert(0, -1.0);
+                }
+                if run[run.len() - 1] >= surface.length {
+                    run.push(surface.length + 1.0);
+                }
+                let mut ring: Vec<Vec2> = run.iter().map(|s| at(*s, reach)).collect();
+                ring.extend(run.iter().rev().map(|s| at(*s, -reach)));
+                rings.push(ring);
+            }
+            run.clear();
+        };
+        for station in stations(&surface.path, 0.0, surface.length, 6.0) {
+            if surface.path.sample(station).0.y < 1.0 {
+                run.push(station);
+            } else {
+                flush(&mut run, &mut rings);
+            }
+        }
+        flush(&mut run, &mut rings);
+    }
+    for junction in &network.junctions {
+        if junction.ports.len() == 1 {
+            // A dead end: the footway across its end (`dead_end_footway`).
+            let port = &junction.ports[0];
+            if let Some(band) = surfaces::dead_end_footway(port) {
+                let back = port.dir * under_footway;
+                rings.push(vec![band[0], band[1], band[2] - back, band[3] - back]);
+            }
+            continue;
+        }
+        if junction.walk_ring.len() >= 3 {
+            let inset = crate::math::inset_ring(&junction.walk_ring, under_footway);
+            rings.push(if inset.len() >= 3 {
+                inset
+            } else {
+                junction.walk_ring.clone()
+            });
+        }
+        if junction.ring.len() >= 3 {
+            rings.push(junction.ring.clone());
+        }
+    }
+    rings
 }
 
 /// Everything the street layer produced that is not static geometry.

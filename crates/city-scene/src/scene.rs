@@ -319,7 +319,8 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
     );
     let mut buildings = city.buildings.clone();
     buildings.truncate(budget.max_buildings);
-    let facade_table = buildings::build(
+    let streets = street::footprints(&network, buildings::PLATE_UNDER_PAVING);
+    let facade_table = buildings::build_among(
         &city.blocks,
         &city.parcels,
         &buildings,
@@ -327,6 +328,7 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
         &city.fields,
         city.frame,
         city.style,
+        &streets,
         &mut builder,
     );
 

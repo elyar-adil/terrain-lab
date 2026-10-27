@@ -79,6 +79,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         junction_report(&network, node);
         return Ok(());
     }
+    if std::env::args().any(|a| a == "--acute") {
+        for j in &network.junctions {
+            let n = j.ports.len();
+            if n < 3 {
+                continue;
+            }
+            for k in 0..n {
+                let a = -j.ports[k].dir;
+                let b = -j.ports[(k + 1) % n].dir;
+                let g = city_scene::corner::gap(a, b).to_degrees();
+                if g < 50.0 {
+                    let cls = |i: usize| {
+                        network
+                            .road(j.ports[i].road)
+                            .map(|r| format!("{:?}", r.class))
+                            .unwrap_or_default()
+                    };
+                    println!(
+                        "junction {} at {:.0},{:.0}: corner {:.0} between road {} {} and road {} {}",
+                        j.node,
+                        j.centre.x,
+                        j.centre.y,
+                        g,
+                        j.ports[k].road,
+                        cls(k),
+                        j.ports[(k + 1) % n].road,
+                        cls((k + 1) % n)
+                    );
+                }
+            }
+        }
+        return Ok(());
+    }
     if std::env::args().any(|a| a == "--list") {
         for junction in &network.junctions {
             let classes: Vec<String> = junction
@@ -131,6 +164,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut builder = MeshBuilder::new();
     city_scene::build_street_layer(&network, &mut builder, city.seed);
+    let streets =
+        city_scene::street::footprints(&network, city_scene::buildings::PLATE_UNDER_PAVING);
     for block in city
         .blocks
         .iter()
@@ -144,16 +179,89 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Vec2::new(x, z)
             })
             .collect();
-        if ring.len() >= 3 {
-            builder.ground_uv(
-                "block.ground",
-                &ring,
-                city_scene::street::level::BLOCK,
-                None,
-            );
+        let mut ring = ring;
+        if city_scene::math::signed_area(&ring) < 0.0 {
+            ring.reverse();
+        }
+        for piece in city_scene::buildings::cut_streets(ring, &streets) {
+            if piece.len() >= 3 {
+                builder.ground_uv(
+                    "block.ground",
+                    &piece,
+                    city_scene::street::level::BLOCK,
+                    None,
+                );
+            }
         }
     }
     let geometry = builder.build();
+    if let Some(at) = flag("--probe") {
+        let v: Vec<f32> = at.split(',').filter_map(|s| s.parse().ok()).collect();
+        let (px, pz) = (v[0], v[1]);
+        let at = Vec2::new(px, pz);
+        for j in &network.junctions {
+            if city_scene::math::point_in_ring(at, &j.ring) {
+                println!("inside junction {} box (even-odd)", j.node);
+            }
+            for piece in city_scene::buildings::normalise(&j.ring) {
+                if city_scene::math::point_in_ring(at, &piece) {
+                    println!("inside junction {} box (normalised)", j.node);
+                }
+            }
+        }
+        for r in &network.roads {
+            let plan: Vec<Vec2> = r
+                .carriageway
+                .points()
+                .iter()
+                .map(|p| Vec2::new(p.x, p.z))
+                .collect();
+            let d = city_scene::math::distance_to_polyline(at, &plan);
+            if d < r.half_width() + r.section.sidewalk_metres + 1.0 {
+                println!(
+                    "road {} ({:?}) centreline {:.1} m away, half {:.1}, walk {:.1}, from {} to {}",
+                    r.id,
+                    r.class,
+                    d,
+                    r.half_width(),
+                    r.half_width() + r.section.sidewalk_metres,
+                    r.from_node,
+                    r.to_node
+                );
+            }
+        }
+        for group in &geometry.meshes {
+            if group.instance_of.is_some() {
+                continue;
+            }
+            let p = &group.positions;
+            for tri in group.indices.chunks(3) {
+                let q: Vec<[f32; 3]> = tri
+                    .iter()
+                    .map(|&i| {
+                        [
+                            p[i as usize * 3],
+                            p[i as usize * 3 + 1],
+                            p[i as usize * 3 + 2],
+                        ]
+                    })
+                    .collect();
+                let area = (q[1][0] - q[0][0]) * (q[2][2] - q[0][2])
+                    - (q[2][0] - q[0][0]) * (q[1][2] - q[0][2]);
+                if area.abs() < 1e-6 {
+                    continue;
+                }
+                let w0 = ((q[1][0] - px) * (q[2][2] - pz) - (q[2][0] - px) * (q[1][2] - pz)) / area;
+                let w1 = ((q[2][0] - px) * (q[0][2] - pz) - (q[0][0] - px) * (q[2][2] - pz)) / area;
+                let w2 = 1.0 - w0 - w1;
+                if w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0 {
+                    let y = w0 * q[0][1] + w1 * q[1][1] + w2 * q[2][1];
+                    println!("{} y={y:.3} tri {:?}", group.material, q);
+                }
+            }
+        }
+        return Ok(());
+    }
 
     let mut image = vec![[0.10_f32, 0.30, 0.12]; px * px];
     let mut depth = vec![f32::MIN; px * px];
@@ -348,6 +456,19 @@ fn junction_report(network: &city_scene::Network, node: u32) {
     }
     for c in &j.corners {
         println!("corner kerb {:?}", c.kerb);
+    }
+    let ring = &j.ring;
+    let area = city_scene::math::signed_area(ring).abs();
+    let tri: f32 = city_scene::math::triangulate(ring)
+        .iter()
+        .map(|[a, b, c]| city_scene::math::signed_area(&[ring[*a], ring[*b], ring[*c]]).abs())
+        .sum();
+    println!(
+        "ring points {} area {area:.1} triangulated {tri:.1}",
+        ring.len()
+    );
+    for (i, p) in ring.iter().enumerate() {
+        println!("  {i} {:.3} {:.3}", p.x, p.y);
     }
 }
 

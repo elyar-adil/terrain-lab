@@ -21,6 +21,10 @@ const RAMP_HALF: f32 = 2.0;
 const TACTILE_SETBACK: f32 = 0.18;
 /// Length of the flat approach kerb either side of the dropped section.
 const KERB_FLAT: f32 = 0.55;
+/// Depth of a dropped-kerb ramp back from the kerb line, where it reaches the
+/// footway's full height.  The block plate stops short of it
+/// (`buildings::PLATE_UNDER_PAVING`), or it would show through the slope.
+pub(crate) const RAMP_DEPTH: f32 = 1.35;
 
 /// Station ranges where the kerb is dropped for a crossing, as `(from, to)`.
 fn dropped_kerb(
@@ -66,6 +70,7 @@ fn remaining(length: f32, cut: &[(f32, f32)]) -> Vec<(f32, f32)> {
 }
 
 pub(super) fn road_surface(
+    network: &Network,
     road: &Road,
     builder: &mut MeshBuilder,
     spec: &JunctionSpec,
@@ -163,7 +168,35 @@ pub(super) fn road_surface(
         return;
     }
     let cut = dropped_kerb(&surface, spec, road.crossing_start, road.crossing_end);
-    let footway = remaining(length, &cut);
+    // Near each junction the footway is laid round the junction's other
+    // carriageways, never over them: where two streets meet too acutely for
+    // their footways to part before the box, one footway would otherwise run
+    // out across the other street.
+    let mut near_start = super::road_near(network, road, true);
+    let mut near_end = super::road_near(network, road, false);
+    // A street shorter than its two junction zones is near both junctions
+    // all along.
+    if length < 2.0 * super::JUNCTION_ZONE_M {
+        let both: Vec<Vec<Vec2>> = near_start.iter().chain(&near_end).cloned().collect();
+        near_start = both.clone();
+        near_end = both;
+    }
+    let zone = super::JUNCTION_ZONE_M.min(length * 0.5);
+    let mut footway: Vec<(f32, f32, &[Vec<Vec2>])> = Vec::new();
+    for (from, to) in remaining(length, &cut) {
+        let edges = [
+            from,
+            zone.clamp(from, to),
+            (length - zone).clamp(from, to),
+            to,
+        ];
+        let clips: [&[Vec<Vec2>]; 3] = [&near_start, &[], &near_end];
+        for k in 0..3 {
+            if edges[k + 1] - edges[k] > 0.05 {
+                footway.push((edges[k], edges[k + 1], clips[k]));
+            }
+        }
+    }
     for side in [-1.0_f32, 1.0] {
         // The footway runs from the back of the kerb top; the kerb top from the
         // carriageway edge, exactly as round a junction corner.
@@ -171,8 +204,8 @@ pub(super) fn road_surface(
         let kerb_to = side * (half + KERB_TOP);
         let inner = kerb_to;
         let outer = side * (half + section.sidewalk_metres);
-        for (from, to) in &footway {
-            ribbon(
+        for (from, to, clips) in &footway {
+            super::ribbon_clipped(
                 builder,
                 "sidewalk",
                 &surface,
@@ -181,16 +214,16 @@ pub(super) fn road_surface(
                 *from,
                 *to,
                 super::level::KERB,
-                None,
                 super::Uvs::World,
+                clips,
             );
         }
         // Kerb: a capping ribbon plus its full-height face.  Drawn in the same
         // pieces as the footway, because a dropped kerb is a kerb that is *not
         // there* — left continuous it pokes through the ramp and the crossing
         // reads as a trip hazard modelled in concrete.
-        for (from, to) in &footway {
-            ribbon(
+        for (from, to, clips) in &footway {
+            super::ribbon_clipped(
                 builder,
                 "kerb",
                 &surface,
@@ -199,10 +232,10 @@ pub(super) fn road_surface(
                 *from,
                 *to,
                 super::level::KERB + 0.002,
-                None,
                 super::Uvs::None,
+                clips,
             );
-            sweep(
+            super::sweep_clipped(
                 builder,
                 "kerb",
                 &surface,
@@ -211,11 +244,34 @@ pub(super) fn road_surface(
                 *from,
                 *to,
                 super::level::KERB,
+                clips,
             );
         }
-        // And the ramp where the kerb is dropped, with its tactile strip.
+        // And the ramp where the kerb is dropped, with its tactile strip, and
+        // the footway behind the ramp at full height out to the back edge.
         for range in &cut {
-            kerb_ramp(builder, &surface, side, *range, spec);
+            // A crossing is always next to a junction: the nearer one's road.
+            let clips: &[Vec<Vec2>] = if range.0 < length - range.1 {
+                &near_start
+            } else {
+                &near_end
+            };
+            kerb_ramp(builder, &surface, side, *range, spec, clips);
+            let back = side * (half + RAMP_DEPTH);
+            if (outer - back) * side > 0.05 {
+                super::ribbon_clipped(
+                    builder,
+                    "sidewalk",
+                    &surface,
+                    back.min(outer),
+                    back.max(outer),
+                    range.0,
+                    range.1,
+                    super::level::KERB,
+                    super::Uvs::World,
+                    clips,
+                );
+            }
         }
     }
 
@@ -237,10 +293,11 @@ fn kerb_ramp(
     side: f32,
     (from, to): (f32, f32),
     spec: &JunctionSpec,
+    clips: &[Vec<Vec2>],
 ) {
     let half = surface.half;
     let kerb = side * half;
-    let back = side * (half + 1.35);
+    let back = side * (half + RAMP_DEPTH);
     let middle = (from + to) * 0.5;
     // Three longitudinal stations: flat kerb, dropped, flat kerb.
     let lo = (from + 0.4).min(middle - 0.2);
@@ -249,11 +306,26 @@ fn kerb_ramp(
         return;
     }
     let ground = super::level::ROAD + 0.02;
+    // A sloped quad that reaches another street's carriageway is cut back
+    // off it: that ground is the other street's.
+    let on_road = |points: &[Vec3]| {
+        let plan: Vec<Vec2> = points.iter().map(|p| Vec2::new(p.x, p.z)).collect();
+        clips.iter().any(|ring| {
+            plan.iter().any(|p| crate::math::point_in_ring(*p, ring))
+                || ring.iter().any(|p| crate::math::point_in_ring(*p, &plan))
+        })
+    };
     let quad = |builder: &mut MeshBuilder, s0: f32, y0: f32, s1: f32, y1: f32| {
         let a = surface.point(s0, kerb, y0);
         let b = surface.point(s0, back, super::level::KERB);
         let c = surface.point(s1, back, super::level::KERB);
         let d = surface.point(s1, kerb, y1);
+        if on_road(&[a, b, c, d]) {
+            // Cut, keeping the slope: each piece's height is read off the
+            // quad it came from.
+            super::quad_clipped(builder, "sidewalk", [a, b, c, d], clips);
+            return;
+        }
         builder.quad_uv(
             "sidewalk",
             a,
@@ -278,7 +350,7 @@ fn kerb_ramp(
     }
     let ribs = 6;
     // The warning surface itself, so the strip reads as one band from a car...
-    ribbon(
+    super::ribbon_clipped(
         builder,
         "kerb",
         surface,
@@ -287,14 +359,14 @@ fn kerb_ramp(
         start,
         end,
         super::level::TACTILE - 0.004,
-        None,
         super::Uvs::None,
+        clips,
     );
     // ... and the raised ribs on top of it, which is what a tactile paving
     // surface actually is and the only part of it visible from a moving car.
     for rib in 0..ribs {
         let offset = inner + (outer - inner) * (rib as f32 + 0.5) / ribs as f32;
-        ribbon(
+        super::ribbon_clipped(
             builder,
             "kerb",
             surface,
@@ -303,8 +375,8 @@ fn kerb_ramp(
             start,
             end,
             super::level::TACTILE,
-            None,
             super::Uvs::None,
+            clips,
         );
     }
 }
@@ -544,6 +616,10 @@ pub(super) fn junction_geometry(
     spec: &JunctionSpec,
 ) {
     let _ = spec;
+    if junction.ports.len() == 1 {
+        dead_end(builder, &junction.ports[0]);
+        return;
+    }
     if junction.ports.len() < 2 {
         return;
     }
@@ -551,7 +627,13 @@ pub(super) fn junction_geometry(
     // on is the corner patch drawn afterwards.  World UVs, so the box's asphalt
     // is the *same* asphalt as the approach it joins and the two do not read as
     // two materials meeting.
-    builder.ground_uv("asphalt", &junction.ring, super::level::ROAD, None);
+    // The region the ring encloses, every lobe of it: where two streets meet
+    // so acutely that the ring crosses itself, this is exactly the ground the
+    // footways are cut away from, so the two can never leave a gap between
+    // them.
+    for piece in crate::buildings::normalise(&junction.ring) {
+        builder.ground_uv("asphalt", &piece, super::level::ROAD, None);
+    }
     sweep_ring(builder, "asphalt.pavement", &junction.ring, 0.25);
 
     // Corner paving: everything between the kerb return and the back of the
@@ -585,22 +667,65 @@ fn corner_paving(builder: &mut MeshBuilder, junction: &Junction, corner: &crate:
     };
     let mut plan: Vec<Vec2> = kerb.clone();
     plan.extend(corner.walk.iter().rev().copied());
-    if crate::math::signed_area(&plan).abs() > 0.5 {
-        for [i, j, k] in crate::math::triangulate(&plan) {
-            let (a, b, c) = (plan[i], plan[j], plan[k]);
-            builder.tri_uv(
-                "sidewalk",
+    // Never over the road: where two streets meet so acutely that no kerb
+    // return fits between them, the paving's outline crosses itself and
+    // would spill into the box and up the approaches, so both are cut out
+    // of it.  Everywhere else this takes nothing.
+    let mut road: Vec<Vec<Vec2>> = vec![junction.ring.clone()];
+    for port in &junction.ports {
+        let back = -port.dir * 60.0;
+        road.push(vec![
+            port.left,
+            port.right,
+            port.right + back,
+            port.left + back,
+        ]);
+    }
+    for piece in crate::buildings::cut_away(plan, &road) {
+        if crate::math::signed_area(&piece).abs() <= 0.05 {
+            continue;
+        }
+        for [i, j, k] in crate::math::triangulate(&piece) {
+            let (a, b, c) = (piece[i], piece[j], piece[k]);
+            let (a3, b3, c3) = (
                 Vec3::from_plan(a, WALK_Y),
-                Vec3::from_plan(c, WALK_Y),
                 Vec3::from_plan(b, WALK_Y),
-                [(a.x, a.y), (c.x, c.y), (b.x, b.y)],
-                None,
+                Vec3::from_plan(c, WALK_Y),
             );
+            // Lit from above, whichever way the piece winds.
+            if crate::mesh::face_normal(a3, c3, b3).y >= 0.0 {
+                builder.tri_uv(
+                    "sidewalk",
+                    a3,
+                    c3,
+                    b3,
+                    [(a.x, a.y), (c.x, c.y), (b.x, b.y)],
+                    None,
+                );
+            } else {
+                builder.tri_uv(
+                    "sidewalk",
+                    a3,
+                    b3,
+                    c3,
+                    [(a.x, a.y), (b.x, b.y), (c.x, c.y)],
+                    None,
+                );
+            }
         }
     }
     for pair in kerb.windows(2) {
         let (p0, p1) = (pair[0], pair[1]);
         if p0.distance(p1) < 1.0e-3 {
+            continue;
+        }
+        // Where two streets meet too acutely for a kerb return, the kerb runs
+        // straight across the corner and over one street: none is laid there.
+        let probe = (p0 + p1) * 0.5 + outward(p0, p1) * 0.3;
+        if road[1..]
+            .iter()
+            .any(|ring| crate::math::point_in_ring(probe, ring))
+        {
             continue;
         }
         // The kerb face, toward the box...
@@ -620,6 +745,43 @@ fn corner_paving(builder: &mut MeshBuilder, junction: &Junction, corner: &crate:
             builder.quad("kerb", q[3], q[2], q[1], q[0], None);
         }
     }
+}
+
+/// The footway across the end of a dead-end street, and the kerb in front of
+/// it: the street ends at a kerb, and the footways either side run round the
+/// end and meet.
+pub(crate) fn dead_end_footway(port: &crate::network::Port) -> Option<[Vec2; 4]> {
+    let width = port.outer_left.distance(port.left);
+    if width < 0.5 {
+        return None;
+    }
+    let ahead = port.dir * width;
+    Some([
+        port.outer_left,
+        port.outer_right,
+        port.outer_right + ahead,
+        port.outer_left + ahead,
+    ])
+}
+
+fn dead_end(builder: &mut MeshBuilder, port: &crate::network::Port) {
+    let Some(band) = dead_end_footway(port) else {
+        return;
+    };
+    builder.ground_uv("sidewalk", &band, WALK_Y, None);
+    // The kerb along the street's end, facing back down the street, and its
+    // top; the footway band covers the two corners.
+    let ahead = port.dir * KERB_TOP;
+    for (a, b) in [(port.left, port.right), (port.right, port.left)] {
+        builder.wall("kerb", a, b, super::level::ROAD, WALK_Y, None);
+    }
+    let y = super::level::KERB + 0.002;
+    builder.ground_uv(
+        "kerb",
+        &[port.left, port.right, port.right + ahead, port.left + ahead],
+        y,
+        None,
+    );
 }
 
 /// The junction's own markings: the yellow no-stopping box on a large signalised

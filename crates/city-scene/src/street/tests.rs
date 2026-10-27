@@ -1006,3 +1006,385 @@ fn no_marking_is_emitted_outside_its_carriageway() {
         &offenders[..offenders.len().min(8)]
     );
 }
+
+/// A triangle in plan with its heights, and its material's index.
+type Tri = ([[f32; 3]; 3], usize);
+
+/// The top-most ground-level surface seen straight down, from built geometry.
+struct TopDown {
+    materials: Vec<String>,
+    /// Plan bins of anything more than a metre up (decks, ramps).
+    overhead: std::collections::HashMap<(i32, i32), Vec<[[f32; 3]; 3]>>,
+    /// (triangle in plan with heights, material index), binned by 4 m cell.
+    bins: std::collections::HashMap<(i32, i32), Vec<Tri>>,
+}
+
+impl TopDown {
+    const BIN: f32 = 4.0;
+
+    fn new(scene: &crate::mesh::SceneGeometry) -> Self {
+        let mut materials = Vec::new();
+        let mut bins: std::collections::HashMap<(i32, i32), Vec<Tri>> =
+            std::collections::HashMap::new();
+        let mut overhead: std::collections::HashMap<(i32, i32), Vec<[[f32; 3]; 3]>> =
+            std::collections::HashMap::new();
+        for group in &scene.meshes {
+            if group.instance_of.is_some() {
+                continue;
+            }
+            let ground = group.material.starts_with("asphalt")
+                || group.material.starts_with("marking.")
+                || matches!(
+                    group.material.as_str(),
+                    "sidewalk" | "kerb" | "median.plant" | "block.ground"
+                );
+            if !ground {
+                continue;
+            }
+            let index = materials.len();
+            materials.push(group.material.clone());
+            let p = &group.positions;
+            for tri in group.indices.chunks(3) {
+                let v: [[f32; 3]; 3] = std::array::from_fn(|k| {
+                    let i = tri[k] as usize * 3;
+                    [p[i], p[i + 1], p[i + 2]]
+                });
+                // Ground level only, and only faces that look up or down:
+                // kerb faces and deck soffits are not what the eye sees from
+                // above, and a viaduct overhead is not the street.
+                if v.iter().any(|q| q[1] > 1.0) {
+                    let (x0, x1) = (
+                        v.iter().map(|q| q[0]).fold(f32::MAX, f32::min),
+                        v.iter().map(|q| q[0]).fold(f32::MIN, f32::max),
+                    );
+                    let (z0, z1) = (
+                        v.iter().map(|q| q[2]).fold(f32::MAX, f32::min),
+                        v.iter().map(|q| q[2]).fold(f32::MIN, f32::max),
+                    );
+                    for bx in (x0 / Self::BIN).floor() as i32..=(x1 / Self::BIN).floor() as i32 {
+                        for bz in (z0 / Self::BIN).floor() as i32..=(z1 / Self::BIN).floor() as i32
+                        {
+                            overhead.entry((bx, bz)).or_default().push(v);
+                        }
+                    }
+                    continue;
+                }
+                let e1 = [v[1][0] - v[0][0], v[1][2] - v[0][2]];
+                let e2 = [v[2][0] - v[0][0], v[2][2] - v[0][2]];
+                if (e1[0] * e2[1] - e1[1] * e2[0]).abs() < 1.0e-6 {
+                    continue;
+                }
+                let (x0, x1) = (
+                    v.iter().map(|q| q[0]).fold(f32::MAX, f32::min),
+                    v.iter().map(|q| q[0]).fold(f32::MIN, f32::max),
+                );
+                let (z0, z1) = (
+                    v.iter().map(|q| q[2]).fold(f32::MAX, f32::min),
+                    v.iter().map(|q| q[2]).fold(f32::MIN, f32::max),
+                );
+                for bx in (x0 / Self::BIN).floor() as i32..=(x1 / Self::BIN).floor() as i32 {
+                    for bz in (z0 / Self::BIN).floor() as i32..=(z1 / Self::BIN).floor() as i32 {
+                        bins.entry((bx, bz)).or_default().push((v, index));
+                    }
+                }
+            }
+        }
+        Self {
+            materials,
+            overhead,
+            bins,
+        }
+    }
+
+    /// Is anything a metre or more up over `p`?  The street under a deck is
+    /// not what is seen from above, so it is not judged here.
+    fn covered(&self, p: Vec2) -> bool {
+        let key = (
+            (p.x / Self::BIN).floor() as i32,
+            (p.y / Self::BIN).floor() as i32,
+        );
+        self.overhead.get(&key).is_some_and(|tris| {
+            tris.iter().any(|v| {
+                let ring = [
+                    Vec2::new(v[0][0], v[0][2]),
+                    Vec2::new(v[1][0], v[1][2]),
+                    Vec2::new(v[2][0], v[2][2]),
+                ];
+                crate::math::point_in_ring(p, &ring)
+            })
+        })
+    }
+
+    /// The material seen from above at `p`, if anything is there.
+    fn top(&self, p: Vec2) -> Option<&str> {
+        let key = (
+            (p.x / Self::BIN).floor() as i32,
+            (p.y / Self::BIN).floor() as i32,
+        );
+        let mut best: Option<(f32, usize)> = None;
+        for (v, material) in self.bins.get(&key)? {
+            let (ax, az) = (v[0][0], v[0][2]);
+            let (bx, bz) = (v[1][0], v[1][2]);
+            let (cx, cz) = (v[2][0], v[2][2]);
+            let area = (bx - ax) * (cz - az) - (cx - ax) * (bz - az);
+            let w0 = ((bx - p.x) * (cz - p.y) - (cx - p.x) * (bz - p.y)) / area;
+            let w1 = ((cx - p.x) * (az - p.y) - (ax - p.x) * (cz - p.y)) / area;
+            let w2 = 1.0 - w0 - w1;
+            if w0 < -1.0e-4 || w1 < -1.0e-4 || w2 < -1.0e-4 {
+                continue;
+            }
+            let y = w0 * v[0][1] + w1 * v[1][1] + w2 * v[2][1];
+            if best.is_none_or(|(b, _)| y > b) {
+                best = Some((y, *material));
+            }
+        }
+        best.map(|(_, m)| self.materials[m].as_str())
+    }
+}
+
+fn distance_to_ring(p: Vec2, ring: &[Vec2]) -> f32 {
+    let mut closed = ring.to_vec();
+    closed.push(ring[0]);
+    crate::math::distance_to_polyline(p, &closed)
+}
+
+/// Grid points inside `ring` at least `margin` from its edge.
+fn inside_points(ring: &[Vec2], step: f32, margin: f32) -> Vec<Vec2> {
+    let (mut lo, mut hi) = (Vec2::new(f32::MAX, f32::MAX), Vec2::new(f32::MIN, f32::MIN));
+    for p in ring {
+        lo = Vec2::new(lo.x.min(p.x), lo.y.min(p.y));
+        hi = Vec2::new(hi.x.max(p.x), hi.y.max(p.y));
+    }
+    let mut out = Vec::new();
+    let mut x = lo.x + step * 0.5;
+    while x < hi.x {
+        let mut z = lo.y + step * 0.5;
+        while z < hi.y {
+            let p = Vec2::new(x, z);
+            if crate::math::point_in_ring(p, ring) && distance_to_ring(p, ring) > margin {
+                out.push(p);
+            }
+            z += step;
+        }
+        x += step;
+    }
+    out
+}
+
+#[test]
+fn every_junction_is_covered_by_the_surface_it_should_be() {
+    // Seen from straight above, a junction must read as one built surface:
+    // road inside the box and on every approach, footway on every corner and
+    // along every approach, and the block (or paving) right behind the
+    // footway.  Bare ground anywhere in that, or lawn drawn over the road,
+    // is a seam a viewer sees at once; every one is listed.
+    let road_ok = |m: &str| {
+        m.starts_with("asphalt") || m.starts_with("marking.") || m == "kerb" || m == "median.plant"
+    };
+    let walk_ok = |m: &str| m == "sidewalk" || m == "kerb" || m.starts_with("marking.");
+    let mut offenders: Vec<String> = Vec::new();
+    for (seed, radius_km) in [(42_u32, 0.5_f32), (1, 0.5), (7, 0.5), (42, 1.6)] {
+        let city = generate_modern_chinese_city(ModernChinaSpec {
+            seed,
+            radius_km,
+            block_size_metres: 110.0,
+            ..ModernChinaSpec::default()
+        });
+        let network = derive(
+            &city.nodes,
+            &city.sd_roads,
+            &city.hd_roads,
+            city.frame,
+            JunctionSpec::default(),
+            city.seed,
+        );
+        let mut builder = MeshBuilder::new();
+        build(&network, &mut builder, city.seed);
+        let streets = super::footprints(&network, crate::buildings::PLATE_UNDER_PAVING);
+        crate::buildings::build_among(
+            &city.blocks,
+            &[],
+            &[],
+            &[],
+            &[],
+            city.frame,
+            city.style,
+            &streets,
+            &mut builder,
+        );
+        let plates: Vec<Vec<Vec2>> = city
+            .blocks
+            .iter()
+            .map(|b| crate::buildings::ring_of(&b.boundary, city.frame))
+            .collect();
+        let top = TopDown::new(&builder.build());
+        let mut report = |what: &str, p: Vec2, found: Option<&str>| {
+            if top.covered(p) {
+                return;
+            }
+            offenders.push(format!(
+                "seed {seed} r {radius_km}: {what} shows {} at ({:.0}, {:.0})",
+                found.unwrap_or("bare ground"),
+                p.x,
+                p.y
+            ));
+        };
+        for junction in network.junctions.iter().filter(|j| j.ports.len() >= 3) {
+            let at_grade = junction.ports.iter().all(|port| {
+                network
+                    .road(port.road)
+                    .is_some_and(|road| road.layer == 0 && road.has_sidewalk())
+            });
+            if !at_grade || junction.roundabout {
+                continue;
+            }
+            // Every carriageway at this junction, and its box.
+            // As the scene fills them: every lobe of a ring that crosses itself.
+            let streets: Vec<Vec<Vec2>> = junction
+                .ports
+                .iter()
+                .filter_map(|port| network.road(port.road).map(|road| (road, port.at_start)))
+                .flat_map(|(road, at_start)| super::road_near(&network, road, at_start))
+                .flat_map(|ring| crate::buildings::normalise(&ring))
+                .collect();
+            let on_a_street = |p: Vec2| {
+                streets.iter().any(|ring| {
+                    crate::math::point_in_ring(p, ring) || distance_to_ring(p, ring) < 0.35
+                })
+            };
+            for p in inside_points(&junction.ring, 1.0, 0.4) {
+                let found = top.top(p);
+                if !found.is_some_and(road_ok) {
+                    report("the junction box", p, found);
+                }
+            }
+            for corner in &junction.corners {
+                let mut paving = corner.kerb.clone();
+                paving.extend(corner.walk.iter().rev().copied());
+                if crate::math::signed_area(&paving).abs() > 0.5 {
+                    for p in inside_points(&paving, 0.5, 0.35) {
+                        // Carriageway wins: where two streets meet so acutely
+                        // that the corner's outline reaches over one of them,
+                        // that ground is the street's.
+                        if on_a_street(p) {
+                            continue;
+                        }
+                        let found = top.top(p);
+                        if !found.is_some_and(walk_ok) {
+                            report("a corner's footway", p, found);
+                        }
+                    }
+                }
+                // Right behind the footway, where a block stands behind it.
+                if corner.rounds_block && corner.walk.len() > 3 {
+                    let kerb_mid = corner.kerb[corner.kerb.len() / 2];
+                    for pair in corner.walk.windows(2) {
+                        let mid = (pair[0] + pair[1]) * 0.5;
+                        let behind = (mid - kerb_mid).normalize();
+                        let probe = mid + behind * 0.6;
+                        if !plates
+                            .iter()
+                            .any(|ring| crate::math::point_in_ring(mid + behind * 3.0, ring))
+                        {
+                            continue;
+                        }
+                        let found = top.top(probe);
+                        if !found.is_some_and(|m| m == "block.ground" || walk_ok(m)) {
+                            report("behind a corner's footway", probe, found);
+                        }
+                    }
+                }
+            }
+            for port in &junction.ports {
+                let Some(road) = network.road(port.road) else {
+                    continue;
+                };
+                // The road the footway is cut round where it is drawn: this
+                // end's, and on a street shorter than two junction zones, the
+                // other end's too.
+                let mut near_rings = super::road_near(&network, road, port.at_start);
+                if road.carriageway.length() < 2.0 * super::JUNCTION_ZONE_M {
+                    near_rings.extend(super::road_near(&network, road, !port.at_start));
+                }
+                let near: Vec<Vec<Vec2>> = near_rings
+                    .iter()
+                    .flat_map(|ring| crate::buildings::normalise(ring))
+                    .collect();
+                let length = road.carriageway.length();
+                let reach = 30.0_f32.min(length * 0.5);
+                let half = road.half_width();
+                let walk = half + road.section.sidewalk_metres;
+                let mut s = 0.5;
+                while s < reach {
+                    let station = if port.at_start { s } else { length - s };
+                    let mut offset = -half + 0.4;
+                    while offset < half - 0.4 {
+                        let q = road.carriageway.offset_at(station, offset, 0.0);
+                        let p = Vec2::new(q.x, q.z);
+                        let found = top.top(p);
+                        if !found.is_some_and(road_ok) {
+                            report(
+                                &format!(
+                                    "an approach's carriageway [road {} start {}]",
+                                    road.id, port.at_start
+                                ),
+                                p,
+                                found,
+                            );
+                        }
+                        offset += 1.0;
+                    }
+                    for side in [-1.0_f32, 1.0] {
+                        let mut offset = half + 0.4;
+                        while offset < walk - 0.3 {
+                            let q = road.carriageway.offset_at(station, side * offset, 0.0);
+                            let p = Vec2::new(q.x, q.z);
+                            if near.iter().any(|ring| {
+                                distance_to_ring(p, ring) < 0.35
+                                    || crate::math::point_in_ring(p, ring)
+                            }) {
+                                offset += 0.7;
+                                continue;
+                            }
+                            let found = top.top(p);
+                            if !found.is_some_and(walk_ok) {
+                                report(
+                                    &format!(
+                                        "an approach's footway [road {} start {}]",
+                                        road.id, port.at_start
+                                    ),
+                                    p,
+                                    found,
+                                );
+                            }
+                            offset += 0.7;
+                        }
+                    }
+                    s += 2.0;
+                }
+            }
+        }
+    }
+    offenders.sort();
+    offenders.dedup();
+    // Grouped by what went wrong where, each with one place to look.
+    let mut groups: std::collections::BTreeMap<String, (usize, String)> =
+        std::collections::BTreeMap::new();
+    for line in &offenders {
+        let (kind, place) = line.rsplit_once(" at ").unwrap_or((line, ""));
+        let entry = groups
+            .entry(kind.to_string())
+            .or_insert((0, place.to_string()));
+        entry.0 += 1;
+    }
+    let summary: Vec<String> = groups
+        .iter()
+        .map(|(kind, (count, place))| format!("{count:>5} × {kind} (e.g. at {place})"))
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "{} points of junctions are not the surface they should be:\n{}",
+        offenders.len(),
+        summary.join("\n")
+    );
+}

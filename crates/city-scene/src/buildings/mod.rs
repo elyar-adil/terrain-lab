@@ -407,6 +407,122 @@ pub(crate) fn ring_of(footprint: &[Point], frame: CityFrameInfo) -> Vec<Vec2> {
         .collect()
 }
 
+/// `plate` with the streets' ground cut out of it ([`crate::street::footprints`]),
+/// as rings without holes, ready to triangulate.  The plate is grown first,
+/// so the cut and nothing else decides where it meets a street: the plan's
+/// plate can stop a metre short of a footway that bows off the line its
+/// block was cut along, and terrain would show in the seam.
+pub fn cut_streets(plate: Vec<Vec2>, streets: &[Vec<Vec2>]) -> Vec<Vec<Vec2>> {
+    use i_overlay::mesh::float::outline::offset::OutlineOffset;
+    use i_overlay::mesh::float::style::{LineJoin, OutlineStyle};
+    if streets.is_empty() {
+        return vec![plate];
+    }
+    let subject: Vec<[f32; 2]> = plate.iter().map(|p| [p.x, p.y]).collect();
+    let style = OutlineStyle::new(PLATE_GROWTH).line_join(LineJoin::Bevel);
+    let grown = vec![subject].outline(&style);
+    let outer = match grown
+        .into_iter()
+        .next()
+        .and_then(|shape| shape.into_iter().next())
+    {
+        Some(ring) if ring.len() >= 3 => ring.iter().map(|p| Vec2::new(p[0], p[1])).collect(),
+        _ => plate,
+    };
+    cut_away(outer, streets)
+}
+
+/// The region a ring encloses, counting every lobe of a ring that crosses
+/// itself (non-zero), as rings without holes: what the same ring encloses
+/// when it is used to cut ([`cut_away`]).
+pub fn normalise(ring: &[Vec2]) -> Vec<Vec<Vec2>> {
+    use i_overlay::core::fill_rule::FillRule;
+    use i_overlay::core::overlay_rule::OverlayRule;
+    use i_overlay::float::single::SingleFloatOverlay;
+    if ring.len() < 3 {
+        return Vec::new();
+    }
+    let subject: Vec<[f32; 2]> = ring.iter().map(|p| [p.x, p.y]).collect();
+    let none: Vec<[f32; 2]> = Vec::new();
+    let mut out = Vec::new();
+    for shape in vec![subject].overlay(&none, OverlayRule::Subject, FillRule::NonZero) {
+        hole_free(shape, 0, &mut out);
+    }
+    out
+}
+
+/// `subject` with every ring of `clips` that reaches it cut out, as rings
+/// without holes.
+pub fn cut_away(subject: Vec<Vec2>, clips: &[Vec<Vec2>]) -> Vec<Vec<Vec2>> {
+    use i_overlay::core::fill_rule::FillRule;
+    use i_overlay::core::overlay_rule::OverlayRule;
+    use i_overlay::float::single::SingleFloatOverlay;
+    let bounds = |ring: &[Vec2]| {
+        ring.iter().fold(
+            (f32::MAX, f32::MAX, f32::MIN, f32::MIN),
+            |(x0, z0, x1, z1), p| (x0.min(p.x), z0.min(p.y), x1.max(p.x), z1.max(p.y)),
+        )
+    };
+    let (x0, z0, x1, z1) = bounds(&subject);
+    // One ring at a time: a ring that crosses itself (a footway outline
+    // pulled in round a tight corner) has lobes wound both ways, and cut in
+    // one pass with its neighbours a lobe would cancel the ring it overlaps.
+    // On its own, every lobe counts as inside.
+    let mut shapes: Vec<Vec<Vec<[f32; 2]>>> =
+        vec![vec![subject.iter().map(|p| [p.x, p.y]).collect()]];
+    for ring in clips.iter().filter(|ring| {
+        let (a0, b0, a1, b1) = bounds(ring);
+        ring.len() >= 3 && a0 <= x1 && a1 >= x0 && b0 <= z1 && b1 >= z0
+    }) {
+        let clip: Vec<[f32; 2]> = ring.iter().map(|p| [p.x, p.y]).collect();
+        shapes = shapes
+            .into_iter()
+            .flat_map(|shape| shape.overlay(&clip, OverlayRule::Difference, FillRule::NonZero))
+            .collect();
+        if shapes.is_empty() {
+            break;
+        }
+    }
+    let mut out = Vec::new();
+    for shape in shapes {
+        hole_free(shape, 0, &mut out);
+    }
+    out
+}
+
+/// A shape (outer contour and holes) as rings without holes: a shape with a
+/// hole is cut in two through the hole, and each half again, until none has.
+fn hole_free(shape: Vec<Vec<[f32; 2]>>, depth: usize, out: &mut Vec<Vec<Vec2>>) {
+    use i_overlay::core::fill_rule::FillRule;
+    use i_overlay::core::overlay_rule::OverlayRule;
+    use i_overlay::float::single::SingleFloatOverlay;
+    let ring = |c: &Vec<[f32; 2]>| {
+        c.iter()
+            .map(|p| Vec2::new(p[0], p[1]))
+            .collect::<Vec<Vec2>>()
+    };
+    if shape.len() <= 1 || depth > 8 {
+        if let Some(outer) = shape.first() {
+            out.push(ring(outer));
+        }
+        return;
+    }
+    let hole = &shape[1];
+    let cx = hole.iter().map(|p| p[0]).sum::<f32>() / hole.len() as f32;
+    let (lo, hi) = shape[0]
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p[1]), b.max(p[1])));
+    let (left, right) = shape[0]
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p[0]), b.max(p[0])));
+    for (a, b) in [(left - 1.0, cx), (cx, right + 1.0)] {
+        let half = vec![[a, lo - 1.0], [b, lo - 1.0], [b, hi + 1.0], [a, hi + 1.0]];
+        for piece in shape.overlay(&[half], OverlayRule::Intersect, FillRule::NonZero) {
+            hole_free(piece, depth + 1, out);
+        }
+    }
+}
+
 /// Build every static surface of a city that stands on the ground.
 pub fn build(
     blocks: &[UrbanBlock],
@@ -416,6 +532,44 @@ pub fn build(
     fields: &[urban::Field],
     frame: CityFrameInfo,
     style: CityStyle,
+    builder: &mut MeshBuilder,
+) -> FacadeTable {
+    build_among(
+        blocks,
+        parcels,
+        buildings,
+        compounds,
+        fields,
+        frame,
+        style,
+        &[],
+        builder,
+    )
+}
+
+/// How far a block plate runs on under the footway beside it: far enough that
+/// no seam opens where they meet, not so far that it reaches the dropped-kerb
+/// ramp at a crossing (it would show through the slope).  The narrowest
+/// footway is 2 m and a ramp 1.35 m deep, so half a metre.
+pub const PLATE_UNDER_PAVING: f32 = 0.5;
+/// How far a plate is grown before the streets are cut out of it, so it
+/// reaches every footway beside it (`cut_streets`).  Less than the 4 m a
+/// block keeps from a river bank, so it never reaches the water.
+const PLATE_GROWTH: f32 = 2.5;
+
+/// [`build`], with the ground the streets take ([`crate::street::footprints`]):
+/// each block plate has it cut out.  The plate sits above the carriageway, so
+/// a plate left over a street shows as lawn on the road.
+#[allow(clippy::too_many_arguments)]
+pub fn build_among(
+    blocks: &[UrbanBlock],
+    parcels: &[Parcel],
+    buildings: &[ModernBuilding],
+    compounds: &[Compound],
+    fields: &[urban::Field],
+    frame: CityFrameInfo,
+    style: CityStyle,
+    streets: &[Vec<Vec2>],
     builder: &mut MeshBuilder,
 ) -> FacadeTable {
     declare(builder);
@@ -431,7 +585,11 @@ pub fn build(
         if signed_area(&plate) < 0.0 {
             plate.reverse();
         }
-        builder.ground_uv("block.ground", &plate, level::BLOCK, None);
+        for piece in cut_streets(plate, streets) {
+            if piece.len() >= 3 && signed_area(&piece).abs() > 1.0 {
+                builder.ground_uv("block.ground", &piece, level::BLOCK, None);
+            }
+        }
     }
     let mut on_parcel: std::collections::HashMap<u32, Vec<&ModernBuilding>> =
         std::collections::HashMap::new();
@@ -1535,7 +1693,10 @@ mod tests {
     /// drawn (mitred, so a block whose outline bends inward keeps its plate)
     /// and a street's own bends were rounded before the blocks are cut: the
     /// plates and the land they leave changed, not the buildings' rules.
-    const WESTERN_MIXED_LAYER_HASH: u64 = 16_912_480_529_014_877_814;
+    /// And again when the plates were grown and then cut by the streets'
+    /// own footprints (junctions, kerb returns and closed dead ends
+    /// included), so no plate edge is left showing over a footway or road.
+    const WESTERN_MIXED_LAYER_HASH: u64 = 12_559_913_892_972_588_293;
 
     #[test]
     fn western_mixed_building_layer_is_bit_identical() {

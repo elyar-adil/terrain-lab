@@ -154,6 +154,11 @@ pub struct Corner {
     /// The back of the footway round the corner, from this port's right
     /// footway corner to the next port's left one.
     pub walk: Vec<Vec2>,
+    /// The corner turns toward the block behind it (a kerb return, or a
+    /// roundabout's circle), so that block's corner is rounded off along
+    /// `walk`.  An open corner (streets in line, or the outside of a bend)
+    /// leaves the block as it is.
+    pub rounds_block: bool,
 }
 
 /// A road with its cross-section resolved and both ends trimmed back to the
@@ -425,6 +430,26 @@ pub fn derive(
     for (index, list) in incidence.iter().enumerate() {
         if air[index] {
             radius[index] = AIR_GAP_M;
+            continue;
+        }
+        if list.len() == 1 {
+            // A dead end that the plan left running into another street (a
+            // street cut short, its end not moved off the road it was cut
+            // from) stops behind that street's footway instead.
+            if let Some(trim) =
+                dead_end_clearance(index, list[0], &local, &sd_by_id, &hd_by_id, frame)
+            {
+                trims.insert(
+                    (
+                        list[0],
+                        sd_by_id
+                            .get(&list[0])
+                            .is_some_and(|r| r.from as usize == index),
+                    ),
+                    trim,
+                );
+                radius[index] = trim;
+            }
             continue;
         }
         if list.len() < 2 {
@@ -1169,11 +1194,15 @@ pub fn derive(
         }
         ports.sort_by(|a, b| a.angle.total_cmp(&b.angle));
 
-        // A ramp terminal is signalised, never a roundabout.
+        // A ramp terminal is signalised, never a roundabout.  Roundabouts are
+        // about 1% of junctions in the OSM statistics of section 7 of
+        // `docs/city-visual-target.md`; until their approaches stop short of
+        // the circle (crossings, stop lines and waiting boxes are still laid
+        // inside it), none is built.
         let roundabout =
             ports.len() >= 4 && radius[node_index] > 14.0 && !control[node_index].terminal && {
                 rng.fork(node);
-                rng.chance(0.20)
+                rng.chance(ROUNDABOUT_SHARE)
             };
         let return_radius = |road: u32| {
             network
@@ -1209,6 +1238,7 @@ pub fn derive(
                 corners.push(Corner {
                     kerb: arc(port.right, next.left),
                     walk: arc(port.outer_right, next.outer_left),
+                    rounds_block: true,
                 });
                 continue;
             }
@@ -1226,7 +1256,13 @@ pub fn derive(
                 next.dir,
                 (r - walk_width).max(0.0),
             );
-            corners.push(Corner { kerb, walk });
+            let rounds_block =
+                crate::corner::gap(-port.dir, -next.dir) < std::f32::consts::PI - 0.03;
+            corners.push(Corner {
+                kerb,
+                walk,
+                rounds_block,
+            });
         }
         let mut ring: Vec<Vec2> = Vec::new();
         let mut walk_ring: Vec<Vec2> = Vec::new();
@@ -1297,6 +1333,75 @@ pub(crate) fn class_rank(class: ModernRoadClass) -> u8 {
         ModernRoadClass::Local => 3,
     }
 }
+
+/// How far back a dead end at `node` must stop to clear every other at-grade
+/// street's carriageway and footway, if its end is inside one.
+fn dead_end_clearance(
+    node: usize,
+    road: u32,
+    local: &[Vec2],
+    sd_by_id: &HashMap<u32, &SdRoad>,
+    hd_by_id: &HashMap<u32, &HdRoad>,
+    frame: CityFrameInfo,
+) -> Option<f32> {
+    let (sd, hd) = (sd_by_id.get(&road)?, hd_by_id.get(&road)?);
+    let plan = |road: &HdRoad| -> Vec<Vec2> {
+        road.centreline
+            .iter()
+            .map(|p| {
+                let [x, z] = frame.to_local(*p);
+                Vec2::new(x, z)
+            })
+            .collect()
+    };
+    let mut own = plan(hd);
+    if sd.from as usize != node {
+        own.reverse();
+    }
+    let others: Vec<(Vec<Vec2>, f32)> = hd_by_id
+        .values()
+        .filter(|other| other.id != road && other.layer == 0 && other.centreline.len() >= 2)
+        .map(|other| {
+            let section = other.cross_section();
+            (
+                plan(other),
+                section.half_width() + section.sidewalk_metres + 0.5,
+            )
+        })
+        .filter(|(line, reach)| crate::math::distance_to_polyline(local[node], line) < *reach)
+        .collect();
+    if others.is_empty() {
+        return None;
+    }
+    let path = Path::flat(own);
+    let length = path.length();
+    let own_section = hd.cross_section();
+    let own_reach = own_section.half_width() + own_section.sidewalk_metres;
+    // A dead end needs only a few metres of street left: it may be trimmed
+    // back as far as that to get clear, across its whole width.
+    let limit = (length - 6.0).max(0.0);
+    let mut station = 0.0;
+    while station < limit {
+        let (centre, across) = (
+            path.plan_at(station),
+            path.tangent_at(station).left_normal(),
+        );
+        let clear = [-1.0_f32, 0.0, 1.0].iter().all(|side| {
+            let p = centre + across * (side * own_reach);
+            others
+                .iter()
+                .all(|(line, reach)| crate::math::distance_to_polyline(p, line) >= *reach)
+        });
+        if clear {
+            return Some(station);
+        }
+        station += 1.0;
+    }
+    Some(limit)
+}
+
+/// Share of eligible junctions built as roundabouts (see `derive`).
+const ROUNDABOUT_SHARE: f32 = 0.0;
 
 /// Length over which a ramp peels away from the deck edge, metres.
 const RAMP_PEEL_M: f32 = 140.0;
