@@ -8,7 +8,7 @@
 
 use urban::ModernRoadClass;
 
-use crate::math::{Path, Vec2, Vec3};
+use crate::math::{Path, Vec2};
 use crate::mesh::MeshBuilder;
 use crate::network::{Lane, LaneUse, Network, Road};
 use crate::spec::{ARROW_LENGTH_MM, JunctionSpec, Movement};
@@ -398,37 +398,17 @@ pub(super) fn road_markings(
         );
     }
 
-    // Left-turn waiting box, drawn only where an innermost lane really turns
-    // left and has company in the same direction.
+    // Left-turn waiting box, in front of a lane that only turns left at a
+    // signalised junction (see `waiting_box_lane`).
     for at_start in [true, false] {
         let node = if at_start {
             road.from_node
         } else {
             road.to_node
         };
-        let direction = if at_start { -1_i8 } else { 1_i8 };
-        let Some(lane) = network.lanes.iter().find(|lane| {
-            lane.road == road.id
-                && lane.to_node == node
-                && lane.direction == direction
-                && lane.index == 0
-        }) else {
-            continue;
-        };
-        if !lane.allowed.contains(&Movement::Left) {
-            continue;
+        if let Some(lane) = waiting_box_lane(network, road, node) {
+            waiting_box(network, builder, spec, lane);
         }
-        let companions = network
-            .lanes
-            .iter()
-            .filter(|other| {
-                other.road == road.id && other.to_node == node && other.direction == direction
-            })
-            .count();
-        if companions < 2 {
-            continue;
-        }
-        waiting_box(road, builder, spec, lane);
     }
 
     // Design-spec drive arrows, one per motor lane, placed clear of the
@@ -449,98 +429,128 @@ pub(super) fn road_markings(
 /// Does any approach into `node` get a left-turn waiting box?  The box owns the
 /// ground it stands on, so a junction with one never also gets a hatched grid.
 pub(super) fn node_has_waiting_box(network: &Network, node: u32) -> bool {
-    network.lanes.iter().any(|lane| {
-        lane.to_node == node
+    network
+        .roads
+        .iter()
+        .filter(|road| road.from_node == node || road.to_node == node)
+        .any(|road| waiting_box_lane(network, road, node).is_some())
+}
+
+/// The lane of `road` arriving at `node` that gets a left-turn waiting box: a
+/// lane that turns left and nothing else, at a signalised junction, where the
+/// left turn waits for the oncoming straight flow (GB 5768.3 §4.6). A lane
+/// that may also go straight cannot wait in a box for a left turn, and a
+/// roundabout or a priority junction has no left-turn phase to wait for.
+pub(super) fn waiting_box_lane<'a>(
+    network: &'a Network,
+    road: &Road,
+    node: u32,
+) -> Option<&'a Lane> {
+    let signalised = network
+        .junctions
+        .iter()
+        .find(|junction| junction.node == node)
+        .is_some_and(|junction| {
+            junction.kind == urban::JunctionKind::Signalized && !junction.roundabout
+        });
+    if !signalised {
+        return None;
+    }
+    network.lanes.iter().find(|lane| {
+        lane.road == road.id
+            && lane.to_node == node
             && lane.index == 0
-            && lane.allowed.contains(&Movement::Left)
-            && network
-                .lanes
-                .iter()
-                .filter(|o| {
-                    o.road == lane.road && o.to_node == node && o.direction == lane.direction
-                })
-                .count()
-                >= 2
+            && lane.use_kind != LaneUse::Bike
+            && lane.allowed == [Movement::Left]
     })
 }
 
-/// The left-turn waiting box (左转待转区).
+/// The left-turn waiting box (左转弯待转区线, GB 5768.3 §4.6, figure 9).
 ///
-/// The source kernel's box runs from the stop line — `stopLineGap` = 5.2 m back
-/// from the junction edge — to `waitingBox.depth` = 11 m *past* that edge,
-/// inside the junction, where a green-but-not-enough driver waits for the
-/// oncoming straight flow.  Two things the previous version got wrong:
-///
-/// * it put both ends of the box on the *approach* side, so the 11 m of paint
-///   sat in the queueing lane instead of in the box;
-/// * its lateral span was anchored on the lane centre plus a longitudinal
-///   sign, which shifted the box half a lane out of the lane it belongs to.
-///
-/// The box is laid out on the lane's own path, extended one box length past
-/// the junction edge because [`crate::math::Path::sample`] clamps to a path's
-/// ends and a clamped cap would sit on the kerb line.  The two dashed side
-/// lines hug the innermost lane's edges 200 mm inside, exactly as the kernel's
-/// `median/2 + 0.2 .. median/2 + laneWidth - 0.2` span does, and the single
-/// transverse cap closes the deep end; the mouth of the box is closed by the
-/// road's own stop line, which is precisely at the box's near edge.
+/// A lane that turns left at a signal moves into the junction while the
+/// straight traffic beside it has green, and waits there for its own phase.
+/// The box starts at the junction edge, just past the crossing, and follows
+/// the lane's own left turn, so it curves to the left the way the cars in it
+/// will; it reaches no more than two fifths of the way round the turn, short
+/// of the oncoming straight flow. Its sides are white dashes (500 mm on,
+/// 500 mm off, 150 mm wide), its front end a solid line, and a left-turn
+/// arrow stands in it: the 2009 standard replaced the box's painted words by
+/// the arrow.
 pub(super) fn waiting_box(
-    road: &Road,
+    network: &Network,
     builder: &mut MeshBuilder,
     spec: &JunctionSpec,
     lane: &Lane,
 ) {
-    // An inbound lane's path always *ends* at the junction edge, so the box's
-    // cap is a station past that end, on a short straight extension.
-    let length = lane.path.length();
-    let (end, tangent) = lane.path.sample(length);
-    let end_plan = Vec2::new(end.x, end.z);
-    let extension = spec.waiting_box.depth + 1.0;
-    let mut points = lane.path.points().to_vec();
-    points.push(Vec3::from_plan(
-        end_plan + tangent * (extension * 0.5),
-        super::level::ROAD,
-    ));
-    points.push(Vec3::from_plan(
-        end_plan + tangent * extension,
-        super::level::ROAD,
-    ));
-    let mut surface = Carriageway::on_path(Path::new(points), road.section.half_width());
-    // The box is inside the junction, where the crown has already flattened out.
-    surface.rise = 0.0;
-    let edge = length;
-    let stop = edge - spec.stop_line_gap;
-    let cap = edge + spec.waiting_box.depth;
-    if (stop - cap).abs() < 0.5 {
+    let Some(turn) = network
+        .connectors
+        .iter()
+        .find(|c| c.from_lane == lane.id && c.movement == Movement::Left)
+    else {
+        return;
+    };
+    let depth = spec.waiting_box.depth.min(turn.path.length() * 0.4);
+    if depth < 4.0 {
         return;
     }
-    // The two side lines hug the innermost lane: 200 mm inside each lane edge,
-    // on whichever side of the centreline this carriageway runs.
-    let lane_width = road.section.motor_lane_width;
-    let side = lane.direction as f32;
-    let median_edge = lane.offset - side * (lane_width * 0.5 - 0.2);
-    let kerb_edge = lane.offset + side * (lane_width * 0.5 - 0.2);
-    for edge_offset in [median_edge, kerb_edge] {
-        stripe(
-            builder,
-            "marking.white",
-            &surface,
-            edge_offset,
-            stop,
-            cap,
-            0.12,
-        );
+    let mut surface = Carriageway::on_path(turn.path.clone(), lane.width * 0.5);
+    // Inside the junction the crown has flattened out.
+    surface.rise = 0.0;
+    let half = lane.width * 0.5 - 0.1;
+    const DASH: f32 = 0.5;
+    const LINE: f32 = 0.15;
+    for side in [-1.0_f32, 1.0] {
+        let mut at = 0.0;
+        while at + DASH <= depth {
+            stripe(
+                builder,
+                "marking.white",
+                &surface,
+                side * half,
+                at,
+                at + DASH,
+                LINE,
+            );
+            at += 2.0 * DASH;
+        }
     }
-    // The deep-end cap: transverse, 300 mm deep, spanning the whole box.
     transverse_stripe(
         builder,
         "marking.white",
         &surface,
-        median_edge.min(kerb_edge),
-        median_edge.max(kerb_edge),
-        cap - 0.15,
-        cap + 0.15,
+        -half - LINE * 0.5,
+        half + LINE * 0.5,
+        depth - spec.stop_line_width,
+        depth,
         super::level::PAINT,
     );
+    // The arrow, in the middle of the box, turned with it.
+    let length = spec.arrow.footprint.min(depth - 1.5);
+    if length < 2.4 {
+        return;
+    }
+    let scale = length / ARROW_LENGTH_MM;
+    let tail = (depth - length) * 0.5;
+    for outline in crate::spec::arrow_polygons(&[Movement::Left]) {
+        if outline.len() < 3 {
+            continue;
+        }
+        let ring: Vec<Vec2> = outline
+            .iter()
+            .map(|(lateral, forward)| Vec2::new(lateral * scale, forward * scale))
+            .collect();
+        for [i, j, k] in crate::math::triangulate(&ring) {
+            let point = |index: usize| {
+                let (lateral, forward) = outline[index];
+                surface.point(
+                    tail + forward * scale,
+                    lateral * scale,
+                    super::level::PAINT + 0.002,
+                )
+            };
+            builder.tri_flat("marking.white", point(i), point(j), point(k), None);
+        }
+    }
 }
 
 fn motorway_markings(

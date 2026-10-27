@@ -5,9 +5,9 @@
 use super::{Carriageway, build, declare};
 use crate::math::{Path, Vec2};
 use crate::mesh::MeshBuilder;
-use crate::network::{Lane, LaneUse, Network, Road, derive};
+use crate::network::{Lane, LaneUse, Network, derive};
 use crate::spec::{ARROW_LENGTH_MM, JunctionSpec, MM, Movement};
-use urban::{ModernChinaSpec, ModernRoadClass, cross_section, generate_modern_chinese_city};
+use urban::{ModernChinaSpec, ModernRoadClass, generate_modern_chinese_city};
 
 use super::markings::{approaches, crosswalk_band, dashed_stripe, drive_arrow, waiting_box};
 use super::signals::signal_axis;
@@ -783,101 +783,106 @@ fn a_signal_housing_hangs_inside_the_gb_14886_window() {
 }
 
 #[test]
-fn a_waiting_box_straddles_the_junction_edge() {
-    // The kernel's box runs from the stop line, 5.2 m back from the junction
-    // edge, to 11 m *past* the edge, inside the box — and its side lines hug
-    // the innermost lane.  Asserted from built paint on a trimmed arterial.
-    let spec = JunctionSpec::default();
-    let section = cross_section(ModernRoadClass::Arterial);
-    let centreline = Path::flat(vec![Vec2::new(0.0, 0.0), Vec2::new(120.0, 0.0)]);
-    let road = Road {
-        id: 7,
-        class: ModernRoadClass::Arterial,
-        section,
-        from_node: 1,
-        to_node: 2,
-        layer: 0,
-        bridge: false,
-        oneway: false,
-        centreline: centreline.clone(),
-        carriageway: centreline.trim(14.0, 106.0),
-        trim_start: 14.0,
-        trim_end: 14.0,
-        deck_thickness: 0.25,
-        deck_height: 0.0,
-        max_grade: 0.0,
-        crossing_start: true,
-        crossing_end: true,
-        marking_start: 7.0,
-        marking_end: 7.0,
-        lane_ids: Vec::new(),
-        widen: Default::default(),
-    };
-    // The innermost inbound lane, offset exactly as the network derives it.
-    let count = section.motor_lanes_per_direction;
-    let offset = section.lane_offset(1, count - 1);
-    let lane = Lane {
-        id: "road/7/lane/f/0".into(),
-        road: 7,
-        index: 0,
-        direction: 1,
-        width: section.motor_lane_width,
-        offset,
-        use_kind: LaneUse::LeftTurn,
-        path: Path::flat(vec![Vec2::new(14.0, 0.0), Vec2::new(106.0, 0.0)]),
-        from_node: 1,
-        to_node: 2,
-        allowed: vec![Movement::Left],
-        successors: Vec::new(),
-        predecessors: Vec::new(),
-    };
-    let mut builder = MeshBuilder::new();
-    declare(&mut builder);
-    waiting_box(&road, &mut builder, &spec, &lane);
-    let scene = builder.build();
-    let group = scene
-        .meshes
-        .iter()
-        .find(|group| group.material == "marking.white")
-        .expect("the waiting box is white paint");
-    let mut min_x = f32::MAX;
-    let mut max_x = f32::MIN;
-    let mut min_z = f32::MAX;
-    let mut max_z = f32::MIN;
-    for chunk in group.positions.chunks(3) {
-        min_x = min_x.min(chunk[0]);
-        max_x = max_x.max(chunk[0]);
-        min_z = min_z.min(chunk[2]);
-        max_z = max_z.max(chunk[2]);
+fn a_waiting_box_starts_at_the_junction_edge_and_curves_with_the_left_turn() {
+    // GB 5768.3 §4.6, figure 9: the box is in front of a left-turn-only lane
+    // at a signal, starts just past the crossing at the junction edge, and
+    // follows the lane's left turn into the junction, short of the oncoming
+    // flow. Asserted from built paint, box by box, on a whole test city.
+    let city = generate_modern_chinese_city(ModernChinaSpec {
+        seed: 42,
+        radius_km: 1.6,
+        block_size_metres: 110.0,
+        ..ModernChinaSpec::default()
+    });
+    let network = derive(
+        &city.nodes,
+        &city.sd_roads,
+        &city.hd_roads,
+        city.frame,
+        JunctionSpec::default(),
+        city.seed,
+    );
+    let spec = network.spec;
+    let mut boxes = 0;
+    let mut curved = 0;
+    for road in &network.roads {
+        for node in [road.from_node, road.to_node] {
+            let Some(lane) = super::markings::waiting_box_lane(&network, road, node) else {
+                continue;
+            };
+            let junction = network.junctions.iter().find(|j| j.node == node).unwrap();
+            assert_eq!(junction.kind, urban::JunctionKind::Signalized);
+            assert!(!junction.roundabout, "a waiting box at roundabout {node}");
+            let turn = network
+                .connectors
+                .iter()
+                .find(|c| c.from_lane == lane.id && c.movement == Movement::Left)
+                .expect("a left-turn lane has its left turn");
+            let mut builder = MeshBuilder::new();
+            declare(&mut builder);
+            waiting_box(&network, &mut builder, &spec, lane);
+            let scene = builder.build();
+            let Some(group) = scene.meshes.iter().find(|g| g.material == "marking.white") else {
+                continue; // a turn too short for a box
+            };
+            boxes += 1;
+            let plan: Vec<Vec2> = turn
+                .path
+                .points()
+                .iter()
+                .map(|p| Vec2::new(p.x, p.z))
+                .collect();
+            let start = plan[0];
+            let into = turn.path.tangent_at(0.01);
+            let depth = spec.waiting_box.depth.min(turn.path.length() * 0.4);
+            let mut furthest = 0.0_f32;
+            for chunk in group.positions.chunks(3) {
+                let p = Vec2::new(chunk[0], chunk[2]);
+                // Never up the approach, over the crossing or the stop line.
+                assert!(
+                    (p - start).dot(into) > -0.3,
+                    "road {} node {node}: box paint {:.1} m up the approach",
+                    road.id,
+                    -(p - start).dot(into)
+                );
+                // Within the lane's width of its own turn.
+                let off = crate::math::distance_to_polyline(p, &plan);
+                assert!(
+                    off <= lane.width * 0.5 + 0.2,
+                    "road {} node {node}: box paint {off:.2} m off the turn",
+                    road.id
+                );
+                furthest = furthest.max(p.distance(start));
+            }
+            assert!(
+                furthest <= depth + 0.5,
+                "road {}: the box runs {furthest:.1} m",
+                road.id
+            );
+            // It turns with the left turn: the front end does not face straight on.
+            // The same way round as the whole turn, and visibly.
+            let front = turn.path.tangent_at(depth);
+            let exit = turn.path.tangent_at(turn.path.length() - 0.01);
+            let bend = into.cross(front);
+            if bend.abs() > 0.05 {
+                curved += 1;
+            }
+            assert!(
+                bend.abs() < 0.01 || bend.signum() == into.cross(exit).signum(),
+                "road {} node {node}: the box does not curve with the turn \
+                 (bend {bend:.3}, turn {:.3}, depth {depth:.1} of {:.1} m)",
+                road.id,
+                into.cross(exit),
+                turn.path.length()
+            );
+        }
     }
-    let edge = 106.0;
-    // The near end is the stop line, 5.2 m up the approach...
+    assert!(boxes >= 4, "only {boxes} waiting boxes in the test city");
+    // A gentle turn across a wide junction is nearly straight for its first
+    // few metres; most are not.
     assert!(
-        (min_x - (edge - spec.stop_line_gap)).abs() < 0.05,
-        "the box starts at x={min_x}, expected the stop line at {}",
-        edge - spec.stop_line_gap
-    );
-    // ... and the cap is the 11 m depth *into* the junction, plus its own
-    // 300 mm.
-    assert!(
-        (max_x - (edge + spec.waiting_box.depth + 0.15)).abs() < 0.05,
-        "the box ends at x={max_x}, expected the cap at {}",
-        edge + spec.waiting_box.depth + 0.15
-    );
-    assert!(
-        min_x < edge && max_x > edge,
-        "the box does not straddle the junction edge at x={edge}"
-    );
-    // Lateral: 200 mm inside the innermost lane's two edges, on the +offset
-    // side of the centreline for a direction +1 carriageway.
-    let lane_edge = section.motor_lane_width * 0.5 - 0.2;
-    let inner = offset - lane_edge;
-    let outer = offset + lane_edge;
-    assert!(
-        (min_z - (inner - 0.06)).abs() < 0.02 && (max_z - (outer + 0.06)).abs() < 0.02,
-        "the box spans z {min_z}..{max_z}, expected {}..{}",
-        inner - 0.06,
-        outer + 0.06
+        curved * 2 >= boxes,
+        "only {curved} of {boxes} waiting boxes visibly curve"
     );
 }
 
