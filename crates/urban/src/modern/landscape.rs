@@ -125,3 +125,161 @@ pub(super) fn derive_compounds_and_trees(
     }
     (compounds, trees)
 }
+
+/// Trees on the town's open ground, the blocks no lot was cut from: a verge, land
+/// not yet built on, the green belt along an expressway. Such ground in a Chinese
+/// town is seldom bare lawn: a line of trees stands back from each street that
+/// bounds it, and the rest is scrub with clumps of self-sown or nursery trees.
+/// Nothing is planted in a field.
+pub(super) fn plant_open_ground(
+    blocks: &[crate::UrbanBlock],
+    parcels: &[Parcel],
+    fields: &[crate::Field],
+    seed: u32,
+    first_id: u32,
+) -> Vec<TreeInstance> {
+    // Back from the centreline of the street, clear of its carriageway and pavement.
+    const SETBACK_KM: f32 = 0.016;
+    const ROW_SPACING_KM: f32 = 0.011;
+    // About one clump to every 0.4 ha, of three to seven trees.
+    const CLUMP_AREA_KM2: f32 = 0.004;
+    const CLUMP_RADIUS_KM: f32 = 0.011;
+    const MAX_CLUMPS: usize = 60;
+    let built: std::collections::HashSet<u32> = parcels.iter().map(|p| p.block_id).collect();
+    let mut trees = Vec::new();
+    let mut id = first_id;
+    for (index, block) in blocks.iter().enumerate() {
+        let ring = &block.boundary;
+        if built.contains(&(index as u32)) || ring.len() < 3 {
+            continue;
+        }
+        let key = index as i32;
+        let fits = |p: Point| {
+            inside(ring, p)
+                && distance_to_ring(ring, p) >= SETBACK_KM * 0.9
+                && !fields.iter().any(|f| inside(&f.ring, p))
+        };
+        let mut plant = |trees: &mut Vec<TreeInstance>, point: Point, salt: i32| {
+            let h = |s: i32| modern_hash(seed, key, salt, s);
+            let (species, height, crown, trunk) = match (h(941) * 4.0) as u32 {
+                0 => (TreeSpecies::Willow, 12.0, 5.2, 0.26),
+                1 => (TreeSpecies::Ginkgo, 13.0, 4.2, 0.28),
+                _ => (TreeSpecies::ChinesePlane, 15.0, 5.4, 0.34),
+            };
+            let variation = 0.7 + h(943) * 0.5;
+            trees.push(TreeInstance {
+                id,
+                point,
+                species,
+                variant: (h(947) * 2.0) as u16 % 2,
+                height_metres: height * variation,
+                crown_radius_metres: crown * variation,
+                trunk_radius_metres: trunk * variation,
+            });
+            id += 1;
+        };
+        // The row along each street, set back and broken where a gap was left.
+        let inward = if signed_area(ring) > 0.0 { 1.0 } else { -1.0 };
+        let mut salt = 0;
+        for e in 0..ring.len() {
+            let a = ring[e];
+            let b = ring[(e + 1) % ring.len()];
+            let (dx, dy) = (b.x_km - a.x_km, b.y_km - a.y_km);
+            let len = (dx * dx + dy * dy).sqrt();
+            if len < SETBACK_KM * 3.0 {
+                continue;
+            }
+            let (nx, ny) = (-dy / len * inward, dx / len * inward);
+            let count = (len / ROW_SPACING_KM) as i32;
+            for i in 1..count {
+                salt += 1;
+                if modern_hash(seed, key, salt, 951) < 0.18 {
+                    continue;
+                }
+                let t = i as f32 / count as f32;
+                let p = Point {
+                    x_km: a.x_km + dx * t + nx * SETBACK_KM,
+                    y_km: a.y_km + dy * t + ny * SETBACK_KM,
+                };
+                if fits(p) {
+                    plant(&mut trees, p, salt);
+                }
+            }
+        }
+        // Clumps over the rest, scattered by rejection inside the block.
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for p in ring {
+            x0 = x0.min(p.x_km);
+            y0 = y0.min(p.y_km);
+            x1 = x1.max(p.x_km);
+            y1 = y1.max(p.y_km);
+        }
+        let clumps = ((signed_area(ring).abs() / CLUMP_AREA_KM2) as usize).min(MAX_CLUMPS);
+        for c in 0..clumps as i32 {
+            let h = |s: i32| modern_hash(seed, key, c, s);
+            let centre = Point {
+                x_km: x0 + (x1 - x0) * h(953),
+                y_km: y0 + (y1 - y0) * h(957),
+            };
+            if !fits(centre) {
+                continue;
+            }
+            let size = 3 + (h(959) * 5.0) as i32;
+            for k in 0..size {
+                let angle = h(961 + k) * std::f32::consts::TAU;
+                let r = CLUMP_RADIUS_KM * h(971 + k).sqrt();
+                let p = Point {
+                    x_km: centre.x_km + angle.cos() * r,
+                    y_km: centre.y_km + angle.sin() * r,
+                };
+                if fits(p) {
+                    salt += 1;
+                    plant(&mut trees, p, salt);
+                }
+            }
+        }
+    }
+    trees
+}
+
+fn signed_area(ring: &[Point]) -> f32 {
+    let mut sum = 0.0;
+    for i in 0..ring.len() {
+        let a = ring[i];
+        let b = ring[(i + 1) % ring.len()];
+        sum += a.x_km * b.y_km - b.x_km * a.y_km;
+    }
+    sum * 0.5
+}
+
+fn inside(ring: &[Point], p: Point) -> bool {
+    let mut odd = false;
+    let mut j = ring.len() - 1;
+    for i in 0..ring.len() {
+        let (a, b) = (ring[i], ring[j]);
+        if (a.y_km > p.y_km) != (b.y_km > p.y_km)
+            && p.x_km < (b.x_km - a.x_km) * (p.y_km - a.y_km) / (b.y_km - a.y_km) + a.x_km
+        {
+            odd = !odd;
+        }
+        j = i;
+    }
+    odd
+}
+
+fn distance_to_ring(ring: &[Point], p: Point) -> f32 {
+    let mut best = f32::MAX;
+    for i in 0..ring.len() {
+        let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+        let (dx, dy) = (b.x_km - a.x_km, b.y_km - a.y_km);
+        let l2 = dx * dx + dy * dy;
+        let t = if l2 > 0.0 {
+            (((p.x_km - a.x_km) * dx + (p.y_km - a.y_km) * dy) / l2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let (ex, ey) = (a.x_km + dx * t - p.x_km, a.y_km + dy * t - p.y_km);
+        best = best.min((ex * ex + ey * ey).sqrt());
+    }
+    best
+}

@@ -42,6 +42,19 @@ function hash01(id: number, salt: number): number {
   return (h >>> 0) / 4294967295;
 }
 
+function smooth01(t: number): number {
+  return t * t * (3 - 2 * t);
+}
+
+/** `hex` scaled by `light`, nudged warmer (`warm` near 1) or cooler (near 0). */
+function shadeHex(hex: number, light: number, warm: number): number {
+  const shift = (warm - 0.5) * 0.08;
+  const r = Math.min(255, ((hex >> 16) & 255) * light * (1 + shift));
+  const g = Math.min(255, ((hex >> 8) & 255) * light);
+  const b = Math.min(255, (hex & 255) * light * (1 - shift));
+  return (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b);
+}
+
 // Red brick and red-brown tile, only on low and mid-rise blocks.
 const BRICK = 0x9c5b4a;
 // Facade and roof albedos (sRGB). Real walls are 0.3-0.6, never white.
@@ -69,6 +82,10 @@ const TERRACOTTA = 0x8a5a45;
 const ASPHALT = 0x64625e;
 // Paving, plazas and forecourts between the buildings of a block.
 const PAVING = 0x8b8982;
+// The height of an expressway deck over the ground, as the detail builds it.
+const VIADUCT_M = 9;
+// Pavement either side of a street.
+const SIDEWALK = 0x9a958a;
 // Unbuilt ground inside the town: rough grass and scrub.
 const OPEN_GROUND = 0x66704d;
 // The ground of a lot by what it is, as the detail plants it: a park is lawn and
@@ -84,6 +101,22 @@ const LOT_GROUND: Record<string, number> = {
   civic: 0x948f84,
   industrial: 0x8c8a84,
   village: 0x7a736a,
+  farmstead: 0x7a736a,
+  // A villa's garden is lawn and planting round the house.
+  villa: 0x6a7752,
+};
+// Paved lots, whose ground the shader breaks up with planted beds and tree pits.
+const PAVED_LOTS = new Set(["commercial", "mixedUse", "civic", "industrial"]);
+// Each crop in its three looks, as the detail's field textures average from afar:
+// green young wheat to straw, rice paddy to ripe gold, rapeseed in flower.
+const CROP_GROUND: Record<string, number[]> = {
+  wheat: [0x6f7e45, 0x8d8a4e, 0xa79a62],
+  rice: [0x5f7a4a, 0x6f8a46, 0x9c9150],
+  rapeseed: [0x75823f, 0x9e9a4a, 0x6d7a44],
+  corn: [0x55703a, 0x617a3e, 0x8f8a5c],
+  vegetables: [0x5b7442, 0x6b7b4c, 0x7a7656],
+  fallow: [0x7d7058, 0x857a62, 0x736a52],
+  orchard: [0x4f673a, 0x5a7041, 0x627446],
 };
 // Crowns from afar: the detail's species range, from the dark of camphor and
 // pine to the light green of a plane or a willow.
@@ -94,6 +127,12 @@ const CROWNS = [0x3e5a33, 0x47633a, 0x51703f, 0x3a5230, 0x5b7845, 0x34492f];
 const OFFICE_SEED = 1;
 const SHED_SEED = 2;
 const PLAIN_SEED = 3;
+// Ground kinds, which the shader textures instead of windowing: soft ground (lawn,
+// scrub, packed earth), a paved lot, a field, a street.
+const GROUND_SEED = 4;
+const PAVED_SEED = 5;
+const FIELD_SEED = 6;
+const STREET_SEED = 7;
 
 /**
  * What stands on a roof, as seen from the air, by the kind of building:
@@ -194,8 +233,9 @@ class MassBuilder {
   readonly bases: number[] = [];
   /** Per vertex: the building's seed, which sets its window rhythm and facade kind. */
   readonly seeds: number[] = [];
-  /** The base of the prism being built; horizontal faces never read it. */
-  private base = 0;
+  /** The base of the prism being built; horizontal faces never read it, so a
+   * field carries its row direction in it instead. */
+  base = 0;
   /** The seed of the building being built, in 0..1. */
   seed = 0;
   /** Tile key to the index the shader hides it by. */
@@ -363,6 +403,7 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     builder.select(...tileOfPoint(city.frame, ringMean(block.boundary)));
     // A parcel names its block by the block's index in the plan.
     const ground = built.has(index) ? PAVING : OPEN_GROUND;
+    builder.seed = (built.has(index) ? PAVED_SEED : GROUND_SEED) + hash01(index, 71) * 0.999;
     builder.flat(toRing(block.boundary), frame.heightAt, 0.15 * m, ground);
   });
 
@@ -371,11 +412,44 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     const colour = LOT_GROUND[parcel.useType] ?? PAVING;
     const ground = parcel.useType === "residential" && !parcel.compound ? 0x7f7d72 : colour;
     builder.select(...(parcelTile.get(parcel.id) ?? tileOfPoint(city.frame, ringMean(parcel.ring))));
-    builder.flat(toRing(parcel.ring), frame.heightAt, 0.25 * m, ground);
+    // Neighbouring lots are never one shade: each is a little lighter or darker,
+    // warmer or cooler, as a real forecourt or lawn is by its age and upkeep.
+    const r = hash01(parcel.id, 73);
+    builder.seed = (PAVED_LOTS.has(parcel.useType) ? PAVED_SEED : GROUND_SEED) + r * 0.999;
+    builder.flat(toRing(parcel.ring), frame.heightAt, 0.25 * m, shadeHex(ground, 0.9 + 0.2 * hash01(parcel.id, 74), r));
+  }
+
+  // Farmland round the town, in its crop's colour, so the edge of the far form is
+  // fields and not the terrain's own meadow under a grey rim.
+  for (const field of city.fields ?? []) {
+    const looks = CROP_GROUND[field.crop] ?? CROP_GROUND.fallow;
+    builder.select(...tileOfPoint(city.frame, ringMean(field.ring)));
+    builder.seed = FIELD_SEED + hash01(field.id, 75) * 0.999;
+    const hex = shadeHex(looks[field.variant % looks.length], 0.92 + 0.16 * hash01(field.id, 76), hash01(field.id, 77));
+    // Rows run along the plot's long side, as it is ploughed.
+    const ring = toRing(field.ring);
+    let longest = 0;
+    for (let i = 0; i < ring.length; i += 1) {
+      const [ax, az] = ring[i], [bx, bz] = ring[(i + 1) % ring.length];
+      const len = Math.hypot(bx - ax, bz - az);
+      if (len > longest) { longest = len; builder.base = Math.atan2(bz - az, bx - ax); }
+    }
+    builder.flat(ring, frame.heightAt, 0.2 * m, hex);
+    builder.base = 0;
   }
 
   // Streets next, as flat ribbons a little above the ground. The metre-scale
   // scene draws the real carriageway; this is its line from afar.
+  // An expressway on a viaduct is drawn at its deck, and a ramp climbs from the
+  // street to the deck end it joins, as the detail's profile does.
+  const deckKey = (p: { x_km: number; y_km: number }) => `${Math.round(p.x_km * 1e4)},${Math.round(p.y_km * 1e4)}`;
+  const deckEnds = new Set<string>();
+  const elevated = (road: (typeof city.hdRoads)[number]) => road.class === "expressway" && (road.layer ?? 0) !== 0;
+  for (const road of city.hdRoads) {
+    if (!elevated(road) || road.oneway || road.centreline.length < 2) continue;
+    deckEnds.add(deckKey(road.centreline[0]));
+    deckEnds.add(deckKey(road.centreline[road.centreline.length - 1]));
+  }
   for (const road of city.hdRoads) {
     const mid = road.centreline[Math.floor(road.centreline.length / 2)];
     if (mid) builder.select(...tileOfPoint(city.frame, mid));
@@ -389,8 +463,28 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
       const a = pts[0], b = pts[pts.length - 1];
       pts.forEach((p, i) => { p[1] = a[1] + (b[1] - a[1]) * (i / (pts.length - 1)); });
     }
+    if (elevated(road)) {
+      const n = road.centreline.length;
+      const startUp = !road.oneway || deckEnds.has(deckKey(road.centreline[0]));
+      const endUp = !road.oneway || deckEnds.has(deckKey(road.centreline[n - 1]));
+      const along = [0];
+      for (let i = 1; i < n; i += 1) along.push(along[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][2] - pts[i - 1][2]));
+      const total = along[n - 1] || 1;
+      pts.forEach((p, i) => {
+        const t = along[i] / total;
+        const lift = (startUp ? 1 - smooth01(t) : 0) + (endUp ? smooth01(t) : 0);
+        p[1] += Math.min(lift, 1) * VIADUCT_M * m;
+      });
+    }
     for (const p of pts) p[1] += 0.35 * m;
-    builder.ribbon(pts, Math.max(road.widthMetres, 6) * m, ASPHALT);
+    builder.seed = STREET_SEED + hash01(road.id, 79) * 0.999;
+    // The pavement either side, light paving under the street trees, then the
+    // carriageway: from the air a street is a dark band with light edges, not one
+    // flat grey ribbon.
+    const width = Math.max(road.widthMetres, 6);
+    const kerb = road.class === "expressway" ? 0 : road.class === "local" || road.class === "service" ? 2 : 4;
+    if (kerb > 0) builder.ribbon(pts.map(([x, y, z]) => [x, y - 0.05 * m, z]), (width + 2 * kerb) * m, SIDEWALK);
+    builder.ribbon(pts, width * m, ASPHALT);
   }
 
   for (const b of city.buildings) {
@@ -454,7 +548,26 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     shader.fragmentShader = shader.fragmentShader
       .replace(
         "#include <common>",
-        "#include <common>\nuniform float uMetre;\nuniform float uHidden[256];\nvarying float vTile;\nvarying float vBase;\nvarying float vSeed;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;",
+        `#include <common>
+        uniform float uMetre;
+        uniform float uHidden[256];
+        varying float vTile;
+        varying float vBase;
+        varying float vSeed;
+        varying vec3 vMassWorld;
+        varying vec3 vMassNormal;
+        float massHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float massNoise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(massHash(i), massHash(i + vec2(1.0, 0.0)), f.x),
+                     mix(massHash(i + vec2(0.0, 1.0)), massHash(i + vec2(1.0, 1.0)), f.x), f.y);
+        }
+        // One octave of noise at \`scale\` metres, faded to its mean once a cell is only a
+        // couple of pixels, so the ground never sparkles far off.
+        float massOctave(vec2 g, float scale, float px, float salt) {
+          return mix(0.5, massNoise(g / scale + salt), 1.0 - smoothstep(scale * 0.25, scale * 0.5, px));
+        }`,
       )
       .replace(
         "#include <color_fragment>",
@@ -462,6 +575,57 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         if (vTile >= 0.0 && uHidden[int(vTile + 0.5)] > 0.5) discard;
         #include <color_fragment>
         float wallness = 1.0 - smoothstep(0.35, 0.7, abs(vMassNormal.y));
+        // The ground from the air is never one flat colour: lawn worn to earth in
+        // places, a forecourt's stains and its planted beds, a field wetter in one
+        // corner, a carriageway patched. All of it in world metres, at three scales.
+        if (vSeed >= ${GROUND_SEED}.0) {
+          float groundKind = floor(vSeed);
+          float groundR = fract(vSeed);
+          vec2 g = vMassWorld.xz / uMetre;
+          float px = max(fwidth(g.x), fwidth(g.y));
+          float n1 = massOctave(g, 70.0, px, groundR * 31.0);
+          float n2 = massOctave(g, 19.0, px, 7.3);
+          float n3 = massOctave(g, 5.5, px, 3.1);
+          float n = 0.5 * n1 + 0.3 * n2 + 0.2 * n3;
+          float luma = dot(diffuseColor.rgb, vec3(0.3, 0.55, 0.15));
+          if (groundKind < ${PAVED_SEED}.5 && groundKind > ${GROUND_SEED}.5) {
+            // A paved lot: concrete stained light and dark, and its beds of shrubs and
+            // trees, a fifth of the lot or so, which from afar is a green-grey tone.
+            diffuseColor.rgb *= 0.86 + 0.28 * n;
+            float bedNoise = mix(n1, n2, 0.55);
+            float bedSharp = smoothstep(0.6, 0.66, bedNoise);
+            float bed = mix(0.2, bedSharp, 1.0 - smoothstep(10.0, 25.0, px));
+            vec3 planting = vec3(0.075, 0.105, 0.05) * (0.8 + 0.4 * n3);
+            diffuseColor.rgb = mix(diffuseColor.rgb, planting, bed);
+          } else if (groundKind < ${GROUND_SEED}.5) {
+            // Lawn and scrub: thicker and darker in clumps of shrubs, worn to dry earth
+            // along desire lines and in patches.
+            diffuseColor.rgb *= 0.7 + 0.6 * n;
+            float clumpNoise = mix(n2, n3, 0.5);
+            float clump = mix(0.12, smoothstep(0.62, 0.7, clumpNoise), 1.0 - smoothstep(6.0, 14.0, px));
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.05, 0.075, 0.035), clump);
+            float worn = mix(0.1, smoothstep(0.6, 0.75, mix(n1, n2, 0.5)), 1.0 - smoothstep(15.0, 35.0, px)) * 0.5;
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.2, 0.16, 0.1) * (luma / 0.14), worn);
+          } else if (groundKind < ${FIELD_SEED}.5) {
+            // A field is farmed in strips along its rows, a few metres wide, each sown or
+            // cut a little apart from the next, so it reads as stripes from the air.
+            vec2 across = vec2(-sin(vBase), cos(vBase));
+            float w = dot(g, across);
+            float strip = floor(w / mix(4.0, 9.0, groundR));
+            float stripR = massHash(vec2(strip, groundR * 17.0));
+            float stripFade = 1.0 - smoothstep(1.5, 4.0, px);
+            diffuseColor.rgb *= mix(1.0, 0.84 + 0.32 * stripR, stripFade);
+            // The furrows themselves, under a metre apart, only as the camera nears.
+            float row = abs(fract(w / 0.75) - 0.5) * 2.0;
+            diffuseColor.rgb *= mix(1.0, 0.85 + 0.25 * row, 1.0 - smoothstep(0.1, 0.3, px));
+            // Wetter and greener in one part, thinner in another.
+            diffuseColor.rgb *= 0.82 + 0.36 * n;
+            diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.1, 1.0, 0.8), n1 - 0.5);
+          } else {
+            // A carriageway: newer patches darker, old seal lighter, a smear down the wheel paths.
+            diffuseColor.rgb *= 0.9 + 0.2 * mix(n2, n3, 0.5);
+          }
+        }
         vec2 along = vec2(-vMassNormal.z, vMassNormal.x);
         float s = dot(vMassWorld.xz, along) / uMetre;
         // Height above the block's own ground, so the storeys start at the pavement.

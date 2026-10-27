@@ -296,6 +296,7 @@ export interface ModernCityPayload {  style: "chineseModern";
     lanesBackward?: number;
     medianMetres?: number;
     layer?: number;
+    oneway?: boolean;
     structure?: boolean;
     lanes?: UrbanLane[];
     connectors?: UrbanConnector[];
@@ -328,6 +329,8 @@ export interface ModernCityPayload {  style: "chineseModern";
   riverWidthMetres?: number;
   compounds?: UrbanCompound[];
   trees?: UrbanTree[];
+  /** Farmland plots round the town: a crop, its row direction and one of three looks. */
+  fields?: Array<{ id: number; ring: UrbanPoint[]; crop: string; rowAngle: number; variant: number }>;
 }
 export interface UrbanModel {
   /**

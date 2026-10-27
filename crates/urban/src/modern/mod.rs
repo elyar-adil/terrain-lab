@@ -10,7 +10,7 @@ mod tidy;
 
 pub use graph::junction_trim_m;
 use graph::{GraphOutput, build_graph, legacy_hash, modern_hash, modern_phase};
-use landscape::derive_compounds_and_trees;
+use landscape::{derive_compounds_and_trees, plant_open_ground};
 use parcels::{ParcelOutput, build_parcels};
 
 use crate::{ModernChinaSpec, ModernCity, Point};
@@ -312,7 +312,11 @@ pub fn generate_modern_chinese_city_with_options(
         fields,
     } = build_parcels(&frame, &nodes, &sd_roads);
     expressway::grade_separate(&frame, &mut nodes, &mut sd_roads, &mut hd_roads, &layout);
-    let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
+    let (compounds, mut trees) = derive_compounds_and_trees(&parcels, spec.seed);
+    let next = trees.len() as u32;
+    trees.extend(plant_open_ground(
+        &blocks, &parcels, &fields, spec.seed, next,
+    ));
     ModernCity {
         version: 3,
         jurisdiction: "ChinaMainland".into(),
@@ -494,7 +498,11 @@ pub fn generate_modern_chinese_city_from_streets(
         fields,
     } = build_parcels(&frame, &nodes, &sd_roads);
     expressway::grade_separate(&frame, &mut nodes, &mut sd_roads, &mut hd_roads, &layout);
-    let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
+    let (compounds, mut trees) = derive_compounds_and_trees(&parcels, spec.seed);
+    let next = trees.len() as u32;
+    trees.extend(plant_open_ground(
+        &blocks, &parcels, &fields, spec.seed, next,
+    ));
     ModernCity {
         version: 3,
         jurisdiction: "ChinaMainland".into(),
