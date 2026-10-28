@@ -1939,3 +1939,70 @@ fn no_two_ground_surfaces_lie_one_over_the_other_within_a_depth_step() {
         report.join("\n")
     );
 }
+
+#[test]
+fn a_tile_draws_its_streets_as_the_whole_town_draws_them() {
+    // The desktop app builds a city in 500 m tiles. A tile's streets are
+    // derived with the streets round it and cropped to it, so near its edge
+    // (where a junction is shared with the next tile) every surface is the
+    // one the whole town has there.
+    let city = generate_modern_chinese_city(ModernChinaSpec {
+        seed: 42,
+        radius_km: 0.9,
+        block_size_metres: 110.0,
+        ..ModernChinaSpec::default()
+    });
+    let street_layer = |plan: &urban::ModernCity, crop: Option<([f32; 2], [f32; 2])>| {
+        let network = derive(
+            &plan.nodes,
+            &plan.sd_roads,
+            &plan.hd_roads,
+            plan.frame,
+            JunctionSpec::default(),
+            plan.seed,
+        );
+        let mut builder = MeshBuilder::new();
+        let mark = builder.mark();
+        build(&network, &mut builder, plan.seed);
+        if let Some((min, max)) = crop {
+            builder.crop_since(&mark, min, max);
+        }
+        TopDown::new(&builder.build())
+    };
+    let whole = street_layer(&city, None);
+    let (min, max) = ([0.0_f32, 0.0], [500.0_f32, 500.0]);
+    let tile = street_layer(
+        &city.roads_near_rect(min, max, crate::scene::TILE_CONTEXT_M),
+        Some((min, max)),
+    );
+    let (mut checked, mut wrong) = (0, Vec::new());
+    let mut x = min[0] + 0.3;
+    while x < max[0] {
+        let mut z = min[1] + 0.7;
+        while z < max[1] {
+            let edge = (x - min[0]).min(max[0] - x).min(z - min[1]).min(max[1] - z);
+            let p = Vec2::new(x, z);
+            if edge < 80.0 && !whole.covered(p) {
+                checked += 1;
+                let (a, b) = (whole.top(p), tile.top(p));
+                if a != b {
+                    wrong.push(format!("({x:.1}, {z:.1}): town {a:?}, tile {b:?}"));
+                }
+            }
+            z += 1.5;
+        }
+        x += 1.5;
+    }
+    assert!(checked > 10_000, "only {checked} points near the edges");
+    assert!(
+        wrong.len() * 1000 <= checked,
+        "{} of {checked} points near the tile's edge differ from the town:\n{}",
+        wrong.len(),
+        wrong
+            .iter()
+            .take(12)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}

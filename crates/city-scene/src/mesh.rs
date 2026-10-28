@@ -127,6 +127,204 @@ struct Buffers {
     with_uvs: bool,
 }
 
+/// Where a builder stood: see [`MeshBuilder::mark`].
+#[derive(Debug, Clone, Default)]
+pub struct BuilderMark {
+    indices: BTreeMap<String, usize>,
+    instances: BTreeMap<String, usize>,
+}
+
+impl Buffers {
+    /// Clip the triangles from index `from` on to the square, replacing them.
+    fn crop_tail(&mut self, from: usize, min: [f32; 2], max: [f32; 2]) {
+        let vertices = self.positions.len() / 3;
+        // Optional layers shorter than the vertex count are padded at build
+        // with their first value; pad now, so new vertices line up.
+        if let Some(uvs) = &mut self.uvs
+            && uvs.len() < vertices * 2
+        {
+            let first = [
+                uvs.first().copied().unwrap_or(0.0),
+                uvs.get(1).copied().unwrap_or(0.0),
+            ];
+            while uvs.len() < vertices * 2 {
+                uvs.extend_from_slice(&first);
+            }
+        }
+        if let Some(colors) = &mut self.colors
+            && colors.len() < vertices * 4
+        {
+            let first: [u8; 4] = if colors.len() >= 4 {
+                [colors[0], colors[1], colors[2], colors[3]]
+            } else {
+                [255; 4]
+            };
+            while colors.len() < vertices * 4 {
+                colors.extend_from_slice(&first);
+            }
+        }
+        let tail: Vec<u32> = self.indices.split_off(from);
+        #[derive(Clone, Copy)]
+        struct V {
+            p: [f32; 3],
+            n: [f32; 3],
+            uv: [f32; 2],
+            c: [f32; 4],
+        }
+        let read = |b: &Buffers, i: u32| -> V {
+            let i = i as usize;
+            V {
+                p: [
+                    b.positions[i * 3],
+                    b.positions[i * 3 + 1],
+                    b.positions[i * 3 + 2],
+                ],
+                n: [b.normals[i * 3], b.normals[i * 3 + 1], b.normals[i * 3 + 2]],
+                uv: b
+                    .uvs
+                    .as_ref()
+                    .map_or([0.0; 2], |u| [u[i * 2], u[i * 2 + 1]]),
+                c: b.colors.as_ref().map_or([255.0; 4], |c| {
+                    [
+                        c[i * 4] as f32,
+                        c[i * 4 + 1] as f32,
+                        c[i * 4 + 2] as f32,
+                        c[i * 4 + 3] as f32,
+                    ]
+                }),
+            }
+        };
+        let lerp = |a: V, b: V, t: f32| -> V {
+            let mix = |x: f32, y: f32| x + (y - x) * t;
+            V {
+                p: [
+                    mix(a.p[0], b.p[0]),
+                    mix(a.p[1], b.p[1]),
+                    mix(a.p[2], b.p[2]),
+                ],
+                n: [
+                    mix(a.n[0], b.n[0]),
+                    mix(a.n[1], b.n[1]),
+                    mix(a.n[2], b.n[2]),
+                ],
+                uv: [mix(a.uv[0], b.uv[0]), mix(a.uv[1], b.uv[1])],
+                c: [
+                    mix(a.c[0], b.c[0]),
+                    mix(a.c[1], b.c[1]),
+                    mix(a.c[2], b.c[2]),
+                    mix(a.c[3], b.c[3]),
+                ],
+            }
+        };
+        // Sutherland-Hodgman against the four sides, in x and z.
+        let planes: [(usize, f32, f32); 4] = [
+            (0, min[0], 1.0),
+            (0, max[0], -1.0),
+            (2, min[1], 1.0),
+            (2, max[1], -1.0),
+        ];
+        for tri in tail.chunks(3) {
+            let inside = |i: u32| {
+                let i = i as usize;
+                let (x, z) = (self.positions[i * 3], self.positions[i * 3 + 2]);
+                x >= min[0] && x <= max[0] && z >= min[1] && z <= max[1]
+            };
+            if tri.iter().all(|&i| inside(i)) {
+                self.indices.extend_from_slice(tri);
+                continue;
+            }
+            let mut poly: Vec<V> = tri.iter().map(|&i| read(self, i)).collect();
+            for &(axis, value, sign) in &planes {
+                let keep = |v: &V| (v.p[axis] - value) * sign >= 0.0;
+                let mut next = Vec::with_capacity(poly.len() + 2);
+                for k in 0..poly.len() {
+                    let (a, b) = (poly[k], poly[(k + 1) % poly.len()]);
+                    if keep(&a) {
+                        next.push(a);
+                    }
+                    if keep(&a) != keep(&b) {
+                        let t = (value - a.p[axis]) / (b.p[axis] - a.p[axis]);
+                        next.push(lerp(a, b, t));
+                    }
+                }
+                poly = next;
+                if poly.len() < 3 {
+                    break;
+                }
+            }
+            if poly.len() < 3 {
+                continue;
+            }
+            let base = (self.positions.len() / 3) as u32;
+            for v in &poly {
+                self.positions.extend_from_slice(&v.p);
+                let len = (v.n[0] * v.n[0] + v.n[1] * v.n[1] + v.n[2] * v.n[2])
+                    .sqrt()
+                    .max(1.0e-6);
+                self.normals
+                    .extend_from_slice(&[v.n[0] / len, v.n[1] / len, v.n[2] / len]);
+                if let Some(uvs) = &mut self.uvs {
+                    uvs.extend_from_slice(&v.uv);
+                }
+                if let Some(colors) = &mut self.colors {
+                    colors.extend(v.c.iter().map(|x| x.round().clamp(0.0, 255.0) as u8));
+                }
+            }
+            // A clipped triangle is convex: a fan from its first corner.
+            for k in 1..poly.len() as u32 - 1 {
+                self.indices
+                    .extend_from_slice(&[base, base + k, base + k + 1]);
+            }
+        }
+        self.drop_unused();
+    }
+
+    /// Remove vertices no triangle uses (what a crop leaves behind).
+    fn drop_unused(&mut self) {
+        let count = self.positions.len() / 3;
+        let mut remap = vec![u32::MAX; count];
+        for &i in &self.indices {
+            remap[i as usize] = 0;
+        }
+        let mut next = 0u32;
+        for slot in remap.iter_mut() {
+            if *slot == 0 {
+                *slot = next;
+                next += 1;
+            }
+        }
+        if next as usize == count {
+            return;
+        }
+        let keep = |stride: usize, data: &[f32]| -> Vec<f32> {
+            (0..count)
+                .filter(|&i| remap[i] != u32::MAX)
+                .flat_map(|i| data[i * stride..(i + 1) * stride].iter().copied())
+                .collect()
+        };
+        self.positions = keep(3, &self.positions);
+        self.normals = keep(3, &self.normals);
+        if let Some(uvs) = &self.uvs
+            && uvs.len() >= count * 2
+        {
+            self.uvs = Some(keep(2, uvs));
+        }
+        if let Some(colors) = &self.colors
+            && colors.len() >= count * 4
+        {
+            self.colors = Some(
+                (0..count)
+                    .filter(|&i| remap[i] != u32::MAX)
+                    .flat_map(|i| colors[i * 4..i * 4 + 4].iter().copied())
+                    .collect(),
+            );
+        }
+        for i in &mut self.indices {
+            *i = remap[*i as usize];
+        }
+    }
+}
+
 /// Accumulates triangles per material and hands back finished groups.
 #[derive(Debug, Default)]
 pub struct MeshBuilder {
@@ -850,6 +1048,52 @@ impl MeshBuilder {
             .values()
             .all(|buffers| buffers.positions.is_empty())
             && self.instances.is_empty()
+    }
+
+    /// Where every group and instance list stands now, for [`Self::crop_since`].
+    pub fn mark(&self) -> BuilderMark {
+        BuilderMark {
+            indices: self
+                .groups
+                .iter()
+                .map(|(material, buffers)| (material.clone(), buffers.indices.len()))
+                .collect(),
+            instances: self
+                .instances
+                .iter()
+                .map(|(key, list)| (key.clone(), list.len()))
+                .collect(),
+        }
+    }
+
+    /// Keep only what was added since `mark` that lies in the plan square
+    /// `[min, max)` (x, z): triangles are clipped to it, their attributes
+    /// interpolated, and instances kept by where they stand. Two neighbouring
+    /// squares cropped from the same geometry meet exactly along their edge.
+    pub fn crop_since(&mut self, mark: &BuilderMark, min: [f32; 2], max: [f32; 2]) {
+        for (material, buffers) in &mut self.groups {
+            if self.bound.contains_key(material) {
+                continue;
+            }
+            let from = mark.indices.get(material).copied().unwrap_or(0);
+            if from >= buffers.indices.len() {
+                continue;
+            }
+            buffers.crop_tail(from, min, max);
+        }
+        for (key, list) in &mut self.instances {
+            let from = mark
+                .instances
+                .get(key)
+                .copied()
+                .unwrap_or(0)
+                .min(list.len());
+            let tail: Vec<Instance> = list.drain(from..).collect();
+            list.extend(
+                tail.into_iter()
+                    .filter(|i| i.x >= min[0] && i.x < max[0] && i.z >= min[1] && i.z < max[1]),
+            );
+        }
     }
 
     /// Finish every group.  Empty groups are dropped so the renderer never

@@ -976,8 +976,7 @@ async fn ensure_city_tile(
     let scene = tauri::async_runtime::spawn_blocking(move || {
         let min = [column as f32 * CITY_TILE_M, row as f32 * CITY_TILE_M];
         let max = [min[0] + CITY_TILE_M, min[1] + CITY_TILE_M];
-        let tile = city.clipped_rect(min, max);
-        city_scene::build_city_scene(&tile, infrastructure::scene_budget(class))
+        city_scene::build_city_scene_tile(&city, min, max, infrastructure::scene_budget(class))
     })
     .await
     .map_err(|error| format!("building the city tile failed: {error}"))?;

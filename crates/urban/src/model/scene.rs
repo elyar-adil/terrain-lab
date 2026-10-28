@@ -136,6 +136,36 @@ impl ModernCity {
         out
     }
 
+    /// The streets a tile's detail is derived from: every road any of whose
+    /// centreline comes within `margin_m` of the square `[min, max]`, whole,
+    /// with every node. A junction on the tile's edge then has all its arms,
+    /// as it does in the whole plan, and its geometry is the same in both
+    /// tiles that share it. Nothing but the roads is kept.
+    pub fn roads_near_rect(&self, min: [f32; 2], max: [f32; 2], margin_m: f32) -> ModernCity {
+        let near = |p: &Point| {
+            let [x, z] = self.frame.to_local(*p);
+            x >= min[0] - margin_m
+                && x < max[0] + margin_m
+                && z >= min[1] - margin_m
+                && z < max[1] + margin_m
+        };
+        let mut out = self.clone();
+        out.hd_roads
+            .retain(|road| road.centreline.iter().any(&near));
+        let kept: std::collections::HashSet<u32> =
+            out.hd_roads.iter().map(|road| road.sd_road).collect();
+        out.sd_roads.retain(|road| kept.contains(&road.id));
+        out.blocks.clear();
+        out.parcels.clear();
+        out.buildings.clear();
+        out.compounds.clear();
+        out.trees.clear();
+        out.fields.clear();
+        out.river = None;
+        out.tributaries.clear();
+        out
+    }
+
     /// The part of the city inside the square `[min, max]` (local metres).
     ///
     /// Every element is kept by where its centre lies: a block, parcel or field by

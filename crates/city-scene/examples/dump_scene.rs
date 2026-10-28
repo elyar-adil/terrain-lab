@@ -62,14 +62,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     // `--clip-x m --clip-z m --clip-r m`: only the neighbourhood of one local point,
     // the unit a streamed scene is built from.
-    // `--square x0,z0,x1,z1`: one square tile of the plan, by the centre of each element.
-    let city = match flag("--square") {
-        Some(text) => {
-            let v: Vec<f32> = text.split(',').filter_map(|s| s.parse().ok()).collect();
-            city.clipped_rect([v[0], v[1]], [v[2], v[3]])
-        }
-        None => city,
-    };
+    // `--square x0,z0,x1,z1`: one square tile, built as the desktop app builds
+    // it (`build_city_scene_tile`).
+    let square: Option<([f32; 2], [f32; 2])> = flag("--square").map(|text| {
+        let v: Vec<f32> = text.split(',').filter_map(|s| s.parse().ok()).collect();
+        ([v[0], v[1]], [v[2], v[3]])
+    });
     let city = match (flag("--clip-x"), flag("--clip-z"), flag("--clip-r")) {
         (Some(x), Some(z), Some(r)) => city.clipped(
             [x.parse().unwrap_or(0.0), z.parse().unwrap_or(0.0)],
@@ -83,7 +81,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("wrote {plan}");
         return Ok(());
     }
-    let scene = build_city_scene(&city, budget);
+    let scene = match square {
+        Some((min, max)) => city_scene::build_city_scene_tile(&city, min, max, budget),
+        None => build_city_scene(&city, budget),
+    };
     let s = &scene.stats;
     println!(
         "{} buildings, {} tree instances, {} draws, {} tris",

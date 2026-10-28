@@ -270,12 +270,46 @@ fn extent_of(network: &Network) -> [f32; 4] {
 
 /// Derive a whole city scene.
 pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
+    build_scene(city, city, None, budget)
+}
+
+/// How far round a tile its streets are derived from: past the reach of any
+/// junction's box, corners, crossings and approach widening.
+pub const TILE_CONTEXT_M: f32 = 200.0;
+
+/// One square tile `[min, max)` of a city (local metres), as the desktop app
+/// streams them. Its buildings, plots and water are the tile's share of the
+/// plan (`ModernCity::clipped_rect`). Its streets are derived from every street
+/// within `TILE_CONTEXT_M` (`ModernCity::roads_near_rect`), so a junction on
+/// the tile's edge has all its arms, and then cropped to the square: built
+/// from one plan's own streets alone, an edge junction lost the arms whose
+/// middle lay in the next tile, and each tile drew a different, broken half
+/// of it.
+pub fn build_city_scene_tile(
+    city: &ModernCity,
+    min: [f32; 2],
+    max: [f32; 2],
+    budget: SceneBudget,
+) -> CityScene {
+    let content = city.clipped_rect(min, max);
+    let roads = city.roads_near_rect(min, max, TILE_CONTEXT_M);
+    build_scene(&roads, &content, Some((min, max)), budget)
+}
+
+/// The scene of `city`'s plots, buildings and water, with the streets of
+/// `roads`, cropped to `crop` when given.
+fn build_scene(
+    roads: &ModernCity,
+    city: &ModernCity,
+    crop: Option<([f32; 2], [f32; 2])>,
+    budget: SceneBudget,
+) -> CityScene {
     let spec = JunctionSpec::default();
     let network = network::derive(
-        &city.nodes,
-        &city.sd_roads,
-        &city.hd_roads,
-        city.frame,
+        &roads.nodes,
+        &roads.sd_roads,
+        &roads.hd_roads,
+        roads.frame,
         spec,
         city.seed,
     );
@@ -288,6 +322,9 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
     trees::build_shrub_prototype(&mut builder);
     trees::build_tuft_prototype(&mut builder);
     furniture::build_prototypes(&mut builder);
+    // Everything from here to the buildings is drawn from the streets, and is
+    // what a tile crops to its square.
+    let street_mark = builder.mark();
 
     let StreetOutput {
         signals,
@@ -317,6 +354,9 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
         city.seed,
         city.style,
     );
+    if let Some((min, max)) = crop {
+        builder.crop_since(&street_mark, min, max);
+    }
     let mut buildings = city.buildings.clone();
     buildings.truncate(budget.max_buildings);
     let streets = street::footprints(&network, buildings::PLATE_UNDER_PAVING);
@@ -393,6 +433,42 @@ pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
         None => TrafficState::default(),
     };
     let vehicles = traffic.as_ref().map(|sim| sim.agent_count()).unwrap_or(0);
+    // A tile keeps the signals of its own junctions, with their aspects, and
+    // the vehicles standing on it.
+    let (signals, traffic_state) = match crop {
+        Some((min, max)) => {
+            let inside = |x: f32, z: f32| x >= min[0] && x < max[0] && z >= min[1] && z < max[1];
+            let owned: std::collections::HashSet<u32> = network
+                .junctions
+                .iter()
+                .filter(|j| inside(j.centre.x, j.centre.y))
+                .map(|j| j.node)
+                .collect();
+            let keep: Vec<bool> = signals
+                .iter()
+                .map(|rig| owned.contains(&rig.junction))
+                .collect();
+            let mut state = traffic_state;
+            if state.aspects.len() == keep.len() {
+                state.aspects = state
+                    .aspects
+                    .iter()
+                    .zip(&keep)
+                    .filter(|(_, k)| **k)
+                    .map(|(a, _)| *a)
+                    .collect();
+            }
+            state.agents.retain(|pose| inside(pose.x, pose.z));
+            let signals = signals
+                .into_iter()
+                .zip(keep)
+                .filter(|(_, k)| *k)
+                .map(|(r, _)| r)
+                .collect();
+            (signals, state)
+        }
+        None => (signals, traffic_state),
+    };
     let signal_count = signals.len();
 
     let mut warnings = network.warnings.clone();
