@@ -1107,36 +1107,9 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
                     }
                 }
             }
-            // Phone kiosks, every 200 m, on the kerbside.  Not on a 300 m
-            // arterial only — a collector has them too, which is most of what
-            // makes a side street read as Chinese.
-            if arterial && length > 90.0 {
-                for side in [-1.0_f32, 1.0] {
-                    let offset = side * (kerb + 0.75);
-                    let mut kiosk_station = 30.0_f32;
-                    while kiosk_station < length - 30.0 {
-                        let point = path.offset_at(
-                            kiosk_station,
-                            road.kerbside(kiosk_station, offset),
-                            0.0,
-                        );
-                        builder.add_instance(
-                            "furniture/kiosk",
-                            Instance::new(
-                                point.x,
-                                level::KERB,
-                                point.z,
-                                // The kiosk's glazed front is its local `+Z`.
-                                yaw_along_z(path.tangent_at(kiosk_station) * -side),
-                                1.0,
-                                [0.94 + rng.unit() * 0.1, 0.95, 0.97],
-                            ),
-                        );
-                        output.shelters += 1;
-                        kiosk_station += 200.0;
-                    }
-                }
-            }
+            // No phone kiosks until one is modelled better than a blank box with
+            // a lid (`phone_kiosk`): in a street-level view it was the worst thing
+            // in the frame, and they are rare on Chinese streets now.
         }
     }
 

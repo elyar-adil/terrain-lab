@@ -186,6 +186,8 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
       mark("renderer");
 
       const world = new THREE.Scene();
+      // For audits: the scene graph, readable from a test page.
+      (window as unknown as { __CITY_SCENE__?: THREE.Scene }).__CITY_SCENE__ = world;
       // `?fog=<density>` overrides the haze, for the audit.
       const fogParam = Number(new URLSearchParams(window.location.search).get("fog"));
       world.fog = createFog(Number.isFinite(fogParam) && fogParam > 0 ? fogParam : undefined);
@@ -266,9 +268,9 @@ export function CityViewer({ scene, preset = "street", onReady }: CityViewerProp
       }
       if (hidden.has("trees")) {
         mark("hiding instanced foliage");
-        for (const [key, mesh] of handles.instanced) {
-          if (key.startsWith("tree/")) mesh.visible = false;
-        }
+        handles.group.traverse((object) => {
+          if (object.name.startsWith("tree/")) object.visible = false;
+        });
       }
       mark("geometry");
 

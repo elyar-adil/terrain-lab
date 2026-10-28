@@ -110,6 +110,15 @@ export function installUniqueTrees(handles: CityHandles, scene: CityScene): Uniq
   for (const mesh of planting.replaced) mesh.removeFromParent();
   const gone = new Set(planting.sets);
   handles.lodSets = handles.lodSets.filter((set) => !gone.has(set));
+  // Every part of every prototype tree goes. The parts of one prototype (bark,
+  // leaf, crown mass) share one key, so the instance map holds only the last of
+  // them: the bark was left in the scene and stood as a second, black tree inside
+  // each grown one, its bare limbs sticking out of the crown. So sweep the scene.
+  const prototypes: THREE.Object3D[] = [];
+  handles.group.traverse((object) => {
+    if ((object as THREE.InstancedMesh).isInstancedMesh && object.name.startsWith("tree/")) prototypes.push(object);
+  });
+  for (const object of prototypes) object.removeFromParent();
   for (const key of [...handles.instanced.keys()]) if (key.startsWith("tree/")) handles.instanced.delete(key);
   return forest;
 }

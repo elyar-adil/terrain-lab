@@ -424,7 +424,7 @@ if (vTreeKind > 0.5) {
     // Plates that have flaked off show bare wood.
     float flake = smoothstep(0.88, 0.95, plateId) * smoothstep(0.30, 0.55, tNoise(q * 5.0));
     float wornMask = 0.0;
-    tBark = h;
+    tBark = h * smoothstep(0.025, 0.07, R);
     float woodGrain = 0.55 + 0.45 * sin(q.x * 90.0 + q.z * 90.0 + 9.0 * tNoise(q * vec3(18.0, 4.0, 18.0)));
     vec3 woodCol = mix(vec3(0.30, 0.13, 0.045), vec3(0.78, 0.43, 0.15), woodGrain) * (0.8 + 0.4 * fine);
     // Bark itself: warm grey-brown, each plate its own tone, silvered on the high ones, near-black in the furrows.
@@ -453,7 +453,11 @@ if (vTreeKind > 0.5) {
     plateCol *= 0.88 + 0.24 * streak;
     // Fine pitting and a dusting of grit, so no surface is perfectly clean.
     plateCol *= 0.92 + 0.16 * tNoise(q * 320.0);
-    vec3 col = mix(plateCol, creviceCol, clamp(furrow * 0.90 + crack * 0.30, 0.0, 1.0));
+    // Young wood is smooth: bark only fissures into plates once a limb is a few
+    // centimetres thick. On a twig a centimetre across, plates ten centimetres wide
+    // put its whole surface in a furrow, and every twig drew near-black.
+    float fissured = smoothstep(0.025, 0.07, R);
+    vec3 col = mix(plateCol, creviceCol, clamp((furrow * 0.90 + crack * 0.30) * fissured, 0.0, 1.0));
     // Planted in the ground: soil splashed up the foot, damp and dark where the wood meets
     // the earth, and less light reaching a surface so close to it.
     float foot = 1.0 - smoothstep(-0.2, 0.9, vAbove);
