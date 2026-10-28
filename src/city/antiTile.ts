@@ -71,7 +71,11 @@ vec3 antiTone(vec2 uv) {
   vec3 c = mix(lush, dry, smoothstep(0.45, 0.80, lo));
   float bare = smoothstep(0.76, 0.90, atNoise(uv * 0.09 + 7.0));
   c = mix(c, vec3(1.40, 1.02, 0.72), bare * 0.55);
-  return c * (0.84 + 0.32 * mid);
+  // Mottling at a metre or two: thicker and thinner sward, the mower's
+  // overlap, a damp hollow. A lawn seen from a few storeys up is never one
+  // flat green.
+  float mottle = atNoise(uv * 0.8 + 11.0) * 0.6 + atNoise(uv * 2.3 + 5.0) * 0.4;
+  return c * (0.76 + 0.30 * mid) * (0.86 + 0.28 * mottle);
 }`,
   paving: /* glsl */ `
 vec3 antiTone(vec2 uv) {

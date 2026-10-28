@@ -251,38 +251,42 @@ pub fn paving_texture(size: usize) -> BakedTexture {
 
 /// Planted ground: the median belt, block lawns and the tussocks on a verge.
 ///
-/// A real Chinese median is not a lawn — it is a clipped shrub bed with bare
-/// earth showing through the thin places and last year's leaves caught in it.  So
-/// the bake is a low-saturation green with a substantial dirt component rather
-/// than the vivid green of a park.
+/// A 4 m tile of mown urban lawn (the 高羊茅 and 马尼拉 of a Chinese verge) as
+/// it reads from a few metres to a few hundred: blades at the pixel, the
+/// clumps a mower leaves at 15-20 cm, a few dry blades and the soil glimpsed
+/// between blades, and only gentle tone at the scale of the tile. Everything
+/// larger (lush and dry patches, worn earth across a lawn) is the shader's
+/// (`antiTile.ts`), at scales no tile repeats: blobs baked into the tile came
+/// back on every 4 m square as a lattice of dark dots across every lawn.
+/// Mown grass has an albedo of about 0.2; its green is a yellowish one.
 pub fn grass_texture(size: usize) -> BakedTexture {
     let mut rgba = vec![0_u8; size * size * 4];
     for y in 0..size {
         for x in 0..size {
             let u = x as f32 / size as f32;
             let v = y as f32 / size as f32;
-            let clump = signed_noise(31, u * 12.0, v * 12.0, 12.0) * 16.0;
-            let blade = if hash(37, x as i32, y as i32) < 0.26 {
-                16.0
-            } else {
-                0.0
-            };
-            // Bare earth: the thin places a clipped bed always has.
-            let bare = noise(0x9d17, u * 4.0, v * 4.0, 4.0);
-            let earth = if bare > 0.62 {
-                (bare - 0.62) * 210.0
-            } else {
-                0.0
-            };
-            let dry = signed_noise(41, u * 6.0, v * 6.0, 6.0) * 11.0;
-            let leaf = if hash(43, x as i32, y as i32) < 0.012 {
-                22.0
-            } else {
-                0.0
-            };
-            let red = 66.0 + clump + blade + dry * 1.15 + leaf - earth;
-            let green = 90.0 + clump + blade + dry + leaf * 0.8 - earth * 0.75;
-            let blue = 52.0 + clump * 0.7 + blade * 0.6 + dry * 0.6 - earth * 0.55;
+            // Blades: one value per pixel, a little streaked along a direction
+            // that turns slowly across the tile, as cut grass lies.
+            let lean = noise(0x5a1, u * 3.0, v * 3.0, 3.0) * std::f32::consts::TAU;
+            let (ls, lc) = lean.sin_cos();
+            let along = (u * lc + v * ls) * 260.0;
+            let across = (-u * ls + v * lc) * 900.0;
+            let blade = signed_noise(29, along, across, 900.0) * 14.0
+                + (hash(37, x as i32, y as i32) - 0.5) * 16.0;
+            let clump = signed_noise(31, u * 22.0, v * 22.0, 22.0) * 9.0;
+            let tone = signed_noise(41, u * 5.0, v * 5.0, 5.0) * 5.0;
+            // Soil between the blades, and the odd dry blade.
+            let gap = hash(43, x as i32, y as i32);
+            let (soil, dry) = (gap < 0.07, gap > 0.95);
+            let lift = blade + clump + tone;
+            let (mut red, mut green, mut blue) =
+                (86.0 + lift * 0.9, 103.0 + lift, 58.0 + lift * 0.6);
+            if soil {
+                // Dark loam, brown rather than black.
+                (red, green, blue) = (red * 0.62 + 18.0, green * 0.52 + 10.0, blue * 0.60 + 6.0);
+            } else if dry {
+                (red, green, blue) = (red + 34.0, green + 16.0, blue - 4.0);
+            }
             let offset = (y * size + x) * 4;
             rgba[offset] = red.clamp(0.0, 255.0) as u8;
             rgba[offset + 1] = green.clamp(0.0, 255.0) as u8;
