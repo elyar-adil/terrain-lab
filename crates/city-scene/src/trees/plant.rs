@@ -337,6 +337,7 @@ fn plant_with(
     lists: Lists,
 ) -> TreeOutput {
     super::declare(builder);
+    let planted_from = builder.mark();
     let mut rng = Rng::new(seed ^ 0x74ee);
     let mut output = TreeOutput::default();
     let mut counts: Vec<(TreeRole, &'static str, usize)> = Vec::new();
@@ -725,6 +726,31 @@ fn plant_with(
         }
     }
     output.tufts = tufts;
+    // Nothing grows under a viaduct's deck: in the dark and dry between its
+    // piers a tree would also stand up through the road above it. Each deck
+    // as its plan line, with its half-width and a crown's reach.
+    let decks: Vec<(Vec<Vec2>, f32)> = network
+        .roads
+        .iter()
+        .filter(|road| road.layer != 0)
+        .map(|road| {
+            let length = road.carriageway.length();
+            let steps = ((length / 4.0).ceil() as usize).max(1);
+            let plan: Vec<Vec2> = (0..=steps)
+                .map(|k| road.carriageway.plan_at(length * k as f32 / steps as f32))
+                .collect();
+            (plan, road.half_width() + 4.0)
+        })
+        .collect();
+    if !decks.is_empty() {
+        let dropped = builder.retain_instances_since(&planted_from, |i| {
+            let p = Vec2::new(i.x, i.z);
+            !decks
+                .iter()
+                .any(|(plan, reach)| crate::math::distance_to_polyline(p, plan) < *reach)
+        });
+        output.instances = output.instances.saturating_sub(dropped);
+    }
     // Roles in the order they were first planted, as they always were.
     let mut by_role: Vec<(TreeRole, usize)> = Vec::new();
     for (role, _, count) in &counts {

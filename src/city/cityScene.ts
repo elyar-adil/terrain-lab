@@ -1358,7 +1358,11 @@ export function beginCityBuild(
         target.receiveShadow = mesh.receiveShadow;
         const part = mesh.material.includes("#") ? mesh.material.split("#")[1] : "";
         target.userData.part = part;
-        const tinted = Boolean((material as THREE.MeshStandardMaterial).vertexColors);
+        // A car takes its paint from the instance tint alone (`car/body` has
+        // no vertex colours on purpose, see its material); three.js applies an
+        // instance colour whether or not the material reads vertex colours.
+        const tinted =
+          Boolean((material as THREE.MeshStandardMaterial).vertexColors) || instanceKey.startsWith("car/");
         const floats = list.floats;
         const wantBounds = options.lod === true;
         const bounds = wantBounds ? new Float32Array(list.count * 4) : null;
@@ -1450,9 +1454,6 @@ export function beginCityBuild(
 
     // The moving fleet draws from the same prototype as the parked cars, so a
     // moving car and a parked car cannot be different vehicles.
-    // Parked cars are hidden until the vehicle model is worth looking at.
-    instanced.get("car/body")?.removeFromParent();
-    instanced.get("car/glass")?.removeFromParent();
     const carPrototype = instanced.get("car/body");
     const glassPrototype = instanced.get("car/glass");
     // Cloned rather than shared: an `InstancedMesh` and a plain `Mesh` may legally
@@ -1464,10 +1465,6 @@ export function beginCityBuild(
     if (carGlass) ownedGeometries.push(carGlass);
     handles.carBody = carBody;
     handles.carGlass = carGlass;
-    // Parked cars never draw: keep them out of the LOD sets too.
-    for (let index = lodSets.length - 1; index >= 0; index -= 1) {
-      if (lodSets[index].key.startsWith("car/")) lodSets.splice(index, 1);
-    }
   }
 
   const generator = run();

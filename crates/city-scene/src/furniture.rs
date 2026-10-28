@@ -142,16 +142,20 @@ fn street_lamp(builder: &mut MeshBuilder, key: &str) {
 /// A utility pole with two cross-arms and a transformer, at unit height.
 fn utility_pole(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
+    // Unit height, placed with its height as the `y` scale alone: across, it
+    // is in true metres, a spun-concrete pole 0.30 m at the foot and 0.19 m
+    // at the head, with cross-arms 3.8 m and 3.0 m long. Scaled whole by its
+    // height it was a slab two metres thick.
     builder.tube(
         key,
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(0.0, 1.0, 0.0),
-        0.11,
-        0.08,
-        6,
+        0.15,
+        0.095,
+        8,
         None,
     );
-    for (height, span) in [(0.90_f32, 0.19_f32), (0.80, 0.15)] {
+    for (height, span) in [(POLE_ARM_TOP, POLE_SPAN_TOP), (POLE_ARM_LOW, POLE_SPAN_LOW)] {
         builder.quad(
             key,
             Vec3::new(-span, height, 0.0),
@@ -162,6 +166,12 @@ fn utility_pole(builder: &mut MeshBuilder, key: &str) {
         );
     }
 }
+
+/// The cross-arms: heights as shares of the pole, half-spans in metres.
+const POLE_ARM_TOP: f32 = 0.90;
+const POLE_ARM_LOW: f32 = 0.80;
+const POLE_SPAN_TOP: f32 = 1.9;
+const POLE_SPAN_LOW: f32 = 1.5;
 
 /// A kerbside bollard: the thing that stops a pedestrian mount the carriageway
 /// at a junction mouth, and that the source renderer placed on the walk ring.
@@ -564,73 +574,158 @@ fn bus_shelter(builder: &mut MeshBuilder, key: &str) {
 
 /// A parked car, authored facing `+X` at unit length, used for both the parked
 /// fleet and the traffic simulation.
+/// A compact saloon, the commonest car on a Chinese street (a Lavida, a Sylphy,
+/// a Corolla: 4.67 m long, 1.81 m wide, 1.47 m high on a 2.69 m wheelbase and
+/// 0.63 m wheels). Authored nose along local `+X`, up `+Y`, so `yaw_along_x`
+/// points it down its lane; its wheels stand on `y = 0`.
+const CAR_WHEELBASE: f32 = 2.69;
+const CAR_TRACK: f32 = 1.54;
+const CAR_WHEEL_R: f32 = 0.315;
+
+/// A face wound to look along `out`.
+fn face_out(builder: &mut MeshBuilder, key: &str, q: &[Vec3], out: Vec3) {
+    let n = crate::mesh::face_normal(q[0], q[1], q[2]);
+    let flip = n.dot(out) < 0.0;
+    let at = |i: usize| if flip { q[q.len() - 1 - i] } else { q[i] };
+    for k in 1..q.len() - 1 {
+        builder.tri_flat(key, at(0), at(k), at(k + 1), None);
+    }
+}
+
+/// A side profile `(x, y)` extruded across the car, `width(y)` wide at each
+/// height so the sides lean in toward the top as a car's do.
+fn extrude_profile(
+    builder: &mut MeshBuilder,
+    key: &str,
+    profile: &[Vec2],
+    width: impl Fn(f32) -> f32,
+) {
+    let side = |p: Vec2, s: f32| Vec3::new(p.x, p.y, s * width(p.y) * 0.5);
+    let centre = profile.iter().fold(Vec2::new(0.0, 0.0), |a, p| a + *p) / profile.len() as f32;
+    for s in [-1.0_f32, 1.0] {
+        for [a, b, c] in crate::math::triangulate(profile) {
+            face_out(
+                builder,
+                key,
+                &[
+                    side(profile[a], s),
+                    side(profile[b], s),
+                    side(profile[c], s),
+                ],
+                Vec3::new(0.0, 0.0, s),
+            );
+        }
+    }
+    for k in 0..profile.len() {
+        let (p, q) = (profile[k], profile[(k + 1) % profile.len()]);
+        let mid = (p + q) * 0.5 - centre;
+        face_out(
+            builder,
+            key,
+            &[side(p, -1.0), side(q, -1.0), side(q, 1.0), side(p, 1.0)],
+            Vec3::new(mid.x, mid.y, 0.0),
+        );
+    }
+}
+
 fn car_body(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
-    // Skirt, body and cabin as three stacked boxes: three draw-call-cheap shapes
-    // that read as a car at street distance and cost 18 quads between them.
-    box_at(
-        builder,
-        key,
-        Vec2::new(0.0, 0.0),
-        0.18,
-        1.86,
-        0.36,
-        4.36,
-        0.0,
-    );
-    box_at(
-        builder,
-        key,
-        Vec2::new(0.0, 0.0),
-        0.52,
-        1.78,
-        0.44,
-        4.10,
-        0.0,
-    );
-    box_at(
-        builder,
-        key,
-        Vec2::new(-0.10, 0.0),
-        0.86,
-        1.58,
-        0.34,
-        2.10,
-        0.0,
-    );
+    let half_base = CAR_WHEELBASE * 0.5;
+    let arch = |profile: &mut Vec<Vec2>, x: f32| {
+        // Over the wheel, front to back along the sill: a half circle a
+        // little larger than the tyre.
+        for k in 0..=8 {
+            let angle = std::f32::consts::PI * (1.0 - k as f32 / 8.0);
+            profile.push(Vec2::new(
+                x + angle.cos() * 0.40,
+                CAR_WHEEL_R + angle.sin() * 0.40,
+            ));
+        }
+    };
+    // Counter-clockwise from the bottom of the rear bumper: the sill with its
+    // two arches, the nose, the bonnet to the foot of the windscreen, the
+    // waist back to the boot, the boot lid and the tail.
+    let mut profile = vec![Vec2::new(-2.30, 0.34), Vec2::new(-1.90, 0.30)];
+    arch(&mut profile, -half_base);
+    arch(&mut profile, half_base);
+    profile.extend([
+        Vec2::new(1.95, 0.30),
+        Vec2::new(2.30, 0.34),
+        Vec2::new(2.35, 0.56),
+        Vec2::new(2.27, 0.78),
+        Vec2::new(1.90, 0.90),
+        Vec2::new(1.15, 0.97),
+        Vec2::new(-1.55, 0.98),
+        Vec2::new(-2.05, 1.00),
+        Vec2::new(-2.30, 0.88),
+        Vec2::new(-2.35, 0.58),
+    ]);
+    extrude_profile(builder, key, &profile, |y| {
+        if y < 0.5 {
+            1.78
+        } else {
+            1.81 - (y - 0.5) * 0.12
+        }
+    });
+    // The roof panel over the glass.
+    let roof = [
+        Vec2::new(-0.80, 1.43),
+        Vec2::new(0.32, 1.43),
+        Vec2::new(0.27, 1.47),
+        Vec2::new(-0.76, 1.47),
+    ];
+    extrude_profile(builder, key, &roof, |_| 1.27);
 }
 
 fn car_glass(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
-    box_at(
-        builder,
-        key,
-        Vec2::new(-0.10, 0.0),
-        0.88,
-        1.60,
-        0.30,
-        2.00,
-        0.0,
-    );
+    // The glasshouse: windscreen, side windows and rear window as one solid,
+    // narrowing from the waist to the roof.
+    let cabin = [
+        Vec2::new(-1.55, 0.97),
+        Vec2::new(1.15, 0.96),
+        Vec2::new(0.33, 1.435),
+        Vec2::new(-0.82, 1.435),
+    ];
+    extrude_profile(builder, key, &cabin, |y| 1.70 - (y - 0.96) * 0.85);
 }
 
 fn car_wheel(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
-    for (x, y) in [
-        (1.36_f32, 0.82_f32),
-        (1.36, -0.82),
-        (-1.36, 0.82),
-        (-1.36, -0.82),
-    ] {
-        builder.tube(
-            key,
-            Vec3::new(x - 0.06, y, 0.16),
-            Vec3::new(x + 0.06, y, 0.16),
-            0.16,
-            0.16,
-            7,
-            None,
-        );
+    let half_base = CAR_WHEELBASE * 0.5;
+    for x in [-half_base, half_base] {
+        for side in [-1.0_f32, 1.0] {
+            let (inner, outer) = (
+                side * (CAR_TRACK * 0.5 - 0.10),
+                side * (CAR_TRACK * 0.5 + 0.10),
+            );
+            let centre = |z: f32| Vec3::new(x, CAR_WHEEL_R, z);
+            builder.tube(
+                key,
+                centre(inner),
+                centre(outer),
+                CAR_WHEEL_R,
+                CAR_WHEEL_R,
+                12,
+                None,
+            );
+            let rim: Vec<Vec3> = (0..12)
+                .map(|k| {
+                    let angle = k as f32 / 12.0 * std::f32::consts::TAU;
+                    centre(outer)
+                        + Vec3::new(angle.cos() * CAR_WHEEL_R, angle.sin() * CAR_WHEEL_R, 0.0)
+                })
+                .collect();
+            let face = Vec3::new(0.0, 0.0, side);
+            for k in 0..rim.len() {
+                face_out(
+                    builder,
+                    key,
+                    &[centre(outer), rim[k], rim[(k + 1) % rim.len()]],
+                    face,
+                );
+            }
+        }
     }
 }
 
@@ -795,14 +890,18 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
                 let rotation = tangent.x.atan2(tangent.y);
                 builder.add_instance(
                     "furniture/pole",
-                    Instance::new(
-                        base.x,
-                        level::KERB,
-                        base.z,
-                        rotation,
-                        pole_height,
-                        [1.0, 1.0, 1.0],
-                    ),
+                    Instance {
+                        scale_x: 1.0,
+                        scale_z: 1.0,
+                        ..Instance::new(
+                            base.x,
+                            level::KERB,
+                            base.z,
+                            rotation,
+                            pole_height,
+                            [1.0, 1.0, 1.0],
+                        )
+                    },
                 );
                 output.poles += 1;
 
@@ -810,14 +909,14 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
                     road: road.id,
                     base: Vec3::new(base.x, level::KERB, base.z),
                     // The arms are at prototype `y` 0.90 and 0.80 of a pole whose
-                    // height *is* the instance scale, so the conductor hang points
-                    // scale with the pole. Hard-coded offsets were the fourth
+                    // height *is* the instance's `y` scale, so the conductor hang
+                    // points rise with the pole; their spans are in metres. Hard-coded offsets were the fourth
                     // defect: the wires floated about a metre inboard of the arm
                     // tips and touched nothing.
-                    arm_top: 0.90 * pole_height,
-                    arm_low: 0.80 * pole_height,
-                    arm_span_top: 0.19 * pole_height,
-                    arm_span_low: 0.15 * pole_height,
+                    arm_top: POLE_ARM_TOP * pole_height,
+                    arm_low: POLE_ARM_LOW * pole_height,
+                    arm_span_top: POLE_SPAN_TOP,
+                    arm_span_low: POLE_SPAN_LOW,
                     rotation,
                 };
                 if spans < CATENARY_BUDGET
@@ -1894,6 +1993,61 @@ mod tests {
                     road.id
                 );
             }
+        }
+    }
+
+    #[test]
+    fn a_car_points_down_its_lane_on_its_wheels_and_a_pole_is_a_pole() {
+        // Placed with `yaw_along_x`, so the model's length must lie along +X:
+        // authored along Z, every parked car stood across the road.
+        let mut builder = MeshBuilder::new();
+        build_prototypes(&mut builder);
+        let scene = builder.build();
+        let extent = |key: &str| {
+            let g = scene.meshes.iter().find(|g| g.material == key).unwrap();
+            let mut lo = [f32::MAX; 3];
+            let mut hi = [f32::MIN; 3];
+            for v in g.positions.chunks(3) {
+                for k in 0..3 {
+                    lo[k] = lo[k].min(v[k]);
+                    hi[k] = hi[k].max(v[k]);
+                }
+            }
+            (lo, hi)
+        };
+        let (lo, hi) = extent("car/body");
+        // Its roof's height over the road its wheels stand on.
+        let (length, width, height) = (hi[0] - lo[0], hi[2] - lo[2], hi[1]);
+        assert!((4.5..4.9).contains(&length), "a car {length:.2} m long");
+        assert!((1.7..1.9).contains(&width), "a car {width:.2} m wide");
+        assert!((1.35..1.6).contains(&height), "a car {height:.2} m high");
+        let (wlo, whi) = extent("car/wheel");
+        assert!(
+            wlo[1].abs() < 0.01,
+            "the wheels stand on the road, not {:.2} m off it",
+            wlo[1]
+        );
+        assert!(
+            whi[0] - wlo[0] > 3.0 && whi[2] - wlo[2] < 2.0,
+            "axles across the car"
+        );
+        // A pole is scaled by its height alone; across it stays a pole.
+        let (_, network) = city();
+        let mut builder = MeshBuilder::new();
+        build_prototypes(&mut builder);
+        place(&network, &mut builder, 42);
+        let scene = builder.build();
+        let (plo, phi) = extent("furniture/pole");
+        let poles = scene
+            .instances
+            .iter()
+            .find(|l| l.key == "furniture/pole")
+            .unwrap();
+        assert!(!poles.instances.is_empty());
+        for pole in &poles.instances {
+            let thick = (phi[2] - plo[2]).min(phi[0] - plo[0]) * pole.scale_x.min(pole.scale_z);
+            assert!(thick < 0.4, "a pole {thick:.2} m thick");
+            assert!(pole.scale_y > 6.0, "a pole {:.1} m high", pole.scale_y);
         }
     }
 }

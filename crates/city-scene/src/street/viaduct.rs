@@ -31,6 +31,8 @@ use super::{Carriageway, level};
 const CONCRETE: &str = "viaduct.concrete";
 const GLASS: &str = "viaduct.glass";
 const PLANTER: &str = "viaduct.planter";
+/// The lowest deck a planter trough hangs on.
+const PLANTER_MIN_DECK_M: f32 = 4.0;
 const STEEL: &str = "rail.steel";
 
 /// Fair-faced concrete in the light, the parapet's face, the soffit in its own
@@ -548,6 +550,11 @@ fn planter(
             a + (b - a) * k as f32 / steps as f32,
             a + (b - a) * (k + 1) as f32 / steps as f32,
         );
+        // Hung only where the deck is up in the air: on a ramp's low end the
+        // foliage spilling down the fascia lay on the embankment beside it.
+        if at(s0, 0.0, 0.0).y.min(at(s1, 0.0, 0.0).y) < PLANTER_MIN_DECK_M {
+            continue;
+        }
         // Foliage: mostly green, a run of magenta here and there, a little
         // thinner where it has not taken.
         let r = cell01(0x5EED, seed as i32, k as i32, 7);

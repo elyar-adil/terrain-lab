@@ -1081,6 +1081,19 @@ impl MeshBuilder {
             }
             buffers.crop_tail(from, min, max);
         }
+        self.retain_instances_since(mark, |i| {
+            i.x >= min[0] && i.x < max[0] && i.z >= min[1] && i.z < max[1]
+        });
+    }
+
+    /// Drop the instances added since `mark` that `keep` refuses; returns how
+    /// many went.
+    pub fn retain_instances_since(
+        &mut self,
+        mark: &BuilderMark,
+        keep: impl Fn(&Instance) -> bool,
+    ) -> usize {
+        let mut dropped = 0;
         for (key, list) in &mut self.instances {
             let from = mark
                 .instances
@@ -1088,12 +1101,12 @@ impl MeshBuilder {
                 .copied()
                 .unwrap_or(0)
                 .min(list.len());
+            let before = list.len();
             let tail: Vec<Instance> = list.drain(from..).collect();
-            list.extend(
-                tail.into_iter()
-                    .filter(|i| i.x >= min[0] && i.x < max[0] && i.z >= min[1] && i.z < max[1]),
-            );
+            list.extend(tail.into_iter().filter(|i| keep(i)));
+            dropped += before - list.len();
         }
+        dropped
     }
 
     /// Finish every group.  Empty groups are dropped so the renderer never

@@ -1382,3 +1382,51 @@ fn zz_signature_sheet() {
         );
     }
 }
+
+#[test]
+fn no_tree_stands_under_a_viaduct_deck() {
+    // A tree under an expressway deck stood up through the road above it.
+    let city = generate_modern_chinese_city(ModernChinaSpec {
+        seed: 42,
+        radius_km: 1.6,
+        block_size_metres: 110.0,
+        ..ModernChinaSpec::default()
+    });
+    let network = derive(
+        &city.nodes,
+        &city.sd_roads,
+        &city.hd_roads,
+        city.frame,
+        JunctionSpec::default(),
+        city.seed,
+    );
+    let decks: Vec<(Vec<Vec2>, f32)> = network
+        .roads
+        .iter()
+        .filter(|road| road.layer != 0)
+        .map(|road| {
+            let length = road.carriageway.length();
+            let plan = (0..=40)
+                .map(|k| road.carriageway.plan_at(length * k as f32 / 40.0))
+                .collect();
+            (plan, road.half_width())
+        })
+        .collect();
+    assert!(!decks.is_empty(), "the fixture has an expressway");
+    let (_, lists) = planted(&city, Some(CityStyle::ChineseModern));
+    for list in &lists {
+        for tree in &list.instances {
+            let p = Vec2::new(tree.x, tree.z);
+            for (plan, half) in &decks {
+                let d = crate::math::distance_to_polyline(p, plan);
+                assert!(
+                    d >= *half,
+                    "a {} under a deck at ({:.0}, {:.0})",
+                    list.key,
+                    p.x,
+                    p.y
+                );
+            }
+        }
+    }
+}
