@@ -1156,11 +1156,22 @@ fn yellow_grid_box(junction: &Junction, builder: &mut MeshBuilder, _spec: &Junct
         return;
     }
     let width = 0.085_f32;
+    // Inset, a box with a narrow notch between two of its legs (two ramps at
+    // a terminal) folds out past its own edge there; the paint keeps to the
+    // box itself.
+    let in_box = |p: Vec2| {
+        crate::math::point_in_ring(p, &inset) && crate::math::point_in_ring(p, &junction.ring)
+    };
     // The outline: a continuous yellow border around the no-stopping box.
     for index in 0..inset.len() {
         let a = inset[index];
         let b = inset[(index + 1) % inset.len()];
-        yellow_bar(builder, a, b, width * 1.5);
+        if crate::math::point_in_ring(a, &junction.ring)
+            && crate::math::point_in_ring(b, &junction.ring)
+            && crate::math::point_in_ring((a + b) * 0.5, &junction.ring)
+        {
+            yellow_bar(builder, a, b, width * 1.5);
+        }
     }
     // The hatching: diagonal lines at +-45 degrees, 4.4 m apart, clipped to the
     // outline. Each line is sampled every 0.7 m and drawn as one quad per run
@@ -1190,7 +1201,7 @@ fn yellow_grid_box(junction: &Junction, builder: &mut MeshBuilder, _spec: &Junct
             let mut last = origin;
             for step in 0..=steps {
                 let point = origin + dir * (step as f32 * 0.7);
-                let inside = crate::math::point_in_ring(point, &inset);
+                let inside = in_box(point);
                 if inside && run_start.is_none() {
                     run_start = Some(point);
                 }

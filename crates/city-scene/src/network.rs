@@ -2077,8 +2077,26 @@ fn merge_ramp(line: &mut [Vec2], decks: &[Vec<Vec2>], half_main: f32, half_ramp:
     for k in 1..line.len() {
         stations[k] = stations[k - 1] + line[k - 1].distance(line[k]);
     }
+    // Only the run that lies along the deck is laid against it: a loop turns
+    // away within a few tens of metres, and peeled over the full length its
+    // curve would be pressed flat onto the deck's edge.
+    let mut peel = RAMP_PEEL_M;
+    for k in 1..line.len() {
+        if stations[k] >= peel {
+            break;
+        }
+        let Some((_, normal, _)) = project(line[k]) else {
+            continue;
+        };
+        let along = Vec2::new(normal.y, -normal.x);
+        let heading = (line[k] - line[k - 1]).normalize();
+        if heading.dot(along).abs() < 0.94 {
+            peel = stations[k - 1].max(1.0);
+            break;
+        }
+    }
     for k in 0..line.len() {
-        let w = smootherstep(stations[k] / RAMP_PEEL_M);
+        let w = smootherstep(stations[k] / peel);
         if w >= 1.0 {
             break;
         }
