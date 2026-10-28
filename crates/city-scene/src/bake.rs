@@ -12,8 +12,8 @@ pub use crate::facades::{
 };
 pub use crate::leaf_cards::{leaf_card_textures, tuft_texture};
 pub use crate::textures::{
-    GROUND_TILE_M, asphalt_texture, crosswalk_texture, dashed_line_texture, grass_texture,
-    paving_texture, signage_texture,
+    GROUND_TILE_M, asphalt_texture, crosswalk_texture, dashed_line_texture, flower_texture,
+    grass_texture, hedge_texture, paving_texture, signage_texture,
 };
 
 use crate::textures::BakedTexture;
@@ -36,6 +36,10 @@ pub fn standard_set(facade_size: usize, ground_size: usize) -> Vec<BakedTexture>
     set.push(asphalt_texture(ground_size));
     set.push(paving_texture(ground_size));
     set.push(grass_texture(ground_size));
+    set.push(hedge_texture(ground_size));
+    for colour in ["red", "pink", "yellow"] {
+        set.push(flower_texture(ground_size, colour));
+    }
     set.extend(crate::crops::crop_textures((ground_size * 2).max(256)));
     set.push(crosswalk_texture(ground_size));
     set.push(dashed_line_texture(64, 3.0, 5.0));

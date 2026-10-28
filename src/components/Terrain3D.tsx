@@ -13,7 +13,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { offerFoliageMask, patchOcclusionFoliage, sanitizePass } from "../city/post";
+import { offerFoliageMask, patchOcclusionFoliage, sanitizePass, skipFlaggedInOcclusion } from "../city/post";
 import { patchTreeMaterial } from "../trees";
 import { bakeSkyEnvironment } from "../city/sky";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
@@ -406,6 +406,7 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
       post.setPixelRatio(renderer.getPixelRatio());
       const renderPass = new RenderPass(scene, camera);
       const gtaoPass = new GTAOPass(scene, camera, host.clientWidth || 2, host.clientHeight || 2);
+      skipFlaggedInOcclusion(gtaoPass);
       gtaoPass.output = GTAOPass.OUTPUT.Default;
       gtaoPass.blendIntensity = 0.85;
       const aoScale = 3.2 / (result.worldSizeKm * 1000);

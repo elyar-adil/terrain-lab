@@ -72,6 +72,7 @@ export function createPost(
 
   if (options.foliageMask) occlusionFoliageMask.value = options.foliageMask;
   patchOcclusionFoliage(gtao.normalMaterial);
+  skipFlaggedInOcclusion(gtao);
 
   // The occlusion pass draws the whole scene with one override material, so the
   // individually grown trees (which are raised in the vertex shader, not stored
@@ -175,6 +176,31 @@ export const occlusionFoliageMask: { value: THREE.Texture | null } = { value: nu
 /** Take the leaf mask from a city's textures, if none is set yet. */
 export function offerFoliageMask(textures: SceneTexture[]): void {
   if (!occlusionFoliageMask.value) occlusionFoliageMask.value = foliageMaskTexture(textures);
+}
+
+/**
+ * Keep flat see-through decals out of GTAO's normal/depth pass. The pass redraws
+ * the scene with one opaque override material, so a soft contact shadow under a
+ * tree went in as a solid square standing off the ground, and the occlusion
+ * then drew a hard black square under every tree. Anything with
+ * `userData.noOcclusion` is hidden for that pass, as points and lines already are.
+ */
+export function skipFlaggedInOcclusion(pass: GTAOPass): void {
+  const internal = pass as unknown as {
+    scene: THREE.Scene;
+    _visibilityCache: THREE.Object3D[];
+    _overrideVisibility: () => void;
+  };
+  const original = internal._overrideVisibility.bind(pass);
+  internal._overrideVisibility = () => {
+    original();
+    internal.scene.traverse((object) => {
+      if (object.userData.noOcclusion && object.visible) {
+        object.visible = false;
+        internal._visibilityCache.push(object);
+      }
+    });
+  };
 }
 
 /**

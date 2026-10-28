@@ -760,6 +760,9 @@ fn declare(builder: &mut MeshBuilder) {
         "sidewalk",
         "kerb",
         "median.plant",
+        "flowers/red",
+        "flowers/pink",
+        "flowers/yellow",
         "barrier.concrete",
         "rail.steel",
         "marking.white",
@@ -772,6 +775,13 @@ fn declare(builder: &mut MeshBuilder) {
     ] {
         builder.style(material, style);
     }
+    builder.style(
+        "hedge.clipped",
+        GroupStyle {
+            cast_shadow: true,
+            ..style
+        },
+    );
     // The two dashed-line variants and the crossing are alpha-cut textures, not
     // opaque paint: their transparent gaps must show the asphalt underneath.
     for material in [

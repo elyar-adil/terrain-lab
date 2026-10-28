@@ -582,6 +582,7 @@ fn median_and_hazard(
         None,
         super::Uvs::World,
     );
+    median_planting(builder, road, surface, median_half, from, to);
     // The nose: the black-and-yellow diagonal on the median's end, the single
     // most recognisable piece of Chinese junction furniture there is.
     for (start, outward, crossing) in [
@@ -596,6 +597,116 @@ fn median_and_hazard(
             continue;
         }
         hazard_stripes(builder, surface, -median_half, median_half, start, end);
+    }
+}
+
+/// What a Chinese median is planted with (the Shanghai, Shenzhen, Urumqi and
+/// Kuitun photographs): a clipped hedge (小叶女贞, 黄杨) along its middle, cut
+/// square and about 0.9 m high, and on a median two metres or more a band of
+/// bedding flowers along each edge, one colour to a street. The hedge stops a
+/// metre and a half short of each nose, where it would hide a pedestrian.
+fn median_planting(
+    builder: &mut MeshBuilder,
+    road: &Road,
+    surface: &Carriageway,
+    median_half: f32,
+    from: f32,
+    to: f32,
+) {
+    let (from, to) = (from + 1.5, to - 1.5);
+    if median_half < 0.5 || to - from < 3.0 {
+        return;
+    }
+    let bed = super::level::MEDIAN;
+    let flowers = median_half >= 1.0;
+    if flowers {
+        let colour = ["flowers/red", "flowers/pink", "flowers/yellow"][road.id as usize % 3];
+        for side in [-1.0_f32, 1.0] {
+            let (a, b) = (side * (median_half - 0.62), side * (median_half - 0.16));
+            ribbon(
+                builder,
+                colour,
+                surface,
+                a.min(b),
+                a.max(b),
+                from,
+                to,
+                bed + 0.08,
+                None,
+                super::Uvs::World,
+            );
+        }
+    }
+    let half = if flowers {
+        (median_half - 0.75).clamp(0.25, 0.55)
+    } else {
+        (median_half - 0.2).clamp(0.2, 0.45)
+    };
+    let height = 0.9;
+    // A face, wound to look along `out`, with metre UVs (along, up).
+    let face = |builder: &mut MeshBuilder, q: [Vec3; 4], uv: [(f32, f32); 4], out: Vec3| {
+        let n = crate::mesh::face_normal(q[0], q[1], q[2]);
+        if n.dot(out) >= 0.0 {
+            builder.quad_uv("hedge.clipped", q[0], q[1], q[2], q[3], uv, None);
+        } else {
+            builder.quad_uv(
+                "hedge.clipped",
+                q[3],
+                q[2],
+                q[1],
+                q[0],
+                [uv[3], uv[2], uv[1], uv[0]],
+                None,
+            );
+        }
+    };
+    let at = |s: f32, lateral: f32, up: f32| {
+        let p = surface.point(s, lateral, 0.0);
+        Vec3::new(p.x, bed + up, p.z)
+    };
+    let stations = surface.stations(from, to, 2.0);
+    for w in stations.windows(2) {
+        let (s0, s1) = (w[0], w[1]);
+        let up = Vec3::new(0.0, 1.0, 0.0);
+        face(
+            builder,
+            [
+                at(s0, -half, height),
+                at(s1, -half, height),
+                at(s1, half, height),
+                at(s0, half, height),
+            ],
+            [(s0, -half), (s1, -half), (s1, half), (s0, half)],
+            up,
+        );
+        for side in [-1.0_f32, 1.0] {
+            let out = at(s0, side, 0.0) - at(s0, 0.0, 0.0);
+            face(
+                builder,
+                [
+                    at(s0, side * half, 0.0),
+                    at(s1, side * half, 0.0),
+                    at(s1, side * half, height),
+                    at(s0, side * half, height),
+                ],
+                [(s0, 0.0), (s1, 0.0), (s1, height), (s0, height)],
+                out,
+            );
+        }
+    }
+    for (s, sign) in [(from, -1.0_f32), (to, 1.0)] {
+        let along = (at(s + sign * 0.1, 0.0, 0.0) - at(s, 0.0, 0.0)) * sign;
+        face(
+            builder,
+            [
+                at(s, -half, 0.0),
+                at(s, half, 0.0),
+                at(s, half, height),
+                at(s, -half, height),
+            ],
+            [(-half, 0.0), (half, 0.0), (half, height), (-half, height)],
+            along,
+        );
     }
 }
 

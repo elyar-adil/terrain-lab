@@ -572,6 +572,8 @@ export class UniqueForest {
     decal.renderOrder = 1;
     decal.frustumCulled = false;
     decal.name = `forest/${chunk.key}/contact`;
+    // A soft pool, not a surface: kept out of the ambient-occlusion pass.
+    decal.userData.noOcclusion = true;
 
     this.release(chunk);
     chunk.decal = decal;

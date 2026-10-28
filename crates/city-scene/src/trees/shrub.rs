@@ -126,37 +126,39 @@ pub fn build_tuft_prototype(builder: &mut MeshBuilder) {
     builder.bind("tuft", "tuft");
 }
 
-/// Median shrubs along a divided road, as instances of the shrub prototype.
+/// Topiary balls (球形灌木) along a median wide enough for them, as in the
+/// reference photographs: one every seven metres on the median's line, standing
+/// up out of its clipped hedge (`street::surfaces::median_planting`), clear of
+/// the noses. A narrower median has the hedge alone.
 pub fn plant_median_shrubs(network: &Network, builder: &mut MeshBuilder, seed: u32) -> usize {
     let mut rng = Rng::new(seed ^ 0x5b12);
     let mut count = 0;
     for road in &network.roads {
-        if road.layer != 0 || !road.section.has_median() {
+        if road.layer != 0 || road.section.median_metres < 2.0 {
             continue;
         }
         let path = road.carriageway.clone();
         let length = path.length();
-        let half = road.section.median_metres * 0.5;
-        let mut station = 4.0;
-        while station < length - 4.0 {
-            let point = path.offset_at(station, (rng.unit() - 0.5) * half * 0.7, 0.0);
+        let mut station = 9.0 + rng.unit() * 3.0;
+        while station < length - 9.0 {
+            let point = path.offset_at(station, 0.0, 0.0);
             // Downwards only, for the same reason the tree tint is: an instance
             // tint above 1.0 clips in the payload's `u8` and the shrub ends up
             // brighter than any clipped hedge can be.
-            let green = 0.80 + rng.unit() * 0.20;
+            let green = 0.86 + rng.unit() * 0.14;
             builder.add_instance(
                 "hedge",
                 Instance::new(
                     point.x,
-                    crate::street::level::MEDIAN + 0.10,
+                    crate::street::level::MEDIAN + 0.25,
                     point.z,
                     rng.unit() * TAU,
-                    0.8 + rng.unit() * 0.5,
+                    1.15 + rng.unit() * 0.15,
                     [green * 0.94, green, green * 0.88],
                 ),
             );
             count += 1;
-            station += 1.35;
+            station += 7.0;
         }
     }
     count

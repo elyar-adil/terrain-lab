@@ -513,11 +513,21 @@ export function createMaterials(
         );
     };
   }
-  standard(
-    "hedge",
-    { map: grassMap ?? undefined, normalMap: normalFor("ground/grass", 2.2) ?? undefined, roughness: 0.92, flatShading: false },
-    grassMap ? 0x6f9a52 : 0x2a4a1f,
-  );
+  // Clipped hedge and topiary: small dense leaves (`foliage/hedge`), the hedge
+  // strip and the instanced balls in one leaf.
+  const hedgeMap = textureFor("foliage/hedge");
+  for (const key of ["hedge", "hedge.clipped"]) {
+    standard(
+      key,
+      { map: hedgeMap ?? undefined, normalMap: normalFor("foliage/hedge", 2.6) ?? undefined, roughness: 0.88, flatShading: false },
+      hedgeMap ? 0xffffff : 0x2a4a1f,
+    );
+  }
+  // Bedding flowers in a median band, one colour to a street.
+  for (const colour of ["red", "pink", "yellow"]) {
+    const map = textureFor(`flowers/${colour}`);
+    standard(`flowers/${colour}`, { map: map ?? undefined, normalMap: normalFor(`flowers/${colour}`, 1.8) ?? undefined, roughness: 0.8 }, map ? 0xffffff : 0x8a2a20);
+  }
   standard("barrier.concrete", { roughness: 0.9 }, 0x9a988e);
   // Hot-dip galvanised steel: bright, but metallic, so it takes its colour from
   // the sky rather than from its own albedo.

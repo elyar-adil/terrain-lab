@@ -249,6 +249,138 @@ pub fn paving_texture(size: usize) -> BakedTexture {
     }
 }
 
+/// The leaf of a clipped hedge or a topiary ball (黄杨, 小叶女贞, 金叶女贞): a
+/// 1 m tile of small leaves, each a cell of its own tone with a dark gap round
+/// it, lit leaves lighter and yellower (the new growth a clipping brings on).
+pub fn hedge_texture(size: usize) -> BakedTexture {
+    let mut rgba = vec![0_u8; size * size * 4];
+    // About sixty leaves across a metre: 1.6 cm each.
+    let cells = 60.0;
+    for y in 0..size {
+        for x in 0..size {
+            let (u, v) = (
+                x as f32 / size as f32 * cells,
+                y as f32 / size as f32 * cells,
+            );
+            let (cu, cv) = (u.floor(), v.floor());
+            // The nearest leaf centre among the neighbours (Worley).
+            let (mut near, mut second, mut id) = (9.0_f32, 9.0_f32, 0.0_f32);
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let (gx, gy) = (cu as i32 + dx, cv as i32 + dy);
+                    let wrap = |g: i32| g.rem_euclid(cells as i32);
+                    let jx = hash(0x1ea1, wrap(gx), wrap(gy));
+                    let jy = hash(0x1ea2, wrap(gx), wrap(gy));
+                    let d = ((gx as f32 + jx - u).powi(2) + (gy as f32 + jy - v).powi(2)).sqrt();
+                    if d < near {
+                        second = near;
+                        near = d;
+                        id = hash(0x1ea3, wrap(gx), wrap(gy));
+                    } else if d < second {
+                        second = d;
+                    }
+                }
+            }
+            let edge = ((second - near) * 2.2).clamp(0.0, 1.0);
+            let lit = id;
+            let new_growth = (signed_noise(
+                0x1ea4,
+                x as f32 / size as f32 * 6.0,
+                y as f32 / size as f32 * 6.0,
+                6.0,
+            ) * 0.5
+                + 0.5)
+                .powi(2);
+            let base = (52.0 + 52.0 * lit, 80.0 + 58.0 * lit, 32.0 + 22.0 * lit);
+            let yellow = new_growth * lit * 0.6;
+            let (r, g, b) = (
+                (base.0 + 40.0 * yellow) * (0.45 + 0.55 * edge),
+                (base.1 + 30.0 * yellow) * (0.45 + 0.55 * edge),
+                (base.2 - 6.0 * yellow) * (0.45 + 0.55 * edge),
+            );
+            let offset = (y * size + x) * 4;
+            rgba[offset] = r.clamp(0.0, 255.0) as u8;
+            rgba[offset + 1] = g.clamp(0.0, 255.0) as u8;
+            rgba[offset + 2] = b.clamp(0.0, 255.0) as u8;
+            rgba[offset + 3] = 255;
+        }
+    }
+    BakedTexture {
+        name: "foliage/hedge".into(),
+        width: size,
+        height: size,
+        tile_width_m: 1.0,
+        tile_height_m: 1.0,
+        has_normal_source: true,
+        rgba,
+    }
+}
+
+/// The bedding flowers of a Chinese median or verge, one tile per colour, as
+/// they are planted, in bands: 一串红 salvia (red), 矮牵牛 petunia (pink),
+/// 万寿菊 marigold (yellow-orange). A 1 m tile of flower heads 3-6 cm across,
+/// packed over their leaves, a few gaps of foliage showing.
+pub fn flower_texture(size: usize, colour: &str) -> BakedTexture {
+    let (petal, deep): ([f32; 3], [f32; 3]) = match colour {
+        "red" => ([214.0, 34.0, 38.0], [140.0, 14.0, 22.0]),
+        "pink" => ([224.0, 82.0, 168.0], [150.0, 30.0, 100.0]),
+        _ => ([246.0, 176.0, 28.0], [214.0, 98.0, 12.0]),
+    };
+    let mut rgba = vec![0_u8; size * size * 4];
+    let cells = 22.0;
+    for y in 0..size {
+        for x in 0..size {
+            let (u, v) = (
+                x as f32 / size as f32 * cells,
+                y as f32 / size as f32 * cells,
+            );
+            let (cu, cv) = (u.floor(), v.floor());
+            let (mut near, mut id) = (9.0_f32, 0.0_f32);
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let (gx, gy) = (cu as i32 + dx, cv as i32 + dy);
+                    let wrap = |g: i32| g.rem_euclid(cells as i32);
+                    let jx = hash(0xf10a, wrap(gx), wrap(gy));
+                    let jy = hash(0xf10b, wrap(gx), wrap(gy));
+                    let d = ((gx as f32 + jx - u).powi(2) + (gy as f32 + jy - v).powi(2)).sqrt();
+                    if d < near {
+                        near = d;
+                        id = hash(0xf10c, wrap(gx), wrap(gy));
+                    }
+                }
+            }
+            // A head where the nearest centre is close and the cell flowers.
+            let head = id > 0.12 && near < 0.30 + 0.12 * id;
+            let leaf = hash(0xf10d, x as i32, y as i32);
+            let (r, g, b) = if head {
+                let shade = 1.0 - near / 0.45;
+                let t = (0.35 + 0.65 * shade).clamp(0.0, 1.0);
+                (
+                    deep[0] + (petal[0] - deep[0]) * t,
+                    deep[1] + (petal[1] - deep[1]) * t,
+                    deep[2] + (petal[2] - deep[2]) * t,
+                )
+            } else {
+                (36.0 + 30.0 * leaf, 58.0 + 34.0 * leaf, 24.0 + 14.0 * leaf)
+            };
+            let offset = (y * size + x) * 4;
+            rgba[offset] = r.clamp(0.0, 255.0) as u8;
+            rgba[offset + 1] = g.clamp(0.0, 255.0) as u8;
+            rgba[offset + 2] = b.clamp(0.0, 255.0) as u8;
+            rgba[offset + 3] = 255;
+        }
+    }
+    BakedTexture {
+        name: format!("flowers/{colour}"),
+        width: size,
+        height: size,
+        tile_width_m: 1.0,
+        tile_height_m: 1.0,
+        has_normal_source: true,
+        rgba,
+    }
+}
+
 /// Planted ground: the median belt, block lawns and the tussocks on a verge.
 ///
 /// A 4 m tile of mown urban lawn (the 高羊茅 and 马尼拉 of a Chinese verge) as
