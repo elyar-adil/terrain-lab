@@ -449,6 +449,80 @@ fn kerb_ramp(
     }
 }
 
+/// A roundabout entry's splitter island (导流岛, CJJ 152 §4.6; the Xinjiang
+/// town-centre aerial): a raised, kerbed, planted wedge on the arm's axis from
+/// just inside the arm's end to just outside the give-way line, parting the
+/// entering lanes from the leaving ones. It starts as wide as the arm's median
+/// (a point on an undivided arm) and widens toward the ring; its nose is
+/// painted in the yellow and black hazard bands. Returns the island's
+/// half-width where the give-way triangle stands, 6 m short of the ring.
+fn splitter_island(
+    builder: &mut MeshBuilder,
+    mid: Vec2,
+    dir: Vec2,
+    median: f32,
+    ring: Option<Vec2>,
+) -> f32 {
+    let Some(ring) = ring else {
+        return 0.0;
+    };
+    let (start, end) = (0.6, (ring - mid).dot(dir));
+    if end - start < 5.0 {
+        return 0.0;
+    }
+    let side = Vec2::new(-dir.y, dir.x);
+    let (nose, base) = (median.max(0.35), median.max(2.2));
+    let half = |s: f32| nose + (base - nose) * ((s - start) / (end - start)).clamp(0.0, 1.0);
+    // The outline, inset by `by`: up one side, across the base, down the
+    // other, round the nose on a half circle.
+    let outline = |by: f32| -> Vec<Vec2> {
+        let (s0, s1) = (start + nose, end - by);
+        let mut ring = Vec::new();
+        for k in 0..=6 {
+            let s = s0 + (s1 - s0) * k as f32 / 6.0;
+            ring.push(mid + dir * s + side * (half(s) - by));
+        }
+        for k in (0..=6).rev() {
+            let s = s0 + (s1 - s0) * k as f32 / 6.0;
+            ring.push(mid + dir * s - side * (half(s) - by));
+        }
+        let r = (nose - by).max(0.05);
+        for k in 1..8 {
+            let angle = std::f32::consts::PI * k as f32 / 8.0;
+            ring.push(mid + dir * (s0 - angle.sin() * r) - side * (angle.cos() * r));
+        }
+        ring
+    };
+    let edge = outline(0.0);
+    let nose_from = edge.len() - 8;
+    for index in 0..edge.len() {
+        let next = (index + 1) % edge.len();
+        // The nose, its last metre of sides included, banded for hazard.
+        let near_nose = index >= nose_from - 1 || index == 0 || next == 0;
+        let material = match (near_nose, index % 2) {
+            (true, 0) => "marking.yellow",
+            (true, _) => "asphalt.pavement",
+            _ => "kerb",
+        };
+        builder.wall(
+            material,
+            edge[index],
+            edge[next],
+            super::level::ROAD,
+            super::level::KERB,
+            None,
+        );
+    }
+    builder.ground_uv("kerb", &edge, super::level::KERB + 0.002, None);
+    builder.ground_uv(
+        "median.plant",
+        &outline(0.25),
+        super::level::MEDIAN + 0.10,
+        None,
+    );
+    half(end - 6.0)
+}
+
 /// The median: two kerb faces, a planted bed, and the yellow-on-black hazard
 /// marking on the nose at each junction end.
 fn median_and_hazard(
@@ -1099,7 +1173,12 @@ fn sweep_ring(builder: &mut MeshBuilder, material: &str, ring: &[Vec2], thicknes
 /// way at the circle with the 减速让行 marking, two dashed lines along the
 /// circle across the lanes coming in and an inverted triangle on them a few
 /// metres back; no stop line, waiting box or lane arrow leads up to it.
-pub(super) fn roundabout(junction: &Junction, builder: &mut MeshBuilder, spec: &JunctionSpec) {
+pub(super) fn roundabout(
+    network: &Network,
+    junction: &Junction,
+    builder: &mut MeshBuilder,
+    spec: &JunctionSpec,
+) {
     let centre = junction.centre;
     let island = junction.island;
     if island < 3.0 {
@@ -1207,8 +1286,22 @@ pub(super) fn roundabout(junction: &Junction, builder: &mut MeshBuilder, spec: &
                 along += 0.9;
             }
         }
-        // The inverted triangle, on the entry half, 6 m up from the circle.
-        let lanes_mid = (mid + port.left) * 0.5;
+        let median = network
+            .road(port.road)
+            .map_or(0.0, |road| road.section.median_metres * 0.5);
+        let splitter = splitter_island(
+            builder,
+            mid,
+            port.dir,
+            median,
+            meet(mid, port.dir, circle + 1.2),
+        );
+        // The inverted triangle, 6 m up from the circle, centred on the entry
+        // lanes between the splitter island and the kerb.
+        let across_entry = port.left - mid;
+        let entry_half = across_entry.length();
+        let inner = splitter.min(entry_half - 1.0).max(0.0);
+        let lanes_mid = mid + across_entry / entry_half.max(0.01) * (inner + entry_half) * 0.5;
         let back = -port.dir;
         let Some(on_circle) = meet(lanes_mid, port.dir, circle) else {
             continue;

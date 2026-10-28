@@ -824,7 +824,7 @@ pub fn build(network: &Network, builder: &mut MeshBuilder, seed: u32) -> StreetO
             !markings::node_has_waiting_box(network, junction.node),
         );
         if junction.kind == urban::JunctionKind::Roundabout {
-            surfaces::roundabout(junction, builder, &spec);
+            surfaces::roundabout(network, junction, builder, &spec);
         }
         if junction.kind == urban::JunctionKind::RightInRightOut {
             surfaces::median_across(network, junction, builder);

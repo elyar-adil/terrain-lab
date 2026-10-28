@@ -477,9 +477,7 @@ pub fn derive(
         })
         .collect();
     let mut control = space_median_openings(control, &incidence, &sd_by_id, hd_roads, frame);
-    let roundabouts = plan_roundabouts(
-        &incidence, &air, &control, &local, &sd_by_id, hd_roads, frame,
-    );
+    let roundabouts = plan_roundabouts(nodes, &incidence, &air, hd_roads);
     for node in roundabouts.keys() {
         control[*node].kind = JunctionKind::Roundabout;
     }
@@ -1633,7 +1631,7 @@ fn dead_end_clearance(
 /// property line, footways included (`RoadCrossSection::derived_width`): the
 /// kerb stands a footway in from its half, and the footway fills the rest.
 pub fn kerb_half(section: &urban::RoadCrossSection) -> f32 {
-    section.half_width() - section.sidewalk_metres
+    urban::modern::roundabout::kerb_half(section)
 }
 
 /// The width of an added queue lane: an entry lane is 3.25 m (CJJ 152 §4.2.9).
@@ -1752,31 +1750,39 @@ fn plan_widening(
 
 /// A roundabout's shape (`docs/city-visual-target.md` §8): the outer kerb a
 /// true circle, the central island the circulating road's width inside it,
-/// and every arm joined to the circle by an entry curve tangent to both.
+/// and every arm joined to the circle by an entry curve tangent to both. Its
+/// size is the plan's (`urban::modern::roundabout`).
 #[derive(Debug, Clone, Copy)]
 pub struct Roundabout {
     /// Centre to the outer kerb.
     pub outer: f32,
     pub island: f32,
-    /// The entry and exit curves' radius: no more than the island's (CJJ 152
-    /// §4.6.4).
+    /// The entry and exit curves' radius.
     pub fillet: f32,
 }
 
-/// Two to three lanes round the island.
-const CIRCULATING_M: f32 = 10.0;
-/// Straight kerb between an arm's end and its entry curve.
-const ROUNDABOUT_LEAD_M: f32 = 4.0;
+use urban::modern::roundabout::{CIRCULATING_M, ROUNDABOUT_LEAD_M, RoundaboutSize};
+
+impl From<RoundaboutSize> for Roundabout {
+    fn from(size: RoundaboutSize) -> Self {
+        Roundabout {
+            outer: size.outer,
+            island: size.island,
+            fillet: size.fillet,
+        }
+    }
+}
 
 impl Roundabout {
     /// How far from the centre an arm's kerb, `kerb` from its centreline,
     /// leaves the entry curve: where the arm stops.
     pub fn trim(&self, kerb: f32) -> f32 {
-        let (r, f) = (self.outer + self.fillet, kerb + self.fillet);
-        // A few metres more, so a street that bends on its way in still
-        // reaches its curve on a straight kerb; it also sets the crossing back
-        // the 7 to 11 m from the circle the OSM roundabouts have it.
-        (r * r - f * f).max(0.0).sqrt() + ROUNDABOUT_LEAD_M
+        RoundaboutSize {
+            outer: self.outer,
+            island: self.island,
+            fillet: self.fillet,
+        }
+        .trim(kerb)
     }
 
     /// Where an arm along `path` (out of the junction at `centre`) stops: the
@@ -1812,7 +1818,10 @@ impl Roundabout {
     pub fn circulate(&self, centre: Vec2, from: (Vec2, Vec2), to: (Vec2, Vec2)) -> Vec<Vec2> {
         let angle = |p: Vec2| (p - centre).y.atan2((p - centre).x);
         let (a, b) = (angle(from.0), angle(to.0));
-        let mut sweep = b - a;
+        // Plan angles grow from +x toward +z, which seen from above (north
+        // up the screen, +z south) is clockwise: round the island the way
+        // traffic keeping right goes, they fall.
+        let mut sweep = a - b;
         while sweep <= 0.0 {
             sweep += std::f32::consts::TAU;
         }
@@ -1824,7 +1833,7 @@ impl Roundabout {
             self.island + CIRCULATING_M * 0.65
         };
         let round = |theta: f32| centre + Vec2::new(theta.cos(), theta.sin()) * ring;
-        let along = |theta: f32| Vec2::new(-theta.sin(), theta.cos());
+        let along = |theta: f32| Vec2::new(theta.sin(), -theta.cos());
         if sweep < 2.5 * JOIN {
             // The first exit, close by: one curve, kept off the island.
             let reach = from.0.distance(to.0) * 0.45;
@@ -1846,7 +1855,7 @@ impl Roundabout {
             })
             .collect();
         }
-        let (enter, leave) = (a + JOIN, a + sweep - JOIN);
+        let (enter, leave) = (a - JOIN, a - sweep + JOIN);
         let handle = |p: Vec2, q: Vec2| p.distance(q) * 0.45;
         let mut out = cubic_points(
             from.0,
@@ -1855,7 +1864,7 @@ impl Roundabout {
             round(enter),
             12,
         );
-        let steps = (((leave - enter) * 8.0).ceil() as usize).max(2);
+        let steps = (((enter - leave) * 8.0).ceil() as usize).max(2);
         out.extend((1..steps).map(|k| round(enter + (leave - enter) * k as f32 / steps as f32)));
         out.extend(cubic_points(
             round(leave),
@@ -1940,111 +1949,31 @@ impl Roundabout {
     }
 }
 
-/// Share of a town's junctions that are roundabouts: about 1 % in Kuitun,
-/// Urumqi, Chongqing and Beijing (`docs/city-visual-target.md` §8).
-const ROUNDABOUT_SHARE: f32 = 0.01;
-/// No two roundabouts nearer than this.
-const ROUNDABOUT_APART_M: f32 = 500.0;
-
-/// Which junctions are roundabouts, and their shape. CJJ 152 §4.6: not where
-/// arterials cross; three to five arms of collectors and locals (one arterial
-/// at most), none a ramp, none meeting another at a narrow angle. Of those,
-/// the ones nearest the town's centre, as the town-centre roundabouts of the
-/// photographs are, each at least `ROUNDABOUT_APART_M` from the next.
+/// The roundabouts the plan marked (`urban::modern::roundabout::mark`, made
+/// on the whole town so every tile built from it agrees), sized to their
+/// widest arm. A marked node that is not one here (raised, or its arms out
+/// of range) is left an ordinary junction.
 fn plan_roundabouts(
+    nodes: &[SdNode],
     incidence: &[Vec<u32>],
     air: &[bool],
-    control: &[Control],
-    local: &[Vec2],
-    sd_by_id: &HashMap<u32, &SdRoad>,
     hd_roads: &[HdRoad],
-    frame: CityFrameInfo,
 ) -> HashMap<usize, Roundabout> {
     let hd_by_id: HashMap<u32, &HdRoad> = hd_roads.iter().map(|road| (road.id, road)).collect();
-    let junctions = incidence.iter().filter(|list| list.len() >= 3).count();
-    let wanted = (junctions as f32 * ROUNDABOUT_SHARE).round() as usize;
-    let mut candidates: Vec<(f32, usize, Roundabout)> = Vec::new();
-    for (index, list) in incidence.iter().enumerate() {
-        if air[index] || control[index].terminal || !(3..=5).contains(&list.len()) {
-            continue;
-        }
-        let arms: Vec<&HdRoad> = list
-            .iter()
-            .filter_map(|id| hd_by_id.get(id).copied())
-            .collect();
-        if arms.len() != list.len()
-            || arms.iter().any(|r| {
-                r.layer != 0 || r.oneway || r.bridge || r.class == ModernRoadClass::Expressway
-            })
-            || arms.iter().filter(|r| r.class == ModernRoadClass::Arterial).count() > 1
-            // Where streets of some standing meet: locals alone do not get one.
-            || arms.iter().filter(|r| r.class != ModernRoadClass::Local).count() < 2
+    let mut out = HashMap::new();
+    for (index, node) in nodes.iter().enumerate() {
+        if node.role != urban::modern::roundabout::ROUNDABOUT_ROLE
+            || air.get(index).copied().unwrap_or(true)
+            || !(3..=5).contains(&incidence[index].len())
         {
             continue;
         }
-        // Each arm's way out, and its length.
-        let mut dirs: Vec<(f32, f32)> = Vec::new();
-        for road in &arms {
-            let Some(sd) = sd_by_id.get(&road.id) else {
-                continue;
-            };
-            let mut line: Vec<Vec2> = road
-                .centreline
-                .iter()
-                .map(|p| {
-                    let [x, z] = frame.to_local(*p);
-                    Vec2::new(x, z)
-                })
-                .collect();
-            if sd.from as usize != index {
-                line.reverse();
-            }
-            let path = Path::flat(line);
-            let d = path.plan_at(path.length().min(20.0)) - local[index];
-            dirs.push((d.y.atan2(d.x), path.length()));
-        }
-        if dirs.len() != arms.len() {
-            continue;
-        }
-        let widest = arms
+        let widest = incidence[index]
             .iter()
-            .map(|r| kerb_half(&r.cross_section()))
+            .filter_map(|id| hd_by_id.get(id))
+            .map(|road| kerb_half(&road.cross_section()))
             .fold(0.0_f32, f32::max);
-        let outer = (widest + 25.0).clamp(30.0, 42.0);
-        let shape = Roundabout {
-            outer,
-            island: outer - CIRCULATING_M,
-            fillet: 15.0_f32.min(outer - CIRCULATING_M),
-        };
-        // Room on every arm for its entry curve and a street beyond it.
-        let room = arms
-            .iter()
-            .zip(&dirs)
-            .all(|(r, (_, length))| *length > shape.trim(kerb_half(&r.cross_section())) + 40.0);
-        let mut angles: Vec<f32> = dirs.iter().map(|d| d.0).collect();
-        angles.sort_by(f32::total_cmp);
-        let narrowest = (0..angles.len())
-            .map(|k| {
-                let next = angles[(k + 1) % angles.len()];
-                (next - angles[k]).rem_euclid(std::f32::consts::TAU)
-            })
-            .fold(std::f32::consts::TAU, f32::min);
-        if room && narrowest > 50.0_f32.to_radians() {
-            candidates.push((local[index].length(), index, shape));
-        }
-    }
-    candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-    let mut out: HashMap<usize, Roundabout> = HashMap::new();
-    for (_, index, shape) in candidates {
-        if out.len() >= wanted {
-            break;
-        }
-        if out
-            .keys()
-            .all(|other| local[*other].distance(local[index]) >= ROUNDABOUT_APART_M)
-        {
-            out.insert(index, shape);
-        }
+        out.insert(index, RoundaboutSize::for_widest_kerb(widest).into());
     }
     out
 }

@@ -758,6 +758,8 @@ export function createMaterials(
   // Chinese guide signs are blue with white text and a white border.
   standard("furniture/sign.guide", { roughness: 0.45 }, 0x0f4c96);
   standard("furniture/sign.crossing", { roughness: 0.45 }, 0x0f4c96);
+  standard("furniture/sign.roundabout", { roughness: 0.45 }, 0x0f4c96);
+  standard("furniture/sign.glyph", { roughness: 0.4 }, 0xf2f2ee);
   standard("signal.body", { roughness: 0.55, metalness: 0.35 }, 0x1a1e21);
   /**
    * A cycle lane. Deliberately *untextured* and a flat dark blue-grey: the

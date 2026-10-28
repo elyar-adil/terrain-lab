@@ -5,6 +5,7 @@ mod graph;
 mod landscape;
 mod parcels;
 mod roads;
+pub mod roundabout;
 mod suburb;
 mod tidy;
 
@@ -314,6 +315,15 @@ pub fn generate_modern_chinese_city_with_options(
     } = build_parcels(&frame, &nodes, &sd_roads, &hd_roads);
     expressway::grade_separate(&frame, &mut nodes, &mut sd_roads, &mut hd_roads, &layout);
     let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
+    roundabout::mark(
+        crate::model::scene::CityFrameInfo {
+            origin: spec.centre,
+            rotation_radians: spec.rotation_radians,
+        },
+        &mut nodes,
+        &sd_roads,
+        &hd_roads,
+    );
     ModernCity {
         version: 3,
         jurisdiction: "ChinaMainland".into(),
@@ -497,6 +507,15 @@ pub fn generate_modern_chinese_city_from_streets(
     } = build_parcels(&frame, &nodes, &sd_roads, &hd_roads);
     expressway::grade_separate(&frame, &mut nodes, &mut sd_roads, &mut hd_roads, &layout);
     let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
+    roundabout::mark(
+        crate::model::scene::CityFrameInfo {
+            origin: spec.centre,
+            rotation_radians: spec.rotation_radians,
+        },
+        &mut nodes,
+        &sd_roads,
+        &hd_roads,
+    );
     ModernCity {
         version: 3,
         jurisdiction: "ChinaMainland".into(),

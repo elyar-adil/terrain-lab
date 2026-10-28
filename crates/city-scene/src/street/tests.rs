@@ -1694,12 +1694,62 @@ fn a_roundabout_gives_way_at_its_entries_and_carries_traffic_anticlockwise_round
                 .windows(2)
                 .map(|w| w[0].cross(w[1]).atan2(w[0].dot(w[1])))
                 .sum();
+            // Which way is anticlockwise seen from above follows from the side
+            // traffic keeps to: heading north with the kerb lanes to the east,
+            // the ring turns from east through north, against that side.
+            let lane = network.lanes.iter().find(|l| l.id == c.from_lane).unwrap();
+            let port = junction.ports.iter().find(|p| p.road == lane.road).unwrap();
+            let start = c.path.plan_at(0.0) - (port.left + port.right) * 0.5;
+            let keeps = port.dir.cross(start).signum();
             assert!(
-                swept > 0.3,
+                swept * keeps < -0.3,
                 "connector {} goes round roundabout {} the wrong way ({swept:.2})",
                 c.id,
                 junction.node
             );
         }
     }
+}
+
+#[test]
+fn a_tile_cut_from_the_plan_keeps_the_roundabout_the_whole_town_has() {
+    // A streamed scene is built from a clipped tile; the roundabouts are the
+    // plan's, so the tile has the same one at the same place and size.
+    let city = generate_modern_chinese_city(ModernChinaSpec {
+        seed: 42,
+        ..ModernChinaSpec::default()
+    });
+    let whole = derive(
+        &city.nodes,
+        &city.sd_roads,
+        &city.hd_roads,
+        city.frame,
+        JunctionSpec::default(),
+        city.seed,
+    );
+    let roundabout = whole
+        .junctions
+        .iter()
+        .find(|j| j.roundabout)
+        .expect("a roundabout");
+    let tile = city.clipped([roundabout.centre.x, roundabout.centre.y], 250.0);
+    let part = derive(
+        &tile.nodes,
+        &tile.sd_roads,
+        &tile.hd_roads,
+        tile.frame,
+        JunctionSpec::default(),
+        tile.seed,
+    );
+    let same = part
+        .junctions
+        .iter()
+        .find(|j| j.centre.distance(roundabout.centre) < 1.0)
+        .expect("the junction is in its tile");
+    assert!(
+        same.roundabout,
+        "the tile lost the roundabout at {:?}",
+        roundabout.centre
+    );
+    assert!((same.circle - roundabout.circle).abs() < 0.01);
 }

@@ -6,6 +6,8 @@
 //!     [--bin city.bin]   also write the binary container the desktop app streams
 //!     [--lite]           small budgets, for headless software rendering
 //!     [--plan plan.json] write the city plan itself and stop, for checking a layout
+//!     [--from plan.json] build from a plan written elsewhere (`plan_svg` with
+//!                        `PLAN_JSON`: the towns the game builds)
 
 use city_scene::{SceneBudget, build_city_scene};
 use urban::{ModernChinaSpec, generate_modern_chinese_city};
@@ -29,19 +31,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out = flag("--out").unwrap_or_else(|| "public/city-scenes.json".into());
     // `--fixture plan.json --city i`: the plan of city i from a render fixture, so the
     // tiles match the far form the terrain view draws for that same city.
-    let city = match flag("--fixture") {
-        Some(path) => {
-            let index: usize = flag("--city").and_then(|v| v.parse().ok()).unwrap_or(0);
-            let document: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
-            let plan = document["result"]["modernCities"][index].clone();
-            serde_json::from_value::<urban::ModernCity>(plan)?
-        }
-        None => generate_modern_chinese_city(ModernChinaSpec {
-            seed,
-            radius_km,
-            block_size_metres: block,
-            ..ModernChinaSpec::default()
-        }),
+    let city = match (flag("--from"), flag("--fixture")) {
+        (Some(path), _) => serde_json::from_slice::<urban::ModernCity>(&std::fs::read(path)?)?,
+        (None, fixture) => match fixture {
+            Some(path) => {
+                let index: usize = flag("--city").and_then(|v| v.parse().ok()).unwrap_or(0);
+                let document: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+                let plan = document["result"]["modernCities"][index].clone();
+                serde_json::from_value::<urban::ModernCity>(plan)?
+            }
+            None => generate_modern_chinese_city(ModernChinaSpec {
+                seed,
+                radius_km,
+                block_size_metres: block,
+                ..ModernChinaSpec::default()
+            }),
+        },
     };
     let budget = if std::env::args().any(|a| a == "--lite") {
         SceneBudget {

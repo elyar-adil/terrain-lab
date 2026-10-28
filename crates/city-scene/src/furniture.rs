@@ -382,6 +382,66 @@ fn crossing_sign(builder: &mut MeshBuilder, key: &str) {
     );
 }
 
+/// GB 5768.2-2009's 环岛行驶 (a mandatory sign): a blue disc, 800 mm across
+/// for a 30–40 km/h street, on a post with its centre 2.3 m up, the board in
+/// the prototype's XY plane facing local `+Z`.
+fn roundabout_sign(builder: &mut MeshBuilder, key: &str) {
+    declare(builder);
+    builder.tube(
+        key,
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.0, 2.3, 0.0),
+        0.04,
+        0.035,
+        6,
+        None,
+    );
+    let centre = Vec3::new(0.0, 2.3, 0.03);
+    let rim: Vec<Vec3> = (0..24)
+        .map(|k| {
+            let angle = k as f32 / 24.0 * std::f32::consts::TAU;
+            centre + Vec3::new(angle.cos() * 0.4, angle.sin() * 0.4, 0.0)
+        })
+        .collect();
+    for k in 0..rim.len() {
+        builder.tri_flat(key, centre, rim[k], rim[(k + 1) % rim.len()], None);
+    }
+}
+
+/// The sign's three white arrows chasing one another anticlockwise as the
+/// driver facing it sees it (local `+X` to the right, `+Y` up).
+fn roundabout_glyph(builder: &mut MeshBuilder, key: &str) {
+    declare(builder);
+    let at = |angle: f32, r: f32| Vec3::new(angle.cos() * r, 2.3 + angle.sin() * r, 0.036);
+    let (radius, half) = (0.22_f32, 0.035_f32);
+    for arrow in 0..3 {
+        let start = arrow as f32 / 3.0 * std::f32::consts::TAU + 0.5;
+        let (sweep, steps) = (1.15_f32, 6);
+        for k in 0..steps {
+            let (a0, a1) = (
+                start + sweep * k as f32 / steps as f32,
+                start + sweep * (k + 1) as f32 / steps as f32,
+            );
+            builder.quad(
+                key,
+                at(a0, radius - half),
+                at(a1, radius - half),
+                at(a1, radius + half),
+                at(a0, radius + half),
+                None,
+            );
+        }
+        let tip = start + sweep + 0.42;
+        builder.tri_flat(
+            key,
+            at(start + sweep, radius - 0.09),
+            at(tip, radius),
+            at(start + sweep, radius + 0.09),
+            None,
+        );
+    }
+}
+
 /// An overhead gantry: the blue directional boards a Chinese arterial hangs
 /// across the carriageway on a steel truss before every signalised junction.
 ///
@@ -582,6 +642,8 @@ pub fn build_prototypes(builder: &mut MeshBuilder) {
     railing_segment(builder, "furniture/railing");
     guide_sign(builder, "furniture/sign.guide");
     crossing_sign(builder, "furniture/sign.crossing");
+    roundabout_sign(builder, "furniture/sign.roundabout");
+    roundabout_glyph(builder, "furniture/sign.glyph");
     gantry_steel(builder, "furniture/gantry.steel");
     gantry_boards(builder, "furniture/gantry.board");
     bus_shelter(builder, "furniture/shelter");
@@ -597,6 +659,8 @@ pub fn build_prototypes(builder: &mut MeshBuilder) {
         "furniture/railing",
         "furniture/sign.guide",
         "furniture/sign.crossing",
+        "furniture/sign.roundabout",
+        "furniture/sign.glyph",
         "furniture/shelter",
         "furniture/bin",
         "furniture/kiosk",
@@ -982,7 +1046,43 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
         junction_bollards(junction, network, builder, &mut rng, &mut output);
     }
     output.spans = spans;
+    output.signs += roundabout_signs(network, builder);
     output
+}
+
+/// GB 5768.2's 环岛行驶 sign on a roundabout's central island, one facing
+/// each entry just inside the island's kerb: what tells a driver arriving
+/// which way round to go.
+fn roundabout_signs(network: &Network, builder: &mut MeshBuilder) -> usize {
+    let mut count = 0;
+    for junction in network
+        .junctions
+        .iter()
+        .filter(|j| j.roundabout && j.island > 3.0)
+    {
+        for port in &junction.ports {
+            let toward = ((port.left + port.right) * 0.5 - junction.centre).normalize();
+            if !toward.is_finite() {
+                continue;
+            }
+            let at = junction.centre + toward * (junction.island - 1.0);
+            for key in ["furniture/sign.roundabout", "furniture/sign.glyph"] {
+                builder.add_instance(
+                    key,
+                    Instance::new(
+                        at.x,
+                        level::KERB,
+                        at.y,
+                        yaw_along_z(toward),
+                        1.0,
+                        [1.0, 1.0, 1.0],
+                    ),
+                );
+            }
+            count += 1;
+        }
+    }
+    count
 }
 
 /// A pole's conductors, as the world-space points a wire actually attaches to.
@@ -1368,6 +1468,8 @@ mod tests {
             "furniture/railing",
             "furniture/sign.guide",
             "furniture/sign.crossing",
+            "furniture/sign.roundabout",
+            "furniture/sign.glyph",
             "furniture/gantry.steel",
             "furniture/gantry.board",
             "furniture/shelter",
