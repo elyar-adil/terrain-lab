@@ -188,7 +188,10 @@ pub fn asphalt_texture(size: usize) -> BakedTexture {
     }
 }
 
-/// Running-bond footway paving, 0.5 x 0.25 m, with recessed dirty joints.
+/// Running-bond footway paving, 0.25 x 0.5 m, with recessed dirty joints.
+///
+/// The long side of a paver runs along `V`, which on a footway is along the
+/// street (`Uvs::Frame`): slabs are laid in courses parallel to the kerb.
 ///
 /// Concrete paving is **25-35% reflectance** — nearly three times asphalt — and
 /// that contrast is one of the strongest cues that a viewer is looking at a
@@ -204,8 +207,10 @@ pub fn paving_texture(size: usize) -> BakedTexture {
     let joint_px = (size / 256).max(1);
     let paver_w = (size / 8).max(1);
     let paver_h = (size / 16).max(1);
-    for y in 0..size {
-        for x in 0..size {
+    for v in 0..size {
+        for u in 0..size {
+            // Courses run along `V`: the bond is drawn with the axes swapped.
+            let (x, y) = (v, u);
             // One tile is 4 m, so a 0.5 m paver is an eighth of the texture.
             let row = y / paver_h;
             let stagger = if row.is_multiple_of(2) { 0 } else { paver_w };
@@ -231,7 +236,7 @@ pub fn paving_texture(size: usize) -> BakedTexture {
             } else {
                 152.0 + slab * 1.4 + dirt + stained
             };
-            let offset = (y * size + x) * 4;
+            let offset = (v * size + u) * 4;
             rgba[offset] = value.clamp(0.0, 255.0) as u8;
             rgba[offset + 1] = value.clamp(0.0, 255.0) as u8;
             rgba[offset + 2] = (value * 0.965).clamp(0.0, 255.0) as u8;

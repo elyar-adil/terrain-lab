@@ -386,17 +386,17 @@ fn footway_bands(
         (inner * side).max(outer * side),
     );
     let Some((g0, g1)) = guide_strip(half, sidewalk).filter(|(g0, g1)| *g0 > lo && *g1 < hi) else {
-        return vec![(inner, outer, "sidewalk", super::Uvs::World)];
+        return vec![(inner, outer, "sidewalk", super::Uvs::Frame)];
     };
     vec![
-        (lo * side, g0 * side, "sidewalk", super::Uvs::World),
+        (lo * side, g0 * side, "sidewalk", super::Uvs::Frame),
         (
             g0 * side,
             g1 * side,
             "tactile.guide",
             super::Uvs::Along(0.0),
         ),
-        (g1 * side, hi * side, "sidewalk", super::Uvs::World),
+        (g1 * side, hi * side, "sidewalk", super::Uvs::Frame),
     ]
 }
 
@@ -441,21 +441,15 @@ fn kerb_ramp(
         let b = surface.point(s0, back, super::level::KERB);
         let c = surface.point(s1, back, super::level::KERB);
         let d = surface.point(s1, kerb, y1);
+        // In the road's frame, as the footway beside it is laid.
+        let uvs = [(kerb, s0), (back, s0), (back, s1), (kerb, s1)];
         if on_road(&[a, b, c, d]) {
             // Cut, keeping the slope: each piece's height is read off the
             // quad it came from.
-            super::quad_clipped(builder, "sidewalk", [a, b, c, d], clips);
+            super::quad_clipped(builder, "sidewalk", [a, b, c, d], Some(uvs), clips);
             return;
         }
-        builder.quad_uv(
-            "sidewalk",
-            a,
-            b,
-            c,
-            d,
-            [(a.x, a.z), (b.x, b.z), (c.x, c.z), (d.x, d.z)],
-            None,
-        );
+        builder.quad_uv("sidewalk", a, b, c, d, uvs, None);
     };
     quad(builder, from, super::level::KERB, lo, ground);
     quad(builder, lo, ground, hi, ground);

@@ -34,7 +34,14 @@ float atNoise(vec2 p) {
 // blend loses (it peaks where both samples are equally weighted).
 vec4 antiTileSample(sampler2D t, vec2 uv, float restore) {
   vec4 a = texture2D(t, uv);
+#ifdef AT_ALIGNED
+  // Laid paving has its joints on one grid that runs with the kerb: the second
+  // sample is the same grid moved by whole slabs, never turned or rescaled,
+  // or the blend shows a second set of joints at an angle.
+  vec4 b = texture2D(t, uv + vec2(0.25, 0.5));
+#else
   vec4 b = texture2D(t, mat2(0.8, -0.6, 0.6, 0.8) * uv * 0.61 + vec2(0.37, 0.11));
+#endif
   float w = smoothstep(0.30, 0.70, atNoise(uv * 0.17 + 3.1));
   vec4 c = mix(a, b, w);
   // The contrast is restored around the texture's own mean (its top mip level),
@@ -96,7 +103,7 @@ export function applyAntiTiling<T extends THREE.MeshStandardMaterial>(material: 
   const restore = kind === "grass" ? 0.30 : 0.22;
   material.onBeforeCompile = (shader) => {
     shader.fragmentShader = shader.fragmentShader
-      .replace("#include <common>", `#include <common>\n${COMMON}\n${TONE[kind]}`)
+      .replace("#include <common>", `#include <common>\n${kind === "paving" ? "#define AT_ALIGNED\n" : ""}${COMMON}\n${TONE[kind]}`)
       .replace(
         "#include <map_fragment>",
         THREE.ShaderChunk.map_fragment

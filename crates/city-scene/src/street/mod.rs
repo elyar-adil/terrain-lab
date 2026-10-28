@@ -262,6 +262,12 @@ pub(super) enum Uvs {
     /// what makes the pattern physically exact at any road width, and anchoring
     /// `V` is what keeps a road drawn in two pieces in phase.
     Along(f32),
+    /// `U` the lateral offset from the centre line, `V` the station, both in
+    /// metres: the road's own frame. Paving laid in it runs with the kerb, as
+    /// footway slabs are laid, and every piece of a footway (the bands either
+    /// side of the guide strip, the ramp, a piece cut at a junction) shares
+    /// one joint grid.
+    Frame,
 }
 
 /// A ribbon on a crowned surface.
@@ -315,6 +321,20 @@ pub(super) fn ribbon(
                         color,
                     );
                 }
+                Uvs::Frame => builder.quad_uv(
+                    material,
+                    pa,
+                    pb,
+                    b,
+                    a,
+                    [
+                        (inner, previous_station),
+                        (outer, previous_station),
+                        (outer, station),
+                        (inner, station),
+                    ],
+                    color,
+                ),
             }
         }
         previous = Some((a, b, station));
@@ -565,6 +585,25 @@ pub(super) fn ribbon_clipped(
         ];
         let plan: Vec<Vec2> = quad.iter().map(|p| Vec2::new(p.x, p.z)).collect();
         let y = quad.iter().map(|p| p.y).sum::<f32>() * 0.25;
+        // A cut point's place in the quad, as fractions across (inner to
+        // outer) and along (first station to second): the quad is near
+        // enough a parallelogram over its 2 m.
+        let (origin, across, along) = (plan[0], plan[1] - plan[0], plan[3] - plan[0]);
+        let det = across.cross(along);
+        let frame_uv = |p: Vec3| -> (f32, f32) {
+            let d = Vec2::new(p.x, p.z) - origin;
+            let (u, v) = if det.abs() < 1.0e-9 {
+                (0.0, 0.0)
+            } else {
+                (d.cross(along) / det, across.cross(d) / det)
+            };
+            let lateral = inner + u * (outer - inner);
+            let station = pair[0] + v * (pair[1] - pair[0]);
+            match uv {
+                Uvs::Along(anchor) => (lateral - inner, station - anchor),
+                _ => (lateral, station),
+            }
+        };
         for piece in crate::buildings::cut_away(plan, clips) {
             if crate::math::signed_area(&piece).abs() < 1.0e-3 {
                 continue;
@@ -582,7 +621,15 @@ pub(super) fn ribbon_clipped(
                 };
                 match uv {
                     Uvs::None => builder.tri_flat(material, a, b, c, None),
-                    _ => builder.tri_uv(
+                    Uvs::Along(_) | Uvs::Frame => builder.tri_uv(
+                        material,
+                        a,
+                        b,
+                        c,
+                        [frame_uv(a), frame_uv(b), frame_uv(c)],
+                        None,
+                    ),
+                    Uvs::World => builder.tri_uv(
                         material,
                         a,
                         b,
@@ -602,9 +649,34 @@ pub(super) fn quad_clipped(
     builder: &mut MeshBuilder,
     material: &str,
     quad: [Vec3; 4],
+    uvs: Option<[(f32, f32); 4]>,
     clips: &[Vec<Vec2>],
 ) {
     let plan: Vec<Vec2> = quad.iter().map(|p| Vec2::new(p.x, p.z)).collect();
+    // A point's texture coordinates: the corners' `uvs` carried in as the
+    // height is, or the world's plan position without them.
+    let uv_at = |p: Vec2| -> (f32, f32) {
+        let Some(uvs) = uvs else {
+            return (p.x, p.y);
+        };
+        for [i, j, k] in [[0, 1, 2], [0, 2, 3]] {
+            let (a, b, c) = (plan[i], plan[j], plan[k]);
+            let area = (b - a).cross(c - a);
+            if area.abs() < 1.0e-6 {
+                continue;
+            }
+            let w1 = (p - a).cross(c - a) / area;
+            let w2 = (b - a).cross(p - a) / area;
+            let w0 = 1.0 - w1 - w2;
+            if w0 >= -1.0e-3 && w1 >= -1.0e-3 && w2 >= -1.0e-3 {
+                return (
+                    w0 * uvs[i].0 + w1 * uvs[j].0 + w2 * uvs[k].0,
+                    w0 * uvs[i].1 + w1 * uvs[j].1 + w2 * uvs[k].1,
+                );
+            }
+        }
+        uvs[0]
+    };
     // Height on the quad's two triangles (a b c) and (a c d), by barycentric.
     let height = |p: Vec2| -> f32 {
         for [i, j, k] in [[0, 1, 2], [0, 2, 3]] {
@@ -634,14 +706,8 @@ pub(super) fn quad_clipped(
             } else {
                 (a, b, c)
             };
-            builder.tri_uv(
-                material,
-                a,
-                b,
-                c,
-                [(a.x, a.z), (b.x, b.z), (c.x, c.z)],
-                None,
-            );
+            let uv = |p: Vec3| uv_at(Vec2::new(p.x, p.z));
+            builder.tri_uv(material, a, b, c, [uv(a), uv(b), uv(c)], None);
         }
     }
 }
