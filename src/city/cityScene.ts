@@ -463,7 +463,7 @@ export function createMaterials(
   // dark granite planter. They lie a few millimetres over the footway.
   const pitBias = { polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -2 };
   standard("treepit.edge", { roughness: 0.78, ...pitBias }, 0xa19e96);
-  standard("treepit.grate", { roughness: 0.55, metalness: 0.6, ...pitBias }, 0x2b2c2a);
+  standard("treepit.grate", { roughness: 0.6, metalness: 0.25, ...pitBias }, 0x45463f);
   standard("treepit.gravel", { roughness: 1.0, ...pitBias }, 0xb9b4a9);
   standard("treepit.planter", { roughness: 0.35, metalness: 0.05 }, 0x4b4e50);
 
