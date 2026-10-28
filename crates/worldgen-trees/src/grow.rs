@@ -410,7 +410,9 @@ impl Grower {
             let y0 = rr.range(0.18, 0.55) * (0.7 + 0.6 * foot_r.min(0.6) / 0.3).min(1.5);
             let at = trunk_axis_at(&pts, y0);
             let start = v3(at.x, y0, at.z) + out * (foot_r * 0.55);
-            let reach = foot_r * rr.range(1.1, 2.6) + 0.25;
+            // A metre or so of root at the surface, no more: a street tree's foot fits
+            // its 1.2 - 1.5 m pit, and longer ones read as a mangrove's.
+            let reach = foot_r * rr.range(0.7, 1.5) + 0.12;
             let r_top = foot_r * rr.range(0.20, 0.36);
             let steps = 6;
             let mut prev = start;

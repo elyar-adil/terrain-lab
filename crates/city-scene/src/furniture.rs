@@ -1024,6 +1024,20 @@ pub fn footway_obstacles(road: &crate::network::Road) -> Vec<(f32, f32)> {
         out.push((station, 1.0));
         station += POLE_EVERY_M;
     }
+    // The approach signs `place` stands at a junction end: the crossing sign
+    // 10.5 m out, and the guide sign somewhere 27 to 34 m out, on both sides.
+    for (crossing, base, toward) in [
+        (road.crossing_start, 0.0_f32, 1.0_f32),
+        (road.crossing_end, length, -1.0),
+    ] {
+        if !crossing {
+            continue;
+        }
+        for out_m in [10.5_f32, 27.0, 29.3, 31.7, 34.0] {
+            let station = base + toward * out_m;
+            out.extend([(station, -1.0), (station, 1.0)]);
+        }
+    }
     out
 }
 

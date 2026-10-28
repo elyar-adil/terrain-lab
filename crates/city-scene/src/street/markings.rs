@@ -197,16 +197,23 @@ pub(super) fn crosswalk_band(
         (inner, outer),
         (centre - depth * 0.5, centre + depth * 0.5),
         super::level::CROSSWALK,
-        Some(centre),
+        // The texture's one tile of `V` (4 m) is the bar's whole length, worn
+        // ends and all: stretched over the crossing's real depth, so a 6 m bar
+        // is one bar. Anchored at the middle instead, the tile seam fell down
+        // the crossing's centre line and every bar read as two short dashes.
+        Some((centre - depth * 0.5, CROSSWALK_TILE_M / depth)),
     );
 }
+
+/// The `V` extent of one tile of `marking/crosswalk`, metres.
+const CROSSWALK_TILE_M: f32 = 4.0;
 
 /// A short band across the road, from lateral `across.0` to `across.1` and
 /// from station `along.0` to `along.1`, laid square to the road at its middle
 /// station in one straight piece: a crossing or a stop line is straight paint
 /// even where the street bends under it, and following the bend would twist a
 /// wide one into a wedge. `anchor` gives it `V` texture coordinates along the
-/// road from that station, as [`Uvs::Along`] does.
+/// road from that station, as [`Uvs::Along`] does, scaled by its second value.
 fn straight_band(
     builder: &mut MeshBuilder,
     material: &str,
@@ -214,7 +221,7 @@ fn straight_band(
     across: (f32, f32),
     along: (f32, f32),
     lift: f32,
-    anchor: Option<f32>,
+    anchor: Option<(f32, f32)>,
 ) {
     let middle = ((along.0 + along.1) * 0.5).clamp(0.0, surface.length);
     let tangent = surface.path.tangent_at(middle);
@@ -232,8 +239,8 @@ fn straight_band(
     );
     match anchor {
         None => builder.quad(material, pa, pb, qb, qa, None),
-        Some(anchor) => {
-            let (v1, v0) = (along.0 - anchor, along.1 - anchor);
+        Some((anchor, scale)) => {
+            let (v1, v0) = ((along.0 - anchor) * scale, (along.1 - anchor) * scale);
             let width = across.1 - across.0;
             builder.quad_uv(
                 material,
