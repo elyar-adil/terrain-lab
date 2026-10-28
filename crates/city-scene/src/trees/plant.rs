@@ -421,13 +421,9 @@ fn plant_with(
         // in a straight line of pits a metre in from the kerb: never on the
         // paving itself, and clear of the lamps and poles in the same line.
         let sidewalk = section.sidewalk_metres;
-        let pit = if sidewalk >= 4.5 {
-            1.5
-        } else if sidewalk >= 3.2 {
-            1.25
-        } else {
-            1.0
-        };
+        // CJJ 75 asks 1.5 m square where the footway allows it; a 3 m footway
+        // keeps 1.25 m so a wheelchair still passes the pit.
+        let pit = if sidewalk >= 3.2 { 1.5 } else { 1.25 };
         let style = pit_style(road.class, sidewalk, road.id);
         let spacing = if road.is_motorway() { 10.0 } else { 8.0 };
         let lateral = half + 0.3 + pit * 0.5;
