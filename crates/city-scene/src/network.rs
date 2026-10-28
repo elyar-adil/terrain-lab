@@ -15,7 +15,7 @@ use urban::{
     cross_section,
 };
 
-use crate::math::{Path, Rng, Vec2, Vec3, cubic_points};
+use crate::math::{Path, Vec2, Vec3, cubic_points};
 use crate::spec::{JunctionSpec, Movement, classify_movement, lane_movement_sets};
 use worldgen_core::smootherstep;
 
@@ -133,6 +133,10 @@ pub struct Junction {
     pub centre: Vec2,
     pub y: f32,
     pub radius: f32,
+    /// A roundabout's circle and its central island, metres from `centre`
+    /// (zero elsewhere).
+    pub circle: f32,
+    pub island: f32,
     pub ports: Vec<Port>,
     /// Kerb face of the junction box: each port's two kerb corners, then the
     /// kerb return to the next port.
@@ -382,7 +386,9 @@ pub fn derive(
     hd_roads: &[HdRoad],
     frame: CityFrameInfo,
     spec: JunctionSpec,
-    seed: u32,
+    // Nothing in the network is random any more: roundabouts are chosen by
+    // where they stand. Kept so callers stay as they are.
+    _seed: u32,
 ) -> Network {
     // A street the plan drew as a chain of short pieces, one per bend, is one
     // street: built piece by piece it was trimmed at every bend, so its median,
@@ -470,7 +476,14 @@ pub fn derive(
             control_for(&classes)
         })
         .collect();
-    let control = space_median_openings(control, &incidence, &sd_by_id, hd_roads, frame);
+    let mut control = space_median_openings(control, &incidence, &sd_by_id, hd_roads, frame);
+    let roundabouts = plan_roundabouts(
+        &incidence, &air, &control, &local, &sd_by_id, hd_roads, frame,
+    );
+    for node in roundabouts.keys() {
+        control[*node].kind = JunctionKind::Roundabout;
+    }
+    let control = control;
 
     let sections: HashMap<u32, RoadCrossSection> = hd_roads
         .iter()
@@ -519,8 +532,8 @@ pub fn derive(
             if list.len() < 2 {
                 continue;
             }
-            // (road, at_start, arm, length)
-            let mut arms: Vec<(u32, bool, crate::corner::Arm, f32)> = Vec::new();
+            // (road, at_start, arm, length, where a roundabout arm stops)
+            let mut arms: Vec<(u32, bool, crate::corner::Arm, f32, f32)> = Vec::new();
             for id in list {
                 let (Some(sd), Some(hd), Some(section)) =
                     (sd_by_id.get(id), hd_by_id.get(id), sections.get(id))
@@ -553,6 +566,9 @@ pub fn derive(
                     continue;
                 }
                 let half = kerb_half(section);
+                let fit = roundabouts
+                    .get(&index)
+                    .map_or(0.0, |r| r.fit(&path, local[index], half, length * 0.45));
                 arms.push((
                     *id,
                     at_start,
@@ -564,15 +580,21 @@ pub fn derive(
                         widen: widen.get(&(*id, at_start)).map_or(0.0, |w| w.width),
                     },
                     length,
+                    fit,
                 ));
             }
             arms.sort_by(|a, b| a.2.dir.angle().total_cmp(&b.2.dir.angle()));
             let geometry: Vec<crate::corner::Arm> = arms.iter().map(|arm| arm.2).collect();
-            let wanted = crate::corner::trims(&geometry);
+            // A roundabout's arms stop where their kerbs leave the entry
+            // curve that joins them to its circle.
+            let wanted = match roundabouts.get(&index) {
+                Some(_) => arms.iter().map(|arm| arm.4).collect(),
+                None => crate::corner::trims(&geometry),
+            };
             // A crossing keeps at least a metre of box; two streets meeting end to
             // end, half a metre, as two decks do.
             let floor = if arms.len() >= 3 { 1.0 } else { AIR_GAP_M };
-            for (k, (id, at_start, _, length)) in arms.iter().enumerate() {
+            for (k, (id, at_start, _, length, _)) in arms.iter().enumerate() {
                 let value = wanted[k].max(floor).min(length * 0.45);
                 trims.insert((*id, *at_start), value);
                 radius[index] = radius[index].max(value);
@@ -800,7 +822,9 @@ pub fn derive(
         let controlled = |node: usize| {
             !air[node] && incidence[node].len() > 2 && {
                 let c = control[node];
-                c.kind == JunctionKind::Signalized || class_rank(hd.class) > c.major
+                // A roundabout's entries give way at the circle, not at a stop line.
+                c.kind != JunctionKind::Roundabout
+                    && (c.kind == JunctionKind::Signalized || class_rank(hd.class) > c.major)
             }
         };
         let crossing_start = controlled(from_index);
@@ -1237,13 +1261,20 @@ pub fn derive(
                 // Twenty samples, exactly as the source kernel's connector
                 // derivation: fewer bends the shoulder of the fillet flat and
                 // the traffic kernel then cuts a corner no car could take.
-                let plan = cubic_points(
-                    Vec2::new(a.x, a.z),
-                    Vec2::new(a.x, a.z) + dir * handle,
-                    Vec2::new(b.x, b.z) - out * handle_out,
-                    Vec2::new(b.x, b.z),
-                    20,
-                );
+                let plan = match roundabouts.get(&node_index) {
+                    Some(shape) => shape.circulate(
+                        local[node_index],
+                        (Vec2::new(a.x, a.z), dir),
+                        (Vec2::new(b.x, b.z), out),
+                    ),
+                    None => cubic_points(
+                        Vec2::new(a.x, a.z),
+                        Vec2::new(a.x, a.z) + dir * handle,
+                        Vec2::new(b.x, b.z) - out * handle_out,
+                        Vec2::new(b.x, b.z),
+                        20,
+                    ),
+                };
                 let y_from = a.y;
                 let y_to = b.y;
                 let steps = plan.len() - 1;
@@ -1307,7 +1338,6 @@ pub fn derive(
     }
 
     // --- junctions -----------------------------------------------------------
-    let mut rng = Rng::new(seed ^ 0x6a75_6e63);
     for node_index in 0..local.len() {
         let node = node_index as u32;
         // Decks meeting in the air have no junction box.
@@ -1367,16 +1397,8 @@ pub fn derive(
         }
         ports.sort_by(|a, b| a.angle.total_cmp(&b.angle));
 
-        // A ramp terminal is signalised, never a roundabout.  Roundabouts are
-        // about 1% of junctions in the OSM statistics of section 7 of
-        // `docs/city-visual-target.md`; until their approaches stop short of
-        // the circle (crossings, stop lines and waiting boxes are still laid
-        // inside it), none is built.
-        let roundabout =
-            ports.len() >= 4 && radius[node_index] > 14.0 && !control[node_index].terminal && {
-                rng.fork(node);
-                rng.chance(ROUNDABOUT_SHARE)
-            };
+        let shape = roundabouts.get(&node_index).copied();
+        let roundabout = shape.is_some();
         let return_radius = |road: u32| {
             network
                 .road(road)
@@ -1387,30 +1409,38 @@ pub fn derive(
         for index in 0..ports.len() {
             let port = ports[index];
             let next = ports[(index + 1) % ports.len()];
-            if roundabout {
-                // A roundabout's kerb is a circle about the centre, and its
-                // footway the same circle a footway further out.
-                let arc = |from: Vec2, to: Vec2| -> Vec<Vec2> {
-                    let (d0, d1) = (from - centre, to - centre);
-                    let (r0, r1) = (d0.length().max(0.5), d1.length().max(0.5));
-                    let a0 = d0.y.atan2(d0.x);
-                    let mut delta = d1.y.atan2(d1.x) - a0;
-                    while delta <= 0.0 {
-                        delta += std::f32::consts::TAU;
-                    }
-                    let steps = ((delta * 12.0).ceil() as usize).max(2);
-                    (0..=steps)
-                        .map(|i| {
-                            let t = i as f32 / steps as f32;
-                            let r = r0 + (r1 - r0) * t;
-                            let angle = a0 + delta * t;
-                            centre + Vec2::new(angle.cos(), angle.sin()) * r
-                        })
-                        .collect()
-                };
+            if let Some(shape) = shape {
+                // A roundabout's kerb: off this street's kerb round its entry
+                // curve, along the circle, and round the next street's curve
+                // onto its kerb. The footway behind is the same a footway out,
+                // round a circle as much bigger as the widest footway.
+                let width = |port: &Port| port.outer_right.distance(port.right);
+                let walk = ports.iter().map(width).fold(0.0_f32, f32::max);
+                let kerb = shape.corner(
+                    centre,
+                    (port.right, port.dir, (port.right - port.left).normalize()),
+                    (next.left, next.dir, (next.left - next.right).normalize()),
+                    shape.outer,
+                    shape.fillet,
+                );
+                let walk = shape.corner(
+                    centre,
+                    (
+                        port.outer_right,
+                        port.dir,
+                        (port.right - port.left).normalize(),
+                    ),
+                    (
+                        next.outer_left,
+                        next.dir,
+                        (next.left - next.right).normalize(),
+                    ),
+                    shape.outer + walk,
+                    (shape.fillet - width(&port).max(width(&next))).max(1.0),
+                );
                 corners.push(Corner {
-                    kerb: arc(port.right, next.left),
-                    walk: arc(port.outer_right, next.outer_left),
+                    kerb,
+                    walk,
                     rounds_block: true,
                 });
                 continue;
@@ -1469,6 +1499,8 @@ pub fn derive(
             centre,
             y: JUNCTION_Y,
             radius: radius[node_index],
+            circle: shape.map_or(0.0, |r| r.outer),
+            island: shape.map_or(0.0, |r| r.island),
             ports,
             ring,
             walk_ring,
@@ -1718,8 +1750,304 @@ fn plan_widening(
     out
 }
 
-/// Share of eligible junctions built as roundabouts (see `derive`).
-const ROUNDABOUT_SHARE: f32 = 0.0;
+/// A roundabout's shape (`docs/city-visual-target.md` §8): the outer kerb a
+/// true circle, the central island the circulating road's width inside it,
+/// and every arm joined to the circle by an entry curve tangent to both.
+#[derive(Debug, Clone, Copy)]
+pub struct Roundabout {
+    /// Centre to the outer kerb.
+    pub outer: f32,
+    pub island: f32,
+    /// The entry and exit curves' radius: no more than the island's (CJJ 152
+    /// §4.6.4).
+    pub fillet: f32,
+}
+
+/// Two to three lanes round the island.
+const CIRCULATING_M: f32 = 10.0;
+/// Straight kerb between an arm's end and its entry curve.
+const ROUNDABOUT_LEAD_M: f32 = 4.0;
+
+impl Roundabout {
+    /// How far from the centre an arm's kerb, `kerb` from its centreline,
+    /// leaves the entry curve: where the arm stops.
+    pub fn trim(&self, kerb: f32) -> f32 {
+        let (r, f) = (self.outer + self.fillet, kerb + self.fillet);
+        // A few metres more, so a street that bends on its way in still
+        // reaches its curve on a straight kerb; it also sets the crossing back
+        // the 7 to 11 m from the circle the OSM roundabouts have it.
+        (r * r - f * f).max(0.0).sqrt() + ROUNDABOUT_LEAD_M
+    }
+
+    /// Where an arm along `path` (out of the junction at `centre`) stops: the
+    /// first station at which both its kerbs, as the street actually runs
+    /// there, leave their entry curves on a straight. A street that bends on
+    /// its way in sits off the centre, and its outer kerb needs longer.
+    pub fn fit(&self, path: &Path, centre: Vec2, kerb: f32, limit: f32) -> f32 {
+        let reach = self.outer + self.fillet;
+        let clear = |s: f32| {
+            let (p, t) = (path.plan_at(s), path.tangent_at(s));
+            let n = Vec2::new(-t.y, t.x);
+            [kerb, -kerb].iter().all(|side| {
+                let edge = p + n * *side - centre;
+                // The entry curve's centre runs a fillet outside the kerb.
+                let line = (edge + n * side.signum() * self.fillet).dot(n).abs();
+                if line >= reach {
+                    return true;
+                }
+                edge.dot(t) >= (reach * reach - line * line).sqrt() + ROUNDABOUT_LEAD_M
+            })
+        };
+        let mut s = (self.trim(kerb) - ROUNDABOUT_LEAD_M).min(limit);
+        while s < limit && !clear(s) {
+            s += 0.5;
+        }
+        s
+    }
+
+    /// A car's way through: off its lane's end onto the circulating road,
+    /// anticlockwise round the island (the first exit is the right turn, as
+    /// traffic keeps right), and off onto the exit lane. Going further round
+    /// it keeps nearer the island, as the lane arrows of a two-lane ring say.
+    pub fn circulate(&self, centre: Vec2, from: (Vec2, Vec2), to: (Vec2, Vec2)) -> Vec<Vec2> {
+        let angle = |p: Vec2| (p - centre).y.atan2((p - centre).x);
+        let (a, b) = (angle(from.0), angle(to.0));
+        let mut sweep = b - a;
+        while sweep <= 0.0 {
+            sweep += std::f32::consts::TAU;
+        }
+        // Where it joins and leaves the ring, a fifth of a radian round.
+        const JOIN: f32 = 0.4;
+        let ring = if sweep > std::f32::consts::PI {
+            self.island + CIRCULATING_M * 0.3
+        } else {
+            self.island + CIRCULATING_M * 0.65
+        };
+        let round = |theta: f32| centre + Vec2::new(theta.cos(), theta.sin()) * ring;
+        let along = |theta: f32| Vec2::new(-theta.sin(), theta.cos());
+        if sweep < 2.5 * JOIN {
+            // The first exit, close by: one curve, kept off the island.
+            let reach = from.0.distance(to.0) * 0.45;
+            return cubic_points(
+                from.0,
+                from.0 + from.1 * reach,
+                to.0 - to.1 * reach,
+                to.0,
+                20,
+            )
+            .into_iter()
+            .map(|p| {
+                let r = (p - centre).length();
+                if r < ring {
+                    centre + (p - centre) / r.max(0.01) * ring
+                } else {
+                    p
+                }
+            })
+            .collect();
+        }
+        let (enter, leave) = (a + JOIN, a + sweep - JOIN);
+        let handle = |p: Vec2, q: Vec2| p.distance(q) * 0.45;
+        let mut out = cubic_points(
+            from.0,
+            from.0 + from.1 * handle(from.0, round(enter)),
+            round(enter) - along(enter) * handle(from.0, round(enter)),
+            round(enter),
+            12,
+        );
+        let steps = (((leave - enter) * 8.0).ceil() as usize).max(2);
+        out.extend((1..steps).map(|k| round(enter + (leave - enter) * k as f32 / steps as f32)));
+        out.extend(cubic_points(
+            round(leave),
+            round(leave) + along(leave) * handle(round(leave), to.0),
+            to.0 - to.1 * handle(round(leave), to.0),
+            to.0,
+            12,
+        ));
+        out
+    }
+
+    /// The kerb from one street's kerb corner to the next one's, round
+    /// `circle`: each corner is (point, its street's direction into the
+    /// junction, the outward side of that kerb).
+    pub fn corner(
+        &self,
+        centre: Vec2,
+        from: (Vec2, Vec2, Vec2),
+        to: (Vec2, Vec2, Vec2),
+        circle: f32,
+        fillet: f32,
+    ) -> Vec<Vec2> {
+        // Where a kerb line leaves for the circle: the point on it, the
+        // curve's centre, and the point it meets the circle at.
+        let leave = |(p, dir, out): (Vec2, Vec2, Vec2)| -> Option<(Vec2, Vec2, Vec2)> {
+            let q = p + out * fillet - centre;
+            let b = q.dot(dir);
+            let disc = b * b - (q.length_squared() - (circle + fillet).powi(2));
+            if disc < 0.0 {
+                return None;
+            }
+            let t = -b - disc.sqrt();
+            // An arm cut short (the next junction is near) stops inside its
+            // entry curve: a tighter curve, tangent to the kerb right at the
+            // arm's end, still meets the circle.
+            let (t, fillet) = if t >= 0.0 {
+                (t, fillet)
+            } else {
+                let q0 = p - centre;
+                let tight =
+                    (q0.length_squared() - circle * circle) / (2.0 * (circle - q0.dot(out)));
+                (0.0, tight.clamp(0.5, fillet))
+            };
+            let curve = p + out * fillet + dir * t;
+            let on_circle = centre + (curve - centre).normalize() * circle;
+            Some((p + dir * t, curve, on_circle))
+        };
+        let (Some((a0, f0, b0)), Some((a1, f1, b1))) = (leave(from), leave(to)) else {
+            return vec![from.0, to.0];
+        };
+        let arc = |around: Vec2, start: Vec2, end: Vec2, longer: bool| -> Vec<Vec2> {
+            let r = start.distance(around);
+            let a = (start - around).y.atan2((start - around).x);
+            let mut sweep = (end - around).y.atan2((end - around).x) - a;
+            while sweep > std::f32::consts::PI {
+                sweep -= std::f32::consts::TAU;
+            }
+            while sweep < -std::f32::consts::PI {
+                sweep += std::f32::consts::TAU;
+            }
+            if longer {
+                // Round the circle the way the ports run: anticlockwise.
+                while sweep <= 0.0 {
+                    sweep += std::f32::consts::TAU;
+                }
+            }
+            let steps = ((sweep.abs() * 12.0).ceil() as usize).max(2);
+            (0..=steps)
+                .map(|k| {
+                    let angle = a + sweep * k as f32 / steps as f32;
+                    around + Vec2::new(angle.cos(), angle.sin()) * r
+                })
+                .collect()
+        };
+        let mut out = vec![from.0];
+        out.extend(arc(f0, a0, b0, false));
+        out.extend(arc(centre, b0, b1, true).into_iter().skip(1));
+        out.extend(arc(f1, b1, a1, false).into_iter().skip(1));
+        out.push(to.0);
+        out.dedup_by(|a, b| a.distance(*b) < 0.05);
+        out
+    }
+}
+
+/// Share of a town's junctions that are roundabouts: about 1 % in Kuitun,
+/// Urumqi, Chongqing and Beijing (`docs/city-visual-target.md` §8).
+const ROUNDABOUT_SHARE: f32 = 0.01;
+/// No two roundabouts nearer than this.
+const ROUNDABOUT_APART_M: f32 = 500.0;
+
+/// Which junctions are roundabouts, and their shape. CJJ 152 §4.6: not where
+/// arterials cross; three to five arms of collectors and locals (one arterial
+/// at most), none a ramp, none meeting another at a narrow angle. Of those,
+/// the ones nearest the town's centre, as the town-centre roundabouts of the
+/// photographs are, each at least `ROUNDABOUT_APART_M` from the next.
+fn plan_roundabouts(
+    incidence: &[Vec<u32>],
+    air: &[bool],
+    control: &[Control],
+    local: &[Vec2],
+    sd_by_id: &HashMap<u32, &SdRoad>,
+    hd_roads: &[HdRoad],
+    frame: CityFrameInfo,
+) -> HashMap<usize, Roundabout> {
+    let hd_by_id: HashMap<u32, &HdRoad> = hd_roads.iter().map(|road| (road.id, road)).collect();
+    let junctions = incidence.iter().filter(|list| list.len() >= 3).count();
+    let wanted = (junctions as f32 * ROUNDABOUT_SHARE).round() as usize;
+    let mut candidates: Vec<(f32, usize, Roundabout)> = Vec::new();
+    for (index, list) in incidence.iter().enumerate() {
+        if air[index] || control[index].terminal || !(3..=5).contains(&list.len()) {
+            continue;
+        }
+        let arms: Vec<&HdRoad> = list
+            .iter()
+            .filter_map(|id| hd_by_id.get(id).copied())
+            .collect();
+        if arms.len() != list.len()
+            || arms.iter().any(|r| {
+                r.layer != 0 || r.oneway || r.bridge || r.class == ModernRoadClass::Expressway
+            })
+            || arms.iter().filter(|r| r.class == ModernRoadClass::Arterial).count() > 1
+            // Where streets of some standing meet: locals alone do not get one.
+            || arms.iter().filter(|r| r.class != ModernRoadClass::Local).count() < 2
+        {
+            continue;
+        }
+        // Each arm's way out, and its length.
+        let mut dirs: Vec<(f32, f32)> = Vec::new();
+        for road in &arms {
+            let Some(sd) = sd_by_id.get(&road.id) else {
+                continue;
+            };
+            let mut line: Vec<Vec2> = road
+                .centreline
+                .iter()
+                .map(|p| {
+                    let [x, z] = frame.to_local(*p);
+                    Vec2::new(x, z)
+                })
+                .collect();
+            if sd.from as usize != index {
+                line.reverse();
+            }
+            let path = Path::flat(line);
+            let d = path.plan_at(path.length().min(20.0)) - local[index];
+            dirs.push((d.y.atan2(d.x), path.length()));
+        }
+        if dirs.len() != arms.len() {
+            continue;
+        }
+        let widest = arms
+            .iter()
+            .map(|r| kerb_half(&r.cross_section()))
+            .fold(0.0_f32, f32::max);
+        let outer = (widest + 25.0).clamp(30.0, 42.0);
+        let shape = Roundabout {
+            outer,
+            island: outer - CIRCULATING_M,
+            fillet: 15.0_f32.min(outer - CIRCULATING_M),
+        };
+        // Room on every arm for its entry curve and a street beyond it.
+        let room = arms
+            .iter()
+            .zip(&dirs)
+            .all(|(r, (_, length))| *length > shape.trim(kerb_half(&r.cross_section())) + 40.0);
+        let mut angles: Vec<f32> = dirs.iter().map(|d| d.0).collect();
+        angles.sort_by(f32::total_cmp);
+        let narrowest = (0..angles.len())
+            .map(|k| {
+                let next = angles[(k + 1) % angles.len()];
+                (next - angles[k]).rem_euclid(std::f32::consts::TAU)
+            })
+            .fold(std::f32::consts::TAU, f32::min);
+        if room && narrowest > 50.0_f32.to_radians() {
+            candidates.push((local[index].length(), index, shape));
+        }
+    }
+    candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    let mut out: HashMap<usize, Roundabout> = HashMap::new();
+    for (_, index, shape) in candidates {
+        if out.len() >= wanted {
+            break;
+        }
+        if out
+            .keys()
+            .all(|other| local[*other].distance(local[index]) >= ROUNDABOUT_APART_M)
+        {
+            out.insert(index, shape);
+        }
+    }
+    out
+}
 
 /// Length over which a ramp peels away from the deck edge, metres.
 const RAMP_PEEL_M: f32 = 140.0;

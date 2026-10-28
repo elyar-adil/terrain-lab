@@ -10,7 +10,7 @@ use urban::JunctionKind;
 use crate::math::{Rng, Vec2, Vec3};
 use crate::mesh::MeshBuilder;
 use crate::network::{Junction, Network, Road};
-use crate::spec::{JunctionSpec, MM, Movement, arrow_polygons};
+use crate::spec::JunctionSpec;
 
 use super::{Carriageway, WALK_Y, ribbon, sweep};
 
@@ -1089,17 +1089,22 @@ fn sweep_ring(builder: &mut MeshBuilder, material: &str, ring: &[Vec2], thicknes
     }
 }
 
-/// A roundabout: circulatory carriageway, mountable truck apron, raised central
-/// island, and the give-way line of triangles across every entry.
+/// A roundabout's own ground (`docs/city-visual-target.md` §8): the central
+/// island and the give-way at every entry. The circulating road is the
+/// junction's own asphalt, unmarked, as the photographs show it.
 ///
-/// The apron matters more than it looks.  A truck whose wheelbase is 12 m cannot
-/// follow a 6 m island, so the inner 400 mm of every roundabout is laid as a
-/// mountable kerb at a different tone, and that single ring is most of what
-/// tells a driver how big the circle is.
+/// The island stands on a stone kerb, a paved band inside it and planting
+/// within, a paved ring through the bed, as a town-centre roundabout's flower
+/// pattern has; there is no European truck apron. Each entry gives
+/// way at the circle with the 减速让行 marking, two dashed lines along the
+/// circle across the lanes coming in and an inverted triangle on them a few
+/// metres back; no stop line, waiting box or lane arrow leads up to it.
 pub(super) fn roundabout(junction: &Junction, builder: &mut MeshBuilder, spec: &JunctionSpec) {
-    let radius = junction.radius.max(18.0);
-    let island = radius * 0.42;
     let centre = junction.centre;
+    let island = junction.island;
+    if island < 3.0 {
+        return;
+    }
     let ring = |r: f32, segments: usize| -> Vec<Vec2> {
         (0..segments)
             .map(|index| {
@@ -1108,93 +1113,117 @@ pub(super) fn roundabout(junction: &Junction, builder: &mut MeshBuilder, spec: &
             })
             .collect()
     };
-    // The carriageway is the junction ring itself, which is a circle for a
-    // roundabout. The apron: a coloured, mountable ring around the island, so the
-    // circle reads at a glance the way it does on a real one.
-    let inner = ring(island + 0.45, 48);
-    let outer = ring(island + 3.4, 48);
-    for index in 0..inner.len() {
-        let next = (index + 1) % inner.len();
-        builder.ground_uv(
-            "asphalt.cycle",
-            &[inner[index], outer[index], outer[next], inner[next]],
-            super::level::ROAD + 0.012,
-            None,
-        );
-    }
-    builder.ground_uv("kerb", &inner, super::level::ROAD + 0.014, None);
-    // The island kerb as a wall, so it has a face and catches the sun on top.
-    let kerb_ring = ring(island + 0.45, 48);
-    for index in 0..kerb_ring.len() {
+    let segments = ((island * 3.0) as usize).clamp(48, 160);
+    let edge = ring(island, segments);
+    for index in 0..edge.len() {
         builder.wall(
             "kerb",
-            kerb_ring[index],
-            kerb_ring[(index + 1) % kerb_ring.len()],
+            edge[index],
+            edge[(index + 1) % edge.len()],
             super::level::ROAD,
             super::level::KERB,
             None,
         );
     }
+    let band = |builder: &mut MeshBuilder, material: &str, outer: f32, inner: f32, y: f32| {
+        let (o, i) = (ring(outer, segments), ring(inner, segments));
+        for index in 0..segments {
+            let next = (index + 1) % segments;
+            builder.ground_uv(material, &[o[index], o[next], i[next], i[index]], y, None);
+        }
+    };
+    band(
+        builder,
+        "kerb",
+        island,
+        island - 0.3,
+        super::level::KERB + 0.002,
+    );
+    band(
+        builder,
+        "sidewalk",
+        island - 0.3,
+        island - 1.8,
+        super::level::KERB,
+    );
     builder.ground_uv(
         "median.plant",
-        &ring(island, 36),
+        &ring(island - 1.8, segments),
         super::level::MEDIAN + 0.10,
         None,
     );
+    // A paved ring inside the planting: the bed's pattern.
+    band(
+        builder,
+        "sidewalk",
+        island * 0.5,
+        island * 0.5 - 0.8,
+        super::level::MEDIAN + 0.12,
+    );
 
-    // Give-way triangles and a deflection arrow on every entry.
+    // Each entry's lanes reach the circle between the arm's centreline and its
+    // arriving kerb: where those two lines, run on along the arm, meet it.
+    let meet = |from: Vec2, dir: Vec2, radius: f32| -> Option<Vec2> {
+        let q = from - centre;
+        let b = q.dot(dir);
+        let disc = b * b - (q.length_squared() - radius * radius);
+        (disc >= 0.0).then(|| from + dir * (-b - disc.sqrt()).max(0.0))
+    };
+    let angle = |p: Vec2| (p - centre).y.atan2((p - centre).x);
+    let circle = junction.circle;
     for port in &junction.ports {
-        let mouth = (port.left + port.right) * 0.5;
-        let offset = mouth - centre;
-        let distance = offset.length();
-        if distance < 1.0 {
+        let mid = (port.left + port.right) * 0.5;
+        let (Some(a), Some(b)) = (
+            meet(mid, port.dir, circle),
+            meet(port.left, port.dir, circle),
+        ) else {
             continue;
+        };
+        let (a0, mut sweep) = (angle(a), angle(b) - angle(a));
+        while sweep > std::f32::consts::PI {
+            sweep -= std::f32::consts::TAU;
         }
-        let outward = offset / distance;
-        let width = port.left.distance(port.right).max(3.0);
-        let line = centre + outward * (distance - 2.2);
-        let right = Vec2::new(-outward.y, outward.x);
-        let count = (width / spec.give_way_pitch).floor().max(1.0) as usize;
-        let pitch = width / count as f32;
-        for index in 0..count {
-            let centre_point = line + right * ((index as f32 + 0.5 - count as f32 * 0.5) * pitch);
-            let half_pitch = pitch * 0.4;
-            // The triangles point *into* the circle, at the driver.
-            let p0 = centre_point - right * half_pitch;
-            let p1 = centre_point + right * half_pitch;
-            let apex = centre_point - outward * spec.give_way_depth;
-            builder.tri_flat(
-                "marking.white",
-                Vec3::new(p0.x, super::level::PAINT, p0.y),
-                Vec3::new(apex.x, super::level::PAINT, apex.y),
-                Vec3::new(p1.x, super::level::PAINT, p1.y),
-                None,
-            );
+        while sweep < -std::f32::consts::PI {
+            sweep += std::f32::consts::TAU;
         }
-        // The deflection arrow: a straight stencil turned to the circle's
-        // tangent, so the driver is told to curve rather than to continue.
-        let entry = centre + outward * (distance - 8.0);
-        deflection_arrow(builder, entry, right, 0.0);
-    }
-    let _ = spec.roundabout_apron;
-}
-
-/// A straight drive arrow re-laid along an arbitrary direction, for a
-/// roundabout's entry lane.
-fn deflection_arrow(builder: &mut MeshBuilder, centre: Vec2, direction: Vec2, lift: f32) {
-    let normal = direction.left_normal();
-    for outline in arrow_polygons(&[Movement::Straight]) {
-        let ring: Vec<Vec2> = outline
-            .iter()
-            .map(|(lateral, forward)| Vec2::new(lateral * MM, forward * MM))
-            .collect();
-        for [i, j, k] in crate::math::triangulate(&ring) {
-            let at = |index: usize| {
-                let (lateral, forward) = outline[index];
-                let plan = centre + normal * (lateral * MM) + direction * (forward * MM);
-                Vec3::new(plan.x, super::level::PAINT + lift, plan.y)
-            };
-            builder.tri_flat("marking.white", at(i), at(j), at(k), None);
+        // GB 5768.3 §5.6: two dashed lines 200 mm wide and 200 mm apart,
+        // dashes 600 mm long with 300 mm gaps.
+        for radius in [circle + 0.3, circle + 0.7] {
+            let span = sweep.abs() * radius;
+            let mut along = 0.15;
+            while along + 0.6 <= span - 0.15 {
+                let (t0, t1) = (along / span, (along + 0.6) / span);
+                let at = |t: f32, r: f32| {
+                    let theta = a0 + sweep * t;
+                    centre + Vec2::new(theta.cos(), theta.sin()) * r
+                };
+                let quad = [
+                    at(t0, radius - 0.1),
+                    at(t1, radius - 0.1),
+                    at(t1, radius + 0.1),
+                    at(t0, radius + 0.1),
+                ];
+                builder.ground_uv("marking.white", &quad, super::level::PAINT, None);
+                along += 0.9;
+            }
         }
+        // The inverted triangle, on the entry half, 6 m up from the circle.
+        let lanes_mid = (mid + port.left) * 0.5;
+        let back = -port.dir;
+        let Some(on_circle) = meet(lanes_mid, port.dir, circle) else {
+            continue;
+        };
+        let base = on_circle + back * 6.0;
+        let across = Vec2::new(-back.y, back.x) * (spec.give_way_width * 1.5);
+        let apex = base - back * (spec.give_way_depth * 2.5);
+        let (p0, p1) = (base - across, base + across);
+        let lift = super::level::PAINT;
+        builder.tri_flat(
+            "marking.white",
+            Vec3::new(p0.x, lift, p0.y),
+            Vec3::new(apex.x, lift, apex.y),
+            Vec3::new(p1.x, lift, p1.y),
+            None,
+        );
     }
 }

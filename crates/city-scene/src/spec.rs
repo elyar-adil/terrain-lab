@@ -83,8 +83,6 @@ pub struct JunctionSpec {
     /// the no-stopping area.  CJJ 37: 4-6 m grid, 40-50 cm lines.
     pub yellow_grid_pitch: f32,
     pub yellow_grid_width: f32,
-    /// Radius multiplier for a roundabout's mountable truck apron.
-    pub roundabout_apron: f32,
 }
 
 impl Default for JunctionSpec {
@@ -124,7 +122,6 @@ impl Default for JunctionSpec {
             give_way_depth: 0.75,
             yellow_grid_pitch: 5.0,
             yellow_grid_width: 0.45,
-            roundabout_apron: 1.6,
         }
     }
 }

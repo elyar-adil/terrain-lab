@@ -85,6 +85,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         junction_report(&network, node);
         return Ok(());
     }
+    // `--connectors node`: every movement through a junction, one line each:
+    // movement then the plan points, for drawing over a render.
+    if let Some(node) = flag("--connectors").and_then(|v| v.parse::<u32>().ok()) {
+        for c in network.connectors.iter().filter(|c| c.node == node) {
+            let points: Vec<String> = (0..=40)
+                .map(|k| {
+                    let p = c.path.plan_at(c.path.length() * k as f32 / 40.0);
+                    format!("{:.2},{:.2}", p.x, p.y)
+                })
+                .collect();
+            println!("{:?} {}", c.movement, points.join(" "));
+        }
+        return Ok(());
+    }
     if std::env::args().any(|a| a == "--acute") {
         for j in &network.junctions {
             let n = j.ports.len();

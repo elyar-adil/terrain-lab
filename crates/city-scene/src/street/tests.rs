@@ -1608,3 +1608,98 @@ fn people_cross_every_arm_of_a_town_junction_and_traffic_stops_only_where_contro
         "no uncontrolled arm has a crosswalk"
     );
 }
+
+#[test]
+fn a_roundabout_gives_way_at_its_entries_and_carries_traffic_anticlockwise_round_its_island() {
+    // `docs/city-visual-target.md` §8: about one junction in a hundred, none
+    // nearer another than 500 m; no stop line at an entry (give way to the
+    // ring); every car goes round the island the way traffic keeps right,
+    // on the circulating road between the island and the outer kerb.
+    let city = generate_modern_chinese_city(ModernChinaSpec {
+        seed: 42,
+        ..ModernChinaSpec::default()
+    });
+    let network = derive(
+        &city.nodes,
+        &city.sd_roads,
+        &city.hd_roads,
+        city.frame,
+        JunctionSpec::default(),
+        city.seed,
+    );
+    let roundabouts: Vec<&crate::network::Junction> =
+        network.junctions.iter().filter(|j| j.roundabout).collect();
+    let crossings = network
+        .junctions
+        .iter()
+        .filter(|j| j.ports.len() >= 3)
+        .count();
+    assert!(!roundabouts.is_empty(), "a town this size has a roundabout");
+    assert!(
+        roundabouts.len() as f32 <= crossings as f32 * 0.02,
+        "{} roundabouts of {crossings} junctions",
+        roundabouts.len()
+    );
+    for (k, a) in roundabouts.iter().enumerate() {
+        for b in &roundabouts[k + 1..] {
+            assert!(
+                a.centre.distance(b.centre) >= 500.0,
+                "roundabouts {} and {} too close",
+                a.node,
+                b.node
+            );
+        }
+    }
+    for junction in roundabouts {
+        assert!(junction.island > 0.0 && junction.island < junction.circle);
+        for port in &junction.ports {
+            let road = network.road(port.road).unwrap();
+            let stop = if port.at_start {
+                road.crossing_start
+            } else {
+                road.crossing_end
+            };
+            assert!(
+                !stop,
+                "a stop line on road {} at roundabout {}",
+                road.id, junction.node
+            );
+            let end = (port.left + port.right) * 0.5;
+            assert!(
+                end.distance(junction.centre) > junction.circle,
+                "road {} reaches into roundabout {}'s ring",
+                road.id,
+                junction.node
+            );
+        }
+        let through: Vec<_> = network
+            .connectors
+            .iter()
+            .filter(|c| c.node == junction.node)
+            .collect();
+        assert!(!through.is_empty());
+        for c in through {
+            let samples: Vec<Vec2> = (0..=60)
+                .map(|k| c.path.plan_at(c.path.length() * k as f32 / 60.0) - junction.centre)
+                .collect();
+            for p in &samples {
+                assert!(
+                    p.length() > junction.island + 0.5,
+                    "connector {} crosses roundabout {}'s island",
+                    c.id,
+                    junction.node
+                );
+            }
+            let swept: f32 = samples
+                .windows(2)
+                .map(|w| w[0].cross(w[1]).atan2(w[0].dot(w[1])))
+                .sum();
+            assert!(
+                swept > 0.3,
+                "connector {} goes round roundabout {} the wrong way ({swept:.2})",
+                c.id,
+                junction.node
+            );
+        }
+    }
+}

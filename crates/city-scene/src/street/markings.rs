@@ -469,8 +469,12 @@ pub(super) fn road_markings(
     // Design-spec drive arrows, one per motor lane, placed clear of the
     // crosswalk band.  The arrow's allowed set comes from the connector graph,
     // so the painted marking and the legal movement are the same fact.
+    // None into a roundabout: its entries all go round, there is no lane to
+    // choose (`docs/city-visual-target.md` §8).
+    let into_roundabout = |node: u32| network.junction(node).is_some_and(|j| j.roundabout);
     for lane in network.lanes.iter().filter(|lane| {
         lane.road == road.id
+            && !into_roundabout(lane.to_node)
             && lane.path.length() > spec.arrow.tip_gap + 1.5 + 2.4
             && matches!(
                 lane.use_kind,
@@ -812,8 +816,12 @@ fn ramp_markings(network: &Network, road: &Road, builder: &mut MeshBuilder, spec
             );
         }
     }
+    // None into a roundabout: its entries all go round, there is no lane to
+    // choose (`docs/city-visual-target.md` §8).
+    let into_roundabout = |node: u32| network.junction(node).is_some_and(|j| j.roundabout);
     for lane in network.lanes.iter().filter(|lane| {
         lane.road == road.id
+            && !into_roundabout(lane.to_node)
             && lane.path.length() > spec.arrow.tip_gap + 1.5 + 2.4
             && network.junction(lane.to_node).is_some()
     }) {
