@@ -1122,6 +1122,35 @@ impl TopDown {
         })
     }
 
+    /// The highest surface a metre or more up over `p` (a deck), if any.
+    fn overhead_top(&self, p: Vec2) -> Option<f32> {
+        let key = (
+            (p.x / Self::BIN).floor() as i32,
+            (p.y / Self::BIN).floor() as i32,
+        );
+        let mut best: Option<f32> = None;
+        for v in self.overhead.get(&key)? {
+            let (ax, az) = (v[0][0], v[0][2]);
+            let (bx, bz) = (v[1][0], v[1][2]);
+            let (cx, cz) = (v[2][0], v[2][2]);
+            let area = (bx - ax) * (cz - az) - (cx - ax) * (bz - az);
+            if area.abs() < 1.0e-6 {
+                continue;
+            }
+            let w0 = ((bx - p.x) * (cz - p.y) - (cx - p.x) * (bz - p.y)) / area;
+            let w1 = ((cx - p.x) * (az - p.y) - (ax - p.x) * (cz - p.y)) / area;
+            let w2 = 1.0 - w0 - w1;
+            if w0 < -1.0e-4 || w1 < -1.0e-4 || w2 < -1.0e-4 {
+                continue;
+            }
+            let y = w0 * v[0][1] + w1 * v[1][1] + w2 * v[2][1];
+            if best.is_none_or(|b| y > b) {
+                best = Some(y);
+            }
+        }
+        best
+    }
+
     /// The material seen from above at `p`, if anything is there.
     fn top(&self, p: Vec2) -> Option<&str> {
         let key = (
@@ -1942,61 +1971,78 @@ fn no_two_ground_surfaces_lie_one_over_the_other_within_a_depth_step() {
 
 #[test]
 fn a_tile_draws_its_streets_as_the_whole_town_draws_them() {
-    // The desktop app builds a city in 500 m tiles. A tile's streets are
-    // derived with the streets round it and cropped to it, so near its edge
-    // (where a junction is shared with the next tile) every surface is the
-    // one the whole town has there.
+    // The desktop app builds a city in 500 m tiles. A tile's streets are the
+    // whole town's network near it, drawn and cropped to it, so near its edge
+    // (where a junction or a deck is shared with the next tile) every surface,
+    // on the ground or up on a viaduct, is the one the whole town has there.
     let city = generate_modern_chinese_city(ModernChinaSpec {
         seed: 42,
-        radius_km: 0.9,
+        radius_km: 1.6,
         block_size_metres: 110.0,
         ..ModernChinaSpec::default()
     });
-    let street_layer = |plan: &urban::ModernCity, crop: Option<([f32; 2], [f32; 2])>| {
-        let network = derive(
-            &plan.nodes,
-            &plan.sd_roads,
-            &plan.hd_roads,
-            plan.frame,
-            JunctionSpec::default(),
-            plan.seed,
-        );
+    let network = crate::scene::derive_city(&city);
+    let street_layer = |network: &Network, crop: Option<([f32; 2], [f32; 2])>| {
         let mut builder = MeshBuilder::new();
         let mark = builder.mark();
-        build(&network, &mut builder, plan.seed);
+        build(network, &mut builder, city.seed);
         if let Some((min, max)) = crop {
             builder.crop_since(&mark, min, max);
         }
         TopDown::new(&builder.build())
     };
-    let whole = street_layer(&city, None);
-    let (min, max) = ([0.0_f32, 0.0], [500.0_f32, 500.0]);
-    let tile = street_layer(
-        &city.roads_near_rect(min, max, crate::scene::TILE_CONTEXT_M),
-        Some((min, max)),
-    );
-    let (mut checked, mut wrong) = (0, Vec::new());
-    let mut x = min[0] + 0.3;
-    while x < max[0] {
-        let mut z = min[1] + 0.7;
-        while z < max[1] {
-            let edge = (x - min[0]).min(max[0] - x).min(z - min[1]).min(max[1] - z);
-            let p = Vec2::new(x, z);
-            if edge < 80.0 && !whole.covered(p) {
-                checked += 1;
-                let (a, b) = (whole.top(p), tile.top(p));
-                if a != b {
-                    wrong.push(format!("({x:.1}, {z:.1}): town {a:?}, tile {b:?}"));
+    let whole = street_layer(&network, None);
+    let (mut checked, mut decks, mut wrong) = (0, 0, Vec::new());
+    for column in -3..3 {
+        for row in -3..3 {
+            let min = [column as f32 * 500.0, row as f32 * 500.0];
+            let max = [min[0] + 500.0, min[1] + 500.0];
+            let tile = street_layer(
+                &network.near(min, max, crate::scene::TILE_CONTEXT_M),
+                Some((min, max)),
+            );
+            let mut x = min[0] + 0.3;
+            while x < max[0] {
+                let mut z = min[1] + 0.7;
+                while z < max[1] {
+                    let edge = (x - min[0]).min(max[0] - x).min(z - min[1]).min(max[1] - z);
+                    let p = Vec2::new(x, z);
+                    if edge < 40.0 {
+                        checked += 1;
+                        if !whole.covered(p) && whole.top(p) != tile.top(p) {
+                            wrong.push(format!(
+                                "({x:.1}, {z:.1}): town {:?}, tile {:?}",
+                                whole.top(p),
+                                tile.top(p)
+                            ));
+                        }
+                        let (a, b) = (whole.overhead_top(p), tile.overhead_top(p));
+                        if a.is_some() {
+                            decks += 1;
+                        }
+                        if a.zip(b).is_none_or(|(a, b)| (a - b).abs() > 0.005)
+                            && (a.is_some() || b.is_some())
+                        {
+                            wrong.push(format!(
+                                "({x:.1}, {z:.1}): deck at {a:?} in the town, {b:?} in the tile"
+                            ));
+                        }
+                    }
+                    z += 1.5;
                 }
+                x += 1.5;
             }
-            z += 1.5;
         }
-        x += 1.5;
     }
-    assert!(checked > 10_000, "only {checked} points near the edges");
     assert!(
-        wrong.len() * 1000 <= checked,
-        "{} of {checked} points near the tile's edge differ from the town:\n{}",
+        checked > 100_000 && decks > 1000,
+        "{checked} points, {decks} under decks"
+    );
+    // A sample falling on a triangle's edge is in or out by the width of a
+    // float, and a crop makes new edges: allow one point in 100 000.
+    assert!(
+        wrong.len() * 100_000 <= checked,
+        "{} of {checked} points near tile edges differ from the town:\n{}",
         wrong.len(),
         wrong
             .iter()

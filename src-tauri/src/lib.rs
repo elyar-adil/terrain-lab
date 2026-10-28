@@ -860,6 +860,10 @@ struct CityWorld {
     scenes: std::collections::HashMap<usize, std::sync::Arc<city_scene::CityScene>>,
     /// Square tiles of a city's plan, by city index and tile column and row.
     tiles: std::collections::HashMap<(usize, i32, i32), std::sync::Arc<city_scene::CityScene>>,
+    /// Each city's street network, derived once on its first tile and cut for
+    /// every tile after (`city_scene::build_city_scene_tile`), so neighbouring
+    /// tiles share every junction and deck exactly.
+    networks: Vec<std::sync::Arc<std::sync::OnceLock<city_scene::Network>>>,
 }
 
 /// Side of one streamed tile, in city-local metres. A tile holds about a hundred
@@ -874,8 +878,9 @@ fn install_city_plans(infrastructure: &InfrastructureData) {
         .iter()
         .zip(infrastructure.modern_cities.iter())
         .map(|(settlement, city)| (settlement.class, std::sync::Arc::new(city.clone())))
-        .collect();
+        .collect::<Vec<_>>();
     *CITY_WORLD.lock().unwrap_or_else(|error| error.into_inner()) = Some(CityWorld {
+        networks: (0..plans.len()).map(|_| Default::default()).collect(),
         plans,
         scenes: std::collections::HashMap::new(),
         tiles: std::collections::HashMap::new(),
@@ -957,7 +962,7 @@ async fn ensure_city_tile(
     column: i32,
     row: i32,
 ) -> Result<std::sync::Arc<city_scene::CityScene>, String> {
-    let (class, city) = {
+    let (class, city, network) = {
         let guard = CITY_WORLD
             .lock()
             .map_err(|_| "the city cache is poisoned")?;
@@ -971,12 +976,19 @@ async fn ensure_city_tile(
             .plans
             .get(index)
             .ok_or_else(|| format!("city {index} does not exist ({} cities)", world.plans.len()))?;
-        (*class, city.clone())
+        (*class, city.clone(), world.networks[index].clone())
     };
     let scene = tauri::async_runtime::spawn_blocking(move || {
         let min = [column as f32 * CITY_TILE_M, row as f32 * CITY_TILE_M];
         let max = [min[0] + CITY_TILE_M, min[1] + CITY_TILE_M];
-        city_scene::build_city_scene_tile(&city, min, max, infrastructure::scene_budget(class))
+        let network = network.get_or_init(|| city_scene::derive_city(&city));
+        city_scene::build_city_scene_tile(
+            &city,
+            network,
+            min,
+            max,
+            infrastructure::scene_budget(class),
+        )
     })
     .await
     .map_err(|error| format!("building the city tile failed: {error}"))?;

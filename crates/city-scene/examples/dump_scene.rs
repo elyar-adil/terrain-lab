@@ -82,7 +82,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let scene = match square {
-        Some((min, max)) => city_scene::build_city_scene_tile(&city, min, max, budget),
+        Some((min, max)) => city_scene::build_city_scene_tile(
+            &city,
+            &city_scene::derive_city(&city),
+            min,
+            max,
+            budget,
+        ),
         None => build_city_scene(&city, budget),
     };
     let s = &scene.stats;

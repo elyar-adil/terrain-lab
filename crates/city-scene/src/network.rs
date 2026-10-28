@@ -311,6 +311,66 @@ impl Network {
         self.air.get(node as usize).copied().unwrap_or(false)
     }
 
+    /// The part of the network near the plan square `[min, max]`: every road
+    /// any of whose carriageway comes within `margin` of it, every junction
+    /// whose box does, and their lanes and movements. Each element is the
+    /// whole network's own, derived once for the whole town, so two tiles cut
+    /// from one network agree exactly where they meet. Derived from a tile's
+    /// own neighbourhood, a viaduct's deck heights (set along the whole chain
+    /// of decks) came out different on either side of a tile's edge.
+    pub fn near(&self, min: [f32; 2], max: [f32; 2], margin: f32) -> Network {
+        let close = |p: Vec2, reach: f32| {
+            p.x >= min[0] - margin - reach
+                && p.x <= max[0] + margin + reach
+                && p.y >= min[1] - margin - reach
+                && p.y <= max[1] + margin + reach
+        };
+        let mut out = Network {
+            node_count: self.node_count,
+            spec: self.spec,
+            warnings: self.warnings.clone(),
+            air: self.air.clone(),
+            ..Network::default()
+        };
+        for road in &self.roads {
+            let length = road.centreline.length();
+            let steps = ((length / 10.0).ceil() as usize).max(1);
+            let reach = road.section.half_width() + 30.0;
+            if (0..=steps).any(|k| {
+                close(
+                    road.centreline.plan_at(length * k as f32 / steps as f32),
+                    reach,
+                )
+            }) {
+                out.road_by_id.insert(road.id, out.roads.len());
+                out.roads.push(road.clone());
+            }
+        }
+        out.junctions = self
+            .junctions
+            .iter()
+            .filter(|j| close(j.centre, j.radius + 30.0))
+            .cloned()
+            .collect();
+        for lane in self
+            .lanes
+            .iter()
+            .filter(|lane| out.road_by_id.contains_key(&lane.road))
+        {
+            out.lane_by_id.insert(lane.id.clone(), out.lanes.len());
+            out.lanes.push(lane.clone());
+        }
+        out.connectors = self
+            .connectors
+            .iter()
+            .filter(|c| {
+                out.lane_by_id.contains_key(&c.from_lane) && out.lane_by_id.contains_key(&c.to_lane)
+            })
+            .cloned()
+            .collect();
+        out
+    }
+
     pub fn junction(&self, node: u32) -> Option<&Junction> {
         self.junctions.iter().find(|junction| junction.node == node)
     }

@@ -33,7 +33,7 @@ pub use bake::standard_set as standard_texture_set;
 pub use buildings::build as build_building_layer;
 pub use mesh::{GroupStyle, Instance, MeshBuilder, MeshGroup};
 pub use network::{Network, derive};
-pub use scene::{CityScene, SceneBudget, build_city_scene, build_city_scene_tile};
+pub use scene::{CityScene, SceneBudget, build_city_scene, build_city_scene_tile, derive_city};
 pub use spec::JunctionSpec;
 pub use street::{SignalRig, StreetOutput, build as build_street_layer};
 pub use textures::BakedTexture;

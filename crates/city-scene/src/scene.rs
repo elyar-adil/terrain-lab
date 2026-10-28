@@ -270,50 +270,59 @@ fn extent_of(network: &Network) -> [f32; 4] {
 
 /// Derive a whole city scene.
 pub fn build_city_scene(city: &ModernCity, budget: SceneBudget) -> CityScene {
-    build_scene(city, city, None, budget)
+    build_scene(derive_city(city), city, None, budget)
 }
 
-/// How far round a tile its streets are derived from: past the reach of any
-/// junction's box, corners, crossings and approach widening.
-pub const TILE_CONTEXT_M: f32 = 200.0;
+/// A city's street network, derived once for the whole town: what every one
+/// of its tiles is cut from (`build_city_scene_tile`).
+pub fn derive_city(city: &ModernCity) -> Network {
+    network::derive(
+        &city.nodes,
+        &city.sd_roads,
+        &city.hd_roads,
+        city.frame,
+        JunctionSpec::default(),
+        city.seed,
+    )
+}
+
+/// How far round a tile the street layer is drawn before it is cropped: past
+/// the reach of any junction's box, corners and crossings, so whatever
+/// reaches into the tile is drawn.
+pub const TILE_CONTEXT_M: f32 = 120.0;
 
 /// One square tile `[min, max)` of a city (local metres), as the desktop app
 /// streams them. Its buildings, plots and water are the tile's share of the
-/// plan (`ModernCity::clipped_rect`). Its streets are derived from every street
-/// within `TILE_CONTEXT_M` (`ModernCity::roads_near_rect`), so a junction on
-/// the tile's edge has all its arms, and then cropped to the square: built
-/// from one plan's own streets alone, an edge junction lost the arms whose
-/// middle lay in the next tile, and each tile drew a different, broken half
-/// of it.
+/// plan (`ModernCity::clipped_rect`). Its streets are the part of the whole
+/// town's network (`derive_city`, derived once and kept) near the tile, drawn
+/// and cropped to the square: two tiles cut from one network meet exactly.
+/// Built from the plan's own streets in the tile, an edge junction lost the
+/// arms whose middle lay in the next tile; derived from the tile's own
+/// neighbourhood, a deck's heights differed on either side of the edge.
 pub fn build_city_scene_tile(
     city: &ModernCity,
+    network: &Network,
     min: [f32; 2],
     max: [f32; 2],
     budget: SceneBudget,
 ) -> CityScene {
     let content = city.clipped_rect(min, max);
-    let roads = city.roads_near_rect(min, max, TILE_CONTEXT_M);
-    build_scene(&roads, &content, Some((min, max)), budget)
+    build_scene(
+        network.near(min, max, TILE_CONTEXT_M),
+        &content,
+        Some((min, max)),
+        budget,
+    )
 }
 
-/// The scene of `city`'s plots, buildings and water, with the streets of
-/// `roads`, cropped to `crop` when given.
+/// The scene of `city`'s plots, buildings and water with the streets of
+/// `network`, cropped to `crop` when given.
 fn build_scene(
-    roads: &ModernCity,
+    network: Network,
     city: &ModernCity,
     crop: Option<([f32; 2], [f32; 2])>,
     budget: SceneBudget,
 ) -> CityScene {
-    let spec = JunctionSpec::default();
-    let network = network::derive(
-        &roads.nodes,
-        &roads.sd_roads,
-        &roads.hd_roads,
-        roads.frame,
-        spec,
-        city.seed,
-    );
-
     let mut builder = MeshBuilder::new();
     // Prototypes first, so their groups exist and can be bound before anything
     // instances into them.
@@ -340,7 +349,9 @@ fn build_scene(
         spans,
     } = furniture::place(&network, &mut builder, city.seed);
     let shrubs = trees::plant_median_shrubs(&network, &mut builder, city.seed);
-    let parked = furniture::park_cars(&network, &mut builder, city.seed);
+    // No parked cars until a car is modelled well enough to stand beside the
+    // rest of the street (`furniture::park_cars` places them when it is).
+    let parked = 0;
     let tree_output = trees::plant_styled(
         &network,
         &city.parcels,
