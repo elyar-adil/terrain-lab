@@ -29,6 +29,7 @@ pub(crate) const RAMP_DEPTH: f32 = 1.35;
 /// Station ranges where the kerb is dropped for a crossing, as `(from, to)`.
 fn dropped_kerb(
     road: &Carriageway,
+    class: urban::ModernRoadClass,
     spec: &JunctionSpec,
     crossing_start: bool,
     crossing_end: bool,
@@ -41,7 +42,7 @@ fn dropped_kerb(
         if !crossing {
             continue;
         }
-        let centre = base - outward * spec.crosswalk.gap;
+        let centre = base - outward * spec.crosswalk_centre(class);
         let lo = (centre - RAMP_HALF - KERB_FLAT).max(0.0);
         let hi = (centre + RAMP_HALF + KERB_FLAT).min(road.length);
         if hi > lo {
@@ -167,7 +168,7 @@ pub(super) fn road_surface(
         road_furniture_marks(builder, road, &surface, spec);
         return;
     }
-    let cut = dropped_kerb(&surface, spec, road.walk_start, road.walk_end);
+    let cut = dropped_kerb(&surface, road.class, spec, road.walk_start, road.walk_end);
     // Near each junction the footway is laid round the junction's other
     // carriageways, never over them: where two streets meet too acutely for
     // their footways to part before the box, one footway would otherwise run
@@ -273,18 +274,22 @@ pub(super) fn road_surface(
         let inner = kerb_to;
         let outer = side * (half + section.sidewalk_metres);
         for (from, to, clips) in &footway {
-            super::ribbon_clipped(
-                builder,
-                "sidewalk",
-                &surface,
-                inner.min(outer),
-                inner.max(outer),
-                *from,
-                *to,
-                super::level::KERB,
-                super::Uvs::World,
-                clips,
-            );
+            for (a, b, material, uvs) in
+                footway_bands(inner, outer, side, half, section.sidewalk_metres)
+            {
+                super::ribbon_clipped(
+                    builder,
+                    material,
+                    &surface,
+                    a.min(b),
+                    a.max(b),
+                    *from,
+                    *to,
+                    super::level::KERB,
+                    uvs,
+                    clips,
+                );
+            }
         }
         // Kerb: a capping ribbon plus its full-height face.  Drawn in the same
         // pieces as the footway, because a dropped kerb is a kerb that is *not
@@ -327,24 +332,72 @@ pub(super) fn road_surface(
             kerb_ramp(builder, &surface, side, *range, spec, clips);
             let back = side * (half + RAMP_DEPTH);
             if (outer - back) * side > 0.05 {
-                super::ribbon_clipped(
-                    builder,
-                    "sidewalk",
-                    &surface,
-                    back.min(outer),
-                    back.max(outer),
-                    range.0,
-                    range.1,
-                    super::level::KERB,
-                    super::Uvs::World,
-                    clips,
-                );
+                for (a, b, material, uvs) in
+                    footway_bands(back, outer, side, half, section.sidewalk_metres)
+                {
+                    super::ribbon_clipped(
+                        builder,
+                        material,
+                        &surface,
+                        a.min(b),
+                        a.max(b),
+                        range.0,
+                        range.1,
+                        super::level::KERB,
+                        uvs,
+                        clips,
+                    );
+                }
             }
         }
     }
 
     median_and_hazard(builder, road, &surface, spec);
     road_furniture_marks(builder, road, &surface, spec);
+}
+
+/// Width of a footway's guiding tactile strip (行进盲道): two pavers.
+const GUIDE_STRIP_M: f32 = 0.5;
+
+/// Where a footway's guiding strip runs, as laterals from the carriageway's
+/// centreline (positive side): clear of the tree pits and lamps by the kerb
+/// and of the shop fronts at the back, GB 50763 §3.2.1. None on a footway too
+/// narrow to carry one.
+pub(crate) fn guide_strip(half: f32, sidewalk: f32) -> Option<(f32, f32)> {
+    if sidewalk < 3.2 {
+        return None;
+    }
+    let centre = half + (sidewalk * 0.58).clamp(2.4, sidewalk - 0.7);
+    Some((centre - GUIDE_STRIP_M * 0.5, centre + GUIDE_STRIP_M * 0.5))
+}
+
+/// A footway band from lateral `inner` to `outer` on `side`, cut into paving
+/// and, where it crosses it, the yellow guiding strip: laid side by side, not
+/// one over the other.
+fn footway_bands(
+    inner: f32,
+    outer: f32,
+    side: f32,
+    half: f32,
+    sidewalk: f32,
+) -> Vec<(f32, f32, &'static str, super::Uvs)> {
+    let (lo, hi) = (
+        (inner * side).min(outer * side),
+        (inner * side).max(outer * side),
+    );
+    let Some((g0, g1)) = guide_strip(half, sidewalk).filter(|(g0, g1)| *g0 > lo && *g1 < hi) else {
+        return vec![(inner, outer, "sidewalk", super::Uvs::World)];
+    };
+    vec![
+        (lo * side, g0 * side, "sidewalk", super::Uvs::World),
+        (
+            g0 * side,
+            g1 * side,
+            "tactile.guide",
+            super::Uvs::Along(0.0),
+        ),
+        (g1 * side, hi * side, "sidewalk", super::Uvs::World),
+    ]
 }
 
 /// A dropped-kerb ramp and the tactile paving behind it.
@@ -416,37 +469,20 @@ fn kerb_ramp(
     if end - start < 0.4 {
         return;
     }
-    let ribs = 6;
-    // The warning surface itself, so the strip reads as one band from a car...
+    // The warning pavers (提示盲道), yellow and domed, a few millimetres
+    // proud of the footway as they are laid.
     super::ribbon_clipped(
         builder,
-        "kerb",
+        "tactile.warn",
         surface,
         inner.min(outer),
         inner.max(outer),
         start,
         end,
-        super::level::TACTILE - 0.004,
-        super::Uvs::None,
+        super::level::TACTILE,
+        super::Uvs::Along(middle),
         clips,
     );
-    // ... and the raised ribs on top of it, which is what a tactile paving
-    // surface actually is and the only part of it visible from a moving car.
-    for rib in 0..ribs {
-        let offset = inner + (outer - inner) * (rib as f32 + 0.5) / ribs as f32;
-        super::ribbon_clipped(
-            builder,
-            "kerb",
-            surface,
-            offset - 0.028,
-            offset + 0.028,
-            start,
-            end,
-            super::level::TACTILE,
-            super::Uvs::None,
-            clips,
-        );
-    }
 }
 
 /// A roundabout entry's splitter island (导流岛, CJJ 152 §4.6; the Xinjiang
@@ -541,7 +577,7 @@ fn median_and_hazard(
     // the stop line: the crossing runs across the carriageway unbroken and the
     // box is clear.  Run on into the box, the median of a divided street
     // pokes into the turning paths of every left turn.
-    let nose = spec.crosswalk.gap + spec.crosswalk.depth * 0.5 + 0.4;
+    let nose = spec.crosswalk_centre(road.class) + spec.crosswalk_depth(road.class) * 0.5 + 0.4;
     let from = if road.crossing_start || road.walk_start {
         nose
     } else {

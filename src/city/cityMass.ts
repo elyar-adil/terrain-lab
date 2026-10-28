@@ -69,6 +69,9 @@ const TERRACOTTA = 0x8a5a45;
 const ASPHALT = 0x64625e;
 // Paving, plazas and forecourts between the buildings of a block.
 const PAVING = 0x8b8982;
+const SIDEWALK = 0x9a978f;
+/** Footway width a side by street class, metres (`worldgen_contracts::cross_section`). */
+const FOOTWAY_M: Record<string, number> = { arterial: 5, collector: 4, local: 3 };
 
 // The whole part of a vertex's seed is its kind: 0 a wall with windows, 1 an
 // office (which alone may be a curtain wall), 2 a shed, 3 plant with no windows.
@@ -307,6 +310,43 @@ class MassBuilder {
   }
 }
 
+/** A line moved sideways by `d` (scene units), point by point. */
+function offsetLine(pts: Array<[number, number, number]>, d: number): Array<[number, number, number]> {
+  return pts.map((p, i) => {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+    const ex = b[0] - a[0], ez = b[2] - a[2];
+    const len = Math.hypot(ex, ez) || 1;
+    return [p[0] - (ez / len) * d, p[1], p[2] + (ex / len) * d];
+  });
+}
+
+/** A summer crown's green, varied tree to tree. */
+function treeTint(x: number, z: number): number {
+  const h = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
+  const greens = [0x3f5f2c, 0x4a6a30, 0x557236, 0x3c5a34, 0x5d7a3a];
+  return greens[Math.floor(h * greens.length)];
+}
+
+/**
+ * A tree's crown from afar: an eight-sided double cone, wider than high, on a
+ * trunk-height of clear stem, lit from above and darker below.
+ */
+function crown(builder: MassBuilder, x: number, ground: number, z: number, height: number, radius: number, hex: number) {
+  const bottom = ground + height * 0.35;
+  const middle = ground + height * 0.62;
+  const top = ground + height;
+  const sides = 8;
+  for (let k = 0; k < sides; k += 1) {
+    const a0 = (k / sides) * Math.PI * 2, a1 = ((k + 1) / sides) * Math.PI * 2;
+    const p0 = [x + Math.cos(a0) * radius, middle, z + Math.sin(a0) * radius];
+    const p1 = [x + Math.cos(a1) * radius, middle, z + Math.sin(a1) * radius];
+    const am = (a0 + a1) * 0.5;
+    const out = [Math.cos(am), 0, Math.sin(am)];
+    builder.tri([x, top, z], p1, p0, [out[0] * 0.6, 0.8, out[2] * 0.6], hex, 1.0);
+    builder.tri([x, bottom, z], p0, p1, [out[0] * 0.6, -0.8, out[2] * 0.6], hex, 0.62);
+  }
+}
+
 export interface CityMass {
   mesh: THREE.Mesh;
   triangles: number;
@@ -342,6 +382,26 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     builder.flat(toRing(block.boundary), frame.heightAt, 0.15 * m, PAVING);
   }
 
+  // Each parcel's ground over its block, by what it is used for: from a few
+  // hundred metres a town is lawns, forecourts and yards, not one grey slab.
+  const PARCEL_GROUND: Record<string, number> = {
+    park: 0x4e6b36,
+    residential: 0x667c4c,
+    villa: 0x5f7746,
+    farmstead: 0x6b7447,
+    village: 0x7a7a62,
+    commercial: 0x96948c,
+    mixedUse: 0x8f8d86,
+    civic: 0x8a8a7e,
+    industrial: 0x837d72,
+  };
+  for (const parcel of city.parcels) {
+    builder.select(...tileOfPoint(city.frame, ringMean(parcel.ring)));
+    builder.seed = PLAIN_SEED;
+    builder.flat(toRing(parcel.ring), frame.heightAt, 0.25 * m, PARCEL_GROUND[parcel.useType] ?? PAVING);
+  }
+
+  const streetTreeLines: Array<{ pts: Array<[number, number, number]>; offset: number; tile: [number, number] | null }> = [];
   // Streets next, as flat ribbons a little above the ground. The metre-scale
   // scene draws the real carriageway; this is its line from afar.
   for (const road of city.hdRoads) {
@@ -358,9 +418,52 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
       pts.forEach((p, i) => { p[1] = a[1] + (b[1] - a[1]) * (i / (pts.length - 1)); });
     }
     for (const p of pts) p[1] += 0.35 * m;
-    builder.ribbon(pts, Math.max(road.widthMetres, 6) * m, ASPHALT);
+    // Footways either side of the carriageway, so a street reads as a street.
+    const width = Math.max(road.widthMetres, 6);
+    // The footway each side, furniture belt included (the cross-section table, CJJ 37).
+    const walk = road.layer ? 0 : (FOOTWAY_M[road.class] ?? 0);
+    builder.ribbon(pts, (width - 2 * walk) * m, ASPHALT);
+    if (walk > 0) {
+      for (const side of [-1, 1]) {
+        builder.ribbon(offsetLine(pts, side * (width - walk) * 0.5 * m), walk * m, SIDEWALK);
+      }
+    }
+    // The detail's pits: a metre or so in from the kerb, every 8 m both sides.
+    if (walk >= 2.4) streetTreeLines.push({ pts, offset: (width * 0.5 - walk + 1.05) * m, tile: mid ? tileOfPoint(city.frame, mid) : null });
   }
 
+  // Tree crowns: every tree of the plan, and the avenues along the streets the
+  // detail plants. A town seen from a kilometre is half trees.
+  builder.seed = PLAIN_SEED;
+  for (const tree of city.trees ?? []) {
+    if (!tree.point) continue;
+    builder.select(...tileOfPoint(city.frame, tree.point));
+    const [x, z] = frame.toScene(tree.point.x_km, tree.point.y_km);
+    const y = frame.heightAt(x, z);
+    crown(builder, x, y, z, (tree.heightMetres ?? 9) * m, Math.max(tree.crownRadiusMetres ?? 3, 1.5) * m, treeTint(x, z));
+  }
+  for (const line of streetTreeLines) {
+    // The street's own tile, as the road it lines is hidden with.
+    if (line.tile) builder.select(...line.tile);
+    for (const side of [-1, 1]) {
+      const placed = offsetLine(line.pts, side * line.offset);
+      let carry = 4;
+      for (let i = 0; i + 1 < placed.length; i += 1) {
+        const [ax, ay, az] = placed[i];
+        const [bx, by, bz] = placed[i + 1];
+        const len = Math.hypot(bx - ax, bz - az);
+        while (carry < len) {
+          const t = carry / len;
+          const x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+          crown(builder, x, ay + (by - ay) * t - 0.35 * m, z, 10 * m, 3.4 * m, treeTint(x, z));
+          carry += 8 * m;
+        }
+        carry -= len;
+      }
+    }
+  }
+
+  builder.seed = 0;
   for (const b of city.buildings) {
     builder.select(...(parcelTile.get(b.parcelId) ?? tileOfPoint(city.frame, ringMean(b.footprint))));
     const ring = toRing(b.footprint);

@@ -68,11 +68,12 @@ pub(super) fn approaches(road: &Road, spec: &JunctionSpec) -> Vec<Approach> {
         result.push(Approach {
             base,
             outward,
-            crosswalk_centre: base - outward * spec.crosswalk.gap,
+            crosswalk_centre: base - outward * spec.crosswalk_centre(road.class),
             lateral_inner: inner.min(outer),
             lateral_outer: inner.max(outer),
-            stop_near: base - outward * (spec.stop_line_gap - spec.stop_line_width * 0.5),
-            stop_far: base - outward * (spec.stop_line_gap + spec.stop_line_width * 0.5),
+            stop_near: base
+                - outward * (spec.stop_line_at(road.class) - spec.stop_line_width * 0.5),
+            stop_far: base - outward * (spec.stop_line_at(road.class) + spec.stop_line_width * 0.5),
         });
     }
     result
@@ -425,20 +426,17 @@ pub(super) fn road_markings(
         (0.0_f32, -1.0_f32, road.walk_start),
         (length, 1.0_f32, road.walk_end),
     ] {
-        let centre = base - outward * spec.crosswalk.gap;
-        if !walked
-            || centre - spec.crosswalk.depth * 0.5 < -0.01
-            || centre + spec.crosswalk.depth * 0.5 > length + 0.01
-        {
+        let depth = spec.crosswalk_depth(road.class);
+        let centre = base - outward * spec.crosswalk_centre(road.class);
+        if !walked || centre - depth * 0.5 < -0.01 || centre + depth * 0.5 > length + 0.01 {
             continue;
         }
-        crosswalk_band(builder, &surface, centre, half, spec.crosswalk.depth);
+        crosswalk_band(builder, &surface, centre, half, depth);
     }
     for approach in approaches(road, spec) {
         let centre = approach.crosswalk_centre;
-        if centre - spec.crosswalk.depth * 0.5 < -0.01
-            || centre + spec.crosswalk.depth * 0.5 > length + 0.01
-        {
+        let depth = spec.crosswalk_depth(road.class);
+        if centre - depth * 0.5 < -0.01 || centre + depth * 0.5 > length + 0.01 {
             continue;
         }
         transverse_stripe(
@@ -784,12 +782,11 @@ fn ramp_markings(network: &Network, road: &Road, builder: &mut MeshBuilder, spec
     let half = road.half_width();
     for approach in approaches(road, spec) {
         let centre = approach.crosswalk_centre;
-        if centre - spec.crosswalk.depth * 0.5 < -0.01
-            || centre + spec.crosswalk.depth * 0.5 > length + 0.01
-        {
+        let depth = spec.crosswalk_depth(road.class);
+        if centre - depth * 0.5 < -0.01 || centre + depth * 0.5 > length + 0.01 {
             continue;
         }
-        crosswalk_band(builder, &surface, centre, half, spec.crosswalk.depth);
+        crosswalk_band(builder, &surface, centre, half, depth);
         // Traffic arrives only at the terminal end of an off-ramp; an on-ramp's
         // terminal end is where it is entered, and has no stop line.
         let arriving = if approach.outward > 0.0 {
@@ -973,7 +970,7 @@ pub(super) fn widening_markings(road: &Road, builder: &mut MeshBuilder, spec: &J
         if !w.is_some() {
             continue;
         }
-        let a = approach.back(spec.stop_line_gap + spec.stop_line_width);
+        let a = approach.back(spec.stop_line_at(road.class) + spec.stop_line_width);
         let b = approach.back(w.hold);
         let (from, to) = (a.min(b).clamp(0.0, length), a.max(b).clamp(0.0, length));
         stripe(

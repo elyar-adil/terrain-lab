@@ -141,6 +141,10 @@ pub fn plant_median_shrubs(network: &Network, builder: &mut MeshBuilder, seed: u
         let length = path.length();
         let mut station = 9.0 + rng.unit() * 3.0;
         while station < length - 9.0 {
+            if crate::furniture::near_median_lamp(station, 1.2) {
+                station += 7.0;
+                continue;
+            }
             let point = path.offset_at(station, 0.0, 0.0);
             // Downwards only, for the same reason the tree tint is: an instance
             // tint above 1.0 clips in the payload's `u8` and the shrub ends up

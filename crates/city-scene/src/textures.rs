@@ -249,6 +249,76 @@ pub fn paving_texture(size: usize) -> BakedTexture {
     }
 }
 
+/// Side of one tactile paver (盲道砖), metres.
+pub const TACTILE_TILE_M: f32 = 0.25;
+
+/// Yellow tactile pavers, GB 50763 §3.2: the guiding paver's four raised bars
+/// run the way a blind walker goes (`V`), the warning paver carries a five by
+/// five grid of domes. One 250 mm paver per tile, its joint on the edges, lit
+/// from one side so the relief reads, and weathered paver to paver.
+pub fn tactile_texture(size: usize, warning: bool) -> BakedTexture {
+    let mut rgba = vec![0_u8; size * size * 4];
+    let joint = (size / 64).max(1);
+    for y in 0..size {
+        for x in 0..size {
+            let (u, v) = (
+                (x as f32 + 0.5) / size as f32,
+                (y as f32 + 0.5) / size as f32,
+            );
+            // Height of the relief at this texel, 0..1, and its slope across u.
+            let (h, dh) = if warning {
+                let (cu, cv) = ((u * 5.0).fract() - 0.5, (v * 5.0).fract() - 0.5);
+                let r = (cu * cu + cv * cv).sqrt() / 0.24;
+                if r < 1.0 {
+                    ((1.0 - r * r).sqrt(), -(cu + cv) / 0.24 * 0.7)
+                } else {
+                    (0.0, 0.0)
+                }
+            } else {
+                let cu = (u * 4.0).fract() - 0.5;
+                let d = cu.abs() / 0.2;
+                if d < 1.0 {
+                    (1.0 - d.powi(4), if d > 0.7 { -cu.signum() } else { 0.0 })
+                } else {
+                    (0.0, 0.0)
+                }
+            };
+            let wear =
+                signed_noise(0x7a11, x as f32 / 9.0, y as f32 / 9.0, size as f32 / 9.0) * 8.0;
+            let shade = 1.0 + 0.10 * h + 0.16 * dh;
+            let edge = x % size < joint || y % size < joint;
+            let (r, g, b) = if edge {
+                (96.0, 84.0, 52.0)
+            } else {
+                (
+                    (198.0 + wear) * shade,
+                    (156.0 + wear * 0.9) * shade,
+                    (52.0 + wear * 0.4) * shade,
+                )
+            };
+            let offset = (y * size + x) * 4;
+            rgba[offset] = r.clamp(0.0, 255.0) as u8;
+            rgba[offset + 1] = g.clamp(0.0, 255.0) as u8;
+            rgba[offset + 2] = b.clamp(0.0, 255.0) as u8;
+            rgba[offset + 3] = 255;
+        }
+    }
+    BakedTexture {
+        name: if warning {
+            "tactile/warn"
+        } else {
+            "tactile/guide"
+        }
+        .into(),
+        width: size,
+        height: size,
+        tile_width_m: TACTILE_TILE_M,
+        tile_height_m: TACTILE_TILE_M,
+        has_normal_source: true,
+        rgba,
+    }
+}
+
 /// The leaf of a clipped hedge or a topiary ball (黄杨, 小叶女贞, 金叶女贞): a
 /// 1 m tile of small leaves, each a cell of its own tone with a dark gap round
 /// it, lit leaves lighter and yellower (the new growth a clipping brings on).

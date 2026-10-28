@@ -373,6 +373,9 @@ pub struct ExternalRoad {
     pub to: u64,
     pub class: crate::ModernRoadClass,
     pub bridge: bool,
+    /// A regional road the town was handed, which carries on beyond it: the
+    /// tidying never takes it back as a dead end.
+    pub given: bool,
     /// From the `from` node to the `to` node, ends included.
     pub centreline: Vec<Point>,
 }

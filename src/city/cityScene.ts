@@ -454,6 +454,19 @@ export function createMaterials(
   // street layer's stacking test assumes these same biases.
   standard("kerb", { roughness: 0.86, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -2 }, 0x8e8b82);
 
+  // Yellow tactile pavers: the guiding strip down a footway and the warning
+  // pavers at a dropped kerb, which lie a few millimetres proud (biased as kerbs are).
+  standard("tactile.guide", { map: textureFor("tactile/guide") ?? undefined, normalMap: normalFor("tactile/guide", 2.0) ?? undefined, roughness: 0.8 }, 0xffffff);
+  standard("tactile.warn", { map: textureFor("tactile/warn") ?? undefined, normalMap: normalFor("tactile/warn", 2.0) ?? undefined, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -2 }, 0xffffff);
+
+  // Tree pits: a granite edge, a cast-iron grate over gravel, or a polished
+  // dark granite planter. They lie a few millimetres over the footway.
+  const pitBias = { polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -2 };
+  standard("treepit.edge", { roughness: 0.78, ...pitBias }, 0xa19e96);
+  standard("treepit.grate", { roughness: 0.55, metalness: 0.6, ...pitBias }, 0x2b2c2a);
+  standard("treepit.gravel", { roughness: 1.0, ...pitBias }, 0xb9b4a9);
+  standard("treepit.planter", { roughness: 0.35, metalness: 0.05 }, 0x4b4e50);
+
   const grassMap = textureFor("ground/grass");
   for (const key of ["block.ground", "parcel.green", "median.plant"]) {
     applyGrassFur(applyAntiTiling(standard(
@@ -765,6 +778,11 @@ export function createMaterials(
   standard("pole.concrete", { roughness: 0.9 }, 0x807c74);
   standard("steel", { roughness: 0.38, metalness: 0.72, envMapIntensity: 0.9 }, 0x9aa0a6);
   standard("furniture/lamp", { roughness: 0.55, metalness: 0.35 }, 0x74797c);
+  standard("furniture/lamp.double", { roughness: 0.55, metalness: 0.35 }, 0x74797c);
+  // The ornamental lamp: dark painted cast metal, milk-glass buds, red silk.
+  standard("furniture/lamp.deco", { roughness: 0.42, metalness: 0.55 }, 0x2c3133);
+  standard("furniture/lamp.globe", { roughness: 0.2, emissive: 0xfff1d8, emissiveIntensity: 0.12 }, 0xf1efe8);
+  standard("furniture/lantern", { roughness: 0.65, emissive: 0x3a0604, emissiveIntensity: 0.4 }, 0xb41e18);
   standard("furniture/pole", { roughness: 0.9 }, 0x807c74);
   standard("furniture/bollard", { roughness: 0.5, metalness: 0.2 }, 0xb8bcb6);
   standard("furniture/railing", { roughness: 0.45, metalness: 0.5 }, 0xa8adb0);

@@ -85,6 +85,32 @@ pub struct JunctionSpec {
     pub yellow_grid_width: f32,
 }
 
+impl JunctionSpec {
+    /// A crossing's depth by the street it crosses: GB 5768.3 §4.2 sets 3 m
+    /// and widens by whole metres with the people crossing; the arterials of
+    /// Chinese towns are crossed on 6 m, collectors on 5 m.
+    pub fn crosswalk_depth(&self, class: urban::ModernRoadClass) -> f32 {
+        use urban::ModernRoadClass::*;
+        match class {
+            Arterial | Expressway => self.crosswalk.depth + 2.0,
+            Collector => self.crosswalk.depth + 1.0,
+            _ => self.crosswalk.depth,
+        }
+    }
+
+    /// The crossing's centre, metres in from the junction edge: its near edge
+    /// stays where a 4 m crossing's is, and a deeper one reaches further back.
+    pub fn crosswalk_centre(&self, class: urban::ModernRoadClass) -> f32 {
+        self.crosswalk.gap + (self.crosswalk_depth(class) - self.crosswalk.depth) * 0.5
+    }
+
+    /// The stop line's centre, metres in from the junction edge: as far
+    /// behind the crossing whatever its depth.
+    pub fn stop_line_at(&self, class: urban::ModernRoadClass) -> f32 {
+        self.stop_line_gap + self.crosswalk_depth(class) - self.crosswalk.depth
+    }
+}
+
 impl Default for JunctionSpec {
     fn default() -> Self {
         Self {

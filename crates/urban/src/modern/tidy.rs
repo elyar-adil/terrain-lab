@@ -654,6 +654,7 @@ fn prune_stubs(streets: &mut ExternalStreets) {
             !(dead
                 && rank(road.class) >= 2
                 && !road.bridge
+                && !road.given
                 && length(road) < STUB_M
                 && degree[&road.from] + degree[&road.to] >= 3)
         });
@@ -686,7 +687,7 @@ fn prune_branches(streets: &mut ExternalStreets, max_m: f32) {
             let (mut branch, mut total, mut keep) = (Vec::new(), 0.0, false);
             loop {
                 let road = &streets.roads[current];
-                if rank(road.class) < 2 || road.from == road.to {
+                if rank(road.class) < 2 || road.from == road.to || road.given {
                     keep = true;
                     break;
                 }
@@ -894,7 +895,12 @@ fn join_dead_ends(streets: &mut ExternalStreets, reach: f32, within_deg: f32) {
                 first.push(point_of(q));
                 let mut second = vec![point_of(q)];
                 second.extend(line[segment + 1..].iter().map(|p| point_of(*p)));
-                let (to, class, bridge) = (target_road.to, target_road.class, target_road.bridge);
+                let (to, class, bridge, given) = (
+                    target_road.to,
+                    target_road.class,
+                    target_road.bridge,
+                    target_road.given,
+                );
                 streets.roads[target].to = id;
                 streets.roads[target].centreline = first;
                 streets.roads.push(ExternalRoad {
@@ -902,6 +908,7 @@ fn join_dead_ends(streets: &mut ExternalStreets, reach: f32, within_deg: f32) {
                     to,
                     class,
                     bridge,
+                    given,
                     centreline: second,
                 });
                 id
@@ -998,7 +1005,7 @@ fn drop_orphans(streets: &mut ExternalStreets, short: bool) {
         .iter()
         .enumerate()
         .map(|(index, road)| {
-            if road.bridge || degree[&road.from] != 1 || degree[&road.to] != 1 {
+            if road.bridge || road.given || degree[&road.from] != 1 || degree[&road.to] != 1 {
                 return false;
             }
             if short {
@@ -1216,6 +1223,7 @@ mod tests {
                     to,
                     class,
                     bridge: false,
+                    given: false,
                     centreline: vec![place[&from], place[&to]],
                 })
                 .collect(),

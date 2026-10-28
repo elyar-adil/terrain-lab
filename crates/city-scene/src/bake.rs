@@ -13,7 +13,7 @@ pub use crate::facades::{
 pub use crate::leaf_cards::{leaf_card_textures, tuft_texture};
 pub use crate::textures::{
     GROUND_TILE_M, asphalt_texture, crosswalk_texture, dashed_line_texture, flower_texture,
-    grass_texture, hedge_texture, paving_texture, signage_texture,
+    grass_texture, hedge_texture, paving_texture, signage_texture, tactile_texture,
 };
 
 use crate::textures::BakedTexture;
@@ -37,6 +37,8 @@ pub fn standard_set(facade_size: usize, ground_size: usize) -> Vec<BakedTexture>
     set.push(paving_texture(ground_size));
     set.push(grass_texture(ground_size));
     set.push(hedge_texture(ground_size));
+    set.push(tactile_texture(128, false));
+    set.push(tactile_texture(128, true));
     for colour in ["red", "pink", "yellow"] {
         set.push(flower_texture(ground_size, colour));
     }

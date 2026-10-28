@@ -1041,6 +1041,7 @@ impl TopDown {
             }
             let ground = group.material.starts_with("asphalt")
                 || group.material.starts_with("marking.")
+                || group.material.starts_with("tactile.")
                 || matches!(
                     group.material.as_str(),
                     "sidewalk" | "kerb" | "median.plant" | "block.ground"
@@ -1217,7 +1218,9 @@ fn every_junction_is_covered_by_the_surface_it_should_be() {
     let road_ok = |m: &str| {
         m.starts_with("asphalt") || m.starts_with("marking.") || m == "kerb" || m == "median.plant"
     };
-    let walk_ok = |m: &str| m == "sidewalk" || m == "kerb" || m.starts_with("marking.");
+    let walk_ok = |m: &str| {
+        m == "sidewalk" || m == "kerb" || m.starts_with("marking.") || m.starts_with("tactile.")
+    };
     let mut offenders: Vec<String> = Vec::new();
     // The test cities, and any plans named in `COVERAGE_PLANS` (paths joined by
     // `:`, written by `infrastructure`'s `plan_svg` with `PLAN_JSON`): the

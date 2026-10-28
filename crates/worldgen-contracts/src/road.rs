@@ -188,11 +188,14 @@ pub fn cross_section(class: RoadClass, setting: Setting) -> CrossSection {
         // 快速路: 双向八车道 + 中央隔离带 + 硬路肩, no non-motorised traffic.
         (Urban, Motorway) => s(2.5, 4, 3.5, 0.75, 1.0, 0.0, 0.0, 6.0, true, 80.0),
         // 主干路: 双向六车道 + 中央分隔带 + 机非分隔的非机动车道 + 人行道.
-        (Urban, Arterial) => s(2.0, 3, 3.5, 0.5, 0.0, 3.5, 3.0, 0.0, true, 60.0),
+        // The footway counts its furniture belt (设施带, the tree pits and
+        // lamps) as CJJ 37 §5.3.4 does: 3 m of walk and 1.5 - 2 m of belt on
+        // an arterial, as the photographs of Kuitun and Urumqi show it.
+        (Urban, Arterial) => s(2.0, 3, 3.5, 0.5, 0.0, 3.5, 5.0, 0.0, true, 60.0),
         // 次干路: 双向四车道 + 非机动车道, no median.
-        (Urban, Collector) => s(0.0, 2, 3.25, 0.4, 0.0, 3.0, 2.5, 0.0, true, 50.0),
+        (Urban, Collector) => s(0.0, 2, 3.25, 0.4, 0.0, 3.0, 4.0, 0.0, true, 50.0),
         // 支路: 双向两车道, shared non-motorised use.
-        (Urban, Local) => s(0.0, 1, 3.25, 0.4, 0.0, 0.0, 2.0, 0.0, true, 30.0),
+        (Urban, Local) => s(0.0, 1, 3.25, 0.4, 0.0, 0.0, 3.0, 0.0, true, 30.0),
         // 小区路 / 内部道路.
         (Urban, Service) => s(0.0, 1, 2.75, 0.25, 0.0, 0.0, 1.0, 0.0, true, 20.0),
         // 巷 / 弄.
@@ -277,12 +280,13 @@ mod tests {
     }
 
     #[test]
-    fn the_urban_widths_are_the_ones_the_street_scene_has_always_drawn() {
+    fn the_urban_widths_are_the_ones_the_street_scene_draws() {
+        // Footways with their furniture belts: 5, 4 and 3 m a side.
         let w = |c| cross_section(c, Setting::Urban).width();
         assert!((w(RoadClass::Motorway) - 34.0).abs() < 1e-9);
-        assert!((w(RoadClass::Arterial) - 37.0).abs() < 1e-9);
-        assert!((w(RoadClass::Collector) - 24.8).abs() < 1e-9);
-        assert!((w(RoadClass::Local) - 11.3).abs() < 1e-9);
+        assert!((w(RoadClass::Arterial) - 41.0).abs() < 1e-9);
+        assert!((w(RoadClass::Collector) - 27.8).abs() < 1e-9);
+        assert!((w(RoadClass::Local) - 13.3).abs() < 1e-9);
     }
 
     #[test]

@@ -139,6 +139,219 @@ fn street_lamp(builder: &mut MeshBuilder, key: &str) {
     );
 }
 
+/// A lamp for the middle of a divided road, at true metric size: one 12 m
+/// column on the median and an arm over each carriageway, the 双臂路灯 of
+/// every Chinese boulevard. Its arms reach along local `±Z`.
+fn median_lamp(builder: &mut MeshBuilder, key: &str) {
+    declare(builder);
+    let height = 12.0_f32;
+    let reach = 2.8_f32;
+    builder.tube(
+        key,
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.0, height, 0.0),
+        0.15,
+        0.07,
+        8,
+        None,
+    );
+    for side in [-1.0_f32, 1.0] {
+        let shoulder = Vec3::new(0.0, height - 0.5, 0.0);
+        let tip = Vec3::new(0.0, height, side * reach);
+        builder.tube(key, shoulder, tip, 0.06, 0.045, 6, None);
+        box_at(
+            builder,
+            key,
+            Vec2::new(0.0, side * (reach - 0.2)),
+            height - 0.16,
+            0.34,
+            0.13,
+            0.82,
+            0.0,
+        );
+    }
+    box_at(builder, key, Vec2::new(0.0, 0.0), 2.0, 0.3, 0.45, 0.26, 0.0);
+}
+
+/// A solid of revolution about a vertical axis through `at`: `profile` is
+/// (radius, height) from the bottom up.
+fn lathe(builder: &mut MeshBuilder, key: &str, at: Vec3, profile: &[(f32, f32)], sides: u8) {
+    for w in profile.windows(2) {
+        let (r0, y0) = w[0];
+        let (r1, y1) = w[1];
+        builder.tube(
+            key,
+            at + Vec3::new(0.0, y0, 0.0),
+            at + Vec3::new(0.0, y1, 0.0),
+            r0,
+            r1,
+            sides,
+            None,
+        );
+    }
+}
+
+/// The ornamental footway lamp of a Chinese town's main streets (玉兰灯):
+/// a dark fluted column about 5.5 m tall, a cluster of white magnolia-bud
+/// globes on curved arms at its head, and on Xinjiang's streets a pair of red
+/// lanterns hung from brackets half way up. True metres, scale 1. Three
+/// prototypes share one transform: the metal, the globes and the lanterns.
+fn deco_lamp(builder: &mut MeshBuilder) {
+    declare(builder);
+    let (metal, globe, lantern) = (
+        "furniture/lamp.deco",
+        "furniture/lamp.globe",
+        "furniture/lantern",
+    );
+    let o = Vec3::new(0.0, 0.0, 0.0);
+    // Plinth, column and collars.
+    lathe(
+        builder,
+        metal,
+        o,
+        &[
+            (0.2, 0.0),
+            (0.2, 0.35),
+            (0.15, 0.45),
+            (0.1, 0.6),
+            (0.075, 0.7),
+        ],
+        10,
+    );
+    builder.tube(
+        metal,
+        Vec3::new(0.0, 0.7, 0.0),
+        Vec3::new(0.0, 5.0, 0.0),
+        0.075,
+        0.055,
+        10,
+        None,
+    );
+    for y in [2.4_f32, 4.85] {
+        lathe(
+            builder,
+            metal,
+            Vec3::new(0.0, y, 0.0),
+            &[(0.06, 0.0), (0.1, 0.06), (0.1, 0.12), (0.06, 0.18)],
+            10,
+        );
+    }
+    // A magnolia bud: narrow at the cup, fullest a third of the way up, to a
+    // rounded point.
+    let bud = |r: f32| -> Vec<(f32, f32)> {
+        [
+            (0.35, 0.0),
+            (0.85, 0.12),
+            (1.0, 0.32),
+            (0.92, 0.55),
+            (0.62, 0.8),
+            (0.0, 1.0),
+        ]
+        .iter()
+        .map(|(a, b)| (a * r, b * r * 3.4))
+        .collect()
+    };
+    // The crown: a central bud, and six arms curving out and up to six more.
+    lathe(builder, globe, Vec3::new(0.0, 5.18, 0.0), &bud(0.16), 10);
+    lathe(
+        builder,
+        metal,
+        Vec3::new(0.0, 5.0, 0.0),
+        &[(0.06, 0.0), (0.09, 0.1), (0.07, 0.18)],
+        8,
+    );
+    for k in 0..6 {
+        let a = k as f32 / 6.0 * std::f32::consts::TAU;
+        let (c, s) = (a.cos(), a.sin());
+        let p = |r: f32, y: f32| Vec3::new(c * r, y, s * r);
+        let arm = [p(0.0, 4.8), p(0.28, 4.86), p(0.48, 4.98), p(0.56, 5.12)];
+        for w in arm.windows(2) {
+            builder.tube(metal, w[0], w[1], 0.022, 0.02, 5, None);
+        }
+        lathe(
+            builder,
+            metal,
+            p(0.56, 5.1),
+            &[(0.03, 0.0), (0.06, 0.06)],
+            6,
+        );
+        lathe(builder, globe, p(0.56, 5.16), &bud(0.11), 8);
+    }
+    // Two lanterns across the footway's line (local ±X), each on a short
+    // bracket: a red drum with gold caps and a tassel.
+    for side in [-1.0_f32, 1.0] {
+        let x = side * 0.42;
+        builder.tube(
+            metal,
+            Vec3::new(0.0, 3.55, 0.0),
+            Vec3::new(x, 3.6, 0.0),
+            0.018,
+            0.015,
+            5,
+            None,
+        );
+        let top = Vec3::new(x, 3.0, 0.0);
+        builder.tube(
+            metal,
+            Vec3::new(x, 3.6, 0.0),
+            top + Vec3::new(0.0, 0.5, 0.0),
+            0.006,
+            0.006,
+            4,
+            None,
+        );
+        lathe(
+            builder,
+            metal,
+            top + Vec3::new(0.0, 0.44, 0.0),
+            &[(0.08, 0.0), (0.08, 0.06)],
+            10,
+        );
+        lathe(
+            builder,
+            lantern,
+            top,
+            &[
+                (0.08, 0.0),
+                (0.17, 0.05),
+                (0.22, 0.14),
+                (0.23, 0.22),
+                (0.22, 0.3),
+                (0.17, 0.39),
+                (0.08, 0.44),
+            ],
+            12,
+        );
+        lathe(
+            builder,
+            metal,
+            top + Vec3::new(0.0, -0.06, 0.0),
+            &[(0.08, 0.0), (0.08, 0.06)],
+            10,
+        );
+        lathe(
+            builder,
+            lantern,
+            top + Vec3::new(0.0, -0.34, 0.0),
+            &[(0.0, 0.0), (0.035, 0.05), (0.02, 0.28)],
+            6,
+        );
+    }
+}
+
+/// Where along a median its lamps stand, so the planting leaves them room.
+pub const MEDIAN_LAMP_FIRST_M: f32 = 17.5;
+pub const MEDIAN_LAMP_EVERY_M: f32 = 35.0;
+
+/// True within `clear` metres of a median lamp's station.
+pub fn near_median_lamp(station: f32, clear: f32) -> bool {
+    let k = ((station - MEDIAN_LAMP_FIRST_M) / MEDIAN_LAMP_EVERY_M).round();
+    k >= 0.0 && (station - MEDIAN_LAMP_FIRST_M - k * MEDIAN_LAMP_EVERY_M).abs() < clear
+}
+
+/// A median wide enough for a lamp column and its planting.
+pub const MEDIAN_LAMP_MIN_M: f32 = 2.0;
+
 /// A utility pole with two cross-arms and a transformer, at unit height.
 fn utility_pole(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
@@ -729,9 +942,96 @@ fn car_wheel(builder: &mut MeshBuilder, key: &str) {
     }
 }
 
+/// The ornamental lamps down both footways, in facing pairs every 25 m, set
+/// back from the kerb by the width of the lamp's lanterns.
+fn deco_lamps(
+    road: &crate::network::Road,
+    path: &Path,
+    kerb: f32,
+    builder: &mut MeshBuilder,
+    output: &mut FurnitureOutput,
+) {
+    let length = path.length();
+    let mut station = DECO_LAMP_FIRST_M;
+    while station < length - 12.0 {
+        let along = path.tangent_at(station);
+        for side in [-1.0_f32, 1.0] {
+            let offset = side * (kerb + 0.75);
+            let point = path.offset_at(station, road.kerbside(station, offset), 0.0);
+            for key in [
+                "furniture/lamp.deco",
+                "furniture/lamp.globe",
+                "furniture/lantern",
+            ] {
+                builder.add_instance(
+                    key,
+                    Instance::new(
+                        point.x,
+                        level::KERB,
+                        point.z,
+                        yaw_along_x(along),
+                        1.0,
+                        [1.0, 1.0, 1.0],
+                    ),
+                );
+            }
+            output.lamps += 1;
+        }
+        station += DECO_LAMP_EVERY_M;
+    }
+}
+
+/// The footway's lamp and pole stations, metres along.
+const DECO_LAMP_FIRST_M: f32 = 12.0;
+const DECO_LAMP_EVERY_M: f32 = 25.0;
+const HIGH_LAMP_FIRST_M: f32 = 16.0;
+const HIGH_LAMP_EVERY_M: f32 = 34.0;
+const POLE_FIRST_M: f32 = 20.0;
+const POLE_EVERY_M: f32 = 34.0;
+
+/// Where `place` stands a lamp or a pole on a road's footways, as (station,
+/// side): what a street tree must leave room for.
+pub fn footway_obstacles(road: &crate::network::Road) -> Vec<(f32, f32)> {
+    let length = road.carriageway.length();
+    let mut out = Vec::new();
+    if road.layer != 0
+        || road.is_motorway()
+        || length < 20.0
+        || !matches!(
+            road.class,
+            ModernRoadClass::Arterial | ModernRoadClass::Collector
+        )
+    {
+        return out;
+    }
+    let divided = road.section.median_metres >= MEDIAN_LAMP_MIN_M;
+    if divided || road.class == ModernRoadClass::Collector {
+        let mut station = DECO_LAMP_FIRST_M;
+        while station < length - 12.0 {
+            out.extend([(station, -1.0), (station, 1.0)]);
+            station += DECO_LAMP_EVERY_M;
+        }
+    } else {
+        let (mut station, mut side) = (HIGH_LAMP_FIRST_M, 1.0);
+        while station < length - 16.0 {
+            out.push((station, side));
+            side = -side;
+            station += HIGH_LAMP_EVERY_M;
+        }
+    }
+    let mut station = POLE_FIRST_M;
+    while station < length - 14.0 {
+        out.push((station, 1.0));
+        station += POLE_EVERY_M;
+    }
+    out
+}
+
 /// Every prototype, built once per generation.
 pub fn build_prototypes(builder: &mut MeshBuilder) {
     street_lamp(builder, "furniture/lamp");
+    median_lamp(builder, "furniture/lamp.double");
+    deco_lamp(builder);
     utility_pole(builder, "furniture/pole");
     bollard(builder, "furniture/bollard");
     railing_segment(builder, "furniture/railing");
@@ -749,6 +1049,10 @@ pub fn build_prototypes(builder: &mut MeshBuilder) {
     car_wheel(builder, "car/wheel");
     for key in [
         "furniture/lamp",
+        "furniture/lamp.double",
+        "furniture/lamp.deco",
+        "furniture/lamp.globe",
+        "furniture/lantern",
         "furniture/pole",
         "furniture/bollard",
         "furniture/railing",
@@ -837,8 +1141,38 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
             // unfinished street. Poles do not alternate: a pole line is a
             // straight run in a line, and alternation is what produced wires
             // crossing the carriageway diagonally.
+            // A divided road is lit from its median, and its footways by the
+            // ornamental lamps; an undivided one from its kerbs.
+            let divided = road.section.median_metres >= MEDIAN_LAMP_MIN_M;
+            if divided {
+                let mut station = MEDIAN_LAMP_FIRST_M;
+                while station < length - 12.0 {
+                    let point = path.offset_at(station, 0.0, 0.0);
+                    let across = path.tangent_at(station).left_normal();
+                    builder.add_instance(
+                        "furniture/lamp.double",
+                        Instance::new(
+                            point.x,
+                            crate::street::level::MEDIAN,
+                            point.z,
+                            yaw_along_z(across),
+                            1.0,
+                            [1.0, 1.0, 1.0],
+                        ),
+                    );
+                    output.lamps += 1;
+                    station += MEDIAN_LAMP_EVERY_M;
+                }
+            }
+            if divided || road.class == ModernRoadClass::Collector {
+                deco_lamps(road, &path, kerb, builder, &mut output);
+            }
             let mut lamp_side = 1.0_f32;
-            let mut station = 16.0;
+            let mut station = if divided || road.class == ModernRoadClass::Collector {
+                f32::INFINITY
+            } else {
+                HIGH_LAMP_FIRST_M
+            };
             while station < length - 16.0 {
                 let offset = lamp_side * (kerb + 0.55);
                 let point = path.offset_at(station, road.kerbside(station, offset), 0.0);
@@ -859,7 +1193,7 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
                 );
                 output.lamps += 1;
                 lamp_side = -lamp_side;
-                station += 34.0;
+                station += HIGH_LAMP_EVERY_M;
             }
 
             // One pole line, on the right-hand kerb as the road is travelled.
@@ -869,7 +1203,7 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
             let pole_side = 1.0_f32;
             let pole_offset = pole_side * (kerb + 1.9);
             let pole_height = 9.0_f32;
-            let mut pole_station = 20.0_f32;
+            let mut pole_station = POLE_FIRST_M;
             while pole_station < length - 14.0 {
                 let base =
                     path.offset_at(pole_station, road.kerbside(pole_station, pole_offset), 0.0);
@@ -926,7 +1260,7 @@ pub fn place(network: &Network, builder: &mut MeshBuilder, seed: u32) -> Furnitu
                     spans += catenary(builder, &previous, &top, arterial);
                 }
                 previous_pole = Some(top);
-                pole_station += 34.0;
+                pole_station += POLE_EVERY_M;
             }
             // Pedestrian railings on an arterial's sidewalk, and the median
             // guardrail that goes with them.
@@ -1535,6 +1869,10 @@ mod tests {
         // special case for "this city placed none of those".
         let prototypes = [
             "furniture/lamp",
+            "furniture/lamp.double",
+            "furniture/lamp.deco",
+            "furniture/lamp.globe",
+            "furniture/lantern",
             "furniture/pole",
             "furniture/bollard",
             "furniture/railing",

@@ -15,7 +15,7 @@ use urban::{CityFrameInfo, CityStyle, Parcel, ParcelUse, Point, TreeSpecies, mod
 use super::{TAU, TREE_BUDGET, TUFT_BUDGET, TreePrototype, two_variant_count};
 use crate::buildings::level;
 use crate::math::{Rng, Vec2};
-use crate::mesh::{Instance, MeshBuilder};
+use crate::mesh::{Instance, MeshBuilder, box_at};
 use crate::network::Network;
 use crate::species::by_key;
 
@@ -416,39 +416,48 @@ fn plant_with(
         }
         let section = road.section;
         let half = crate::network::kerb_half(&section);
-        // A boulevard gets a double row; a local street gets one on the sunnier
-        // side only, which is both what is built and what keeps the count sane.
-        let double_row = matches!(
-            road.class,
-            urban::ModernRoadClass::Arterial | urban::ModernRoadClass::Expressway
-        );
-        let spacing = if road.is_motorway() { 22.0 } else { 15.0 };
-        let lateral = half + section.sidewalk_metres * 0.6;
+        // Every street with a footway wide enough for a pit is lined both
+        // sides, at the 6 - 8 m Chinese streets are planted at (CJJ 75 §3.2),
+        // in a straight line of pits a metre in from the kerb: never on the
+        // paving itself, and clear of the lamps and poles in the same line.
+        let sidewalk = section.sidewalk_metres;
+        let pit = if sidewalk >= 4.5 {
+            1.5
+        } else if sidewalk >= 3.2 {
+            1.25
+        } else {
+            1.0
+        };
+        let style = pit_style(road.class, sidewalk, road.id);
+        let spacing = if road.is_motorway() { 10.0 } else { 8.0 };
+        let lateral = half + 0.3 + pit * 0.5;
         let list = if road.is_motorway() {
             lists.motorway
         } else {
             lists.street
         };
-        let mut station = 12.0;
-        let mut side = 1.0_f32;
-        while station < length - 12.0 {
-            // Longitudinally jittered so an avenue does not read as a comb.
-            let offset = station + (rng.unit() - 0.5) * 5.0;
-            if offset < 10.0 || offset > length - 10.0 {
-                station += spacing;
-                continue;
-            }
-            let sides: &[f32] = if double_row { &[-1.0, 1.0] } else { &[side] };
-            for direction in sides {
-                let wobble = (rng.unit() - 0.5) * 0.9;
-                let point = path.offset_at(
-                    offset,
-                    road.kerbside(offset, *direction * (lateral + wobble)),
-                    0.0,
-                );
+        let obstacles = crate::furniture::footway_obstacles(road);
+        // A footway too narrow for a pit carries no trees.
+        let mut station = if sidewalk >= 2.4 {
+            10.0 + (road.id % 4) as f32
+        } else {
+            f32::INFINITY
+        };
+        while station < length - 10.0 {
+            for direction in [-1.0_f32, 1.0] {
+                if obstacles
+                    .iter()
+                    .any(|(at, side)| *side == direction && (at - station).abs() < pit * 0.5 + 0.7)
+                {
+                    continue;
+                }
+                let point =
+                    path.offset_at(station, road.kerbside(station, direction * lateral), 0.0);
+                let at = Vec2::new(point.x, point.z);
+                let before = output.instances;
                 place(
                     TreeRole::Street,
-                    Vec2::new(point.x, point.z),
+                    at,
                     list,
                     prototypes,
                     &mut rng,
@@ -456,20 +465,22 @@ fn plant_with(
                     &mut output,
                     &mut counts,
                 );
+                if output.instances > before {
+                    tree_pit(builder, at, path.tangent_at(station), pit, style);
+                }
             }
-            side = -side;
             station += spacing;
         }
-        // Median belt on a divided street.
+        // Median belt on a divided street: one line down the middle of the
+        // hedge, clear of the median's lamps.
         if section.has_median() {
-            let median_half = section.median_metres * 0.5;
             let mut at = 20.0;
             while at < length - 20.0 {
-                let point = path.offset_at(
-                    at + (rng.unit() - 0.5) * 4.0,
-                    (rng.unit() - 0.5) * median_half * 0.5,
-                    0.0,
-                );
+                if crate::furniture::near_median_lamp(at, 2.0) {
+                    at += 24.0;
+                    continue;
+                }
+                let point = path.offset_at(at, 0.0, 0.0);
                 place(
                     TreeRole::Median,
                     Vec2::new(point.x, point.z),
@@ -771,6 +782,76 @@ fn plant_with(
 }
 
 /// Distance from a point to a segment, plan metres.
+/// How a street's tree pits are finished (树池), one way down a street, from
+/// photographs of Chinese footways: a raised granite planter of grass on a
+/// wide boulevard footway, a cast-iron grate over gravel on a busy street, a
+/// pit of grass in a granite edge elsewhere.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PitStyle {
+    Grass,
+    Grate,
+    Planter,
+}
+
+fn pit_style(class: urban::ModernRoadClass, sidewalk: f32, id: u32) -> PitStyle {
+    use urban::ModernRoadClass::*;
+    match class {
+        Arterial if sidewalk >= 5.0 && id.is_multiple_of(2) => PitStyle::Planter,
+        Arterial | Collector if !id.is_multiple_of(3) => PitStyle::Grate,
+        _ => PitStyle::Grass,
+    }
+}
+
+/// A tree pit `size` square round `at`, its sides along `along`, set into
+/// the footway (whose top is at kerb height).
+fn tree_pit(builder: &mut MeshBuilder, at: Vec2, along: Vec2, size: f32, style: PitStyle) {
+    let walk = crate::street::level::KERB;
+    let across = Vec2::new(-along.y, along.x);
+    let square = |h: f32| -> Vec<Vec2> {
+        [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+            .iter()
+            .map(|(u, v)| at + along * (u * h) + across * (v * h))
+            .collect()
+    };
+    let rotation = along.y.atan2(along.x);
+    let edge = 0.1;
+    let frame = |builder: &mut MeshBuilder, material: &str, h: f32, y: f32, tall: f32| {
+        for k in 0..4 {
+            let (u, v) = [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)][k];
+            let centre = at + along * (u * (h - edge * 0.5)) + across * (v * (h - edge * 0.5));
+            let (w, d) = if u != 0.0 {
+                (edge, h * 2.0)
+            } else {
+                (h * 2.0 - 2.0 * edge, edge)
+            };
+            box_at(builder, material, centre, y, w, tall, d, rotation);
+        }
+    };
+    let h = size * 0.5;
+    match style {
+        PitStyle::Planter => {
+            let (h, tall) = (h + 0.1, 0.45);
+            frame(builder, "treepit.planter", h, walk + tall * 0.5, tall);
+            builder.ground_uv("median.plant", &square(h - edge), walk + tall - 0.04, None);
+        }
+        PitStyle::Grate => {
+            frame(builder, "treepit.edge", h, walk + 0.005, 0.03);
+            builder.ground_uv("treepit.grate", &square(h - edge), walk + 0.006, None);
+            let disc: Vec<Vec2> = (0..14)
+                .map(|k| {
+                    let a = k as f32 / 14.0 * TAU;
+                    at + Vec2::new(a.cos(), a.sin()) * (h * 0.42)
+                })
+                .collect();
+            builder.ground_uv("treepit.gravel", &disc, walk + 0.012, None);
+        }
+        PitStyle::Grass => {
+            frame(builder, "treepit.edge", h, walk + 0.01, 0.04);
+            builder.ground_uv("median.plant", &square(h - edge), walk + 0.008, None);
+        }
+    }
+}
+
 fn segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f32 {
     let ab = b - a;
     let len2 = ab.x * ab.x + ab.y * ab.y;

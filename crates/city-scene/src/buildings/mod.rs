@@ -1880,7 +1880,7 @@ mod tests {
     /// And again when an interchange's landings stopped leaving the local
     /// streets they close as dead ends: those are taken back to their
     /// junctions, and the blocks round them changed.
-    const WESTERN_MIXED_LAYER_HASH: u64 = 1_715_384_970_521_594_432;
+    const WESTERN_MIXED_LAYER_HASH: u64 = 14_291_961_791_199_849_466;
 
     #[test]
     fn western_mixed_building_layer_is_bit_identical() {

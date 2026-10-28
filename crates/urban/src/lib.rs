@@ -505,6 +505,7 @@ mod tests {
                             to: id(i2, j2),
                             class,
                             bridge: false,
+                            given: false,
                             centreline: vec![p(i, j), p(i2, j2)],
                         });
                     }

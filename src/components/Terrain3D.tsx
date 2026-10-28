@@ -19,6 +19,7 @@ import { bakeSkyEnvironment } from "../city/sky";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { buildFarTreeSet } from "./farTrees";
 import { createGroundCover } from "./groundCover";
+import { FARM_GLSL, FarmCrop, farmPlot } from "./farmland";
 import type { GenerationResult, SimulationConfig, UrbanBuilding, UrbanLane, UrbanPoint, UrbanRoad, VegetationPrototypePayload } from "../types";
 
 function decodeHeights(base64: string): Float32Array {
@@ -530,9 +531,17 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     materialTexture.wrapS = materialTexture.wrapT = THREE.ClampToEdgeWrapping;
     materialTexture.generateMipmaps = false;
     materialTexture.needsUpdate = true;
+    // Where the land is farmed, which the shader lays its field grid over.
+    const farmTexture = new THREE.DataTexture(decodeBytes(result.cultivatedDataBase64), result.meshSize, result.meshSize, THREE.RedFormat, THREE.UnsignedByteType);
+    farmTexture.minFilter = THREE.LinearFilter;
+    farmTexture.magFilter = THREE.LinearFilter;
+    farmTexture.wrapS = farmTexture.wrapT = THREE.ClampToEdgeWrapping;
+    farmTexture.generateMipmaps = false;
+    farmTexture.needsUpdate = true;
     const snowWindAngle = THREE.MathUtils.degToRad(config.windDirection);
     const terrainShadowUniforms = {
       uMaterialTex: { value: materialTexture },
+      uFarmTex: { value: farmTexture },
       uWindDir: { value: new THREE.Vector2(Math.cos(snowWindAngle), Math.sin(snowWindAngle)) },
       uHeightTex: { value: heightTexture },
       uHeightN: { value: result.meshSize },
@@ -575,6 +584,8 @@ float dNoise(vec2 p) {
   return mix(mix(dHash(i), dHash(i + vec2(1, 0)), f.x), mix(dHash(i + vec2(0, 1)), dHash(i + vec2(1, 1)), f.x), f.y);
 }
 float dFbm(vec2 p) { return 0.5 * dNoise(p) + 0.3 * dNoise(p * 2.13 + 7.1) + 0.2 * dNoise(p * 4.37 + 3.7); }
+uniform sampler2D uFarmTex;
+${FARM_GLSL}
 // ---- eroded relief -------------------------------------------------------
 // The mesh is one sample per ~150 m, so every ridge, gully and spur finer than
 // that has to be synthesised. Gradient noise with analytic derivatives, folded
@@ -784,6 +795,14 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       gSnow = clamp(snowW, 0.0, 1.0) * ctrl.a;
       diffuseColor.rgb = mix(diffuseColor.rgb, c, ctrl.a);
     }
+    // Farmland: the field grid in place of the baked image's blotches, which
+    // at one texel per 40 m are only patches of colour.
+    float farm = smoothstep(0.07, 0.30, texture2D(uFarmTex, muv).r) * (1.0 - ctrl.a);
+    if (farm > 0.004) {
+      float footF = max(length(fwidth(pm)), 0.02);
+      vec3 fc = farmColour(pm, footF);
+      diffuseColor.rgb = mix(diffuseColor.rgb, fc * (0.94 + 0.12 * hn), farm);
+    }
     // Contact shadow in gully floors and on the lee of spurs.
     diffuseColor.rgb *= mix(1.0, 0.55 + 0.65 * hn, 0.20 + 0.40 * steep);
     gSunLit = sunVisibility(vDetailP);
@@ -929,25 +948,24 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       return THREE.MathUtils.lerp(top, bottom, ty);
     };
 
-    // Crop detail is streamed around the camera target. The satellite texture
-    // remains the far LOD; these meshes only exist where individual rows and
-    // plants are large enough to contribute pixels.
+    // Crop detail is streamed around the camera target. The terrain shader
+    // paints the fields at every range; these meshes only exist where
+    // individual rows and plants are large enough to contribute pixels.
     const cultivatedValues = decodeBytes(result.cultivatedDataBase64);
-    const cropDataBase64 = (result as GenerationResult & { cropDataBase64?: string }).cropDataBase64;
-    const cropValues = cropDataBase64 ? decodeBytes(cropDataBase64) : undefined;
-    const sampleGridNearest = (values: ArrayLike<number>, worldX: number, worldZ: number) => {
-      const gridX = THREE.MathUtils.clamp(Math.round((worldX + 1.6) / 3.2 * (result.meshSize - 1)), 0, result.meshSize - 1);
-      const gridY = THREE.MathUtils.clamp(Math.round((worldZ + 1.6) / 3.2 * (result.meshSize - 1)), 0, result.meshSize - 1);
-      return values[gridY * result.meshSize + gridX];
+    // The near crops follow the shader's field grid (`farmland.ts`): what a
+    // strip is painted as from afar is what grows in it up close.
+    const cropOfFarm: Record<FarmCrop, number> = {
+      [FarmCrop.Cotton]: 3,
+      [FarmCrop.Maize]: 2,
+      [FarmCrop.Wheat]: 1,
+      [FarmCrop.Stubble]: 0,
+      [FarmCrop.Soil]: 0,
+      [FarmCrop.Alfalfa]: 3,
     };
     const cropAt = (worldX: number, worldZ: number) => {
-      if (cropValues?.length === cultivatedValues.length) return sampleGridNearest(cropValues, worldX, worldZ);
-      if (sampleGrid(cultivatedValues, worldX, worldZ) < 38) return 0;
-      const metresX = (worldX + 1.6) / metresToScene;
-      const metresZ = (worldZ + 1.6) / metresToScene;
-      const parcelX = Math.floor(metresX / 180);
-      const parcelZ = Math.floor(metresZ / 180);
-      return hash01(parcelX, parcelZ, 71) < 0.58 ? 1 : 2;
+      if (sampleGrid(cultivatedValues, worldX, worldZ) < 0.3 * 255) return 0;
+      const plot = farmPlot(worldX / metresToScene, worldZ / metresToScene);
+      return plot.margin ? 0 : cropOfFarm[plot.crop];
     };
 
     const cropRowCapacity = 14_000;
@@ -1060,9 +1078,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
           if (crop < 1 || crop > 3) continue;
           if (sampleGrid(vegetationExclusion, worldX, worldZ) > 48) continue;
           const terrainHeight = Math.max(0, sampleGrid(heights, worldX, worldZ) - result.stats.minElevation) * metresToScene;
-          const parcelX = Math.floor(metresX / 180);
-          const parcelZ = Math.floor(metresZ / 180);
-          const rowAngle = hash01(parcelX, parcelZ, 74) * Math.PI;
+          const rowAngle = farmPlot(worldX / metresToScene, worldZ / metresToScene).rowAngle;
           cropQuaternion.setFromAxisAngle(cropAxis, rowAngle + (hash01(cellX, cellZ, 75) - 0.5) * 0.035);
 
           if (!showPlants) {

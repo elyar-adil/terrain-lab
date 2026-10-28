@@ -922,8 +922,10 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
         let per_m = n_target / weight_total;
         // Leaf size: the crown's leaf area, shared out among the leaves drawn.
         let crown_area = std::f32::consts::PI * grower.crown.radius * grower.crown.radius;
+        // A street tree's crown in summer is dense enough that the sky shows
+        // only in its gaps (the reference photographs of Xinjiang avenues).
         let area_total =
-            1.9 * sp.leaf_cover * cover * keep_twigs * (0.55 + 0.45 * spec.openness) * crown_area;
+            2.6 * sp.leaf_cover * cover * keep_twigs * (0.55 + 0.45 * spec.openness) * crown_area;
         let k = 0.70 * sp.leaf_aspect.min(1.1);
         let opposite = matches!(sp.key, "feng-shu" | "gui-hua");
         // A farther level draws fewer, bigger leaves; the ceiling on their size rises with

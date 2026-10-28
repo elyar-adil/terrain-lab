@@ -587,6 +587,7 @@ impl WorldFabric {
                             to: b,
                             class: modern_road_class(edge.class),
                             bridge,
+                            given: matches!(edge.source, EdgeSource::Given),
                             centreline: piece.iter().map(|p| km(*p)).collect(),
                         });
                     }

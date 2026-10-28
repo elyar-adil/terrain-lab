@@ -901,7 +901,8 @@ pub fn derive(
         // A link too short for two crossings has one, at its controlled end
         // if only one is, else at its start: two zebras back to back, their
         // kerbs dropped into each other, is not a street anyone builds.
-        let room = 2.0 * (spec.crosswalk.gap + spec.crosswalk.depth) + 4.0;
+        let room =
+            2.0 * (spec.crosswalk_centre(hd.class) + spec.crosswalk_depth(hd.class) * 0.5) + 4.0;
         if walk_start && walk_end && carriageway.length() < room {
             if crossing_end && !crossing_start {
                 walk_start = false;
