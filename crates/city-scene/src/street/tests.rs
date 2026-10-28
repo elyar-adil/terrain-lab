@@ -1388,6 +1388,9 @@ fn every_junction_is_covered_by_the_surface_it_should_be() {
                         super::JUNCTION_ZONE_M,
                     ));
                 }
+                // And whatever street runs beside this one: the footway gives
+                // way to its carriageway too (`road_beside`).
+                near_rings.extend(super::road_beside(&network, road));
                 let near: Vec<Vec<Vec2>> = near_rings
                     .iter()
                     .flat_map(|ring| crate::buildings::normalise(ring))

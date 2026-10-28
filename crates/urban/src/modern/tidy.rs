@@ -656,16 +656,71 @@ fn join_dead_ends(streets: &mut ExternalStreets) {
             .map(|n| n.point)
             .unwrap_or(point_of(q));
         let road = &mut streets.roads[index];
-        if road.from == node {
-            road.centreline.insert(0, meet_point);
+        let at_start = road.from == node;
+        if at_start {
+            road.centreline.reverse();
+        }
+        carry_on(&mut road.centreline, meet_point);
+        if at_start {
+            road.centreline.reverse();
             road.from = meet;
         } else {
-            road.centreline.push(meet_point);
             road.to = meet;
         }
     }
     let used: HashSet<u64> = streets.roads.iter().flat_map(|r| [r.from, r.to]).collect();
     streets.nodes.retain(|n| used.contains(&n.id));
+}
+
+/// Carry the end of `line` on to `target` in one smooth curve: from 25 m back,
+/// leaving the way the street ran, bending to arrive at `target`. Bolted on as
+/// a straight piece it made a kink a few metres short of the junction, and a
+/// kink there skews the street's end and everything painted across it.
+fn carry_on(line: &mut Vec<Point>, target: Point) {
+    const BACK_M: f32 = 25.0;
+    let pts: Vec<(f32, f32)> = line.iter().map(|p| metres(*p)).collect();
+    let Some(&end) = pts.last() else {
+        return;
+    };
+    // Where the curve leaves the street: 25 m back, or its start.
+    let mut kept = pts.len() - 1;
+    let mut travelled = 0.0;
+    while kept > 0 && travelled + dist(pts[kept - 1], pts[kept]) < BACK_M {
+        travelled += dist(pts[kept - 1], pts[kept]);
+        kept -= 1;
+    }
+    let from = pts[kept];
+    let goal = metres(target);
+    // The control point on the street's own heading past its old end, as far
+    // again as half the way to the target, so the curve leaves tangent.
+    let heading = if kept + 1 < pts.len() || kept > 0 {
+        let before = if kept + 1 < pts.len() {
+            from
+        } else {
+            pts[kept - 1]
+        };
+        let d = dist(before, end).max(1e-3);
+        ((end.0 - before.0) / d, (end.1 - before.1) / d)
+    } else {
+        (0.0, 0.0)
+    };
+    let reach = dist(end, goal) * 0.5;
+    let control = (end.0 + heading.0 * reach, end.1 + heading.1 * reach);
+    let length = dist(from, control) + dist(control, goal);
+    let steps = ((length / 3.0).ceil() as usize).max(2);
+    line.truncate(kept + 1);
+    for k in 1..=steps {
+        let t = k as f32 / steps as f32;
+        let u = 1.0 - t;
+        let p = (
+            u * u * from.0 + 2.0 * u * t * control.0 + t * t * goal.0,
+            u * u * from.1 + 2.0 * u * t * control.1 + t * t * goal.1,
+        );
+        line.push(point_of(p));
+    }
+    if let Some(last) = line.last_mut() {
+        *last = target;
+    }
 }
 
 /// A street free at both ends joins nothing: a fragment a cut or a dropped
