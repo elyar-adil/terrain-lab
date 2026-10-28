@@ -74,8 +74,8 @@ pub mod level {
     /// Crosswalk and stop-line paint, one step above lane paint so the two
     /// never z-fight where they overlap.
     pub const CROSSWALK: f32 = 0.020;
-    /// Block ground plate, just below the sidewalk so no step shows.
-    pub const BLOCK: f32 = 0.138;
+    /// Block ground plate, under the plots (`buildings::level`).
+    pub const BLOCK: f32 = crate::buildings::level::BLOCK;
     /// Paved parcel and junction corner paving.
     pub const PAVING: f32 = 0.150;
     /// Kerb top / sidewalk surface.

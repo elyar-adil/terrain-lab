@@ -513,13 +513,13 @@ fn splitter_island(
             None,
         );
     }
-    builder.ground_uv("kerb", &edge, super::level::KERB + 0.002, None);
-    builder.ground_uv(
-        "median.plant",
-        &outline(0.25),
-        super::level::MEDIAN + 0.10,
-        None,
-    );
+    // The kerb's top a band round the bed, not a plate under it: one surface
+    // over each point, or the two trade places in the depth buffer.
+    let bed = outline(0.25);
+    for piece in crate::buildings::cut_away(edge.clone(), std::slice::from_ref(&bed)) {
+        builder.ground_uv("kerb", &piece, super::level::KERB, None);
+    }
+    builder.ground_uv("median.plant", &bed, super::level::MEDIAN + 0.10, None);
     half(end - 6.0)
 }
 
@@ -1225,19 +1225,16 @@ pub(super) fn roundabout(
         island - 1.8,
         super::level::KERB,
     );
+    // The planting, and a paved ring through it (the bed's pattern), side by
+    // side rather than one over the other.
+    let bed = super::level::MEDIAN + 0.10;
+    band(builder, "median.plant", island - 1.8, island * 0.5, bed);
+    band(builder, "sidewalk", island * 0.5, island * 0.5 - 0.8, bed);
     builder.ground_uv(
         "median.plant",
-        &ring(island - 1.8, segments),
-        super::level::MEDIAN + 0.10,
+        &ring(island * 0.5 - 0.8, segments),
+        bed,
         None,
-    );
-    // A paved ring inside the planting: the bed's pattern.
-    band(
-        builder,
-        "sidewalk",
-        island * 0.5,
-        island * 0.5 - 0.8,
-        super::level::MEDIAN + 0.12,
     );
 
     // Each entry's lanes reach the circle between the arm's centreline and its

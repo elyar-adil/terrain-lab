@@ -1753,3 +1753,189 @@ fn a_tile_cut_from_the_plan_keeps_the_roundabout_the_whole_town_has() {
     );
     assert!((same.circle - roundabout.circle).abs() < 0.01);
 }
+
+#[test]
+fn no_two_ground_surfaces_lie_one_over_the_other_within_a_depth_step() {
+    // Two surfaces of different material over one point, a few millimetres
+    // apart, trade places in the depth buffer as the camera zooms: the game's
+    // view resolves about 1/20000 of the distance, a centimetre at 200 m.
+    // Paint is pulled forward and the block plate pushed back by the
+    // renderer's polygon offset, so those two may lie on others; nothing else
+    // may lie within `STEP` of a surface it overlaps.
+    const STEP: f32 = 0.02;
+    let city = generate_modern_chinese_city(ModernChinaSpec {
+        seed: 42,
+        radius_km: 0.5,
+        block_size_metres: 110.0,
+        ..ModernChinaSpec::default()
+    });
+    let network = derive(
+        &city.nodes,
+        &city.sd_roads,
+        &city.hd_roads,
+        city.frame,
+        JunctionSpec::default(),
+        city.seed,
+    );
+    let mut builder = MeshBuilder::new();
+    build(&network, &mut builder, city.seed);
+    let streets = super::footprints(&network, crate::buildings::PLATE_UNDER_PAVING);
+    crate::buildings::build_among(
+        &city.blocks,
+        &city.parcels,
+        &city.buildings,
+        &city.compounds,
+        &city.fields,
+        city.frame,
+        city.style,
+        &streets,
+        &mut builder,
+    );
+    let scene = builder.build();
+    // Each horizontal triangle and its material, by 4 m cell.
+    type Cell = Vec<([[f32; 3]; 3], usize)>;
+    let mut tris: std::collections::HashMap<(i32, i32), Cell> = std::collections::HashMap::new();
+    // The renderer's depth bias per material (`src/city/cityScene.ts`), in
+    // depth steps: negative is pulled toward the camera. A surface lying on
+    // another is fine when its bias is the stronger, since the bias holds
+    // the order at every zoom; otherwise it must stand `STEP` clear.
+    let bias = |material: &str| -> i32 {
+        if material.starts_with("marking.") {
+            -4
+        } else if matches!(material, "kerb" | "asphalt.cycle") {
+            -2
+        } else if material == "block.ground" {
+            2
+        } else {
+            0
+        }
+    };
+    // Ground cover only: a building's own horizontal faces (slab, plinth)
+    // lie inside its walls, out of sight.
+    let ground = |material: &str| {
+        material.starts_with("asphalt")
+            || material.starts_with("marking.")
+            || material.starts_with("parcel.")
+            || matches!(
+                material,
+                "sidewalk" | "kerb" | "median.plant" | "block.ground"
+            )
+    };
+    let mut materials: Vec<String> = Vec::new();
+    for group in &scene.meshes {
+        if group.instance_of.is_some() || !ground(&group.material) {
+            continue;
+        }
+        let index = materials.len();
+        materials.push(group.material.clone());
+        let p = &group.positions;
+        for tri in group.indices.chunks(3) {
+            let v: [[f32; 3]; 3] = std::array::from_fn(|k| {
+                let i = tri[k] as usize * 3;
+                [p[i], p[i + 1], p[i + 2]]
+            });
+            if v.iter().any(|q| q[1] > 1.0 || q[1] < -0.5) {
+                continue;
+            }
+            // Horizontal faces only: a wall's foot is not a surface over a point.
+            let e1 = [v[1][0] - v[0][0], v[1][1] - v[0][1], v[1][2] - v[0][2]];
+            let e2 = [v[2][0] - v[0][0], v[2][1] - v[0][1], v[2][2] - v[0][2]];
+            let n = [
+                e1[1] * e2[2] - e1[2] * e2[1],
+                e1[2] * e2[0] - e1[0] * e2[2],
+                e1[0] * e2[1] - e1[1] * e2[0],
+            ];
+            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            if len < 1.0e-6 || n[1].abs() / len < 0.95 {
+                continue;
+            }
+            let (x0, x1) = (
+                v.iter().map(|q| q[0]).fold(f32::MAX, f32::min),
+                v.iter().map(|q| q[0]).fold(f32::MIN, f32::max),
+            );
+            let (z0, z1) = (
+                v.iter().map(|q| q[2]).fold(f32::MAX, f32::min),
+                v.iter().map(|q| q[2]).fold(f32::MIN, f32::max),
+            );
+            for bx in (x0 / 4.0).floor() as i32..=(x1 / 4.0).floor() as i32 {
+                for bz in (z0 / 4.0).floor() as i32..=(z1 / 4.0).floor() as i32 {
+                    tris.entry((bx, bz)).or_default().push((v, index));
+                }
+            }
+        }
+    }
+    let mut found: std::collections::BTreeMap<(String, String), (usize, Vec2)> =
+        std::collections::BTreeMap::new();
+    let mut samples = 0;
+    let mut cells: Vec<_> = tris.iter().collect();
+    cells.sort_by_key(|(key, _)| **key);
+    for (&(bx, bz), list) in cells {
+        for i in 0..4 {
+            for j in 0..4 {
+                // Off the grid lines, where edges of adjoining pieces meet.
+                let p = Vec2::new(
+                    bx as f32 * 4.0 + 0.37 + i as f32,
+                    bz as f32 * 4.0 + 0.61 + j as f32,
+                );
+                samples += 1;
+                let mut hits: Vec<(f32, usize)> = Vec::new();
+                for (v, material) in list {
+                    let (ax, az) = (v[0][0], v[0][2]);
+                    let (bx, bz) = (v[1][0], v[1][2]);
+                    let (cx, cz) = (v[2][0], v[2][2]);
+                    let area = (bx - ax) * (cz - az) - (cx - ax) * (bz - az);
+                    let w0 = ((bx - p.x) * (cz - p.y) - (cx - p.x) * (bz - p.y)) / area;
+                    let w1 = ((cx - p.x) * (az - p.y) - (ax - p.x) * (cz - p.y)) / area;
+                    let w2 = 1.0 - w0 - w1;
+                    // Well inside: a shared edge is not an overlap.
+                    if w0 < 0.01 || w1 < 0.01 || w2 < 0.01 {
+                        continue;
+                    }
+                    hits.push((w0 * v[0][1] + w1 * v[1][1] + w2 * v[2][1], *material));
+                }
+                hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+                for w in hits.windows(2) {
+                    let (low, high) = (&materials[w[0].1], &materials[w[1].1]);
+                    // Paint on paint is one white on another.
+                    let paint = |m: &str| m.starts_with("marking.");
+                    if low != high
+                        && !(paint(low) && paint(high))
+                        && w[1].0 - w[0].0 < STEP
+                        && bias(high) >= bias(low)
+                    {
+                        let mut pair = (materials[w[0].1].clone(), materials[w[1].1].clone());
+                        if pair.0 > pair.1 {
+                            pair = (pair.1, pair.0);
+                        }
+                        let entry = found.entry(pair).or_insert((0, p));
+                        entry.0 += 1;
+                    }
+                }
+            }
+        }
+    }
+    let report: Vec<String> = found
+        .iter()
+        .map(|((a, b), (n, p))| format!("{n:>6} × {a} / {b} (e.g. at ({:.1}, {:.1}))", p.x, p.y))
+        .collect();
+    // Paint run a little under a kerb or a cycle lane at a road's edge shows
+    // through it: rare (`no_marking_is_emitted_outside_its_carriageway`
+    // keeps it so), and held there. Ground layers on ground layers, none.
+    let under_paint: usize = found
+        .iter()
+        .filter(|((a, b), _)| a.starts_with("marking.") || b.starts_with("marking."))
+        .map(|(_, v)| v.0)
+        .sum();
+    found.retain(|(a, b), _| !(a.starts_with("marking.") || b.starts_with("marking.")));
+    assert!(
+        under_paint <= 10,
+        "paint under other surfaces at {under_paint} points:\n{}",
+        report.join("\n")
+    );
+    assert!(
+        found.is_empty(),
+        "surfaces stacked within {STEP} m at {} of {samples} points:\n{}",
+        found.values().map(|v| v.0).sum::<usize>(),
+        report.join("\n")
+    );
+}

@@ -3739,8 +3739,15 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
           camera.position.y = eyeTerrainHeight + minimumEyeClearance;
         }
         const distance = camera.position.distanceTo(controls.target);
+        // Depth precision goes with the near plane: a step of about
+        // z² / (near · 2²⁴). At distance / 900 a street seen from a kilometre
+        // resolved only 6 cm, coarser than the centimetres between kerb,
+        // footway and plot, and they flickered as the zoom changed. At
+        // distance / 300 it is 2 cm there, and the eye, which already collides
+        // with the terrain, clips only what is within a three-hundredth of its
+        // orbit distance (3 m at a kilometre).
         const wantedNear = THREE.MathUtils.clamp(
-          distance / 900,
+          distance / 300,
           0.05 * metresToScene,
           40 * metresToScene,
         );

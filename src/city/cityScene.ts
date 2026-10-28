@@ -448,7 +448,11 @@ export function createMaterials(
   applyAntiTiling(standard("parcel.paving", { map: pavingMap ?? undefined, roughness: 0.92 }, 0xffffff), "paving");
   // Kerb concrete: 25-35% reflectance, and a shade warmer than the asphalt it
   // sits beside, which is what makes a kerb line read at distance.
-  standard("kerb", { roughness: 0.86 }, 0x8e8b82);
+  // Kerb tops and dropped-kerb ramps lie a few millimetres over the footway
+  // and the carriageway edge. A depth bias counted in depth steps (units, no
+  // slope factor) keeps them in front at every zoom, as paint is kept; the
+  // street layer's stacking test assumes these same biases.
+  standard("kerb", { roughness: 0.86, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -2 }, 0x8e8b82);
 
   const grassMap = textureFor("ground/grass");
   for (const key of ["block.ground", "parcel.green", "median.plant"]) {
@@ -771,7 +775,9 @@ export function createMaterials(
    * Chinese street. That is a one-line change here, not a scene-layer one.
    */
   // The 非机动车道: the same aged asphalt, a shade lighter and dustier.
-  standard("asphalt.cycle", { roughness: 0.9 }, 0x6c6964);
+  // Laid over the carriageway as a surfacing, not cut into it: biased in
+  // front of the asphalt it lies on, like the kerb.
+  standard("asphalt.cycle", { roughness: 0.9, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -2 }, 0x6c6964);
   // Street furniture. Values come from the scene layer that authors the
   // geometry, so the two cannot drift apart.
   standard("furniture/bin", { roughness: 0.6, metalness: 0.05 }, 0x9aa0a2);

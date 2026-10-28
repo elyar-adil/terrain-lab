@@ -588,8 +588,17 @@ pub fn triangulate(ring: &[Vec2]) -> Vec<[usize; 3]> {
             let current = indices[position];
             let next = indices[(position + 1) % len];
             let (a, b, c) = (ring[previous], ring[current], ring[next]);
+            let turn = cross3(a, b, c);
+            // A corner on the line between its neighbours (or doubling back
+            // along it) encloses nothing: drop it. Left in, it can stall the
+            // clipping, and the fan below then overlaps itself.
+            if turn.abs() <= EPSILON {
+                indices.remove(position);
+                clipped = true;
+                break;
+            }
             // Convex corner in a counter-clockwise ring turns left.
-            if cross3(a, b, c) <= EPSILON {
+            if turn < 0.0 {
                 continue;
             }
             if indices.iter().any(|&other| {

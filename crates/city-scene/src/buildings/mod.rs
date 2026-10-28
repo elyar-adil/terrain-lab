@@ -74,7 +74,13 @@ pub mod level {
     /// Skirt below the ground floor, so a building on a slope never shows a gap
     /// between its base and the terrain.
     pub const PLINTH: f32 = -1.60;
-    pub const BLOCK: f32 = 0.138;
+    /// A plot's ground: a step under the footway, as a lawn or a forecourt is.
+    /// Its edge runs on under the footway (`PLATE_UNDER_PAVING`), and two
+    /// surfaces over one point need a depth step between them that holds as
+    /// the camera zooms out: 25 mm is that step at a kilometre.
+    pub const PARCEL: f32 = GROUND - 0.025;
+    /// The block plate under the plots, a step below them again.
+    pub const BLOCK: f32 = PARCEL - 0.025;
 }
 
 /// The dimensioned rules the geometry is built from.  Each constant sits inside
@@ -505,6 +511,90 @@ pub fn cut_away(subject: Vec<Vec2>, clips: &[Vec<Vec2>]) -> Vec<Vec<Vec2>> {
     out
 }
 
+/// A compound's internal drives as short quads along them, for cutting out of
+/// the ground they are laid level with.
+fn drive_pieces(compound: &Compound, frame: CityFrameInfo) -> Vec<Vec<Vec2>> {
+    use i_overlay::core::fill_rule::FillRule;
+    use i_overlay::core::overlay_rule::OverlayRule;
+    use i_overlay::float::single::SingleFloatOverlay;
+    let half = compound.road_width_metres * 0.5;
+    let mut quads: Vec<Vec<[f32; 2]>> = Vec::new();
+    for path in &compound.paths {
+        let line: Vec<Vec2> = path.iter().map(|point| gate_point(*point, frame)).collect();
+        if line.len() < 2 {
+            continue;
+        }
+        let drive = crate::math::Path::flat(line);
+        let length = drive.length();
+        let steps = ((length / 2.0).ceil() as usize).max(1);
+        let at = |s: f32, side: f32| {
+            let p = drive.offset_at(s.clamp(0.0, length), side * half, 0.0);
+            Vec2::new(p.x, p.z)
+        };
+        for k in 0..steps {
+            // Each a little longer than its step, so neighbours overlap.
+            let (s0, s1) = (
+                length * k as f32 / steps as f32 - 0.05,
+                length * (k + 1) as f32 / steps as f32 + 0.05,
+            );
+            // On a tight bend the inner corners swap and the quad twists into
+            // a bow-tie, whose two triangles overlap; its hull never does.
+            let quad = hull(&[at(s0, -1.0), at(s1, -1.0), at(s1, 1.0), at(s0, 1.0)]);
+            quads.push(quad.iter().map(|p| [p.x, p.y]).collect());
+        }
+    }
+    if quads.is_empty() {
+        return Vec::new();
+    }
+    // One outline for the whole drive: cutting the ground by a hundred
+    // overlapping quads one at a time leaves slivers along their seams.
+    let none: Vec<Vec<[f32; 2]>> = Vec::new();
+    let mut out = Vec::new();
+    for shape in quads.overlay(&none, OverlayRule::Subject, FillRule::NonZero) {
+        hole_free(shape, 0, &mut out);
+    }
+    out
+}
+
+/// The convex hull of a few points, anticlockwise (monotone chain).
+fn hull(points: &[Vec2]) -> Vec<Vec2> {
+    let mut p = points.to_vec();
+    p.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+    let turn = |o: Vec2, a: Vec2, b: Vec2| (a - o).cross(b - o);
+    let mut lower: Vec<Vec2> = Vec::new();
+    for &q in &p {
+        while lower.len() >= 2 && turn(lower[lower.len() - 2], lower[lower.len() - 1], q) <= 0.0 {
+            lower.pop();
+        }
+        lower.push(q);
+    }
+    let mut upper: Vec<Vec2> = Vec::new();
+    for &q in p.iter().rev() {
+        while upper.len() >= 2 && turn(upper[upper.len() - 2], upper[upper.len() - 1], q) <= 0.0 {
+            upper.pop();
+        }
+        upper.push(q);
+    }
+    lower.pop();
+    upper.pop();
+    lower.extend(upper);
+    lower
+}
+
+/// The parts of `subject` inside `within`, as rings without holes.
+pub fn clip_to(subject: &[Vec2], within: &[Vec2]) -> Vec<Vec<Vec2>> {
+    use i_overlay::core::fill_rule::FillRule;
+    use i_overlay::core::overlay_rule::OverlayRule;
+    use i_overlay::float::single::SingleFloatOverlay;
+    let a: Vec<[f32; 2]> = subject.iter().map(|p| [p.x, p.y]).collect();
+    let b: Vec<[f32; 2]> = within.iter().map(|p| [p.x, p.y]).collect();
+    let mut out = Vec::new();
+    for shape in a.overlay(&b, OverlayRule::Intersect, FillRule::NonZero) {
+        hole_free(shape, 0, &mut out);
+    }
+    out
+}
+
 /// A shape (outer contour and holes) as rings without holes: a shape with a
 /// hole is cut in two through the hole, and each half again, until none has.
 fn hole_free(shape: Vec<Vec<[f32; 2]>>, depth: usize, out: &mut Vec<Vec<Vec2>>) {
@@ -614,11 +704,27 @@ pub fn build_among(
             .or_default()
             .push(building);
     }
+    // A compound's drive is cut out of its plot's ground and laid level with
+    // it, as every ground layer is: one surface over each point.
+    let mut drives: std::collections::HashMap<u32, Vec<Vec<Vec2>>> =
+        std::collections::HashMap::new();
+    for compound in compounds {
+        drives
+            .entry(compound.parcel_id)
+            .or_default()
+            .extend(drive_pieces(compound, frame));
+    }
     for parcel in parcels {
         let ring = ring_of(&parcel.ring, frame);
         if ring.len() < 3 {
             continue;
         }
+        // What the parcel's ground gives way to: the streets, and its drives.
+        let cuts: Vec<Vec<Vec2>> = streets
+            .iter()
+            .cloned()
+            .chain(drives.get(&parcel.id).into_iter().flatten().cloned())
+            .collect();
         let standing = on_parcel.get(&parcel.id).map(Vec::as_slice).unwrap_or(&[]);
         // A parcel the plan laid over a street (a dead-end spur no block was
         // cut by) keeps only its ground off the street: the street wins.
@@ -627,7 +733,7 @@ pub fn build_among(
         if !crossed
             && style == CityStyle::ChineseModern
             && parcel.use_type == ParcelUse::Residential
-            && compound_ground(&ring, standing, frame, builder)
+            && compound_ground(&ring, standing, frame, builder, &cuts)
         {
             continue;
         }
@@ -641,12 +747,10 @@ pub fn build_among(
         } else {
             "parcel.paving"
         };
-        if crossed {
-            for piece in off_street.iter().filter(|p| p.len() >= 3) {
-                builder.ground_uv(material, piece, level::GROUND - 0.004, None);
-            }
-        } else {
-            builder.ground_uv(material, &ring, level::GROUND - 0.004, None);
+        // Cut however little it crosses: a sliver over the footway 4 mm under
+        // the paving flickers through it.
+        for piece in cut_away(ring, &cuts).iter().flat_map(|p| normalise(p)) {
+            builder.ground_uv(material, &piece, level::PARCEL, None);
         }
     }
     for field in fields {
@@ -706,14 +810,15 @@ const APRON_M: f32 = 3.0;
 ///
 /// Drawn as one lawn, the plots read as a golf course between towers.  GB 50180
 /// asks a new compound for a green-space ratio of 30 – 35 %; the rest is lanes,
-/// parking, courts and the aprons the blocks stand in.  Layers are drawn a few
-/// millimetres apart, each over the last.  Returns false when the plot is too
+/// parking, courts and the aprons the blocks stand in.  Each layer is cut out
+/// of the one under it, so no two overlap.  Returns false when the plot is too
 /// thin for even the footway, and the caller draws it plain.
 fn compound_ground(
     ring: &[Vec2],
     buildings: &[&ModernBuilding],
     frame: CityFrameInfo,
     builder: &mut MeshBuilder,
+    cuts: &[Vec<Vec2>],
 ) -> bool {
     let mut outer = ring.to_vec();
     if signed_area(&outer) < 0.0 {
@@ -725,30 +830,92 @@ fn compound_ground(
         let a = signed_area(inner);
         a > 0.0 && a < area && a > area * share
     };
+    // An inset of a concave plot can cross itself; its loops lie over the
+    // layer outside it, two surfaces at one height. Such a ring is no ring.
+    let simple = |inner: &[Vec2]| {
+        let pieces = normalise(inner);
+        pieces.len() == 1 && (area_of(&pieces) - signed_area(inner).abs()).abs() < 0.5
+    };
     let lane = crate::math::inset_ring(&outer, LANE_SETBACK_M);
-    if !keeps(&lane, 0.4) {
+    if !keeps(&lane, 0.4) || !simple(&lane) {
         return false;
     }
-    builder.ground_uv("parcel.paving", &outer, level::GROUND - 0.004, None);
+    let aprons: Vec<Vec<Vec2>> = buildings
+        .iter()
+        .filter_map(|building| {
+            let mut footprint = ring_of(&building.footprint, frame);
+            if footprint.len() < 3 {
+                return None;
+            }
+            if signed_area(&footprint) < 0.0 {
+                footprint.reverse();
+            }
+            let apron = crate::math::inset_ring(&footprint, -APRON_M);
+            // Inside the plot: past its edge an apron lay over the footway.
+            (signed_area(&apron) > signed_area(&footprint)).then(|| clip_to(&apron, &outer))
+        })
+        .flatten()
+        .filter(|piece| piece.len() >= 3)
+        .collect();
+    // Each layer is the part of its ring no layer above it covers, all at one
+    // height: stacked a fraction of a millimetre apart they took turns in the
+    // depth buffer as the camera zoomed, and the lawn and the fire lane
+    // flickered through one another.
+    let y = level::PARCEL;
+    let mut lay = |material: &str, ring: Vec<Vec2>, mut above: Vec<Vec<Vec2>>| {
+        above.extend(cuts.iter().cloned());
+        for piece in cut_away(ring, &above).iter().flat_map(|p| normalise(p)) {
+            if piece.len() >= 3 && signed_area(&piece).abs() > 0.05 {
+                builder.ground_uv(material, &piece, y, None);
+            }
+        }
+    };
+    // Each inner ring kept inside the plot: an inset of a concave plot can
+    // cross itself, and its loops would reach out over the layer outside.
+    let lane_pieces = clip_to(&lane, &outer);
     let lawn = crate::math::inset_ring(&outer, LANE_SETBACK_M + FIRE_LANE_M);
-    if area >= 2500.0 && keeps(&lawn, 0.3) {
-        builder.ground_uv("asphalt", &lane, level::GROUND - 0.0035, None);
-        builder.ground_uv("parcel.green", &lawn, level::GROUND - 0.003, None);
+    let big = area >= 2500.0 && keeps(&lawn, 0.3) && simple(&lawn);
+    let lawn_pieces: Vec<Vec<Vec2>> = if big {
+        clip_to(&lawn, &outer)
+            .iter()
+            .flat_map(|piece| lane_pieces.iter().flat_map(move |l| clip_to(piece, l)))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let above = |layers: &[&[Vec<Vec2>]]| -> Vec<Vec<Vec2>> {
+        layers
+            .iter()
+            .flat_map(|l| l.iter().cloned())
+            .chain(aprons.iter().cloned())
+            .collect()
+    };
+    lay(
+        "parcel.paving",
+        outer.clone(),
+        above(&[&lane_pieces, &lawn_pieces]),
+    );
+    if big {
+        for piece in &lane_pieces {
+            lay("asphalt", piece.clone(), above(&[&lawn_pieces]));
+        }
+        for piece in &lawn_pieces {
+            lay("parcel.green", piece.clone(), above(&[]));
+        }
     } else {
         // A single block's plot: a footway inside the fence, the rest planted.
-        builder.ground_uv("parcel.green", &lane, level::GROUND - 0.003, None);
+        for piece in &lane_pieces {
+            lay("parcel.green", piece.clone(), above(&[]));
+        }
     }
-    for building in buildings {
-        let mut footprint = ring_of(&building.footprint, frame);
-        if footprint.len() < 3 {
-            continue;
-        }
-        if signed_area(&footprint) < 0.0 {
-            footprint.reverse();
-        }
-        let apron = crate::math::inset_ring(&footprint, -APRON_M);
-        if signed_area(&apron) > signed_area(&footprint) {
-            builder.ground_uv("parcel.paving", &apron, level::GROUND - 0.0025, None);
+    // Where two aprons overlap they are one paving, the same texture at the
+    // same height, so nothing shows.
+    for apron in &aprons {
+        for piece in cut_away(apron.clone(), cuts)
+            .iter()
+            .flat_map(|p| normalise(p))
+        {
+            builder.ground_uv("parcel.paving", &piece, y, None);
         }
     }
     true
@@ -982,27 +1149,11 @@ fn compound_shell(
             -bearing,
         );
     }
-    // Internal loop drive.  Metre UVs along the path: `parcel.paving` is a
-    // *textured* material, and a bare quad into it desyncs the group's optional
-    // UV layer from its vertex count — the payload bug the renderer caught.
-    for path in &compound.paths {
-        let ring: Vec<Vec2> = path.iter().map(|point| gate_point(*point, frame)).collect();
-        if ring.len() < 2 {
-            continue;
-        }
-        let drive = crate::math::Path::flat(ring);
-        let length = drive.length();
-        builder.ribbon_uv_along(
-            "parcel.paving",
-            &drive,
-            -compound.road_width_metres * 0.5,
-            compound.road_width_metres * 0.5,
-            0.0,
-            length,
-            level::GROUND + 0.006,
-            None,
-            0.0,
-        );
+    // Internal loop drive: the very pieces cut out of the plot's ground, laid
+    // level with it (`drive_pieces`). `ground_uv` gives the textured paving
+    // its world-metre UVs.
+    for piece in drive_pieces(compound, frame) {
+        builder.ground_uv("parcel.paving", &piece, level::PARCEL, None);
     }
 }
 
@@ -1022,7 +1173,8 @@ fn draw_field(field: &urban::Field, ring: &[Vec2], builder: &mut MeshBuilder) {
     // UVs in metres along and across the rows.
     let (sin, cos) = field.row_angle.sin_cos();
     let uv = |p: Vec2| (p.x * cos + p.y * sin, -p.x * sin + p.y * cos);
-    let y = level::GROUND - 0.012;
+    // Between the block plate and the plots.
+    let y = level::PARCEL - 0.012;
     for [a, b, c] in crate::math::triangulate(&plot) {
         let (pa, pb, pc) = (plot[a], plot[b], plot[c]);
         // `triangulate` returns counter-clockwise indices, which face down: flip.
@@ -1722,7 +1874,10 @@ mod tests {
     /// And again when the plates were grown and then cut by the streets'
     /// own footprints (junctions, kerb returns and closed dead ends
     /// included), so no plate edge is left showing over a footway or road.
-    const WESTERN_MIXED_LAYER_HASH: u64 = 12_559_913_892_972_588_293;
+    /// And again when the ground layers stopped lying one over another: the
+    /// plots a step under the footway and the block plate a step under them,
+    /// each plot's layers cut out of one another, so nothing z-fights.
+    const WESTERN_MIXED_LAYER_HASH: u64 = 10_288_074_835_167_623_410;
 
     #[test]
     fn western_mixed_building_layer_is_bit_identical() {
