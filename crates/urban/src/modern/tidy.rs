@@ -80,6 +80,138 @@ pub(super) fn tidy(streets: &mut ExternalStreets) {
     // Joined ends make junctions too, and some land close to others.
     merge_clusters(streets);
     drop_overlaps(streets);
+    break_knots(streets);
+    round_bends(streets);
+}
+
+/// Three junctions joined to one another by streets shorter than this are a
+/// knot, not three junctions.
+const KNOT_M: f32 = 45.0;
+
+/// Where three junctions sit in a triangle of short streets, too many arms
+/// for one junction and too close for three, their boxes run into one
+/// another. A planner would not build one: the triangle's least street (the
+/// lowest class, the longest of those) goes, leaving a staggered pair or a
+/// junction and a bend. Arterials, expressways and bridges stay.
+fn break_knots(streets: &mut ExternalStreets) {
+    loop {
+        let degree = degrees(&streets.roads);
+        let short: Vec<(usize, u64, u64, f32)> = streets
+            .roads
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.from != r.to)
+            .map(|(i, r)| (i, r.from.min(r.to), r.from.max(r.to), length(r)))
+            .filter(|&(_, a, b, l)| l < KNOT_M && degree[&a] >= 3 && degree[&b] >= 3)
+            .collect();
+        let mut side: HashMap<(u64, u64), usize> = HashMap::new();
+        let mut near: HashMap<u64, Vec<u64>> = HashMap::new();
+        for &(i, a, b, _) in &short {
+            side.insert((a, b), i);
+            near.entry(a).or_default().push(b);
+            near.entry(b).or_default().push(a);
+        }
+        let mut drop = None;
+        'search: for &(i, a, b, _) in &short {
+            for c in near.get(&a).into_iter().flatten() {
+                let (Some(&j), Some(&k)) = (
+                    side.get(&(a.min(*c), a.max(*c))),
+                    side.get(&(b.min(*c), b.max(*c))),
+                ) else {
+                    continue;
+                };
+                if *c == b {
+                    continue;
+                }
+                let least = [i, j, k]
+                    .into_iter()
+                    .max_by(|&x, &y| {
+                        let (rx, ry) = (&streets.roads[x], &streets.roads[y]);
+                        rank(rx.class)
+                            .cmp(&rank(ry.class))
+                            .then(length(rx).total_cmp(&length(ry)))
+                    })
+                    .unwrap();
+                let road = &streets.roads[least];
+                if road.bridge || rank(road.class) <= rank(ModernRoadClass::Arterial) {
+                    continue;
+                }
+                drop = Some(least);
+                break 'search;
+            }
+        }
+        match drop {
+            Some(index) => {
+                streets.roads.remove(index);
+            }
+            None => break,
+        }
+    }
+}
+
+/// The smallest radius a street of each class bends on: CJJ 37-2012's limit
+/// with superelevation for its design speed (50, 40 and 30 km/h).
+fn bend_radius(class: ModernRoadClass) -> Option<f32> {
+    match class {
+        ModernRoadClass::Expressway => None,
+        ModernRoadClass::Arterial => Some(100.0),
+        ModernRoadClass::Collector => Some(70.0),
+        ModernRoadClass::Local => Some(40.0),
+    }
+}
+
+/// Every bend of a street an arc, not a vertex: merging junctions and carrying
+/// dead ends on leave a street a corner of 20 to 30 degrees a few tens of
+/// metres from its end, and a street is built to a curvature. The arc takes
+/// the class's radius, or the largest that keeps to 45 % of either leg, so a
+/// street's first metres out of a junction stay straight. Bridges keep their
+/// straight decks; expressways are eased where they are laid out.
+fn round_bends(streets: &mut ExternalStreets) {
+    for road in &mut streets.roads {
+        let Some(radius) = bend_radius(road.class) else {
+            continue;
+        };
+        if road.bridge || road.centreline.len() < 3 {
+            continue;
+        }
+        let p: Vec<(f32, f32)> = road.centreline.iter().map(|q| metres(*q)).collect();
+        let mut out = vec![p[0]];
+        for i in 1..p.len() - 1 {
+            let (a, b, c) = (p[i - 1], p[i], p[i + 1]);
+            let (l0, l1) = (dist(a, b), dist(b, c));
+            if l0 < 1.0e-3 || l1 < 1.0e-3 {
+                continue;
+            }
+            let d0 = ((b.0 - a.0) / l0, (b.1 - a.1) / l0);
+            let d1 = ((c.0 - b.0) / l1, (c.1 - b.1) / l1);
+            let turn = (d0.0 * d1.1 - d0.1 * d1.0).atan2(d0.0 * d1.0 + d0.1 * d1.1);
+            if turn.abs() < 2.0_f32.to_radians() {
+                out.push(b);
+                continue;
+            }
+            let half = turn.abs() * 0.5;
+            let reach = (radius * half.tan()).min(0.45 * l0.min(l1));
+            let r = reach / half.tan();
+            let entry = (b.0 - d0.0 * reach, b.1 - d0.1 * reach);
+            // The arc's centre, `r` to the side the street turns to.
+            let side = turn.signum();
+            let centre = (entry.0 - d0.1 * r * side, entry.1 + d0.0 * r * side);
+            let from = (entry.1 - centre.1).atan2(entry.0 - centre.0);
+            let steps = ((r * turn.abs() / 3.0).ceil() as usize).max(2);
+            out.extend((0..=steps).map(|k| {
+                let angle = from + turn * k as f32 / steps as f32;
+                (centre.0 + angle.cos() * r, centre.1 + angle.sin() * r)
+            }));
+        }
+        out.push(p[p.len() - 1]);
+        road.centreline = out
+            .into_iter()
+            .map(|(x, y)| Point {
+                x_km: x / 1000.0,
+                y_km: y / 1000.0,
+            })
+            .collect();
+    }
 }
 
 /// Heading a road leaves `node` on, over its first 15 m.
@@ -924,4 +1056,113 @@ fn cut_squeezed(streets: &mut ExternalStreets) {
     }
     let used: HashSet<u64> = streets.roads.iter().flat_map(|r| [r.from, r.to]).collect();
     streets.nodes.retain(|n| used.contains(&n.id));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::modern::ExternalNode;
+
+    fn at(x: f32, y: f32) -> Point {
+        Point {
+            x_km: x / 1000.0,
+            y_km: y / 1000.0,
+        }
+    }
+
+    fn streets(
+        nodes: &[(u64, f32, f32)],
+        roads: &[(u64, u64, ModernRoadClass)],
+    ) -> ExternalStreets {
+        let place: HashMap<u64, Point> = nodes.iter().map(|&(id, x, y)| (id, at(x, y))).collect();
+        ExternalStreets {
+            nodes: nodes
+                .iter()
+                .map(|&(id, x, y)| ExternalNode {
+                    id,
+                    point: at(x, y),
+                })
+                .collect(),
+            roads: roads
+                .iter()
+                .map(|&(from, to, class)| ExternalRoad {
+                    from,
+                    to,
+                    class,
+                    bridge: false,
+                    centreline: vec![place[&from], place[&to]],
+                })
+                .collect(),
+            river: Vec::new(),
+            tributaries: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_triangle_of_short_streets_between_three_junctions_loses_its_least_street() {
+        use ModernRoadClass::{Collector, Local};
+        // all2/plan12: junctions 38, 29 and 33 m apart, each with two more arms.
+        let mut s = streets(
+            &[
+                (1, 0.0, 0.0),
+                (2, 27.0, -27.0),
+                (3, 33.0, 1.0),
+                (11, -200.0, 0.0),
+                (12, -50.0, 200.0),
+                (21, 30.0, -200.0),
+                (22, 200.0, -100.0),
+                (31, 200.0, 50.0),
+                (32, 50.0, 200.0),
+            ],
+            &[
+                (1, 2, Collector),
+                (2, 3, Collector),
+                (1, 3, Local),
+                (1, 11, Collector),
+                (1, 12, Local),
+                (2, 21, Collector),
+                (2, 22, Collector),
+                (3, 31, Local),
+                (3, 32, Local),
+            ],
+        );
+        break_knots(&mut s);
+        assert_eq!(s.roads.len(), 8);
+        assert!(
+            !s.roads.iter().any(|r| (r.from, r.to) == (1, 3)),
+            "the local side goes"
+        );
+    }
+
+    #[test]
+    fn a_street_bends_on_an_arc_of_its_class_radius_and_leaves_its_ends_straight() {
+        // all1/plan2: a collector turning 26 degrees 23 m from its end.
+        let mut s = streets(
+            &[(1, 0.0, 0.0), (2, 100.0, 0.0)],
+            &[(1, 2, ModernRoadClass::Collector)],
+        );
+        let turn = 26.0_f32.to_radians();
+        s.roads[0].centreline = vec![
+            at(0.0, 0.0),
+            at(23.0, 0.0),
+            at(23.0 + 60.0 * turn.cos(), 60.0 * turn.sin()),
+        ];
+        round_bends(&mut s);
+        let line: Vec<(f32, f32)> = s.roads[0].centreline.iter().map(|p| metres(*p)).collect();
+        assert!(line.len() > 4, "the corner is an arc");
+        assert_eq!(line[0], (0.0, 0.0));
+        let heading = |a: (f32, f32), b: (f32, f32)| (b.1 - a.1).atan2(b.0 - a.0);
+        assert!(
+            heading(line[0], line[1]).abs() < 1.0e-3,
+            "straight out of its end"
+        );
+        for w in line.windows(3) {
+            let bend = (heading(w[1], w[2]) - heading(w[0], w[1])).abs();
+            assert!(
+                bend < 4.0_f32.to_radians(),
+                "no vertex turns {:.1} degrees",
+                bend.to_degrees()
+            );
+        }
+    }
 }
