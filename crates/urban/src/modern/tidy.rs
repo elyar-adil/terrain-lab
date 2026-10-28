@@ -38,6 +38,11 @@ const STUB_M: f32 = 70.0;
 /// A piece of street free at both ends and shorter than this, left after the
 /// dead ends are joined, is a fragment and not a street.
 const ORPHAN_M: f32 = 120.0;
+/// ... and, more loosely, one this far ahead, within this many degrees.
+const FAR_JOIN_M: f32 = 150.0;
+const FAR_JOIN_DEG: f32 = 30.0;
+/// A dead-end branch (to its first junction) shorter than this goes.
+const BRANCH_M: f32 = 800.0;
 /// A dead end that points at a street this close ahead is carried on to it.
 const JOIN_M: f32 = 60.0;
 /// ... "points at" meaning within this many degrees of its own heading.
@@ -75,12 +80,21 @@ pub(super) fn tidy(streets: &mut ExternalStreets) {
     cut_squeezed(streets);
     prune_stubs(streets);
     drop_orphans(streets, false);
-    join_dead_ends(streets);
+    join_dead_ends(streets, JOIN_M, JOIN_DEG);
+    // A street the plan stops in the open, at the town's edge or short of
+    // the one it was heading for: carried on to that one when it lies ahead,
+    // and otherwise taken back to its junction. A street that ends in the
+    // grass with its footway wrapped round the end is not one a town has.
+    join_dead_ends(streets, FAR_JOIN_M, FAR_JOIN_DEG);
+    prune_branches(streets, BRANCH_M);
     drop_orphans(streets, true);
     // Joined ends make junctions too, and some land close to others.
     merge_clusters(streets);
     drop_overlaps(streets);
     break_knots(streets);
+    // What the merges and drops above left hanging.
+    prune_branches(streets, BRANCH_M);
+    drop_orphans(streets, true);
     round_bends(streets);
 }
 
@@ -286,7 +300,59 @@ fn degrees(roads: &[ExternalRoad]) -> HashMap<u64, usize> {
 
 fn merge_clusters(streets: &mut ExternalStreets) {
     merge_nodes(streets, 1.0, 0);
+    join_facing_ends(streets);
     merge_nodes(streets, CLUSTER_M, 3);
+}
+
+/// Two free ends this close are one street broken in two.
+const FACING_M: f32 = 8.0;
+
+/// Join every pair of free street ends within `FACING_M` of each other: one
+/// street the plan's pieces broke in two (a bridge whose halves came from
+/// two edges stopped 3.6 m apart, each a dead end in mid-air).
+fn join_facing_ends(streets: &mut ExternalStreets) {
+    let degree = degrees(&streets.roads);
+    let ends: Vec<(u64, (f32, f32))> = streets
+        .nodes
+        .iter()
+        .filter(|n| degree.get(&n.id) == Some(&1))
+        .map(|n| (n.id, metres(n.point)))
+        .collect();
+    let mut onto: HashMap<u64, u64> = HashMap::new();
+    for (i, (a, pa)) in ends.iter().enumerate() {
+        if onto.contains_key(a) {
+            continue;
+        }
+        let nearest = ends[i + 1..]
+            .iter()
+            .filter(|(b, _)| !onto.contains_key(b) && !onto.values().any(|v| v == b))
+            .map(|(b, pb)| (dist(*pa, *pb), *b))
+            .filter(|(d, _)| *d < FACING_M)
+            .min_by(|x, y| x.0.total_cmp(&y.0));
+        if let Some((_, b)) = nearest {
+            onto.insert(*a, b);
+        }
+    }
+    if onto.is_empty() {
+        return;
+    }
+    let position: HashMap<u64, Point> = streets.nodes.iter().map(|n| (n.id, n.point)).collect();
+    for road in &mut streets.roads {
+        if let Some(&to) = onto.get(&road.from) {
+            road.from = to;
+            if let Some(first) = road.centreline.first_mut() {
+                *first = position[&to];
+            }
+        }
+        if let Some(&to) = onto.get(&road.to) {
+            road.to = to;
+            if let Some(last) = road.centreline.last_mut() {
+                *last = position[&to];
+            }
+        }
+    }
+    streets.roads.retain(|road| road.from != road.to);
+    streets.nodes.retain(|n| !onto.contains_key(&n.id));
 }
 
 /// Merge nodes closer than `radius` whose degree is at least `min_degree`. At
@@ -599,6 +665,66 @@ fn prune_stubs(streets: &mut ExternalStreets) {
     streets.nodes.retain(|n| used.contains(&n.id));
 }
 
+/// Remove every dead-end branch of collectors and locals shorter than
+/// `max_m`: from a free end along its street, through nodes where it only
+/// continues, to the first junction. Arterials stay; a bridge on a branch
+/// that leads nowhere goes with it.
+fn prune_branches(streets: &mut ExternalStreets, max_m: f32) {
+    loop {
+        let degree = degrees(&streets.roads);
+        let mut by_node: HashMap<u64, Vec<usize>> = HashMap::new();
+        for (index, road) in streets.roads.iter().enumerate() {
+            by_node.entry(road.from).or_default().push(index);
+            by_node.entry(road.to).or_default().push(index);
+        }
+        let mut drop: HashSet<usize> = HashSet::new();
+        for (&node, list) in &by_node {
+            if degree.get(&node) != Some(&1) || drop.contains(&list[0]) {
+                continue;
+            }
+            let (mut at, mut current) = (node, list[0]);
+            let (mut branch, mut total, mut keep) = (Vec::new(), 0.0, false);
+            loop {
+                let road = &streets.roads[current];
+                if rank(road.class) < 2 || road.from == road.to {
+                    keep = true;
+                    break;
+                }
+                branch.push(current);
+                total += length(road);
+                if total >= max_m {
+                    keep = true;
+                    break;
+                }
+                at = if road.from == at { road.to } else { road.from };
+                if degree.get(&at) != Some(&2) {
+                    // A junction (the branch ends here) or another free end
+                    // (a lone piece; `drop_orphans` decides those).
+                    keep |= degree.get(&at) == Some(&1);
+                    break;
+                }
+                match by_node[&at].iter().find(|&&i| i != current) {
+                    Some(&i) => current = i,
+                    None => break,
+                }
+            }
+            if !keep {
+                drop.extend(branch);
+            }
+        }
+        if drop.is_empty() {
+            break;
+        }
+        let mut index = 0;
+        streets.roads.retain(|_| {
+            index += 1;
+            !drop.contains(&(index - 1))
+        });
+    }
+    let used: HashSet<u64> = streets.roads.iter().flat_map(|r| [r.from, r.to]).collect();
+    streets.nodes.retain(|n| used.contains(&n.id));
+}
+
 /// The point of `line` nearest `p`: (distance, segment index, parameter, point).
 fn nearest_on(line: &[(f32, f32)], p: (f32, f32)) -> Option<(f32, usize, f32, (f32, f32))> {
     let mut best: Option<(f32, usize, f32, (f32, f32))> = None;
@@ -645,8 +771,8 @@ fn point_of(p: (f32, f32)) -> Point {
 /// road's segment, the meeting point).
 type Join = (u64, usize, usize, usize, (f32, f32));
 
-fn join_dead_ends(streets: &mut ExternalStreets) {
-    let cos_limit = JOIN_DEG.to_radians().cos();
+fn join_dead_ends(streets: &mut ExternalStreets, reach: f32, within_deg: f32) {
+    let cos_limit = within_deg.to_radians().cos();
     let mut next_id = streets
         .nodes
         .iter()
@@ -705,7 +831,7 @@ fn join_dead_ends(streets: &mut ExternalStreets) {
                             w[0].1 + (w[1].1 - w[0].1) * f,
                         );
                         let d = dist(end, q);
-                        if !(0.5..=JOIN_M).contains(&d) {
+                        if !(0.5..=reach).contains(&d) {
                             continue;
                         }
                         let toward = ((q.0 - end.0) / d, (q.1 - end.1) / d);
@@ -1164,5 +1290,59 @@ mod tests {
                 bend.to_degrees()
             );
         }
+    }
+
+    #[test]
+    fn a_branch_leading_nowhere_goes_back_to_its_junction_and_an_arterial_stays() {
+        use ModernRoadClass::{Arterial, Collector, Local};
+        let mut s = streets(
+            &[
+                (1, 0.0, 0.0),
+                (2, 200.0, 0.0),
+                (3, 400.0, 0.0),
+                (4, 200.0, 200.0),
+                (5, 200.0, 400.0),
+                (6, 200.0, -300.0),
+                (7, -300.0, 0.0),
+            ],
+            &[
+                (1, 2, Collector),
+                (2, 3, Collector),
+                (2, 4, Local),
+                (4, 5, Local),
+                (2, 6, Arterial),
+                (7, 1, Collector),
+            ],
+        );
+        prune_branches(&mut s, 800.0);
+        let kept: Vec<(u64, u64)> = s.roads.iter().map(|r| (r.from, r.to)).collect();
+        // 2-3 (200 m) and 2-4-5 (400 m) lead nowhere; 7-1-2 (500 m) too.
+        assert!(!kept.contains(&(2, 3)) && !kept.contains(&(4, 5)) && !kept.contains(&(7, 1)));
+        assert!(
+            kept.contains(&(2, 6)),
+            "the arterial (a regional road) stays"
+        );
+    }
+
+    #[test]
+    fn two_free_ends_a_few_metres_apart_are_one_street() {
+        use ModernRoadClass::Collector;
+        // all1/plan12: a bridge's two halves stopped 3.6 m apart.
+        let mut s = streets(
+            &[
+                (1, 0.0, 0.0),
+                (2, 100.0, 0.0),
+                (3, 103.0, 2.0),
+                (4, 200.0, 0.0),
+            ],
+            &[(1, 2, Collector), (3, 4, Collector)],
+        );
+        join_facing_ends(&mut s);
+        let degree = degrees(&s.roads);
+        assert_eq!(
+            degree.values().filter(|d| **d == 1).count(),
+            2,
+            "only the street's two real ends"
+        );
     }
 }

@@ -1877,7 +1877,10 @@ mod tests {
     /// And again when the ground layers stopped lying one over another: the
     /// plots a step under the footway and the block plate a step under them,
     /// each plot's layers cut out of one another, so nothing z-fights.
-    const WESTERN_MIXED_LAYER_HASH: u64 = 10_288_074_835_167_623_410;
+    /// And again when an interchange's landings stopped leaving the local
+    /// streets they close as dead ends: those are taken back to their
+    /// junctions, and the blocks round them changed.
+    const WESTERN_MIXED_LAYER_HASH: u64 = 1_715_384_970_521_594_432;
 
     #[test]
     fn western_mixed_building_layer_is_bit_identical() {

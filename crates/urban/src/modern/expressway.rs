@@ -653,7 +653,7 @@ struct RampPlan {
 }
 
 /// Plan the diamond at `node`, or say why not.
-fn plan_diamond(graph: &Graph, node: usize, half_deck: f32) -> Option<Diamond> {
+fn plan_diamond(graph: &Graph, node: usize, half_deck: f32, carry_on: bool) -> Option<Diamond> {
     // Each `return None` says why, for whoever reads this next.
     // Each `return None` says why, for whoever reads this next.
     let debug = |_why: &str| {};
@@ -712,10 +712,15 @@ fn plan_diamond(graph: &Graph, node: usize, half_deck: f32) -> Option<Diamond> {
             )
             && dot(direction(i), direction(first)) < -0.85
     });
+    // A street that ends at the expressway is carried on past it only where a
+    // regional road meets the far end (`carry_on`: the generated towns, whose
+    // edge streets are their regional approaches). In a town grown on the
+    // world's streets nothing outside meets it, and it stood in the fields as
+    // a dead end; such a crossing gets no interchange.
     let mut stub: Option<Vec<V>> = None;
     match far {
         Some(i) if streets.len() == 2 => across.push(Some(i)),
-        None if streets.len() == 1 => {
+        None if streets.len() == 1 && carry_on => {
             let a = direction(first);
             let out = mul(a, -1.0);
             let line = vec![
@@ -793,9 +798,9 @@ fn plan_diamond(graph: &Graph, node: usize, half_deck: f32) -> Option<Diamond> {
         }
         terminals.push((slot, line, at));
     }
-    // A local street crossing where the ramps come down is cut short of the
-    // expressway (it ends at the frontage, as it would); anything bigger rules
-    // the interchange out.
+    // A local street crossing where the ramps come down is closed (and what is
+    // left of it taken back to its junction); anything bigger rules the
+    // interchange out.
     for &(s, n) in &chain.nodes {
         if n == node || (s - chain.at).abs() >= LANDING_CLEAR_M {
             continue;
@@ -935,12 +940,18 @@ fn plan_diamond(graph: &Graph, node: usize, half_deck: f32) -> Option<Diamond> {
 /// Build a planned diamond into the graph.
 fn build_diamond(graph: &mut Graph, diamond: Diamond, layout: &mut Layout) {
     // Cut what the landings need cleared.
+    let degree_before = degrees(graph);
     for &index in &diamond.remove {
         // Gone: no ends, no line, so nothing meets or crosses it again.
         graph.roads[index].from = usize::MAX;
         graph.roads[index].to = usize::MAX;
         graph.roads[index].line.clear();
     }
+    // What met them is taken back to its junction: there is no frontage road
+    // for a street to end at, and it stopped short of the ramps in the grass.
+    // It cannot be carried across, where the ramps come down.
+    let arms: Vec<usize> = diamond.terminals.iter().filter_map(|t| t.0).collect();
+    mend_stubs(graph, &degree_before, false, &arms);
     // The terminals first: they cut the arterial arms, which the ramps end on.
     let mut terminal_nodes = Vec::new();
     for (slot, line, at) in &diamond.terminals {
@@ -1183,7 +1194,7 @@ fn lay_corridor(frame: &CityFrame, graph: &mut Graph) -> bool {
             if built.iter().any(|t| (s - t).abs() < SPACING_M) {
                 continue;
             }
-            if plan_diamond(&trial, node, half_deck).is_some() {
+            if plan_diamond(&trial, node, half_deck, false).is_some() {
                 built.push(s);
             }
         }
@@ -1208,6 +1219,7 @@ fn insert_corridor(graph: &mut Graph, line: &[V]) -> Vec<(f32, usize)> {
     // The streets that run along the corridor give way to it.
     let (first, last) = (line[0], line[line.len() - 1]);
     let dir = unit(sub(last, first));
+    let degree_before: Vec<usize> = degrees(graph);
     for road in graph.roads.iter_mut() {
         if road.line.len() < 2 {
             continue;
@@ -1229,6 +1241,7 @@ fn insert_corridor(graph: &mut Graph, line: &[V]) -> Vec<(f32, usize)> {
             road.line.clear();
         }
     }
+    mend_stubs(graph, &degree_before, true, &[]);
     // Cut it into the graph where it crosses the streets, and lay it.
     let crossings = graph.cross(line, |r| r.class != ModernRoadClass::Expressway);
     let total = polyline_len(line);
@@ -1262,6 +1275,132 @@ fn insert_corridor(graph: &mut Graph, line: &[V]) -> Vec<(f32, usize)> {
         });
     }
     crossings
+}
+
+/// How many streets meet at each node.
+fn degrees(graph: &Graph) -> Vec<usize> {
+    let mut degree = vec![0; graph.pts.len()];
+    for road in graph
+        .roads
+        .iter()
+        .filter(|r| r.line.len() >= 2 && r.from != usize::MAX)
+    {
+        degree[road.from] += 1;
+        degree[road.to] += 1;
+    }
+    degree
+}
+
+/// A street carried on this far to the next one, across the corridor.
+const MEND_REACH_M: f32 = 150.0;
+/// A stub no street lies ahead of is taken back to its junction, this far.
+const PRUNE_M: f32 = 300.0;
+
+/// The streets the corridor took (those along it) left the streets that met
+/// them ending at nothing: a street running at the expressway and stopping
+/// short of it, which no planner builds. Each is carried straight on to the
+/// next street ahead, across the corridor (it passes under the deck like any
+/// crossing street), or, with none ahead, taken back to its last junction.
+fn mend_stubs(graph: &mut Graph, before: &[usize], extend: bool, keep: &[usize]) {
+    let now = degrees(graph);
+    let stubs: Vec<usize> = (0..now.len())
+        .filter(|&n| before.get(n).copied().unwrap_or(0) >= 2 && now[n] == 1)
+        .collect();
+    for node in stubs {
+        if degrees(graph)[node] != 1 {
+            continue;
+        }
+        let Some(&road) = graph
+            .incident(node)
+            .iter()
+            .find(|&&i| graph.roads[i].line.len() >= 2)
+        else {
+            continue;
+        };
+        let line = &graph.roads[road].line;
+        let (end, back) = if graph.roads[road].to == node {
+            (line[line.len() - 1], line[line.len().saturating_sub(2)])
+        } else {
+            (line[0], line[1])
+        };
+        let ahead = unit(sub(end, back));
+        let reach = add(end, mul(ahead, MEND_REACH_M));
+        // The nearest street the line straight on meets.
+        let mut hit: Option<(f32, usize, V)> = None;
+        for (index, other) in graph.roads.iter().enumerate() {
+            if index == road
+                || other.line.len() < 2
+                || other.bridge
+                || other.class == ModernRoadClass::Expressway
+            {
+                continue;
+            }
+            for w in other.line.windows(2) {
+                if let Some((t, u)) = intersect(end, reach, w[0], w[1])
+                    && t * MEND_REACH_M > 1.0
+                    && (0.0..=1.0).contains(&u)
+                    && hit.is_none_or(|(best, _, _)| t < best)
+                {
+                    hit = Some((t, index, add(end, mul(sub(reach, end), t))));
+                }
+            }
+        }
+        if let Some((_, target, point)) = hit.filter(|_| extend) {
+            let (from, to) = (graph.roads[target].from, graph.roads[target].to);
+            let (station, _) = project(&graph.roads[target].line, point);
+            let total = polyline_len(&graph.roads[target].line);
+            let meet = if station < 6.0 {
+                from
+            } else if station > total - 6.0 {
+                to
+            } else {
+                let n = graph.node(point, "district-junction");
+                graph.split(target, vec![(station, n)]);
+                n
+            };
+            let class = graph.roads[road].class;
+            graph.roads.push(Road {
+                from: node,
+                to: meet,
+                class,
+                bridge: false,
+                oneway: false,
+                line: vec![end, graph.pts[meet]],
+            });
+            continue;
+        }
+        // Nothing ahead: back to the junction it left, through collectors and
+        // locals only.
+        let (mut at, mut current, mut pruned) = (node, road, 0.0);
+        loop {
+            if keep.contains(&current)
+                || matches!(
+                    graph.roads[current].class,
+                    ModernRoadClass::Arterial | ModernRoadClass::Expressway
+                )
+            {
+                break;
+            }
+            let r = &mut graph.roads[current];
+            pruned += polyline_len(&r.line);
+            let next = if r.from == at { r.to } else { r.from };
+            r.from = usize::MAX;
+            r.to = usize::MAX;
+            r.line.clear();
+            at = next;
+            if pruned > PRUNE_M || degrees(graph)[at] != 1 {
+                break;
+            }
+            match graph
+                .incident(at)
+                .into_iter()
+                .find(|&i| graph.roads[i].line.len() >= 2)
+            {
+                Some(i) => current = i,
+                None => break,
+            }
+        }
+    }
 }
 
 /// The blocks are faces of the graph's straight edges, node to node, so every
@@ -1357,7 +1496,7 @@ pub(super) fn lay_out(
         if built.iter().any(|q| len(sub(*q, p)) < SPACING_M) {
             continue;
         }
-        let Some(diamond) = plan_diamond(&graph, node, half_deck) else {
+        let Some(diamond) = plan_diamond(&graph, node, half_deck, frame.external.is_none()) else {
             continue;
         };
         build_diamond(&mut graph, diamond, &mut layout);
