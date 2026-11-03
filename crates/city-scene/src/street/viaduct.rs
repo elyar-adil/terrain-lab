@@ -650,10 +650,12 @@ fn lamp_column(builder: &mut MeshBuilder, surface: &Carriageway, s: f32, reach: 
     }
 }
 
-/// Is a pier at `p` with footprint radius `r` clear of every street at grade?
+/// Is a pier at `p` with footprint radius `r` clear of every road below its
+/// deck: the streets at grade, and for the upper deck of a system interchange
+/// the lower deck and its ramps too?
 fn clear_of_streets(network: &Network, road: &Road, p: Vec2, r: f32) -> bool {
     network.roads.iter().all(|other| {
-        if other.id == road.id || other.layer != 0 {
+        if other.id == road.id || other.layer >= road.layer {
             return true;
         }
         let line: Vec<Vec2> = other

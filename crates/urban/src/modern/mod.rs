@@ -312,7 +312,7 @@ pub fn generate_modern_chinese_city_with_options(
         parcels,
         buildings,
         fields,
-    } = build_parcels(&frame, &nodes, &sd_roads, &hd_roads);
+    } = build_parcels(&frame, &nodes, &sd_roads, &hd_roads, layout.reserved());
     expressway::grade_separate(&frame, &mut nodes, &mut sd_roads, &mut hd_roads, &layout);
     let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
     roundabout::mark(
@@ -507,7 +507,7 @@ pub fn generate_modern_chinese_city_from_streets(
         parcels,
         buildings,
         fields,
-    } = build_parcels(&frame, &nodes, &sd_roads, &hd_roads);
+    } = build_parcels(&frame, &nodes, &sd_roads, &hd_roads, layout.reserved());
     expressway::grade_separate(&frame, &mut nodes, &mut sd_roads, &mut hd_roads, &layout);
     let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
     roundabout::mark(

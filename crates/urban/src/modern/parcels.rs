@@ -63,6 +63,7 @@ pub(super) fn build_parcels(
     nodes: &[SdNode],
     sd_roads: &[SdRoad],
     hd_roads: &[HdRoad],
+    reserved: &[Vec<V>],
 ) -> ParcelOutput {
     let radius_m = frame.radius_m;
     let density = frame.density;
@@ -211,6 +212,14 @@ pub(super) fn build_parcels(
     for (face_index, face) in faces.iter().enumerate() {
         let centre = centroid(&face.ring);
         if centre.0.hypot(centre.1) > radius_m * 1.04 {
+            continue;
+        }
+        // Ground an interchange takes whole (the corners between its ramps
+        // and decks, loop interiors included) stays bare verge.
+        if reserved.iter().any(|zone| {
+            point_in(zone, centre)
+                || face.ring.iter().filter(|p| point_in(zone, **p)).count() * 2 > face.ring.len()
+        }) {
             continue;
         }
         // How built-up this block is: 1 in the town, thinning to scattered houses

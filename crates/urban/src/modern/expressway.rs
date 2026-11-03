@@ -21,11 +21,9 @@
 //! signalised terminal; the on-ramp leaves the same terminal and climbs back to
 //! the deck after it.
 //!
-//! Where the street has the room, a side may instead be a partial cloverleaf
-//! quadrant (部分苜蓿叶, CJJ 152's other form for an expressway over an
-//! arterial, and the commonest on Beijing's and Urumqi's rings): both of the
-//! side's ramps in one corner, one of them a loop, still meeting the street at
-//! one signalised terminal ([`Quadrant`]).
+//! A cloverleaf or partial cloverleaf is a freeway form (free-flow, no signal);
+//! it belongs to the system interchange of two expressways (`system`), not to
+//! an expressway over an ordinary city street, which gets the diamond.
 
 use std::collections::HashMap;
 
@@ -64,88 +62,6 @@ const RAMP_GRADE: f32 = 0.045;
 const RAMP_HALF_M: f32 = 4.25;
 /// A ramp is cut into pieces no longer than this, so the blocks follow its curve.
 const PIECE_M: f32 = 60.0;
-/// A loop ramp's radius: CJJ 152 gives 40 - 60 m for a 30 - 40 km/h loop, the
-/// radius the loops of Beijing's and Urumqi's partial cloverleaves are built to.
-const LOOP_R_M: f32 = 50.0;
-const LOOP_R_MIN_M: f32 = 40.0;
-const LOOP_R_MAX_M: f32 = 65.0;
-/// A loop's length from its terminal to its deck node, at least: the 9 m
-/// climb at the ramp grade with its two vertical curves, the level hold beside
-/// the deck, the landing, the junction box it starts from and the taper it
-/// ends on.
-const LOOP_MIN_M: f32 = 380.0;
-/// A loop side meets the street at two signalised junctions this far apart
-/// along it: the loop at the nearer to the deck, the outer ramp at the
-/// farther. Each is a plain T, its ramp square to the street; brought to one
-/// node the two ramps arrive side by side and make one long, notched box.
-const TERMINAL_GAP_M: f32 = 42.0;
-/// The straight a ramp leaves (or reaches) the street by, square to it.
-const LOOP_LEG_M: f32 = 25.0;
-
-/// How one side of an interchange reaches its terminal.
-///
-/// A diamond (菱形) has its off-ramp before the street and its on-ramp after
-/// it. A partial cloverleaf (部分苜蓿叶) puts both of a side's ramps in one
-/// quadrant, one of them a loop: before the street (A, the loop the on-ramp,
-/// so the land after the street is free) or after it (B, the loop the
-/// off-ramp). The ramps still meet the street at one signalised terminal.
-///
-/// A cloverleaf (苜蓿叶) side has both quadrants, mirrored across the
-/// street: both loops and both outer ramps, the two outer ramps meeting the
-/// street at one junction and the two loops at the other, each a crossroads
-/// of the street and two ramps. Both sides so make the full cloverleaf.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Quadrant {
-    Diamond,
-    LoopBefore,
-    LoopAfter,
-    Clover,
-}
-
-impl Quadrant {
-    /// The loop quadrants of a side: before the street (`false`), after it
-    /// (`true`), or both.
-    fn loops(self) -> &'static [bool] {
-        match self {
-            Quadrant::Diamond => &[],
-            Quadrant::LoopBefore => &[false],
-            Quadrant::LoopAfter => &[true],
-            Quadrant::Clover => &[false, true],
-        }
-    }
-
-    /// What a side falls back to where it has no room, best first.
-    fn fallbacks(self) -> &'static [Quadrant] {
-        match self {
-            Quadrant::Diamond => &[Quadrant::Diamond],
-            Quadrant::LoopBefore => &[Quadrant::LoopBefore, Quadrant::Diamond],
-            Quadrant::LoopAfter => &[Quadrant::LoopAfter, Quadrant::Diamond],
-            Quadrant::Clover => &[
-                Quadrant::Clover,
-                Quadrant::LoopBefore,
-                Quadrant::LoopAfter,
-                Quadrant::Diamond,
-            ],
-        }
-    }
-}
-
-/// The form an interchange at `p` is built to, chosen by its place so a town
-/// has a mix: diamonds, partial cloverleaves of either hand, the two hands
-/// mixed, and full cloverleaves, as the expressway rings of Beijing and Urumqi
-/// have them.
-fn interchange_form(p: V) -> [Quadrant; 2] {
-    let h = ((p.0 / 37.0).round() as i64).wrapping_mul(73_856_093)
-        ^ ((p.1 / 37.0).round() as i64).wrapping_mul(19_349_663);
-    match h.rem_euclid(7) {
-        0 | 1 => [Quadrant::Diamond, Quadrant::Diamond],
-        2 => [Quadrant::LoopBefore, Quadrant::LoopBefore],
-        3 => [Quadrant::LoopAfter, Quadrant::LoopAfter],
-        4 => [Quadrant::LoopBefore, Quadrant::LoopAfter],
-        _ => [Quadrant::Clover, Quadrant::Clover],
-    }
-}
-
 fn smootherstep(x: f32) -> f32 {
     let x = x.clamp(0.0, 1.0);
     x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
@@ -185,9 +101,19 @@ pub(super) struct Layout {
     tapers: Vec<usize>,
     /// System interchanges: where a second expressway flies over this one.
     systems: Vec<system::SystemSite>,
+    /// Ground the interchanges take whole (the corners between ramps and
+    /// decks): no lot is laid in one.
+    reserved: Vec<Vec<V>>,
 }
 
 mod system;
+
+impl Layout {
+    /// Ground the interchanges take whole, as rings in local metres.
+    pub(super) fn reserved(&self) -> &[Vec<V>] {
+        &self.reserved
+    }
+}
 
 fn sub(a: V, b: V) -> V {
     (a.0 - b.0, a.1 - b.1)
@@ -765,11 +691,6 @@ struct Diamond {
     remove: Vec<usize>,
     /// The arterial carried across the expressway, when it ended there.
     stub: Option<Vec<V>>,
-    /// A loop side's second terminal, nearer the deck on the same arm: the
-    /// distance along it.
-    loop_at: [Option<f32>; 2],
-    /// The street ends at the deck: nothing of it is left under the deck.
-    one_arm: bool,
 }
 
 struct RampPlan {
@@ -782,117 +703,8 @@ struct RampPlan {
     line: Vec<V>,
 }
 
-/// One partial-cloverleaf quadrant, before the street, in travel stations
-/// (the crossing at 0) and lateral offsets on the kerb side.
-struct LoopQuadrant {
-    /// The outer ramp, from the deck down to its terminal.
-    outer: Vec<(f32, f32)>,
-    /// The loop, from its terminal round to beside the deck.
-    loop_line: Vec<(f32, f32)>,
-    /// Station of the loop's deck node.
-    loop_deck: f32,
-}
-
-/// Lay out a quadrant whose outer ramp lands at `outer` and whose loop starts
-/// at `inner`, both on the street, `inner` the nearer the deck. Each ramp
-/// meets the street square to it. The loop turns through a half circle in the
-/// corner between the deck and the street (with the turn off the street, the
-/// 270 degrees a loop is), clear of the street, `street_half` wide; the outer
-/// ramp swings out round it.
-fn loop_quadrant(
-    abut: f32,
-    outer: (f32, f32),
-    inner: (f32, f32),
-    street_half: f32,
-) -> Option<LoopQuadrant> {
-    let (s_o, d_o) = outer;
-    // The street, from the outer terminal toward the deck, and square to it
-    // on the quadrant's side.
-    let u = {
-        let l = s_o.hypot(d_o).max(1.0);
-        (-s_o / l, -d_o / l)
-    };
-    let w = if u.1 > 0.0 { (u.1, -u.0) } else { (-u.1, u.0) };
-    let w = if w.0 > 0.0 { (-w.0, -w.1) } else { w };
-    let leg = |p: (f32, f32)| (p.0 + LOOP_LEG_M * w.0, p.1 + LOOP_LEG_M * w.1);
-    let (loop_leg, outer_leg) = (leg(inner), leg(outer));
-    let top = loop_leg.1;
-    let wide = outer_leg.1;
-    let r = (top - abut) * 0.5;
-    if !(LOOP_R_MIN_M..=LOOP_R_MAX_M).contains(&r) || wide - top < 25.0 {
-        return None;
-    }
-    let clear = street_half + RAMP_HALF_M + 8.0;
-    let cl = abut + r;
-    // The street runs from the crossing on the deck's axis out to the
-    // terminals, at a slant where it crosses obliquely; the loop keeps clear
-    // of it across its whole span.
-    let street_at = |l: f32| s_o * l / d_o;
-    let loop_deck = -clear + 5.0;
-    // As far from the street as the loop must stand to be long enough to
-    // climb to the deck within the ramp grade, with its level hold and
-    // landing: the top and bottom runs both lengthen as it moves out.
-    let fixed = LOOP_LEG_M + loop_leg.0 + std::f32::consts::PI * r + loop_deck;
-    let cs = (street_at(abut).min(street_at(top)) - clear - r)
-        .min(loop_leg.0 - 5.0)
-        .min((fixed - LOOP_MIN_M) * 0.5);
-    // The outer ramp: beside the deck after its taper, out past the loop well
-    // before it, then straight in and square onto the street.
-    let off_start = -RAMP_REACH_M + TAPER_M;
-    let splay_end = cs - r - 25.0;
-    if splay_end - off_start < 110.0 {
-        return None;
-    }
-    let mut outer_line = Vec::new();
-    let mut s = off_start;
-    while s < splay_end {
-        outer_line.push((
-            s,
-            abut + (wide - abut) * smootherstep((s - off_start) / (splay_end - off_start)),
-        ));
-        s += 10.0;
-    }
-    let mut s = splay_end;
-    while s < outer_leg.0 - 12.0 {
-        outer_line.push((s, wide));
-        s += 15.0;
-    }
-    outer_line.push(outer_leg);
-    outer_line.push(outer);
-    // The loop: square off the street, along to the top of its circle, round
-    // the half circle toward the deck, and a short run beside the deck to its
-    // taper.
-    let mut loop_line = vec![inner, loop_leg];
-    let mut s = loop_leg.0 - 12.0;
-    while s > cs + 1.0 {
-        loop_line.push((s, top));
-        s -= 15.0;
-    }
-    let steps = 16;
-    for i in 0..=steps {
-        let theta = std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / steps as f32;
-        loop_line.push((cs + r * theta.cos(), cl + r * theta.sin()));
-    }
-    let run_end = cs + 0.35 * r;
-    loop_line.push((run_end, abut));
-    if loop_deck - run_end < 20.0 || loop_deck > -20.0 {
-        return None;
-    }
-    Some(LoopQuadrant {
-        outer: outer_line,
-        loop_line,
-        loop_deck,
-    })
-}
-
 /// Plan the diamond at `node`, or say why not.
-fn plan_diamond(
-    graph: &Graph,
-    node: usize,
-    half_deck: f32,
-    carry_on: bool,
-    forms: [Quadrant; 2],
-) -> Option<Diamond> {
+fn plan_diamond(graph: &Graph, node: usize, half_deck: f32, carry_on: bool) -> Option<Diamond> {
     // Each `return None` says why, for whoever reads this next.
     let debug = |_why: &str| {};
     let incident = graph.incident(node);
@@ -956,17 +768,11 @@ fn plan_diamond(
     // world's streets nothing outside meets it, and it stood in the fields as
     // a dead end; such a crossing gets no interchange.
     let mut stub: Option<Vec<V>> = None;
-    let mut one_arm = false;
     match far {
         Some(i) if streets.len() == 2 => across.push(Some(i)),
         None if streets.len() == 1 && carry_on => {
-            // Long enough for the terminal and the room past it; a loop's
-            // terminal stands farther out.
-            let stub_m = if forms[1] == Quadrant::Diamond {
-                TERMINAL_M
-            } else {
-                (half_deck + RAMP_HALF_M + 2.0 * LOOP_R_M) / 0.9 + TERMINAL_GAP_M
-            } + 90.0;
+            // Long enough for the terminal and the room past it.
+            let stub_m = TERMINAL_M + 90.0;
             let a = direction(first);
             let out = mul(a, -1.0);
             let line = vec![graph.pts[node], add(graph.pts[node], mul(out, stub_m))];
@@ -984,15 +790,11 @@ fn plan_diamond(
             stub = Some(line);
             across.push(None);
         }
-        // A street that ends at the expressway with nothing beyond it (a T):
-        // everything is on its one side, a full cloverleaf of its own, whose
-        // two loops turn left for the traffic of both decks.
+        // A street that ends at the expressway with nothing beyond it (a T) has
+        // no far arm for the other half of a diamond: no interchange.
         None if streets.len() == 1 && !carry_on => {
-            if forms[0] != Quadrant::Clover {
-                debug("a T takes the full cloverleaf only");
-                return None;
-            }
-            one_arm = true;
+            debug("a T has no far arm for a diamond");
+            return None;
         }
         _ => {
             debug("the crossing street is not one street across");
@@ -1004,28 +806,15 @@ fn plan_diamond(
         None => stub.clone().unwrap_or_default(),
     };
     let mut terminals: Vec<(Option<usize>, Vec<V>, f32)> = Vec::new();
-    let mut loop_at: [Option<f32>; 2] = [None; 2];
     let mut remove: Vec<usize> = Vec::new();
     let abut = half_deck + RAMP_HALF_M;
-    for (k, slot) in across.into_iter().enumerate() {
+    for slot in across {
         let line = arm_line(slot);
         let arm_len = polyline_len(&line);
         // Room for the terminal and its box before the arm's next junction;
         // or, where that junction is close, the ramps land at it, and the
         // local streets that met the arterial there are closed off.
-        // A loop side's terminal stands out past the loop and the outer ramp
-        // beside it: at the loop's own radius if the street has the room, at
-        // the tightest loop if not.
-        let (want, least) = if forms[k] == Quadrant::Diamond {
-            (TERMINAL_M, TERMINAL_MIN_M)
-        } else {
-            let a = unit(sub(sample(&line, 12.0).0, line[0]));
-            let square = cross(a, t).abs().max(0.5);
-            (
-                (abut + 2.0 * LOOP_R_M) / square + TERMINAL_GAP_M,
-                (abut + 2.0 * LOOP_R_MIN_M) / square + TERMINAL_GAP_M,
-            )
-        };
+        let (want, least) = (TERMINAL_M, TERMINAL_MIN_M);
         let mut at = want.min(arm_len - 30.0);
         if at < least {
             let Some(road) = slot else {
@@ -1064,9 +853,6 @@ fn plan_diamond(
             debug("the arterial crosses too obliquely");
             return None;
         }
-        if forms[k] != Quadrant::Diamond {
-            loop_at[k] = Some(at - TERMINAL_GAP_M);
-        }
         terminals.push((slot, line, at));
     }
     // A local street crossing where the ramps come down is closed (and what is
@@ -1089,7 +875,7 @@ fn plan_diamond(
         }
     }
     let mut ramps = Vec::new();
-    for (k, (slot, line, at)) in terminals.iter().enumerate() {
+    for (k, (_, line, at)) in terminals.iter().enumerate() {
         let tp = sample(line, *at).0;
         let (s_t, lateral) = project(&chain.line, tp);
         // Traffic on the terminal's side of the deck runs with the main line
@@ -1108,78 +894,6 @@ fn plan_diamond(
             add(p, mul(kerb_side(mul(tt, sign)), offset))
         };
         let s_term = sign * (s_t - chain.at);
-        if forms[k] != Quadrant::Diamond {
-            let class = slot.map_or(ModernRoadClass::Arterial, |road| graph.roads[road].class);
-            let street_half = crate::cross_section(class).width_metres * 0.5;
-            // Built for the quadrant before the street; after it, the same
-            // ramps mirrored across the crossing and run the other way, laid
-            // out for the terminal's mirrored station so it lands on it.
-            for &after in forms[k].loops() {
-                // A quadrant is laid out square to the deck where it crosses the
-                // street, not along the deck's centreline: offset 100 m and more
-                // off a line with a bend in it, the loop would jump where the
-                // normal turns. The outer ramp eases from the deck's own line,
-                // where it leaves the deck, into this frame.
-                let (p0, t0) = sample(&chain.line, chain.at);
-                let (t0, n0) = (mul(t0, sign), kerb_side(mul(t0, sign)));
-                let square =
-                    |s_travel: f32, offset: f32| add(p0, add(mul(t0, s_travel), mul(n0, offset)));
-                let tl = sample(line, loop_at[k].unwrap_or(*at)).0;
-                let local = |p: V| {
-                    let s = dot(sub(p, p0), t0);
-                    (if after { -s } else { s }, dot(sub(p, p0), n0))
-                };
-                let d = local(tp).1;
-                let Some(quadrant) = loop_quadrant(abut, local(tp), local(tl), street_half) else {
-                    debug("the loop does not fit between the deck and the terminal");
-                    return None;
-                };
-                let wide = d + LOOP_LEG_M;
-                let place = |pts: &[(f32, f32)], ease: bool| -> Vec<V> {
-                    let mut out: Vec<V> = pts
-                        .iter()
-                        .map(|&(s, l)| {
-                            let s = if after { -s } else { s };
-                            let w = if ease {
-                                smootherstep((l - abut) / (wide - abut))
-                            } else {
-                                1.0
-                            };
-                            let (a, b) = (point(s, l), square(s, l));
-                            add(a, mul(sub(b, a), w))
-                        })
-                        .collect();
-                    if after {
-                        out.reverse();
-                    }
-                    out
-                };
-                let mut outer = place(&quadrant.outer, true);
-                let mut inner = place(&quadrant.loop_line, false);
-                // The terminal ends are the terminals themselves, mirrored or not.
-                if after {
-                    *outer.first_mut().expect("a ramp has points") = tp;
-                    *inner.last_mut().expect("a ramp has points") = tl;
-                } else {
-                    *outer.last_mut().expect("a ramp has points") = tp;
-                    *inner.first_mut().expect("a ramp has points") = tl;
-                }
-                let flip = if after { -1.0 } else { 1.0 };
-                ramps.push(RampPlan {
-                    off: !after,
-                    terminal: k,
-                    deck_station: chain.at + sign * flip * -RAMP_REACH_M,
-                    line: outer,
-                });
-                ramps.push(RampPlan {
-                    off: after,
-                    terminal: 2 + k,
-                    deck_station: chain.at + sign * flip * quadrant.loop_deck,
-                    line: inner,
-                });
-            }
-            continue;
-        }
         // Off-ramp: from beside the deck `RAMP_REACH_M` before the crossing to
         // the terminal, splaying out after the taper and running in straight
         // for the last 30 m.
@@ -1274,8 +988,6 @@ fn plan_diamond(
         ramps,
         remove,
         stub,
-        loop_at,
-        one_arm,
     })
 }
 
@@ -1295,8 +1007,7 @@ fn build_diamond(graph: &mut Graph, diamond: Diamond, layout: &mut Layout) {
     let arms: Vec<usize> = diamond.terminals.iter().filter_map(|t| t.0).collect();
     mend_stubs(graph, &degree_before, false, &arms);
     // The terminals first: they cut the arterial arms, which the ramps end on.
-    // A loop side's second terminal is cut on the same arm, nearer the deck.
-    let mut terminal_nodes = [usize::MAX; 4];
+    let mut terminal_nodes = [usize::MAX; 2];
     for (k, (slot, line, at)) in diamond.terminals.iter().enumerate() {
         let road = match slot {
             Some(road) => *road,
@@ -1335,24 +1046,7 @@ fn build_diamond(graph: &mut Graph, diamond: Diamond, layout: &mut Layout) {
             cuts.push((along(*at), n));
             terminal_nodes[k] = n;
         }
-        if let Some(loop_at) = diamond.loop_at[k] {
-            let n = graph.node(sample(line, loop_at).0, "ramp-terminal");
-            cuts.push((along(loop_at), n));
-            terminal_nodes[2 + k] = n;
-        }
         graph.split(road, cuts);
-    }
-    // A street that ended at the deck stops at its terminals: the piece of it
-    // that ran on to the deck would be a dead end under the viaduct.
-    if diamond.one_arm {
-        for index in graph.incident(diamond.node) {
-            let r = &graph.roads[index];
-            if !main_line(r) && !r.oneway {
-                graph.roads[index].from = usize::MAX;
-                graph.roads[index].to = usize::MAX;
-                graph.roads[index].line.clear();
-            }
-        }
     }
     // The deck ends: two nodes on the main line, each shared by an off-ramp of
     // one direction and an on-ramp of the other. Cut the farther station first,
@@ -1559,7 +1253,7 @@ fn lay_corridor(frame: &CityFrame, graph: &mut Graph) -> Option<Vec<V>> {
             if built.iter().any(|t| (s - t).abs() < SPACING_M) {
                 continue;
             }
-            if plan_diamond(&trial, node, half_deck, false, [Quadrant::Diamond; 2]).is_some() {
+            if plan_diamond(&trial, node, half_deck, false).is_some() {
                 built.push(s);
             }
         }
@@ -1880,24 +1574,7 @@ pub(super) fn lay_out(
             continue;
         }
         let carry_on = frame.external.is_none();
-        // The form wanted here, then each loop side given up in turn, then the
-        // diamond, which fits wherever any interchange does.
-        // Every pair of the two sides' fallbacks, the least given up first.
-        let [a, b] = interchange_form(p);
-        let mut tries: Vec<(usize, [Quadrant; 2])> = Vec::new();
-        for (i, &fa) in a.fallbacks().iter().enumerate() {
-            for (j, &fb) in b.fallbacks().iter().enumerate() {
-                tries.push((i + j, [fa, fb]));
-            }
-        }
-        tries.sort_by_key(|t| t.0);
-        // A street that ends at the deck (a T) has its one arm only.
-        tries.push((usize::MAX, [Quadrant::Clover, Quadrant::Diamond]));
-        let tries: Vec<[Quadrant; 2]> = tries.into_iter().map(|t| t.1).collect();
-        let Some(diamond) = tries
-            .into_iter()
-            .find_map(|forms| plan_diamond(&graph, node, half_deck, carry_on, forms))
-        else {
+        let Some(diamond) = plan_diamond(&graph, node, half_deck, carry_on) else {
             continue;
         };
         build_diamond(&mut graph, diamond, &mut layout);
@@ -1918,7 +1595,7 @@ pub(super) fn lay_out(
             let upper = layout.systems.iter().any(|site| {
                 road.line
                     .iter()
-                    .all(|p| dot(sub(*p, site.centre), site.m_dir).abs() < 8.0)
+                    .all(|p| cross(site.x_dir, sub(*p, site.centre)).abs() < 8.0)
             });
             let near = !upper
                 && road.line.iter().any(|p| {
@@ -2067,7 +1744,7 @@ pub(super) fn grade_separate(
             let p = frame.to_local(node.point);
             layout.systems.iter().any(|site| {
                 n != site.node
-                    && dot(sub(p, site.centre), site.m_dir).abs() < 8.0
+                    && cross(site.x_dir, sub(p, site.centre)).abs() < 8.0
                     && dot(sub(p, site.centre), site.x_dir).abs() <= site.half + 1.0
             })
         })

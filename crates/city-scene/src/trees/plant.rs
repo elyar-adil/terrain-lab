@@ -733,6 +733,56 @@ fn plant_with(
         }
     }
     output.tufts = tufts;
+    // The verge of an interchange: a planted belt down both sides of every
+    // ramp, beyond the deck's edge, as a freeway's ramps are lined. It takes
+    // what is left of the budget, and not a street at grade.
+    {
+        let streets: Vec<Vec<Vec2>> = network
+            .roads
+            .iter()
+            .filter(|road| road.layer == 0)
+            .map(|road| {
+                road.carriageway
+                    .points()
+                    .iter()
+                    .map(|q| Vec2::new(q.x, q.z))
+                    .collect()
+            })
+            .collect();
+        for road in network
+            .roads
+            .iter()
+            .filter(|r| r.layer != 0 && r.oneway && r.is_motorway())
+        {
+            let length = road.carriageway.length();
+            let lateral = road.half_width() + 6.5;
+            let mut station = 12.0 + (road.id % 5) as f32;
+            while station < length - 12.0 {
+                for direction in [-1.0_f32, 1.0] {
+                    let q = road
+                        .carriageway
+                        .offset_at(station, direction * lateral, 0.0);
+                    let at = Vec2::new(q.x, q.z);
+                    let near = streets.iter().any(|line| {
+                        line.len() >= 2 && crate::math::distance_to_polyline(at, line) < 12.0
+                    });
+                    if !near {
+                        place(
+                            TreeRole::Street,
+                            at,
+                            lists.motorway,
+                            prototypes,
+                            &mut rng,
+                            builder,
+                            &mut output,
+                            &mut counts,
+                        );
+                    }
+                }
+                station += 11.0;
+            }
+        }
+    }
     // Nothing grows under a viaduct's deck: in the dark and dry between its
     // piers a tree would also stand up through the road above it. Each deck
     // as its plan line, with its half-width and a crown's reach.
