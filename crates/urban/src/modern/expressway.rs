@@ -726,7 +726,7 @@ struct Diamond {
     /// The two arms of the street across: (road index, or `None` for the stub
     /// that carries an arterial across; its line from the node; the distance
     /// along it to the terminal).
-    terminals: [(Option<usize>, Vec<V>, f32); 2],
+    terminals: Vec<(Option<usize>, Vec<V>, f32)>,
     ramps: Vec<RampPlan>,
     /// Local streets cut where the ramps come down.
     remove: Vec<usize>,
@@ -735,6 +735,8 @@ struct Diamond {
     /// A loop side's second terminal, nearer the deck on the same arm: the
     /// distance along it.
     loop_at: [Option<f32>; 2],
+    /// The street ends at the deck: nothing of it is left under the deck.
+    one_arm: bool,
 }
 
 struct RampPlan {
@@ -921,6 +923,7 @@ fn plan_diamond(
     // world's streets nothing outside meets it, and it stood in the fields as
     // a dead end; such a crossing gets no interchange.
     let mut stub: Option<Vec<V>> = None;
+    let mut one_arm = false;
     match far {
         Some(i) if streets.len() == 2 => across.push(Some(i)),
         None if streets.len() == 1 && carry_on => {
@@ -947,6 +950,16 @@ fn plan_diamond(
             }
             stub = Some(line);
             across.push(None);
+        }
+        // A street that ends at the expressway with nothing beyond it (a T):
+        // everything is on its one side, a full cloverleaf of its own, whose
+        // two loops turn left for the traffic of both decks.
+        None if streets.len() == 1 && !carry_on => {
+            if forms[0] != Quadrant::Clover {
+                debug("a T takes the full cloverleaf only");
+                return None;
+            }
+            one_arm = true;
         }
         _ => {
             debug("the crossing street is not one street across");
@@ -1042,7 +1055,6 @@ fn plan_diamond(
             remove.push(i);
         }
     }
-    let terminals: [(Option<usize>, Vec<V>, f32); 2] = terminals.try_into().ok()?;
     let mut ramps = Vec::new();
     for (k, (slot, line, at)) in terminals.iter().enumerate() {
         let tp = sample(line, *at).0;
@@ -1183,7 +1195,7 @@ fn plan_diamond(
         .iter()
         .map(|(_, line, at)| project(&chain.line, sample(line, *at).0).1.signum())
         .collect();
-    if sides[0] == sides[1] {
+    if sides.len() == 2 && sides[0] == sides[1] {
         debug("both terminals are on one side of the deck");
         return None;
     }
@@ -1230,6 +1242,7 @@ fn plan_diamond(
         remove,
         stub,
         loop_at,
+        one_arm,
     })
 }
 
@@ -1295,6 +1308,18 @@ fn build_diamond(graph: &mut Graph, diamond: Diamond, layout: &mut Layout) {
             terminal_nodes[2 + k] = n;
         }
         graph.split(road, cuts);
+    }
+    // A street that ended at the deck stops at its terminals: the piece of it
+    // that ran on to the deck would be a dead end under the viaduct.
+    if diamond.one_arm {
+        for index in graph.incident(diamond.node) {
+            let r = &graph.roads[index];
+            if !main_line(r) && !r.oneway {
+                graph.roads[index].from = usize::MAX;
+                graph.roads[index].to = usize::MAX;
+                graph.roads[index].line.clear();
+            }
+        }
     }
     // The deck ends: two nodes on the main line, each shared by an off-ramp of
     // one direction and an on-ramp of the other. Cut the farther station first,
@@ -1815,6 +1840,8 @@ pub(super) fn lay_out(
             }
         }
         tries.sort_by_key(|t| t.0);
+        // A street that ends at the deck (a T) has its one arm only.
+        tries.push((usize::MAX, [Quadrant::Clover, Quadrant::Diamond]));
         let tries: Vec<[Quadrant; 2]> = tries.into_iter().map(|t| t.1).collect();
         let Some(diamond) = tries
             .into_iter()

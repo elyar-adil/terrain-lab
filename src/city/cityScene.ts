@@ -17,6 +17,7 @@
 
 import * as THREE from "three";
 
+import { patchBark } from "./bark";
 import { applyAntiTiling } from "./antiTile";
 import { patchElevationMaterial } from "./elevation";
 import { createFacadeMaterial, facadeTableTexture } from "./facade";
@@ -569,7 +570,18 @@ export function createMaterials(
   standard("viaduct.planter", { roughness: 0.9, vertexColors: true }, 0xffffff);
   standard("bridge.stone", { roughness: 0.88, side: THREE.DoubleSide, vertexColors: true }, 0xb4aca0);
   // Dressed river-wall stone and paving: vertex colours carry the wet base and coping.
-  standard("quay.stone", { roughness: 0.9, side: THREE.DoubleSide, vertexColors: true }, 0xc4bcb0);
+  // The paving's slab texture, laid level on the walls and flat on the promenade.
+  standard(
+    "quay.stone",
+    {
+      map: pavingMap ?? undefined,
+      normalMap: normalFor("ground/paving", 1.4) ?? undefined,
+      roughness: 0.9,
+      side: THREE.DoubleSide,
+      vertexColors: true,
+    },
+    pavingMap ? 0xf2ece2 : 0xc4bcb0,
+  );
   {
     // Foam: several stacked translucent white strips give a soft, fading edge.
     const foam = new THREE.MeshStandardMaterial({
@@ -823,7 +835,7 @@ export function createMaterials(
   standard("car/body", { roughness: 0.3, metalness: 0.35, envMapIntensity: 1.0 }, 0xffffff);
   standard("car/glass", { roughness: 0.12, metalness: 0.5, envMapIntensity: 1.1 }, 0x1c2429);
   standard("car/wheel", { roughness: 0.9 }, 0x101012);
-  standard("bark", { roughness: 0.95, flatShading: true, vertexColors: true }, 0xffffff);
+  patchBark(standard("bark", { roughness: 0.95, vertexColors: true }, 0xffffff));
 
   // Foliage: alpha-cut, double-sided, tinted per instance and per vertex.
   // `side: DoubleSide` is required — a leaf card is a quad, and half of them face

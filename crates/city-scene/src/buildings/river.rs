@@ -18,6 +18,34 @@ const TOP: f32 = 0.85;
 const COPING: f32 = 0.98;
 const WATER_Y: f32 = 0.03;
 
+/// [`MeshBuilder::wall`] with texture coordinates: `U` up the wall and `V`
+/// along it in metres, so a paving-stone texture lays its courses level, as a
+/// quay wall's stones are laid.
+fn wall_uv(
+    builder: &mut MeshBuilder,
+    material: &str,
+    a: Vec2,
+    b: Vec2,
+    y0: f32,
+    y1: f32,
+    color: Option<[f32; 3]>,
+) {
+    if (y1 - y0).abs() <= 1.0e-4 {
+        return;
+    }
+    let along = (b - a).normalize();
+    let (va, vb) = (a.x * along.x + a.y * along.y, b.x * along.x + b.y * along.y);
+    builder.quad_uv(
+        material,
+        Vec3::from_plan(a, y0),
+        Vec3::from_plan(b, y0),
+        Vec3::from_plan(b, y1),
+        Vec3::from_plan(a, y1),
+        [(y0, va), (y0, vb), (y1, vb), (y1, va)],
+        color,
+    );
+}
+
 fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     let t = t.clamp(0.0, 1.0);
     [
@@ -220,8 +248,8 @@ pub fn build_water(
                 let j = i;
                 let o = |off: f32| at(j, oe + sg * off);
                 let cap = |builder: &mut MeshBuilder, off0: f32, off1: f32, y0: f32, y1: f32| {
-                    builder.wall(QUAY, o(off0), o(off1), y0, y1, Some(stone));
-                    builder.wall(QUAY, o(off1), o(off0), y0, y1, Some(stone));
+                    wall_uv(builder, QUAY, o(off0), o(off1), y0, y1, Some(stone));
+                    wall_uv(builder, QUAY, o(off1), o(off0), y0, y1, Some(stone));
                 };
                 cap(builder, 0.0, 4.0, -0.2, TOP);
             }
@@ -232,10 +260,10 @@ pub fn build_water(
             let stairs = stair_seg(i);
             let out = |p: usize, off: f32| at(p, oe + sg * off);
             // Water face: a dark wet base under the waterline, dressed stone above.
-            builder.wall(QUAY, a_w, b_w, -1.0, WATER_Y, Some(wet));
-            builder.wall(QUAY, b_w, a_w, -1.0, WATER_Y, Some(wet));
-            builder.wall(QUAY, a_w, b_w, WATER_Y, TOP, Some(stone));
-            builder.wall(QUAY, b_w, a_w, WATER_Y, TOP, Some(stone));
+            wall_uv(builder, QUAY, a_w, b_w, -1.0, WATER_Y, Some(wet));
+            wall_uv(builder, QUAY, b_w, a_w, -1.0, WATER_Y, Some(wet));
+            wall_uv(builder, QUAY, a_w, b_w, WATER_Y, TOP, Some(stone));
+            wall_uv(builder, QUAY, b_w, a_w, WATER_Y, TOP, Some(stone));
             let s = arc[i];
             let tone = 0.94 + 0.12 * cell01(0xC33, (s / 4.0) as i32, side_id, 1);
             let top_col = [paving[0] * tone, paving[1] * tone, paving[2] * tone];
@@ -260,13 +288,14 @@ pub fn build_water(
                         Some(coping_col),
                     );
                     let (p, q) = (out(i, -d1), out(i + 1, -d1));
-                    builder.wall(QUAY, p, q, y - 0.19, y, Some(stone));
-                    builder.wall(QUAY, q, p, y - 0.19, y, Some(stone));
+                    wall_uv(builder, QUAY, p, q, y - 0.19, y, Some(stone));
+                    wall_uv(builder, QUAY, q, p, y - 0.19, y, Some(stone));
                     // Side cheek walls, kept out of the water above the last tread.
                 }
             } else {
                 // Coping: a proud, lighter stone edge.
-                builder.wall(
+                wall_uv(
+                    builder,
                     QUAY,
                     out(i, -0.06),
                     out(i + 1, -0.06),
@@ -274,7 +303,8 @@ pub fn build_water(
                     COPING,
                     Some(coping_col),
                 );
-                builder.wall(
+                wall_uv(
+                    builder,
                     QUAY,
                     out(i + 1, -0.06),
                     out(i, -0.06),
@@ -294,7 +324,8 @@ pub fn build_water(
                     QUAY,
                     Some(coping_col),
                 );
-                builder.wall(
+                wall_uv(
+                    builder,
                     QUAY,
                     out(i, 0.42),
                     out(i + 1, 0.42),
@@ -302,7 +333,8 @@ pub fn build_water(
                     COPING,
                     Some(coping_col),
                 );
-                builder.wall(
+                wall_uv(
+                    builder,
                     QUAY,
                     out(i + 1, 0.42),
                     out(i, 0.42),
@@ -321,8 +353,8 @@ pub fn build_water(
             // Landward edge: two risers step down to the ground.
             for (o0, y0, y1) in [(3.4_f32, 0.42_f32, TOP), (4.0, 0.0, 0.42)] {
                 let (p, q) = (out(i, o0), out(i + 1, o0));
-                builder.wall(QUAY, p, q, y0, y1, Some(stone));
-                builder.wall(QUAY, q, p, y0, y1, Some(stone));
+                wall_uv(builder, QUAY, p, q, y0, y1, Some(stone));
+                wall_uv(builder, QUAY, q, p, y0, y1, Some(stone));
             }
             put(
                 builder,
