@@ -1250,7 +1250,7 @@ fn build_diamond(graph: &mut Graph, diamond: Diamond, layout: &mut Layout) {
     mend_stubs(graph, &degree_before, false, &arms);
     // The terminals first: they cut the arterial arms, which the ramps end on.
     // A loop side's second terminal is cut on the same arm, nearer the deck.
-    let mut terminal_nodes = vec![usize::MAX; 4];
+    let mut terminal_nodes = [usize::MAX; 4];
     for (k, (slot, line, at)) in diamond.terminals.iter().enumerate() {
         let road = match slot {
             Some(road) => *road,
