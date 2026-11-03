@@ -48,6 +48,8 @@ const TERMINAL_M: f32 = 58.0;
 const TERMINAL_MIN_M: f32 = 38.0;
 /// The ramp runs beside the deck for this long before it splays away from it.
 const TAPER_M: f32 = 70.0;
+/// A diamond keeps this far from a system interchange.
+const SYSTEM_CLEAR_M: f32 = 1_300.0;
 /// Interchanges are at least this far apart along the expressway.
 const SPACING_M: f32 = 1_050.0;
 /// No other street may cross the expressway this close to an interchange, or
@@ -181,7 +183,11 @@ pub(super) struct Layout {
     /// once they are cut, the taper is dropped and the ramp meets the deck node
     /// itself, its line still starting beside the deck.
     tapers: Vec<usize>,
+    /// System interchanges: where a second expressway flies over this one.
+    systems: Vec<system::SystemSite>,
 }
+
+mod system;
 
 fn sub(a: V, b: V) -> V {
     (a.0 - b.0, a.1 - b.1)
@@ -595,11 +601,38 @@ fn main_line(road: &Road) -> bool {
 
 /// Walk the expressway main line out of `node` both ways, up to `reach` metres.
 fn chain_at(graph: &Graph, node: usize, reach: f32) -> Option<Chain> {
-    let arms: Vec<usize> = graph
+    chain_through(graph, node, reach, None)
+}
+
+/// [`chain_at`] for a node where two main lines cross: the one that runs along
+/// `dir`.
+fn chain_through(graph: &Graph, node: usize, reach: f32, dir: Option<V>) -> Option<Chain> {
+    let mut arms: Vec<usize> = graph
         .incident(node)
         .into_iter()
         .filter(|&i| main_line(&graph.roads[i]))
         .collect();
+    if let Some(dir) = dir {
+        // The two arms that leave along `dir` and against it.
+        let leaving = |road: usize| {
+            let (_, line, _) = arm(graph, road, node);
+            unit(sub(sample(&line, 12.0).0, line[0]))
+        };
+        let ahead = arms
+            .iter()
+            .copied()
+            .filter(|&i| dot(leaving(i), dir) > 0.7)
+            .max_by(|&a, &b| dot(leaving(a), dir).total_cmp(&dot(leaving(b), dir)));
+        let behind = arms
+            .iter()
+            .copied()
+            .filter(|&i| dot(leaving(i), dir) < -0.7)
+            .min_by(|&a, &b| dot(leaving(a), dir).total_cmp(&dot(leaving(b), dir)));
+        let (Some(ahead), Some(behind)) = (ahead, behind) else {
+            return None;
+        };
+        arms = vec![behind, ahead];
+    }
     let [first, second] = arms.as_slice() else {
         return None;
     };
@@ -1381,11 +1414,11 @@ const CORRIDOR_HALF_M: f32 = 34.0;
 /// slant, and passes at a fringe of the centre, as a Chinese city's elevated
 /// expressway skirts its old core. The streets it crosses are cut where it
 /// crosses them; the expressway is lifted off them after the blocks.
-fn lay_corridor(frame: &CityFrame, graph: &mut Graph) -> bool {
+fn lay_corridor(frame: &CityFrame, graph: &mut Graph) -> Option<Vec<V>> {
     // How big the town is: where nine in ten of its nodes lie.
     let mut radii: Vec<f32> = graph.pts.iter().map(|p| len(*p)).collect();
     if radii.len() < 200 {
-        return false;
+        return None;
     }
     radii.sort_by(f32::total_cmp);
     let reach = radii[radii.len() * 9 / 10];
@@ -1396,7 +1429,7 @@ fn lay_corridor(frame: &CityFrame, graph: &mut Graph) -> bool {
         .map(|r| polyline_len(&r.line))
         .sum();
     if reach < 1_200.0 || arterial_m < 6_000.0 {
-        return false;
+        return None;
     }
     let river = frame.river_line();
     // The line at angle `a` and offset `o`, out past the town.
@@ -1538,11 +1571,9 @@ fn lay_corridor(frame: &CityFrame, graph: &mut Graph) -> bool {
             best = Some((built.len(), cost, line));
         }
     }
-    let Some((_, _, line)) = best else {
-        return false;
-    };
+    let (_, _, line) = best?;
     insert_corridor(graph, &line);
-    true
+    Some(line)
 }
 
 /// Lay the corridor along `line`: the streets running along it give way, and it
@@ -1797,10 +1828,16 @@ pub(super) fn lay_out(
     let mut graph = Graph::new(frame, &nodes, &sd, &hd);
     // A town grown on outside streets has no expressway of its own; a big one
     // gets one (`lay_corridor`).
-    if !sd.iter().any(|r| r.class == ModernRoadClass::Expressway)
-        && !(frame.external.is_some() && lay_corridor(frame, &mut graph))
-    {
-        return (nodes, sd, hd, layout);
+    let mut corridor: Option<Vec<V>> = None;
+    if !sd.iter().any(|r| r.class == ModernRoadClass::Expressway) {
+        corridor = if frame.external.is_some() {
+            lay_corridor(frame, &mut graph)
+        } else {
+            None
+        };
+        if corridor.is_none() {
+            return (nodes, sd, hd, layout);
+        }
     }
     let half_deck = crate::cross_section(ModernRoadClass::Expressway).width_metres * 0.5;
     // Candidate crossings, the most central first, so a town's interchange is
@@ -1822,10 +1859,24 @@ pub(super) fn lay_out(
         len(pa).total_cmp(&len(pb))
     });
     let mut built: Vec<V> = Vec::new();
+    // Where two expressways cross, a system interchange takes the land first.
+    let mut systems: Vec<V> = Vec::new();
+    if let Some(line) = &corridor {
+        let mut radii: Vec<f32> = graph.pts.iter().map(|p| len(*p)).collect();
+        radii.sort_by(f32::total_cmp);
+        let reach = radii[radii.len() * 9 / 10];
+        if let Some(p) = system::lay(&mut graph, &mut layout, line, reach, half_deck) {
+            built.push(p);
+            systems.push(p);
+            layout.interchanges += 1;
+        }
+    }
     for node in candidates {
         let p = graph.pts[node];
         // Spacing along the line, measured straight: near enough for a town.
-        if built.iter().any(|q| len(sub(*q, p)) < SPACING_M) {
+        if built.iter().any(|q| len(sub(*q, p)) < SPACING_M)
+            || systems.iter().any(|q| len(sub(*q, p)) < SYSTEM_CLEAR_M)
+        {
             continue;
         }
         let carry_on = frame.external.is_none();
@@ -1862,11 +1913,19 @@ pub(super) fn lay_out(
             if !main_line(road) || road.line.len() < 2 {
                 continue;
             }
-            let near = road.line.iter().any(|p| {
-                built
+            // The upper expressway is left in long pieces: its slope down to the
+            // lower level needs the length, and it runs straight.
+            let upper = layout.systems.iter().any(|site| {
+                road.line
                     .iter()
-                    .any(|x| len(sub(*p, *x)) < RAMP_REACH_M + 250.0)
+                    .all(|p| dot(sub(*p, site.centre), site.m_dir).abs() < 8.0)
             });
+            let near = !upper
+                && road.line.iter().any(|p| {
+                    built
+                        .iter()
+                        .any(|x| len(sub(*p, *x)) < RAMP_REACH_M + 250.0)
+                });
             if near {
                 graph.densify(index, PIECE_M);
             }
@@ -1897,6 +1956,44 @@ pub(super) fn grade_separate(
     for (i, r) in sd.iter().enumerate() {
         incident[r.from as usize].push(i);
         incident[r.to as usize].push(i);
+    }
+    // Where two expressways cross, the upper one gets a node of its own.
+    for site in &layout.systems {
+        let n = site.node;
+        let id = nodes.len() as u32;
+        let mut moved: Vec<usize> = Vec::new();
+        nodes.push(SdNode {
+            id,
+            point: nodes[n].point,
+            role: "flyover".into(),
+        });
+        for &i in &incident[n] {
+            let road = &sd[i];
+            if road.class != ModernRoadClass::Expressway
+                || oneway.get(&road.id).copied().unwrap_or(false)
+            {
+                continue;
+            }
+            let Some(h) = hd.iter().find(|h| h.id == road.id) else {
+                continue;
+            };
+            let pts: Vec<V> = h.centreline.iter().map(|p| frame.to_local(*p)).collect();
+            let (a, b) = if road.from as usize == n {
+                (pts[0], pts[1.min(pts.len() - 1)])
+            } else {
+                (pts[pts.len() - 1], pts[pts.len().saturating_sub(2)])
+            };
+            if dot(unit(sub(b, a)), site.x_dir).abs() > 0.7 {
+                if sd[i].from as usize == n {
+                    sd[i].from = id;
+                } else {
+                    sd[i].to = id;
+                }
+                moved.push(i);
+            }
+        }
+        incident.push(moved.clone());
+        incident[n].retain(|i| !moved.contains(i));
     }
     let mut split: Vec<usize> = (0..nodes.len())
         .filter(|&n| {
@@ -1962,15 +2059,36 @@ pub(super) fn grade_separate(
             lifted.push(n);
         }
     }
+    // The nodes of the upper expressway where it rides the upper deck.
+    let high: Vec<bool> = nodes
+        .iter()
+        .enumerate()
+        .map(|(n, node)| {
+            let p = frame.to_local(node.point);
+            layout.systems.iter().any(|site| {
+                n != site.node
+                    && dot(sub(p, site.centre), site.m_dir).abs() < 8.0
+                    && dot(sub(p, site.centre), site.x_dir).abs() <= site.half + 1.0
+            })
+        })
+        .collect();
     for node in lifted {
         ease_through(frame, nodes, sd, hd, node);
     }
     smooth_main_line(frame, nodes, sd, hd);
     drop_tapers(sd, hd, &layout.tapers);
     drop_orphans(nodes.len(), sd, hd);
+    let ends: HashMap<u32, (usize, usize)> = sd
+        .iter()
+        .map(|r| (r.id, (r.from as usize, r.to as usize)))
+        .collect();
     for road in hd.iter_mut() {
         if road.class == ModernRoadClass::Expressway {
-            road.layer = 1;
+            let upper = !road.oneway
+                && ends.get(&road.id).is_some_and(|&(a, b)| {
+                    high.get(a) == Some(&true) && high.get(b) == Some(&true)
+                });
+            road.layer = if upper { 2 } else { 1 };
             road.bridge = false;
         }
     }

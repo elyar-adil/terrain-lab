@@ -38,6 +38,10 @@ pub const STRUCTURE_HEIGHT: f32 = 6.4;
 /// for motor traffic), a 2 m box girder and its surfacing. The reference
 /// photographs of Shenzhen and Shanghai put the soffit at 7 - 8 m.
 pub const VIADUCT_Y: f32 = 9.0;
+/// The second deck level, where one expressway flies over another at a system
+/// interchange: nine metres above the first, which leaves its soffit the same
+/// 7 m above the lower deck that the lower deck's has above a street.
+pub const VIADUCT2_Y: f32 = 18.0;
 /// Grade a ramp falls at between its vertical curves (CJJ 129 allows 5 - 6 %
 /// on a 40 km/h ramp; 4.5 % leaves a margin under the limit).
 const RAMP_GRADE: f32 = 0.045;
@@ -498,7 +502,34 @@ pub fn derive(
                     .all(|id| sd_by_id.get(id).is_some_and(|road| !road.bridge))
         })
         .collect();
-    let node_y = |node: usize| if air[node] { VIADUCT_Y } else { ROADBED_Y };
+    // A deck node stands at the level of the main line through it (a ramp
+    // runs level into whichever deck it joins); one with ramps only, at the
+    // highest of them.
+    let oneway_of: HashMap<u32, bool> = hd_roads.iter().map(|r| (r.id, r.oneway)).collect();
+    let level_y = |layer: i8| match layer {
+        0 => ROADBED_Y,
+        1 => VIADUCT_Y,
+        _ => VIADUCT2_Y,
+    };
+    let air_y: Vec<f32> = incidence
+        .iter()
+        .enumerate()
+        .map(|(index, list)| {
+            if !air[index] {
+                return ROADBED_Y;
+            }
+            let layer_of = |id: &u32| layer_of_road.get(id).copied().unwrap_or(0);
+            let mains = list
+                .iter()
+                .filter(|id| !oneway_of.get(id).copied().unwrap_or(false));
+            let layer = mains
+                .map(layer_of)
+                .max()
+                .unwrap_or_else(|| list.iter().map(layer_of).max().unwrap_or(0));
+            level_y(layer)
+        })
+        .collect();
+    let node_y = |node: usize| air_y[node];
     network.air = air.clone();
 
     // --- junction control -----------------------------------------------------
@@ -3248,7 +3279,16 @@ mod tests {
                 ] {
                     let (point, _) = road.centreline.sample(station);
                     let in_air = degree(node) >= 2 && network.junction(node).is_none();
-                    let expected = if in_air { VIADUCT_Y } else { ROADBED_Y };
+                    let expected = if in_air { point.y } else { ROADBED_Y };
+                    assert!(
+                        !in_air
+                            || [VIADUCT_Y, VIADUCT2_Y]
+                                .iter()
+                                .any(|y| (point.y - y).abs() < 1.0e-3),
+                        "seed {seed}: road {} meets a deck at {:.3} m, not a viaduct level",
+                        road.id,
+                        point.y
+                    );
                     assert!(
                         (point.y - expected).abs() < 1.0e-3,
                         "seed {seed}: road {} stands {:.3} m above roadbed where it meets \
