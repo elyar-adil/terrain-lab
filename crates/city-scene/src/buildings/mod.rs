@@ -46,6 +46,7 @@ pub(crate) mod cn_commercial;
 mod cn_crowns;
 mod cn_kit;
 pub(crate) mod cn_residential;
+mod cn_shopsigns;
 pub(crate) mod details;
 pub(crate) mod house;
 mod industrial;
@@ -1333,6 +1334,10 @@ mod tests {
                     | "awning"
                     | "wall.render"
                     | "sign/shop"
+                    | "sign/board"
+                    | "sign/vert"
+                    | "sign/crown"
+                    | "sign/pole"
                     | "block.ground"
                     | "parcel.paving"
                     | "parcel.green"

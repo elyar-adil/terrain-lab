@@ -24,6 +24,7 @@ import { createFacadeMaterial, facadeTableTexture } from "./facade";
 import { patchCorrugation } from "./corrugated";
 import { patchWeathering } from "./weathering";
 import { applyGrassFur } from "./grassFur";
+import { buildSignTextures } from "./signs";
 
 /** One vertex buffer group from the payload. */
 export interface SceneMesh {
@@ -770,6 +771,65 @@ export function createMaterials(
       emissiveIntensity: 0.55,
     }),
   );
+  // Shop boards, hanging signs, company lettering and the barber pole: canvas
+  // sheets drawn from the manifest Rust ships (see `signs.ts`).
+  {
+    const manifest = sources.get("sign/manifest");
+    const sheets = manifest ? buildSignTextures(base64ToBytes(manifest.data)) : null;
+    if (sheets) {
+      builtTextures.push(...([sheets.board, sheets.vert, sheets.crown, sheets.pole] as THREE.DataTexture[]));
+      register(
+        "sign/board",
+        new THREE.MeshStandardMaterial({
+          map: sheets.board,
+          roughness: 0.45,
+          emissiveMap: sheets.board,
+          emissive: 0xffffff,
+          emissiveIntensity: 0.22,
+        }),
+      );
+      register(
+        "sign/vert",
+        new THREE.MeshStandardMaterial({
+          map: sheets.vert,
+          roughness: 0.5,
+          emissiveMap: sheets.vert,
+          emissive: 0xffffff,
+          emissiveIntensity: 0.22,
+          side: THREE.DoubleSide,
+        }),
+      );
+      // Separate letters: cut out of the sheet, lit from within at night.
+      register(
+        "sign/crown",
+        new THREE.MeshStandardMaterial({
+          map: sheets.crown,
+          alphaTest: 0.4,
+          roughness: 0.35,
+          metalness: 0.3,
+          emissiveMap: sheets.crown,
+          emissive: 0xffffff,
+          emissiveIntensity: 0.3,
+        }),
+      );
+      // The barber pole turns by scrolling its stripes (see `cityLayer.update`).
+      const pole = register(
+        "sign/pole",
+        new THREE.MeshStandardMaterial({
+          map: sheets.pole,
+          roughness: 0.25,
+          emissiveMap: sheets.pole,
+          emissive: 0xffffff,
+          emissiveIntensity: 0.35,
+        }),
+      );
+      pole.userData.poleMap = sheets.pole;
+    } else {
+      for (const key of ["sign/board", "sign/vert", "sign/crown", "sign/pole"]) {
+        standard(key, { roughness: 0.6 }, 0xcfcac0);
+      }
+    }
+  }
   patchWeathering(standard("trim.light", { roughness: 0.72 }, 0x8e887c), 0.6);
   standard("trim.dark", { roughness: 0.45, metalness: 0.2 }, 0x2a2f34);
   standard("balcony.slab", { roughness: 0.82 }, 0x7e7a70);

@@ -53,5 +53,6 @@ pub fn standard_set(facade_size: usize, ground_size: usize) -> Vec<BakedTexture>
     set.extend(leaf_card_textures(ground_size));
     set.push(tuft_texture(ground_size));
     set.push(signage_texture(256));
+    set.push(crate::facades::cn_signs::manifest_texture());
     set
 }

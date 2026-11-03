@@ -389,6 +389,9 @@ pub(super) fn ground_shops(plan: &[Vec2], building: &ModernBuilding, builder: &m
                 }
                 let p0 = a + along * (sa - u0);
                 let p1 = a + along * (sb - u0);
+                if super::cn_shopsigns::shop_signs(builder, p0, p1, out, seed) {
+                    continue;
+                }
                 projection(
                     builder,
                     "trim.dark",

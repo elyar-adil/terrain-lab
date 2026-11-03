@@ -47,6 +47,7 @@
 
 pub(crate) mod cn_grammar;
 pub(crate) mod cn_shopfront;
+pub(crate) mod cn_signs;
 pub(crate) mod designs;
 pub(crate) mod ground_floor;
 pub(crate) mod tile;

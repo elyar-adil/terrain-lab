@@ -215,6 +215,9 @@ function finishLayer(
     update(seconds: number, cameraDistanceM = 0, camera?: THREE.Camera): boolean {
       const clock = materials.get("water").userData.uTime as { value: number } | undefined;
       if (clock) clock.value = seconds;
+      // The barber poles turn: one stripe period every three seconds.
+      const poleMap = materials.get("sign/pole").userData?.poleMap as THREE.Texture | undefined;
+      if (poleMap) poleMap.offset.y = -((seconds / 3) % 1);
       if (!camera) return false;
       camera.updateMatrixWorld();
       // The group's scale is metres-to-scene, so its local frame is metres and
