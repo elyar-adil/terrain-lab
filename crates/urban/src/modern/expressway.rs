@@ -72,14 +72,13 @@ const LOOP_R_MAX_M: f32 = 65.0;
 /// the deck, the landing, the junction box it starts from and the taper it
 /// ends on.
 const LOOP_MIN_M: f32 = 380.0;
-/// Between the centrelines of a loop and the outer ramp beside it.
-const LOOP_SEP_M: f32 = 22.0;
-/// The outer ramp's last leg and the loop's first, at the terminal: this
-/// long, at 60 and 120 degrees off the street toward the deck, so the street
-/// and the two ramps meet at about 60 degrees to each other, as streets meet
-/// a junction. Near parallel, the ramps (or a ramp and the street) would make
-/// one long junction box.
-const LOOP_LEG_M: f32 = 20.0;
+/// A loop side meets the street at two signalised junctions this far apart
+/// along it: the loop at the nearer to the deck, the outer ramp at the
+/// farther. Each is a plain T, its ramp square to the street; brought to one
+/// node the two ramps arrive side by side and make one long, notched box.
+const TERMINAL_GAP_M: f32 = 42.0;
+/// The straight a ramp leaves (or reaches) the street by, square to it.
+const LOOP_LEG_M: f32 = 25.0;
 
 /// How one side of an interchange reaches its terminal.
 ///
@@ -88,24 +87,60 @@ const LOOP_LEG_M: f32 = 20.0;
 /// quadrant, one of them a loop: before the street (A, the loop the on-ramp,
 /// so the land after the street is free) or after it (B, the loop the
 /// off-ramp). The ramps still meet the street at one signalised terminal.
+///
+/// A cloverleaf (苜蓿叶) side has both quadrants, mirrored across the
+/// street: both loops and both outer ramps, the two outer ramps meeting the
+/// street at one junction and the two loops at the other, each a crossroads
+/// of the street and two ramps. Both sides so make the full cloverleaf.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Quadrant {
     Diamond,
     LoopBefore,
     LoopAfter,
+    Clover,
+}
+
+impl Quadrant {
+    /// The loop quadrants of a side: before the street (`false`), after it
+    /// (`true`), or both.
+    fn loops(self) -> &'static [bool] {
+        match self {
+            Quadrant::Diamond => &[],
+            Quadrant::LoopBefore => &[false],
+            Quadrant::LoopAfter => &[true],
+            Quadrant::Clover => &[false, true],
+        }
+    }
+
+    /// What a side falls back to where it has no room, best first.
+    fn fallbacks(self) -> &'static [Quadrant] {
+        match self {
+            Quadrant::Diamond => &[Quadrant::Diamond],
+            Quadrant::LoopBefore => &[Quadrant::LoopBefore, Quadrant::Diamond],
+            Quadrant::LoopAfter => &[Quadrant::LoopAfter, Quadrant::Diamond],
+            Quadrant::Clover => &[
+                Quadrant::Clover,
+                Quadrant::LoopBefore,
+                Quadrant::LoopAfter,
+                Quadrant::Diamond,
+            ],
+        }
+    }
 }
 
 /// The form an interchange at `p` is built to, chosen by its place so a town
-/// has a mix: diamonds, partial cloverleaves of either hand, and the two hands
-/// mixed, as the expressway rings of Beijing and Urumqi have them.
+/// has a mix: diamonds, partial cloverleaves of either hand, the two hands
+/// mixed, and full cloverleaves, as the expressway rings of Beijing and Urumqi
+/// have them.
 fn interchange_form(p: V) -> [Quadrant; 2] {
     let h = ((p.0 / 37.0).round() as i64).wrapping_mul(73_856_093)
         ^ ((p.1 / 37.0).round() as i64).wrapping_mul(19_349_663);
-    match h.rem_euclid(5) {
+    match h.rem_euclid(7) {
         0 | 1 => [Quadrant::Diamond, Quadrant::Diamond],
         2 => [Quadrant::LoopBefore, Quadrant::LoopBefore],
         3 => [Quadrant::LoopAfter, Quadrant::LoopAfter],
-        _ => [Quadrant::LoopBefore, Quadrant::LoopAfter],
+        4 => [Quadrant::LoopBefore, Quadrant::LoopAfter],
+        _ => [Quadrant::Clover, Quadrant::Clover],
     }
 }
 
@@ -697,12 +732,15 @@ struct Diamond {
     remove: Vec<usize>,
     /// The arterial carried across the expressway, when it ended there.
     stub: Option<Vec<V>>,
+    /// A loop side's second terminal, nearer the deck on the same arm: the
+    /// distance along it.
+    loop_at: [Option<f32>; 2],
 }
 
 struct RampPlan {
     /// `true` from the deck down to the terminal.
     off: bool,
-    /// Which terminal, 0 or 1.
+    /// Which terminal: 0 or 1 the arm's own, 2 or 3 that arm's loop terminal.
     terminal: usize,
     /// Station on the main line of the ramp's deck end.
     deck_station: f32,
@@ -712,66 +750,68 @@ struct RampPlan {
 /// One partial-cloverleaf quadrant, before the street, in travel stations
 /// (the crossing at 0) and lateral offsets on the kerb side.
 struct LoopQuadrant {
-    /// The outer ramp, from the deck down to the terminal.
+    /// The outer ramp, from the deck down to its terminal.
     outer: Vec<(f32, f32)>,
-    /// The loop, from the terminal round to beside the deck.
+    /// The loop, from its terminal round to beside the deck.
     loop_line: Vec<(f32, f32)>,
     /// Station of the loop's deck node.
     loop_deck: f32,
 }
 
-/// Lay out a quadrant whose terminal is `d` out from the deck axis at station
-/// `s_term`: the loop turns through a half circle in the corner between the
-/// deck and the street (and the terminal's quarter turn makes it the 270
-/// degrees a loop is), leaving the street `street_half` wide by a clear
-/// margin; the outer ramp swings out round it and comes in to the terminal
-/// beside the loop's first straight.
-fn loop_quadrant(abut: f32, d: f32, s_term: f32, street_half: f32) -> Option<LoopQuadrant> {
-    let r = (d - LOOP_SEP_M * 0.5 - abut) * 0.5;
-    if !(LOOP_R_MIN_M..=LOOP_R_MAX_M).contains(&r) {
+/// Lay out a quadrant whose outer ramp lands at `outer` and whose loop starts
+/// at `inner`, both on the street, `inner` the nearer the deck. Each ramp
+/// meets the street square to it. The loop turns through a half circle in the
+/// corner between the deck and the street (with the turn off the street, the
+/// 270 degrees a loop is), clear of the street, `street_half` wide; the outer
+/// ramp swings out round it.
+fn loop_quadrant(
+    abut: f32,
+    outer: (f32, f32),
+    inner: (f32, f32),
+    street_half: f32,
+) -> Option<LoopQuadrant> {
+    let (s_o, d_o) = outer;
+    // The street, from the outer terminal toward the deck, and square to it
+    // on the quadrant's side.
+    let u = {
+        let l = s_o.hypot(d_o).max(1.0);
+        (-s_o / l, -d_o / l)
+    };
+    let w = if u.1 > 0.0 { (u.1, -u.0) } else { (-u.1, u.0) };
+    let w = if w.0 > 0.0 { (-w.0, -w.1) } else { w };
+    let leg = |p: (f32, f32)| (p.0 + LOOP_LEG_M * w.0, p.1 + LOOP_LEG_M * w.1);
+    let (loop_leg, outer_leg) = (leg(inner), leg(outer));
+    let top = loop_leg.1;
+    let wide = outer_leg.1;
+    let r = (top - abut) * 0.5;
+    if !(LOOP_R_MIN_M..=LOOP_R_MAX_M).contains(&r) || wide - top < 25.0 {
         return None;
     }
     let clear = street_half + RAMP_HALF_M + 8.0;
     let cl = abut + r;
-    let top = d - LOOP_SEP_M * 0.5;
-    let wide = d + LOOP_SEP_M * 0.5;
-    // The street at the terminal, toward the deck, and square to it on the
-    // loop's side; the two ramps' legs at 60 and 120 degrees off it.
-    let u = {
-        let l = s_term.hypot(d).max(1.0);
-        (-s_term / l, -d / l)
-    };
-    let w = if u.1 > 0.0 { (u.1, -u.0) } else { (-u.1, u.0) };
-    let w = if w.0 > 0.0 { (-w.0, -w.1) } else { w };
-    let leg = |deg: f32| {
-        let (c, sn) = (deg.to_radians().cos(), deg.to_radians().sin());
-        (
-            s_term + LOOP_LEG_M * (c * u.0 + sn * w.0),
-            d + LOOP_LEG_M * (c * u.1 + sn * w.1),
-        )
-    };
-    let (loop_leg, outer_leg) = (leg(60.0), leg(120.0));
     // The street runs from the crossing on the deck's axis out to the
-    // terminal, at a slant where it crosses obliquely; the loop keeps clear of
-    // it across its whole span.
-    let street_at = |l: f32| s_term * l / d;
+    // terminals, at a slant where it crosses obliquely; the loop keeps clear
+    // of it across its whole span.
+    let street_at = |l: f32| s_o * l / d_o;
     let loop_deck = -clear + 5.0;
     // As far from the street as the loop must stand to be long enough to
     // climb to the deck within the ramp grade, with its level hold and
     // landing: the top and bottom runs both lengthen as it moves out.
     let fixed = LOOP_LEG_M + loop_leg.0 + std::f32::consts::PI * r + loop_deck;
-    let cs = (street_at(abut).min(street_at(top)) - clear - r).min((fixed - LOOP_MIN_M) * 0.5);
-    // The outer ramp: beside the deck after its taper, out to the terminal's
-    // offset well before the loop, then straight in to the terminal.
+    let cs = (street_at(abut).min(street_at(top)) - clear - r)
+        .min(loop_leg.0 - 5.0)
+        .min((fixed - LOOP_MIN_M) * 0.5);
+    // The outer ramp: beside the deck after its taper, out past the loop well
+    // before it, then straight in and square onto the street.
     let off_start = -RAMP_REACH_M + TAPER_M;
     let splay_end = cs - r - 25.0;
     if splay_end - off_start < 110.0 {
         return None;
     }
-    let mut outer = Vec::new();
+    let mut outer_line = Vec::new();
     let mut s = off_start;
     while s < splay_end {
-        outer.push((
+        outer_line.push((
             s,
             abut + (wide - abut) * smootherstep((s - off_start) / (splay_end - off_start)),
         ));
@@ -779,15 +819,15 @@ fn loop_quadrant(abut: f32, d: f32, s_term: f32, street_half: f32) -> Option<Loo
     }
     let mut s = splay_end;
     while s < outer_leg.0 - 12.0 {
-        outer.push((s, wide));
+        outer_line.push((s, wide));
         s += 15.0;
     }
-    outer.push(outer_leg);
-    outer.push((s_term, d));
-    // The loop: out of the terminal beside the outer ramp, along to the top
-    // of its circle, round the half circle toward the deck, and a short run
-    // beside the deck to its taper.
-    let mut loop_line = vec![(s_term, d), loop_leg];
+    outer_line.push(outer_leg);
+    outer_line.push(outer);
+    // The loop: square off the street, along to the top of its circle, round
+    // the half circle toward the deck, and a short run beside the deck to its
+    // taper.
+    let mut loop_line = vec![inner, loop_leg];
     let mut s = loop_leg.0 - 12.0;
     while s > cs + 1.0 {
         loop_line.push((s, top));
@@ -804,7 +844,7 @@ fn loop_quadrant(abut: f32, d: f32, s_term: f32, street_half: f32) -> Option<Loo
         return None;
     }
     Some(LoopQuadrant {
-        outer,
+        outer: outer_line,
         loop_line,
         loop_deck,
     })
@@ -889,7 +929,7 @@ fn plan_diamond(
             let stub_m = if forms[1] == Quadrant::Diamond {
                 TERMINAL_M
             } else {
-                (half_deck + RAMP_HALF_M + 2.0 * LOOP_R_M + LOOP_SEP_M) / 0.9
+                (half_deck + RAMP_HALF_M + 2.0 * LOOP_R_M) / 0.9 + TERMINAL_GAP_M
             } + 90.0;
             let a = direction(first);
             let out = mul(a, -1.0);
@@ -918,6 +958,7 @@ fn plan_diamond(
         None => stub.clone().unwrap_or_default(),
     };
     let mut terminals: Vec<(Option<usize>, Vec<V>, f32)> = Vec::new();
+    let mut loop_at: [Option<f32>; 2] = [None; 2];
     let mut remove: Vec<usize> = Vec::new();
     let abut = half_deck + RAMP_HALF_M;
     for (k, slot) in across.into_iter().enumerate() {
@@ -935,8 +976,8 @@ fn plan_diamond(
             let a = unit(sub(sample(&line, 12.0).0, line[0]));
             let square = cross(a, t).abs().max(0.5);
             (
-                (abut + 2.0 * LOOP_R_M + LOOP_SEP_M) / square,
-                (abut + 2.0 * LOOP_R_MIN_M + LOOP_SEP_M) / square,
+                (abut + 2.0 * LOOP_R_M) / square + TERMINAL_GAP_M,
+                (abut + 2.0 * LOOP_R_MIN_M) / square + TERMINAL_GAP_M,
             )
         };
         let mut at = want.min(arm_len - 30.0);
@@ -976,6 +1017,9 @@ fn plan_diamond(
         if dot(a, t).abs() > 0.45 {
             debug("the arterial crosses too obliquely");
             return None;
+        }
+        if forms[k] != Quadrant::Diamond {
+            loop_at[k] = Some(at - TERMINAL_GAP_M);
         }
         terminals.push((slot, line, at));
     }
@@ -1025,65 +1069,70 @@ fn plan_diamond(
             // Built for the quadrant before the street; after it, the same
             // ramps mirrored across the crossing and run the other way, laid
             // out for the terminal's mirrored station so it lands on it.
-            let after = forms[k] == Quadrant::LoopAfter;
-            // A quadrant is laid out square to the deck where it crosses the
-            // street, not along the deck's centreline: offset 100 m and more
-            // off a line with a bend in it, the loop would jump where the
-            // normal turns. The outer ramp eases from the deck's own line,
-            // where it leaves the deck, into this frame.
-            let (p0, t0) = sample(&chain.line, chain.at);
-            let (t0, n0) = (mul(t0, sign), kerb_side(mul(t0, sign)));
-            let square =
-                |s_travel: f32, offset: f32| add(p0, add(mul(t0, s_travel), mul(n0, offset)));
-            let (s_term, d) = (dot(sub(tp, p0), t0), dot(sub(tp, p0), n0));
-            let s_plan = if after { -s_term } else { s_term };
-            let Some(quadrant) = loop_quadrant(abut, d, s_plan, street_half) else {
-                debug("the loop does not fit between the deck and the terminal");
-                return None;
-            };
-            let wide = d + LOOP_SEP_M * 0.5;
-            let place = |pts: &[(f32, f32)], ease: bool| -> Vec<V> {
-                let mut out: Vec<V> = pts
-                    .iter()
-                    .map(|&(s, l)| {
-                        let s = if after { -s } else { s };
-                        let w = if ease {
-                            smootherstep((l - abut) / (wide - abut))
-                        } else {
-                            1.0
-                        };
-                        let (a, b) = (point(s, l), square(s, l));
-                        add(a, mul(sub(b, a), w))
-                    })
-                    .collect();
+            for &after in forms[k].loops() {
+                // A quadrant is laid out square to the deck where it crosses the
+                // street, not along the deck's centreline: offset 100 m and more
+                // off a line with a bend in it, the loop would jump where the
+                // normal turns. The outer ramp eases from the deck's own line,
+                // where it leaves the deck, into this frame.
+                let (p0, t0) = sample(&chain.line, chain.at);
+                let (t0, n0) = (mul(t0, sign), kerb_side(mul(t0, sign)));
+                let square =
+                    |s_travel: f32, offset: f32| add(p0, add(mul(t0, s_travel), mul(n0, offset)));
+                let tl = sample(line, loop_at[k].unwrap_or(*at)).0;
+                let local = |p: V| {
+                    let s = dot(sub(p, p0), t0);
+                    (if after { -s } else { s }, dot(sub(p, p0), n0))
+                };
+                let d = local(tp).1;
+                let Some(quadrant) = loop_quadrant(abut, local(tp), local(tl), street_half) else {
+                    debug("the loop does not fit between the deck and the terminal");
+                    return None;
+                };
+                let wide = d + LOOP_LEG_M;
+                let place = |pts: &[(f32, f32)], ease: bool| -> Vec<V> {
+                    let mut out: Vec<V> = pts
+                        .iter()
+                        .map(|&(s, l)| {
+                            let s = if after { -s } else { s };
+                            let w = if ease {
+                                smootherstep((l - abut) / (wide - abut))
+                            } else {
+                                1.0
+                            };
+                            let (a, b) = (point(s, l), square(s, l));
+                            add(a, mul(sub(b, a), w))
+                        })
+                        .collect();
+                    if after {
+                        out.reverse();
+                    }
+                    out
+                };
+                let mut outer = place(&quadrant.outer, true);
+                let mut inner = place(&quadrant.loop_line, false);
+                // The terminal ends are the terminals themselves, mirrored or not.
                 if after {
-                    out.reverse();
+                    *outer.first_mut().expect("a ramp has points") = tp;
+                    *inner.last_mut().expect("a ramp has points") = tl;
+                } else {
+                    *outer.last_mut().expect("a ramp has points") = tp;
+                    *inner.first_mut().expect("a ramp has points") = tl;
                 }
-                out
-            };
-            let mut outer = place(&quadrant.outer, true);
-            let mut inner = place(&quadrant.loop_line, false);
-            // The terminal end is the terminal itself, mirrored or not.
-            if after {
-                *outer.first_mut().expect("a ramp has points") = tp;
-                *inner.last_mut().expect("a ramp has points") = tp;
-            } else {
-                *outer.last_mut().expect("a ramp has points") = tp;
-                *inner.first_mut().expect("a ramp has points") = tp;
+                let flip = if after { -1.0 } else { 1.0 };
+                ramps.push(RampPlan {
+                    off: !after,
+                    terminal: k,
+                    deck_station: chain.at + sign * flip * -RAMP_REACH_M,
+                    line: outer,
+                });
+                ramps.push(RampPlan {
+                    off: after,
+                    terminal: 2 + k,
+                    deck_station: chain.at + sign * flip * quadrant.loop_deck,
+                    line: inner,
+                });
             }
-            let flip = if after { -1.0 } else { 1.0 };
-            ramps.push(RampPlan {
-                off: !after,
-                terminal: k,
-                deck_station: chain.at + sign * flip * -RAMP_REACH_M,
-                line: outer,
-            });
-            ramps.push(RampPlan {
-                off: after,
-                terminal: k,
-                deck_station: chain.at + sign * flip * quadrant.loop_deck,
-                line: inner,
-            });
             continue;
         }
         // Off-ramp: from beside the deck `RAMP_REACH_M` before the crossing to
@@ -1180,6 +1229,7 @@ fn plan_diamond(
         ramps,
         remove,
         stub,
+        loop_at,
     })
 }
 
@@ -1199,8 +1249,9 @@ fn build_diamond(graph: &mut Graph, diamond: Diamond, layout: &mut Layout) {
     let arms: Vec<usize> = diamond.terminals.iter().filter_map(|t| t.0).collect();
     mend_stubs(graph, &degree_before, false, &arms);
     // The terminals first: they cut the arterial arms, which the ramps end on.
-    let mut terminal_nodes = Vec::new();
-    for (slot, line, at) in &diamond.terminals {
+    // A loop side's second terminal is cut on the same arm, nearer the deck.
+    let mut terminal_nodes = vec![usize::MAX; 4];
+    for (k, (slot, line, at)) in diamond.terminals.iter().enumerate() {
         let road = match slot {
             Some(road) => *road,
             None => {
@@ -1226,22 +1277,24 @@ fn build_diamond(graph: &mut Graph, diamond: Diamond, layout: &mut Layout) {
         };
         let (from, to) = (graph.roads[road].from, graph.roads[road].to);
         let total = polyline_len(&graph.roads[road].line);
+        let along = |at: f32| if from == diamond.node { at } else { total - at };
+        let mut cuts = Vec::new();
         // At the arm's own far junction: that node is the terminal.
         if *at >= total - 0.5 {
             let far = if from == diamond.node { to } else { from };
             graph.roles[far] = "ramp-terminal".into();
-            terminal_nodes.push(far);
-            continue;
-        }
-        let p = sample(line, *at).0;
-        let n = graph.node(p, "ramp-terminal");
-        let along = if from == diamond.node {
-            *at
+            terminal_nodes[k] = far;
         } else {
-            total - *at
-        };
-        graph.split(road, vec![(along, n)]);
-        terminal_nodes.push(n);
+            let n = graph.node(sample(line, *at).0, "ramp-terminal");
+            cuts.push((along(*at), n));
+            terminal_nodes[k] = n;
+        }
+        if let Some(loop_at) = diamond.loop_at[k] {
+            let n = graph.node(sample(line, loop_at).0, "ramp-terminal");
+            cuts.push((along(loop_at), n));
+            terminal_nodes[2 + k] = n;
+        }
+        graph.split(road, cuts);
     }
     // The deck ends: two nodes on the main line, each shared by an off-ramp of
     // one direction and an on-ramp of the other. Cut the farther station first,
@@ -1276,6 +1329,9 @@ fn build_diamond(graph: &mut Graph, diamond: Diamond, layout: &mut Layout) {
             continue;
         };
         let terminal = terminal_nodes[ramp.terminal];
+        if terminal == usize::MAX {
+            continue;
+        }
         let (from, to) = if ramp.off {
             (deck, terminal)
         } else {
@@ -1750,10 +1806,16 @@ pub(super) fn lay_out(
         let carry_on = frame.external.is_none();
         // The form wanted here, then each loop side given up in turn, then the
         // diamond, which fits wherever any interchange does.
+        // Every pair of the two sides' fallbacks, the least given up first.
         let [a, b] = interchange_form(p);
-        let mut tries = vec![[a, b], [a, Quadrant::Diamond], [Quadrant::Diamond, b]];
-        tries.push([Quadrant::Diamond; 2]);
-        tries.dedup();
+        let mut tries: Vec<(usize, [Quadrant; 2])> = Vec::new();
+        for (i, &fa) in a.fallbacks().iter().enumerate() {
+            for (j, &fb) in b.fallbacks().iter().enumerate() {
+                tries.push((i + j, [fa, fb]));
+            }
+        }
+        tries.sort_by_key(|t| t.0);
+        let tries: Vec<[Quadrant; 2]> = tries.into_iter().map(|t| t.1).collect();
         let Some(diamond) = tries
             .into_iter()
             .find_map(|forms| plan_diamond(&graph, node, half_deck, carry_on, forms))

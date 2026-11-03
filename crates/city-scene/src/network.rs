@@ -46,7 +46,7 @@ const VERTICAL_CURVE_M: f32 = 40.0;
 /// A ramp is level with the deck for this long past the end of its taper, so
 /// the nose where it parts from the deck is flat.
 const RAMP_HOLD_M: f32 = 30.0;
-/// The gap left between two decks that meet in the air.
+/// The box left where two streets meet end to end at grade.
 const AIR_GAP_M: f32 = 0.5;
 /// A ramp reaches the ground this far before the junction it lands at.
 const RAMP_LANDING_M: f32 = 15.0;
@@ -564,7 +564,9 @@ pub fn derive(
         let mut trims: HashMap<(u32, bool), f32> = HashMap::new();
         for (index, list) in incidence.iter().enumerate() {
             if air[index] {
-                radius[index] = AIR_GAP_M;
+                // Decks that meet in the air run on into each other: a gap
+                // between them is a slot through the viaduct to the ground.
+                radius[index] = 0.0;
                 continue;
             }
             if list.len() == 1 {
