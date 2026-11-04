@@ -158,5 +158,9 @@ pub(crate) fn architecture(canopy: Canopy) -> Architecture {
         Canopy::Irregular => irreg::architecture(),
         Canopy::Umbrella => umbrella::architecture(),
         Canopy::Banyan => banyan::architecture(),
+        // Built by `trees::plants`; this record is never grown.
+        Canopy::Palm | Canopy::Bamboo | Canopy::Reed | Canopy::Shrub | Canopy::Cushion => {
+            round::architecture()
+        }
     }
 }

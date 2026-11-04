@@ -351,6 +351,7 @@ pub fn plant_in_climate(
                     keep: e.keep,
                     size: e.size,
                     dry: e.dry,
+                    alpine: e.alpine,
                 },
             )
         }
@@ -405,6 +406,8 @@ struct Env {
     size: f32,
     /// 0 watered .. 1 arid: tint and thinning of the ground cover.
     dry: f32,
+    /// Alpine meadow ground cover: tufts kept and cool-toned.
+    alpine: bool,
 }
 
 impl Env {
@@ -412,6 +415,7 @@ impl Env {
         keep: 1.0,
         size: 1.0,
         dry: 0.0,
+        alpine: false,
     };
 }
 
@@ -886,7 +890,12 @@ fn plant_with(
                 );
             }
         }
-        let tuft_attempts = (40.0 * (1.0 - env.dry * 0.75)) as usize;
+        let tuft_attempts = if env.alpine {
+            // Alpine meadow is a continuous low turf, not patches of lawn.
+            70
+        } else {
+            (40.0 * (1.0 - env.dry * 0.75)) as usize
+        };
         for _ in 0..tuft_attempts {
             if tufts >= TUFT_BUDGET {
                 break 'tufts;
@@ -913,9 +922,9 @@ fn plant_with(
                     scale_y: 0.55 + rng.unit() * 0.5,
                     scale_z: 0.55 + rng.unit() * 0.5,
                     // Dry sites: the blades are straw, not green.
-                    tint_r: (green * (0.96 + 0.30 * env.dry)).min(1.0),
+                    tint_r: (green * (0.96 + 0.30 * env.dry - if env.alpine { 0.10 } else { 0.0 })).min(1.0),
                     tint_g: green * (1.0 - 0.10 * env.dry),
-                    tint_b: green * (0.90 - 0.30 * env.dry),
+                    tint_b: green * (0.90 - 0.30 * env.dry + if env.alpine { 0.14 } else { 0.0 }),
                 },
             );
             tufts += 1;

@@ -10,7 +10,7 @@ pub use crate::facades::{
     FACADE_TILE_H, FACADE_TILE_W, GROUND_FLOOR_TILE_W, facade_textures, ground_floor_textures,
     roof_texture,
 };
-pub use crate::leaf_cards::{leaf_card_textures, tuft_texture};
+pub use crate::leaf_cards::{leaf_card_textures, plant_card_textures, tuft_texture};
 pub use crate::textures::{
     GROUND_TILE_M, asphalt_texture, crosswalk_texture, dashed_line_texture, flower_texture,
     grass_texture, grass_texture_in, hedge_texture, paving_texture, signage_texture, tactile_texture,
@@ -63,6 +63,7 @@ pub fn standard_set_in(
     // single generic leaf texture is exactly what made the last port's trees
     // read as green blobs.
     set.extend(leaf_card_textures(ground_size));
+    set.extend(plant_card_textures(ground_size));
     set.push(tuft_texture(ground_size));
     set.push(signage_texture(256));
     set.push(crate::facades::cn_signs::manifest_texture());

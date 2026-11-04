@@ -79,13 +79,31 @@ from a measurement:
   Guangzhou and Xiamen (榕树, 香樟).
 * CJJ 75 (tree-pit spacing on streets, already in the planting code).
 
-## What is not modelled (and what stands in)
+## Plants that are not street trees
 
-* Palms (棕榈, 大王椰子, 蒲葵, 椰子), casuarina (木麻黄), bamboo (竹), litchi and
-  mango, tamarisk (柽柳), mangrove and reeds on tidal flats, 沙棘 and 梭梭 shrubs, cushion plants
-  and alpine meadow have no canopy form or prototype yet. The warm coast and
-  subtropical zones use 榕树 and 香樟; alpine and arid zones use the lawn texture
-  and thinning to look dry and bare. Wind-bent crowns are not modelled.
+`species::PLANTS` (kept apart from the street-tree table so the tree tests keep
+describing trees) holds the forms built by `trees/plants.rs`:
+
+| key | form | where |
+|---|---|---|
+| 棕榈 zong-lu, 蒲葵 pu-kui | fan palm: fibrous column, pleated fan fronds | warm coast |
+| 大王椰子 da-wang-ye, 椰子 ye-zi | feather palm: smooth swollen / leaning column, arching pinnate fronds | warm coast |
+| 木麻黄 mu-ma-huang | tall conical tree, fine grey-green drooping twigs (grown by the tree grower) | warm coast |
+| 竹 zhu | clump of 22-30 jointed culms arching out, leaf sprays on the upper third | warm coast, humid subtropical |
+| 芦苇 lu-wei | tussock of 46 bending blades | waterfronts of coast, humid, arid, cold, plateau zones |
+| 红树 hong-shu | multi-stem bush on arched prop roots | warm-coast waterfront |
+| 沙棘 sha-ji, 梭梭 suo-suo | multi-stem bushes (silvery leaf; near-leafless green twigs) | arid and plateau zones |
+| 垫状植物 dian-zhuang | low dome of leaf cards | plateau zone |
+
+Alpine meadow is the tuft pass at a higher count with a cool tint on a plateau
+site (`Environment::alpine`).
+
+## What is not modelled
+
+* Litchi and mango, tamarisk (柽柳) and salt-marsh flats as a ground surface
+  have no prototype yet; mangrove and reed are planted as bushes and tussocks
+  along the waterfront, not on a tidal-flat surface. Wind-bent crowns are not
+  modelled.
 * There is no season in the renderer: leaf cards are baked in summer colour.
   Species carry an autumn colour in the table but nothing selects it, so
   "winter-leafless versus evergreen by climate and season" cannot be shown

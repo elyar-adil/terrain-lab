@@ -48,6 +48,7 @@ mod cn_kit;
 pub(crate) mod cn_residential;
 mod cn_shopsigns;
 pub(crate) mod details;
+pub mod far;
 pub(crate) mod house;
 mod industrial;
 pub(crate) mod roofscape;

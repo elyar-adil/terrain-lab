@@ -53,11 +53,13 @@ pub mod far;
 pub mod forms;
 mod grow;
 mod plant;
+mod plants;
 pub(crate) mod zones;
 mod shrub;
 
 pub use cards::{
     CARD_WINDOW, card_tile_m, chromaticity, colour_distance, leaf_card_textures, luma,
+    plant_card_textures,
     mean_albedo_rgb, opaque_albedo, target_coverage, tuft_texture,
 };
 pub use far::{FAR_SPECIES, FarTree, FarTreePayload, far_tree_payload, far_tree_set};
@@ -66,7 +68,7 @@ pub use shrub::{build_shrub_prototype, build_tuft_prototype, plant_median_shrubs
 
 use crate::math::Rng;
 use crate::mesh::MeshBuilder;
-use crate::species::{SPECIES, Species};
+use crate::species::{PLANTS, SPECIES, Species};
 
 /// Two radians of pi, shared by every sub-module's trig.
 pub(crate) const TAU: f32 = std::f32::consts::PI * 2.0;
@@ -136,8 +138,20 @@ pub struct TreePrototype {
 
 /// The prototype set: every species, one or two variants each.
 pub fn prototype_set() -> Vec<TreePrototype> {
+    prototypes_of(SPECIES, 0)
+}
+
+/// The trees and the plants (`species::PLANTS`): what a city instances.
+pub fn prototype_set_all() -> Vec<TreePrototype> {
+    let mut all = prototypes_of(SPECIES, 0);
+    all.extend(prototypes_of(PLANTS, SPECIES.len()));
+    all
+}
+
+fn prototypes_of(table: &'static [Species], first_index: usize) -> Vec<TreePrototype> {
     let mut result = Vec::new();
-    for (index, species) in SPECIES.iter().enumerate() {
+    for (offset, species) in table.iter().enumerate() {
+        let index = first_index + offset;
         let variants = two_variant_count(species);
         for variant in 0..variants {
             let variant = variant as u16;
@@ -280,8 +294,12 @@ pub fn build_prototypes(prototypes: &[TreePrototype], builder: &mut MeshBuilder)
             },
         );
         let seed = hash_seed(prototype.species.key, prototype.variant);
-        let mut grower = grow::Grower::new(prototype, seed, &bark, &leaf, builder);
-        grower.build();
+        if prototype.species.canopy.is_plant_form() {
+            plants::build(prototype, seed, &bark, &leaf, builder);
+        } else {
+            let mut grower = grow::Grower::new(prototype, seed, &bark, &leaf, builder);
+            grower.build();
+        }
         // One transform list places the whole tree: bark and foliage are two
         // groups, one instance buffer.
         builder.bind(&bark, &prototype.key);

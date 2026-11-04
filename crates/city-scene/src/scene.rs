@@ -336,7 +336,7 @@ fn build_scene(
     }
     // Prototypes first, so their groups exist and can be bound before anything
     // instances into them.
-    let prototypes: Vec<TreePrototype> = trees::prototype_set();
+    let prototypes: Vec<TreePrototype> = trees::prototype_set_all();
     trees::build_prototypes(&prototypes, &mut builder);
     trees::build_shrub_prototype(&mut builder);
     trees::build_tuft_prototype(&mut builder);
@@ -410,7 +410,8 @@ fn build_scene(
                 station += 6.0;
             }
         }
-        let built: Vec<crate::math::Vec2> = buildings
+        let built: Vec<crate::math::Vec2> = city
+            .buildings
             .iter()
             .filter_map(|b| {
                 let n = b.footprint.len().max(1) as f32;
@@ -872,8 +873,11 @@ mod tests {
         let instanced = scene.meshes.len() - plain;
         assert!(plain < 70, "the city needs {plain} material draw calls");
         assert!(
-            // 19 species were 109 groups; the five the climate zones add make 115.
-            instanced < 125,
+            // 19 species were 109 groups; the five climate-zone trees make 115 and
+            // the eleven plants (palms, bamboo, reed, bushes, cushion) make 139.
+            // These are groups emitted per prototype whether or not this city
+            // plants it; a list with no instances has count 0 and draws nothing.
+            instanced < 145,
             "the city needs {instanced} instanced draw calls"
         );
     }

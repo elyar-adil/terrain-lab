@@ -1,4 +1,5 @@
 import type { CityScene } from "./city/cityScene";
+import type { FarLook } from "./city/farLook";
 
 export type TerrainPreset = "arid" | "temperate" | "glacial";
 export type Landform = "mountainRange" | "hills" | "plains" | "plateau" | "coastal" | "archipelago";
@@ -135,7 +136,7 @@ export interface UrbanBuilding {
   windowBays?: number;
   balconyBays?: number;
   entranceCount?: number;
-  roof: "mansard" | "terracotta" | "flat" | "setbackTower";
+  roof: "mansard" | "terracotta" | "flat" | "setbackTower" | "gable" | "hip";
 }
 
 /** Optional high-detail city payload emitted by newer Rust generators. */
@@ -312,7 +313,7 @@ export interface ModernCityPayload {  style: "chineseModern";
     heightMetres: number;
     floors: number;
     useType: string;
-    roof: "mansard" | "terracotta" | "flat" | "setbackTower";
+    roof: "mansard" | "terracotta" | "flat" | "setbackTower" | "gable" | "hip";
     variant?: number;
     style?: string;
     pitched?: boolean;
@@ -323,6 +324,8 @@ export interface ModernCityPayload {  style: "chineseModern";
     windowBays?: number;
     balconyBays?: number;
     entranceCount?: number;
+    /** The facade grammar's own summary of the building, for the far form (`buildings/far.rs`). */
+    farLook?: FarLook;
   }>;
   river: UrbanPoint[] | null;
   riverWidthMetres?: number;

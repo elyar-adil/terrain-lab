@@ -98,6 +98,28 @@ pub enum Canopy {
     /// A very wide dense dome on a thick trunk, with column-like aerial roots
     /// dropping from the major limbs to the ground — the `榕树`.
     Banyan,
+    /// A bare column carrying a crown of radiating fronds: the palms. Built by
+    /// `trees::plants`, not by the branching grower.
+    Palm,
+    /// A clump of slender jointed culms arching outward with leaf sprays at the
+    /// tips: 竹.
+    Bamboo,
+    /// A tussock of tall narrow blades: 芦苇.
+    Reed,
+    /// A multi-stemmed bush: 沙棘, 梭梭, and the mangrove with its prop roots.
+    Shrub,
+    /// A low dome hugging the ground: alpine cushion plants.
+    Cushion,
+}
+
+impl Canopy {
+    /// Whether the plant is built by `trees::plants` rather than the grower.
+    pub fn is_plant_form(self) -> bool {
+        matches!(
+            self,
+            Canopy::Palm | Canopy::Bamboo | Canopy::Reed | Canopy::Shrub | Canopy::Cushion
+        )
+    }
 }
 
 /// Leaf form. This drives the leaf card's alpha silhouette, which is most of
@@ -753,9 +775,236 @@ pub const SPECIES: &[Species] = &[
     },
 ];
 
-/// Look a species up by its stable key.
+/// The plants that are not street trees: palms, bamboo, reed, bush and cushion
+/// forms, and the casuarina. Kept apart from [`SPECIES`] because the tree
+/// tests (a crown wider than a trunk is tall, a bark between 0.1 and 0.3, a
+/// foliage colour distinct from every other tree's) describe trees. They are
+/// planted by the climate zones (`trees::zones`) like any species.
+pub const PLANTS: &[Species] = &[
+    Species {
+        key: "zong-lu",
+        name_zh: "棕榈",
+        name_en: "Windmill palm",
+        canopy: Canopy::Palm,
+        leaf: LeafForm::Fan,
+        // Dark fibrous trunk, wrapped in old leaf bases.
+        bark: bark([0.130, 0.095, 0.066], 0.80, 1.0),
+        foliage: [0.062, 0.120, 0.052],
+        autumn: None,
+        bloom: Bloom::NONE,
+        height_m: (4.0, 8.0),
+        crown_m: (1.4, 2.2),
+        trunk_m: (0.10, 0.16),
+        clear_stem: 0.80,
+        density: 0.6,
+        leaf_scale: 0.30,
+        evergreen: true,
+        street_tolerant: true,
+    },
+    Species {
+        key: "pu-kui",
+        name_zh: "蒲葵",
+        name_en: "Chinese fan palm",
+        canopy: Canopy::Palm,
+        leaf: LeafForm::Fan,
+        bark: bark([0.170, 0.150, 0.125], 0.45, 1.0),
+        foliage: [0.070, 0.135, 0.050],
+        autumn: None,
+        bloom: Bloom::NONE,
+        height_m: (6.0, 12.0),
+        crown_m: (2.0, 3.2),
+        trunk_m: (0.12, 0.20),
+        clear_stem: 0.82,
+        density: 0.6,
+        leaf_scale: 0.30,
+        evergreen: true,
+        street_tolerant: true,
+    },
+    Species {
+        key: "da-wang-ye",
+        name_zh: "大王椰子",
+        name_en: "Royal palm",
+        canopy: Canopy::Palm,
+        leaf: LeafForm::Pinnate,
+        // The smooth grey column, swollen a little below the middle.
+        bark: bark([0.250, 0.240, 0.222], 0.08, 1.0),
+        foliage: [0.060, 0.135, 0.062],
+        autumn: None,
+        bloom: Bloom::NONE,
+        height_m: (12.0, 20.0),
+        crown_m: (2.8, 4.0),
+        trunk_m: (0.16, 0.26),
+        clear_stem: 0.84,
+        density: 0.6,
+        leaf_scale: 0.30,
+        evergreen: true,
+        street_tolerant: true,
+    },
+    Species {
+        key: "ye-zi",
+        name_zh: "椰子",
+        name_en: "Coconut palm",
+        canopy: Canopy::Palm,
+        leaf: LeafForm::Pinnate,
+        bark: bark([0.190, 0.170, 0.145], 0.35, 1.0),
+        foliage: [0.085, 0.150, 0.050],
+        autumn: None,
+        bloom: Bloom::NONE,
+        height_m: (9.0, 16.0),
+        crown_m: (2.8, 4.2),
+        trunk_m: (0.14, 0.22),
+        clear_stem: 0.86,
+        density: 0.6,
+        leaf_scale: 0.30,
+        evergreen: true,
+        street_tolerant: true,
+    },
+    Species {
+        key: "mu-ma-huang",
+        name_zh: "木麻黄",
+        name_en: "Casuarina",
+        canopy: Canopy::Conical,
+        leaf: LeafForm::Needle,
+        bark: bark([0.170, 0.140, 0.115], 0.85, 1.0),
+        // Grey-green jointed twigs that read as fine drooping needles.
+        foliage: [0.070, 0.120, 0.092],
+        autumn: None,
+        bloom: Bloom::NONE,
+        height_m: (12.0, 22.0),
+        crown_m: (3.0, 5.0),
+        trunk_m: (0.22, 0.38),
+        clear_stem: 0.40,
+        density: 0.55,
+        leaf_scale: 0.22,
+        evergreen: true,
+        street_tolerant: true,
+    },
+    Species {
+        key: "zhu",
+        name_zh: "竹",
+        name_en: "Bamboo",
+        canopy: Canopy::Bamboo,
+        leaf: LeafForm::Lanceolate,
+        // Green culms.
+        bark: bark([0.150, 0.215, 0.075], 0.05, 1.0),
+        foliage: [0.085, 0.165, 0.058],
+        autumn: None,
+        bloom: Bloom::NONE,
+        height_m: (6.0, 10.0),
+        crown_m: (1.8, 2.8),
+        trunk_m: (0.03, 0.05),
+        clear_stem: 0.35,
+        density: 0.7,
+        leaf_scale: 0.30,
+        evergreen: true,
+        street_tolerant: false,
+    },
+    Species {
+        key: "lu-wei",
+        name_zh: "芦苇",
+        name_en: "Common reed",
+        canopy: Canopy::Reed,
+        leaf: LeafForm::Lanceolate,
+        bark: bark([0.250, 0.215, 0.120], 0.05, 1.0),
+        foliage: [0.110, 0.160, 0.070],
+        autumn: Some([0.260, 0.200, 0.090]),
+        bloom: Bloom::NONE,
+        height_m: (2.2, 3.6),
+        crown_m: (0.9, 1.5),
+        trunk_m: (0.008, 0.014),
+        clear_stem: 0.10,
+        density: 0.8,
+        leaf_scale: 0.25,
+        evergreen: false,
+        street_tolerant: false,
+    },
+    Species {
+        key: "hong-shu",
+        name_zh: "红树",
+        name_en: "Mangrove",
+        canopy: Canopy::Shrub,
+        leaf: LeafForm::Elliptic,
+        bark: bark([0.140, 0.105, 0.080], 0.40, 1.0),
+        foliage: [0.045, 0.100, 0.058],
+        autumn: None,
+        bloom: Bloom::NONE,
+        height_m: (2.5, 5.0),
+        crown_m: (1.6, 2.8),
+        trunk_m: (0.04, 0.08),
+        clear_stem: 0.25,
+        density: 0.85,
+        leaf_scale: 0.30,
+        evergreen: true,
+        street_tolerant: false,
+    },
+    Species {
+        key: "sha-ji",
+        name_zh: "沙棘",
+        name_en: "Sea buckthorn",
+        canopy: Canopy::Shrub,
+        leaf: LeafForm::Lanceolate,
+        bark: bark([0.130, 0.105, 0.085], 0.60, 1.0),
+        // Silvery-green narrow leaves, with orange berries on the female.
+        foliage: [0.135, 0.165, 0.105],
+        autumn: Some([0.250, 0.200, 0.080]),
+        bloom: Bloom::NONE,
+        height_m: (1.8, 4.0),
+        crown_m: (1.2, 2.4),
+        trunk_m: (0.03, 0.07),
+        clear_stem: 0.12,
+        density: 0.6,
+        leaf_scale: 0.28,
+        evergreen: false,
+        street_tolerant: true,
+    },
+    Species {
+        key: "suo-suo",
+        name_zh: "梭梭",
+        name_en: "Saxaul",
+        canopy: Canopy::Shrub,
+        leaf: LeafForm::Needle,
+        bark: bark([0.185, 0.170, 0.140], 0.75, 1.0),
+        // Leafless green twigs, nearly the colour of the sand.
+        foliage: [0.110, 0.145, 0.095],
+        autumn: None,
+        bloom: Bloom::NONE,
+        height_m: (1.5, 4.0),
+        crown_m: (1.4, 2.8),
+        trunk_m: (0.05, 0.12),
+        clear_stem: 0.10,
+        density: 0.35,
+        leaf_scale: 0.30,
+        evergreen: false,
+        street_tolerant: true,
+    },
+    Species {
+        key: "dian-zhuang",
+        name_zh: "垫状植物",
+        name_en: "Cushion plant",
+        canopy: Canopy::Cushion,
+        leaf: LeafForm::Elliptic,
+        bark: bark([0.180, 0.160, 0.130], 0.10, 1.0),
+        // Dense dark-green cushion that browns toward the edge.
+        foliage: [0.070, 0.125, 0.075],
+        autumn: None,
+        bloom: Bloom::NONE,
+        height_m: (0.25, 0.60),
+        crown_m: (0.30, 0.70),
+        trunk_m: (0.01, 0.02),
+        clear_stem: 0.0,
+        density: 0.9,
+        leaf_scale: 0.30,
+        evergreen: true,
+        street_tolerant: false,
+    },
+];
+
+/// Look a species up by its stable key, trees and plants alike.
 pub fn by_key(key: &str) -> Option<&'static Species> {
-    SPECIES.iter().find(|species| species.key == key)
+    SPECIES
+        .iter()
+        .chain(PLANTS.iter())
+        .find(|species| species.key == key)
 }
 
 /// The species a street planting may use, in the order a Chinese city plants

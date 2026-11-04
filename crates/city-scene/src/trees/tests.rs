@@ -726,6 +726,8 @@ fn all_twelve_canopies_are_a_distinct_silhouette() {
         Canopy::Oval => 0.26,
         Canopy::Vase => 0.30,
         Canopy::Rounded => 0.30,
+        // Plant forms are built by `plants`, not grown: these tests do not cover them.
+        Canopy::Palm | Canopy::Bamboo | Canopy::Reed | Canopy::Shrub | Canopy::Cushion => 0.30,
     };
     let canopies = [
         Canopy::Rounded,
@@ -757,6 +759,7 @@ fn all_twelve_canopies_are_a_distinct_silhouette() {
                 Canopy::Irregular => "test-irregular",
                 Canopy::Umbrella => "test-umbrella",
                 Canopy::Banyan => "test-banyan",
+                _ => "test-plant",
             },
             canopy,
             clear_stem: clear_stem_of(canopy),
@@ -1271,6 +1274,8 @@ fn zz_signature_sheet() {
         Canopy::Oval => 0.26,
         Canopy::Vase => 0.30,
         Canopy::Rounded => 0.30,
+        // Plant forms are built by `plants`, not grown: these tests do not cover them.
+        Canopy::Palm | Canopy::Bamboo | Canopy::Reed | Canopy::Shrub | Canopy::Cushion => 0.30,
     };
     let mut sigs: Vec<(Canopy, [f32; 4], f32, f32)> = Vec::new();
     for canopy in [

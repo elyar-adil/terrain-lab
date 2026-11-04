@@ -1073,3 +1073,56 @@ mod tests {
         assert_ne!(rows_a, rows_c);
     }
 }
+
+/// The far form of a residential block: the design the detail is built from,
+/// summarised for the merged mass (`far::FarLook`).
+pub(crate) fn far_look(building: &ModernBuilding, podium: Option<(f32, u16)>) -> super::far::FarLook {
+    use super::far::{FarLook, bay_of, crown_code, glass_code, skin_code};
+    let mut table = FacadeTable::new();
+    let (design, _) = design_of(building, &mut table);
+    let (base, storeys) = storeys_of(building, podium);
+    let storey = design.front.storey_m;
+    let village = building.use_type == ParcelUse::Village;
+    let ctx = Ctx {
+        id: building.id,
+        design: &design,
+        paint: village.then(|| village_paint(building.id)),
+        base,
+        storeys,
+    };
+    let bands = ctx.bands();
+    let bay = bay_of(&design.front);
+    let front = &design.front;
+    FarLook {
+        roof_m: base + storeys as f32 * storey,
+        start_m: podium.map_or(0.0, |(top, _)| top),
+        storey_m: storey,
+        shop_m: if podium.is_none() && shop_storey(building) { GROUND_STOREY_M } else { 0.0 },
+        wall: ctx.paint_at(bands[1]),
+        base_band: ctx.paint_at(0),
+        base_n: bands[1],
+        top_band: ctx.paint_at(storeys.saturating_sub(1)),
+        top_n: storeys - bands[2].min(storeys),
+        unit_w: front.width,
+        kind: bay.kind,
+        window: bay.window,
+        balcony: bay.balcony,
+        module_m: bay.module,
+        glass: front.tint,
+        glass_kind: glass_code(front.glass),
+        frame: front.frame,
+        trim: front.trim,
+        skin: skin_code(front.skin),
+        flags: front.flags,
+        weather: front.weather,
+        crown: crown_code(design.crown),
+        terracotta: design.terracotta,
+        solar: design.solar,
+        podium_floors: 0,
+        podium_storey_m: storey,
+        setback_m: 0.0,
+        podium_unit_w: front.width,
+        podium_kind: bay.kind,
+        podium_window: bay.window,
+    }
+}

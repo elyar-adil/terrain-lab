@@ -41,7 +41,7 @@
 //! valid leaf scatter and the wrap is invisible.
 
 use crate::math::Rng;
-use crate::species::{LeafForm, SPECIES, Species};
+use crate::species::{LeafForm, PLANTS, SPECIES, Species};
 use crate::textures::BakedTexture;
 
 const TAU: f32 = std::f32::consts::PI * 2.0;
@@ -78,6 +78,96 @@ pub fn leaf_card_textures(size: usize) -> Vec<BakedTexture> {
         .enumerate()
         .map(|(index, species)| leaf_card(species, index, size.max(48)))
         .collect()
+}
+
+/// The cards of the plants that are not street trees (`species::PLANTS`): the
+/// same leaf scatter for bushes, bamboo, reed and cushions, and one whole frond
+/// per card for the palms.
+pub fn plant_card_textures(size: usize) -> Vec<BakedTexture> {
+    PLANTS
+        .iter()
+        .enumerate()
+        .map(|(index, species)| {
+            let size = size.max(48);
+            if species.canopy == crate::species::Canopy::Palm {
+                frond_card(species, index, size)
+            } else {
+                leaf_card(species, SPECIES.len() + index, size)
+            }
+        })
+        .collect()
+}
+
+/// One palm frond filling its card, base at the top row and tip at the bottom
+/// (V runs from the base to the tip). A fan palm is a pleated blade slit into
+/// segments toward its tip; a feather palm a rachis with paired leaflets that
+/// sweep toward the tip and shorten at both ends.
+fn frond_card(species: &Species, index: usize, size: usize) -> BakedTexture {
+    let mut card = Card::new(size, 0xf20d_0000 ^ (index as u32).wrapping_mul(0x9e37_79b9));
+    let n = size as f32;
+    let base = species.foliage;
+    let fan = species.leaf == LeafForm::Fan;
+    if fan {
+        let pleats = 15.0;
+        for y in 0..size {
+            let v = y as f32 / n;
+            // Outline: narrow at the petiole, full from a quarter out.
+            let half = 0.48 * (0.10 + 0.90 * ramp(v, 0.02, 0.28)) * (1.0 - 0.10 * v);
+            for x in 0..size {
+                let u = x as f32 / n - 0.5;
+                if u.abs() > half {
+                    continue;
+                }
+                // Petiole: a bare stalk until the blade opens.
+                if v < 0.14 && u.abs() > 0.02 {
+                    continue;
+                }
+                let k = (u / half * 0.5 + 0.5) * pleats;
+                let along = k.fract();
+                // Slits between segments, deepening toward the tip.
+                let slit = ramp(v, 0.45, 0.95) * 0.36;
+                if along < slit * 0.5 || along > 1.0 - slit * 0.5 {
+                    continue;
+                }
+                // Pleat shading: ridge and valley alternate.
+                let pleat = 0.88 + 0.16 * (along * std::f32::consts::PI).sin();
+                let hash = ((x * 73 + y * 151) % 17) as f32 / 17.0;
+                let value = pleat * (0.90 + 0.12 * hash) * (0.86 + 0.20 * v);
+                card.plot(x as i32, y as i32, scaled(base, value));
+            }
+        }
+    } else {
+        // Rachis, then leaflets.
+        let rachis = scaled(base, 0.62);
+        for y in 0..size {
+            let v = y as f32 / n;
+            for dx in -1..=1 {
+                card.plot((n * 0.5) as i32 + dx, y as i32, rachis);
+            }
+            if v < 0.08 {
+                continue;
+            }
+            // A leaflet pair every few rows.
+            if y % 3 != 0 {
+                continue;
+            }
+            // Leaflet length: longest at a third of the frond, shorter at both ends.
+            let length = 0.46 * ramp(v, 0.08, 0.30) * (1.0 - 0.80 * ramp(v, 0.55, 1.0)) * n;
+            for side in [-1.0_f32, 1.0] {
+                let steps = length as i32;
+                for s in 0..=steps {
+                    let t = s as f32 / steps.max(1) as f32;
+                    // Leaflets sweep forward (toward the tip) and droop slightly.
+                    let px = n * 0.5 + side * t * length;
+                    let py = y as f32 + t * length * 0.55 + t * t * length * 0.12;
+                    let value = 0.82 + 0.22 * (1.0 - t) * (0.6 + 0.4 * (y % 7) as f32 / 6.0);
+                    card.plot(px as i32, py as i32, scaled(base, value));
+                    card.plot(px as i32, py as i32 + 1, scaled(base, value * 0.94));
+                }
+            }
+        }
+    }
+    card.into_texture(&format!("vegetation/leaf/{}", species.key), 1.0)
 }
 
 /// The generic grass tuft card, `vegetation/tuft`.

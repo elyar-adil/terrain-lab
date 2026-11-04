@@ -450,3 +450,61 @@ fn plant_screen(ring: &[Vec2], top: f32, builder: &mut MeshBuilder) {
         );
     }
 }
+
+/// The far form of a commercial building: the same stack and elevations the
+/// detail is built from, summarised for the merged mass (`far::FarLook`).
+/// `area` is the footprint's area in square metres.
+pub(crate) fn far_look(
+    building: &ModernBuilding,
+    area: f32,
+    podium: Option<(f32, u16)>,
+) -> super::far::FarLook {
+    use super::far::{FarLook, bay_of, crown_code, glass_code, skin_code};
+    let mut table = FacadeTable::new();
+    let stone = cladding_of(building.id);
+    let stack = Stack::of(building, area, podium, stone, &mut table);
+    let (shaft, _) = &stack.shaft_skin;
+    let (podium_elevation, _) = &stack.podium_skin;
+    let bay = bay_of(shaft);
+    let pod = bay_of(podium_elevation);
+    let curtain = stack.skin == OfficeSkin::Curtain;
+    FarLook {
+        roof_m: stack.top(),
+        start_m: podium.map_or(0.0, |(top, _)| top),
+        storey_m: shaft.storey_m,
+        shop_m: if podium.is_some() { 0.0 } else { GROUND_STOREY_M },
+        wall: stone,
+        base_band: stone,
+        base_n: 0,
+        top_band: stone,
+        top_n: 0,
+        unit_w: shaft.width,
+        kind: bay.kind,
+        window: bay.window,
+        balcony: bay.balcony,
+        module_m: bay.module,
+        glass: shaft.tint,
+        glass_kind: glass_code(shaft.glass),
+        frame: shaft.frame,
+        trim: if curtain { [0.30, 0.31, 0.32] } else { stone },
+        skin: skin_code(shaft.skin),
+        flags: shaft.flags,
+        weather: shaft.weather,
+        crown: crown_code(crate::facades::cn_grammar::Crown::Flat),
+        terracotta: false,
+        solar: false,
+        podium_floors: stack.podium,
+        podium_storey_m: podium_elevation.storey_m,
+        setback_m: 3.0,
+        podium_unit_w: podium_elevation.width,
+        podium_kind: pod.kind,
+        podium_window: pod.window,
+    }
+}
+
+/// The roof deck of a commercial building standing on the ground, from its
+/// footprint area alone (square metres).
+pub(crate) fn roof_height_of_area(building: &ModernBuilding, area: f32) -> f32 {
+    let mut table = FacadeTable::new();
+    Stack::of(building, area, None, cladding_of(building.id), &mut table).top()
+}

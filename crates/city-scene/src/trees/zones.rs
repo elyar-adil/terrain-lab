@@ -122,6 +122,9 @@ pub(crate) struct Environment {
     pub size: f32,
     /// 0 (watered) to 1 (arid): how straw-coloured and bare the ground cover is.
     pub dry: f32,
+    /// A high-mountain site: the ground cover is alpine meadow, kept (not
+    /// thinned) and cool-toned.
+    pub alpine: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +232,7 @@ const COLD_NORTHEAST: ZonePlanting = ZonePlanting {
         ("liu-shu", 1),
     ],
     compound: &[("sha-shu", 4), ("yu-shu", 3), ("bai-hua", 3), ("song-shu", 2)],
-    waterfront: &[("liu-shu", 5), ("yang-shu", 3), ("bai-hua", 2)],
+    waterfront: &[("liu-shu", 5), ("yang-shu", 3), ("bai-hua", 2), ("lu-wei", 3)],
     farm: &[("yang-shu", 6), ("yu-shu", 3), ("liu-shu", 2), ("bai-hua", 1)],
     orchard: &[("tao-shu", 1)],
     island: &[("sha-shu", 3), ("bai-hua", 2), ("song-shu", 2)],
@@ -258,45 +261,23 @@ const HUMID_SUBTROPICAL: ZonePlanting = ZonePlanting {
         ("he-huan", 1),
         ("yin-xing", 1),
     ],
-    compound: &[
-        ("xiang-zhang", 4),
-        ("gui-hua", 5),
-        ("yu-lan", 3),
-        ("zi-wei", 2),
-        ("tao-shu", 2),
-        ("long-bai", 1),
-    ],
-    waterfront: &[("liu-shu", 4), ("shui-shan", 3), ("rong-shu", 2), ("xiang-zhang", 1)],
-    farm: &[("xiang-zhang", 3), ("liu-shu", 2), ("tao-shu", 2), ("yu-shu", 1), ("gui-hua", 1)],
+    compound: &[("xiang-zhang", 4), ("gui-hua", 5), ("yu-lan", 3), ("zhu", 3), ("zi-wei", 2), ("tao-shu", 2), ("long-bai", 1)],
+    waterfront: &[("liu-shu", 4), ("shui-shan", 3), ("lu-wei", 3), ("zhu", 2), ("rong-shu", 2), ("xiang-zhang", 1)],
+    farm: &[("zhu", 4), ("xiang-zhang", 3), ("liu-shu", 2), ("tao-shu", 2), ("yu-shu", 1), ("gui-hua", 1)],
     orchard: &[("tao-shu", 1)],
     island: &[("gui-hua", 3), ("zi-wei", 2), ("he-huan", 2), ("yu-lan", 2)],
 };
 
 const COAST_WARM: ZonePlanting = ZonePlanting {
-    street: &[
-        ("rong-shu", 32),
-        ("xiang-zhang", 24),
-        ("gui-hua", 12),
-        ("he-huan", 10),
-        ("zi-wei", 8),
-        ("song-shu", 8),
-        ("yu-lan", 6),
-    ],
-    motorway: &[("rong-shu", 4), ("song-shu", 3), ("xiang-zhang", 3)],
-    median: &[("gui-hua", 3), ("zi-wei", 3), ("he-huan", 2)],
-    park: &[
-        ("rong-shu", 4),
-        ("xiang-zhang", 3),
-        ("song-shu", 2),
-        ("he-huan", 2),
-        ("gui-hua", 2),
-        ("liu-shu", 1),
-    ],
-    compound: &[("gui-hua", 4), ("xiang-zhang", 3), ("zi-wei", 3), ("rong-shu", 2), ("yu-lan", 1)],
-    waterfront: &[("rong-shu", 4), ("song-shu", 3), ("liu-shu", 2), ("shui-shan", 1)],
-    farm: &[("rong-shu", 3), ("xiang-zhang", 2), ("song-shu", 2), ("liu-shu", 1)],
+    street: &[("rong-shu", 20), ("xiang-zhang", 14), ("da-wang-ye", 12), ("pu-kui", 10), ("ye-zi", 8), ("mu-ma-huang", 8), ("gui-hua", 8), ("he-huan", 6), ("zi-wei", 4), ("zong-lu", 6)],
+    motorway: &[("mu-ma-huang", 4), ("rong-shu", 3), ("da-wang-ye", 2), ("song-shu", 2)],
+    median: &[("zong-lu", 3), ("gui-hua", 3), ("zi-wei", 3), ("pu-kui", 2)],
+    park: &[("ye-zi", 4), ("rong-shu", 4), ("pu-kui", 3), ("da-wang-ye", 3), ("mu-ma-huang", 3), ("zhu", 3), ("xiang-zhang", 2), ("he-huan", 2), ("zong-lu", 2)],
+    compound: &[("gui-hua", 4), ("zong-lu", 3), ("zhu", 3), ("xiang-zhang", 3), ("zi-wei", 3), ("rong-shu", 2), ("pu-kui", 2)],
+    waterfront: &[("hong-shu", 5), ("lu-wei", 4), ("mu-ma-huang", 3), ("ye-zi", 3), ("rong-shu", 3), ("liu-shu", 2)],
+    farm: &[("rong-shu", 3), ("mu-ma-huang", 3), ("xiang-zhang", 2), ("zhu", 2), ("ye-zi", 1)],
     orchard: &[("tao-shu", 1)],
-    island: &[("gui-hua", 3), ("zi-wei", 2), ("he-huan", 2)],
+    island: &[("ye-zi", 3), ("da-wang-ye", 3), ("zi-wei", 2), ("gui-hua", 2)],
 };
 
 const COAST_COOL: ZonePlanting = ZonePlanting {
@@ -336,20 +317,13 @@ const ARID_NORTHWEST: ZonePlanting = ZonePlanting {
         ("bai-la", 4),
     ],
     motorway: &[("yang-shu", 6), ("sha-zao", 3)],
-    median: &[("sha-zao", 4), ("yang-shu", 2)],
-    park: &[
-        ("hu-yang", 4),
-        ("yang-shu", 4),
-        ("yu-shu", 3),
-        ("sha-zao", 3),
-        ("song-shu", 2),
-        ("liu-shu", 2),
-    ],
-    compound: &[("yu-shu", 3), ("sha-zao", 3), ("yang-shu", 3), ("long-bai", 2)],
-    waterfront: &[("hu-yang", 4), ("liu-shu", 4), ("yang-shu", 2)],
-    farm: &[("yang-shu", 6), ("yu-shu", 3), ("sha-zao", 3), ("liu-shu", 1)],
+    median: &[("sha-zao", 4), ("sha-ji", 4), ("suo-suo", 3), ("yang-shu", 2)],
+    park: &[("hu-yang", 4), ("yang-shu", 4), ("yu-shu", 3), ("sha-zao", 3), ("suo-suo", 3), ("sha-ji", 3), ("song-shu", 2), ("liu-shu", 2)],
+    compound: &[("yu-shu", 3), ("sha-zao", 3), ("yang-shu", 3), ("sha-ji", 2), ("long-bai", 2)],
+    waterfront: &[("hu-yang", 4), ("liu-shu", 4), ("lu-wei", 4), ("sha-ji", 2), ("yang-shu", 2)],
+    farm: &[("yang-shu", 6), ("yu-shu", 3), ("sha-zao", 3), ("suo-suo", 2), ("liu-shu", 1)],
     orchard: &[("tao-shu", 1)],
-    island: &[("sha-zao", 3), ("long-bai", 2)],
+    island: &[("sha-zao", 3), ("sha-ji", 3), ("suo-suo", 2), ("long-bai", 2)],
 };
 
 /// Qinghai spruce (青海云杉) is `sha-shu`, the blue-green cone; Qilian juniper
@@ -364,19 +338,13 @@ const PLATEAU: ZonePlanting = ZonePlanting {
         ("sha-zao", 10),
     ],
     motorway: &[("yang-shu", 5), ("sha-shu", 3), ("long-bai", 2)],
-    median: &[("sha-zao", 3), ("long-bai", 2)],
-    park: &[
-        ("sha-shu", 5),
-        ("long-bai", 3),
-        ("yang-shu", 3),
-        ("liu-shu", 2),
-        ("sha-zao", 2),
-    ],
+    median: &[("sha-ji", 4), ("dian-zhuang", 3), ("sha-zao", 3), ("long-bai", 2)],
+    park: &[("sha-shu", 5), ("long-bai", 3), ("yang-shu", 3), ("dian-zhuang", 4), ("sha-ji", 3), ("liu-shu", 2), ("sha-zao", 2)],
     compound: &[("sha-shu", 3), ("long-bai", 3), ("yang-shu", 3), ("sha-zao", 2)],
-    waterfront: &[("liu-shu", 5), ("yang-shu", 4)],
+    waterfront: &[("liu-shu", 5), ("yang-shu", 4), ("sha-ji", 3), ("lu-wei", 2)],
     farm: &[("yang-shu", 6), ("liu-shu", 3), ("sha-zao", 2)],
     orchard: &[("tao-shu", 1)],
-    island: &[("long-bai", 3), ("sha-shu", 2)],
+    island: &[("long-bai", 3), ("dian-zhuang", 3), ("sha-ji", 2), ("sha-shu", 2)],
 };
 
 // ---------------------------------------------------------------------------
@@ -523,6 +491,7 @@ pub(crate) fn environment_for(site: &SiteClimate) -> Environment {
         keep,
         size,
         dry,
+        alpine: zone.key == "plateau",
     }
 }
 
@@ -580,6 +549,26 @@ mod tests {
         assert_eq!(zone_for(&site(13.0, 0.5, 20.0, 5.0)).key, "coast-cool");
         assert_eq!(zone_for(&site(13.0, 0.15, 900.0, 400.0)).key, "arid-northwest");
         assert_eq!(zone_for(&site(4.0, 0.4, 3300.0, 400.0)).key, "plateau");
+    }
+
+    #[test]
+    fn the_coast_plants_palms_and_the_dry_zones_plant_their_shrubs() {
+        let has = |z: &Zone, key: &str| {
+            let p = z.planting;
+            [p.street, p.park, p.waterfront, p.compound, p.median, p.island]
+                .iter()
+                .any(|l| l.iter().any(|(k, _)| *k == key))
+        };
+        let coast = zone_for(&site(21.0, 0.7, 20.0, 5.0));
+        for key in ["da-wang-ye", "ye-zi", "pu-kui", "zong-lu", "mu-ma-huang", "hong-shu", "lu-wei", "zhu"] {
+            assert!(has(coast, key), "coast-warm lacks {key}");
+        }
+        let arid = zone_for(&site(13.0, 0.15, 900.0, 400.0));
+        for key in ["sha-ji", "suo-suo", "hu-yang"] {
+            assert!(has(arid, key), "arid lacks {key}");
+        }
+        let alpine = zone_for(&site(4.0, 0.4, 3300.0, 400.0));
+        assert!(has(alpine, "dian-zhuang") && has(alpine, "sha-ji"));
     }
 
     #[test]

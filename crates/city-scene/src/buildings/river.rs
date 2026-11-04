@@ -24,7 +24,7 @@
 use urban::{CityFrameInfo, Point, RiverSetting};
 
 use crate::math::{Vec2, Vec3, point_in_ring, signed_area};
-use crate::mesh::{GroupStyle, Instance, MeshBuilder};
+use crate::mesh::{GroupStyle, MeshBuilder};
 use worldgen_core::hash::cell01;
 use worldgen_core::smooth01;
 
@@ -400,9 +400,9 @@ pub fn build_water(
             let probe = at((i0 + i1) / 2, sg * (half + 30.0));
             let near = built
                 .iter()
-                .filter(|b| (b.x - probe.x).hypot(b.y - probe.y) < 85.0)
+                .filter(|b| (b.x - probe.x).hypot(b.y - probe.y) < 150.0)
                 .count() as f32;
-            let urban = (near / 9.0).clamp(0.0, 1.0);
+            let urban = (near / 10.0).clamp(0.0, 1.0);
             let crossing = (i0..=i1).any(|i| near_crossing(at(i, sg * half)) || near_crossing(pos[i]));
             let u = cell01(0xA11, cell as i32, side_id, 7);
             let u2 = cell01(0xA12, cell as i32, side_id, 9);
@@ -422,6 +422,9 @@ pub fn build_water(
                 Kind::Natural
             };
             kinds[side] = kind;
+            if std::env::var("RIVER_DEBUG").is_ok() {
+                eprintln!("reach {cell} side {side} at ({:.0},{:.0}) urban {urban:.2} -> {kind:?}", pos[(i0 + i1) / 2].x, pos[(i0 + i1) / 2].y);
+            }
             let bar_noise = 0.6 + 0.8 * cell01(0xA14, cell as i32, side_id, 2);
             let bar = match kind {
                 Kind::Wall | Kind::Terrace | Kind::Paved => low_flow * 3.0 * bar_noise,
@@ -470,9 +473,9 @@ pub fn build_water(
             let o = bank[side][k][0].o;
             half + o
         };
-        let ts = [
-            0.0_f32, 0.015, 0.04, 0.08, 0.15, 0.26, 0.4, 0.5, 0.6, 0.74, 0.85, 0.92, 0.96, 0.985, 1.0,
-        ];
+        let ts: Vec<f32> = (0..=30)
+            .map(|k| 0.5 - 0.5 * (std::f32::consts::PI * k as f32 / 30.0).cos())
+            .collect();
         let deep = [0.09, 0.17, 0.19];
         let clear = [0.13, 0.24, 0.25];
         let muddy = [0.27, 0.27, 0.17];
@@ -655,22 +658,28 @@ pub fn build_water(
                         let c0 = at(i, sg * (half + o));
                         let c1 = at(i + 1, sg * (half + o));
                         let (x, z) = (c0.x + (c1.x - c0.x) * along / SPACING, c0.y + (c1.y - c0.y) * along / SPACING);
-                        let green = 0.7 + 0.3 * r2;
-                        builder.add_instance(
-                            "tuft",
-                            Instance {
-                                x,
-                                y: y - 0.04,
-                                z,
-                                rotation_y: r2 * 6.28,
-                                scale_x: 0.9 + 0.6 * r1,
-                                scale_y: 1.3 + 0.9 * r2,
-                                scale_z: 0.9 + 0.6 * r1,
-                                tint_r: green * 0.95,
-                                tint_g: green,
-                                tint_b: green * 0.72,
-                            },
-                        );
+                        // A clump of blades: narrow tapering leaves leaning outward,
+                        // straw at the tip, olive at the root.
+                        let n_blades = 5 + (r1 * 4.0) as usize;
+                        for k in 0..n_blades {
+                            let h = cell01(0xD46, i as i32 * 31 + c as i32 * 7 + k as i32, side_id, 3);
+                            let a = cell01(0xD47, i as i32 * 31 + c as i32 * 7 + k as i32, side_id, 4) * 6.283;
+                            let height = 1.1 + 1.1 * h;
+                            let lean = Vec2::new(a.cos(), a.sin()) * (0.25 + 0.35 * h);
+                            let root = Vec2::new(x + a.cos() * 0.12, z + a.sin() * 0.12);
+                            let w = Vec2::new(-a.sin(), a.cos()) * 0.035;
+                            let tip = Vec3::from_plan(root + lean, y + height);
+                            let base_l = Vec3::from_plan(root - w, y - 0.04);
+                            let base_r = Vec3::from_plan(root + w, y - 0.04);
+                            let mid_l = Vec3::from_plan(root + lean * 0.35 - w * 0.7, y + height * 0.55);
+                            let mid_r = Vec3::from_plan(root + lean * 0.35 + w * 0.7, y + height * 0.55);
+                            let root_col = [0.22 * (0.8 + 0.4 * h), 0.30, 0.10];
+                            let tip_col = [0.52, 0.50, 0.24];
+                            builder.quad_uv(BANK, base_l, base_r, mid_r, mid_l, [(0.0, 0.0); 4], Some(root_col));
+                            builder.quad_uv(BANK, mid_l, mid_r, tip, tip, [(0.0, 0.0); 4], Some(tip_col));
+                            builder.quad_uv(BANK, base_r, base_l, mid_l, mid_r, [(0.0, 0.0); 4], Some(root_col));
+                            builder.quad_uv(BANK, mid_r, mid_l, tip, tip, [(0.0, 0.0); 4], Some(tip_col));
+                        }
                     }
                 }
             }
