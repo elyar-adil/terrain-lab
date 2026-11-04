@@ -30,3 +30,6 @@ render-out/
 # Agent worktrees created by the tooling while subagents run (not project files).
 .claude/worktrees/
 /public/city-tiles/
+
+# Single-file web build output (npm run build:single).
+/dist-single/
