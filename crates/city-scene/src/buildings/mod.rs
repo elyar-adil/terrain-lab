@@ -401,6 +401,10 @@ fn declare(builder: &mut MeshBuilder) {
     builder.style("block.ground", ground);
     builder.style("parcel.paving", ground);
     builder.style("parcel.green", ground);
+    // Large hard-standing by use: a concrete yard, an asphalt lot, a car park.
+    builder.style("parcel.yard", ground);
+    builder.style("parcel.lot", ground);
+    builder.style("parcel.parking", ground);
 }
 
 /// Ring of a building, in city-local metres, wound consistently outward-facing.
@@ -629,6 +633,21 @@ fn hole_free(shape: Vec<Vec<[f32; 2]>>, depth: usize, out: &mut Vec<Vec<Vec2>>) 
     }
 }
 
+/// The surface of a parcel's open hard-standing, by use. Industrial lots are a
+/// jointed concrete yard or an asphalt lot; commercial and mixed-use lots are
+/// mostly car parks with painted bays; the rest keep the footway paving. The
+/// far form (`cityMass.ts`, `groundOf`) makes the same choice by the same rule,
+/// `id * 7919 mod 100`, so a lot does not change surface as its detail loads.
+fn hard_standing(use_type: ParcelUse, id: u32) -> &'static str {
+    let pick = id.wrapping_mul(7919) % 100;
+    match use_type {
+        ParcelUse::Industrial if pick < 55 => "parcel.yard",
+        ParcelUse::Industrial => "parcel.lot",
+        ParcelUse::Commercial | ParcelUse::MixedUse if pick < 70 => "parcel.parking",
+        _ => "parcel.paving",
+    }
+}
+
 /// Build every static surface of a city that stands on the ground.
 pub fn build(
     blocks: &[UrbanBlock],
@@ -746,7 +765,7 @@ pub fn build_among(
         ) {
             "parcel.green"
         } else {
-            "parcel.paving"
+            hard_standing(parcel.use_type, parcel.id)
         };
         // Cut however little it crosses: a sliver over the footway 4 mm under
         // the paving flickers through it.
@@ -1341,6 +1360,9 @@ mod tests {
                     | "block.ground"
                     | "parcel.paving"
                     | "parcel.green"
+                    | "parcel.yard"
+                    | "parcel.lot"
+                    | "parcel.parking"
             )
     }
 
@@ -1440,7 +1462,14 @@ mod tests {
         for group in &groups {
             if !matches!(
                 group.material.as_str(),
-                "roof" | "parcel.paving" | "parcel.green" | "block.ground" | "sign/shop"
+                "roof"
+                    | "parcel.paving"
+                    | "parcel.green"
+                    | "parcel.yard"
+                    | "parcel.lot"
+                    | "parcel.parking"
+                    | "block.ground"
+                    | "sign/shop"
             ) {
                 continue;
             }
@@ -1885,7 +1914,7 @@ mod tests {
     /// And again when an interchange's landings stopped leaving the local
     /// streets they close as dead ends: those are taken back to their
     /// junctions, and the blocks round them changed.
-    const WESTERN_MIXED_LAYER_HASH: u64 = 2_717_590_253_685_407_465;
+    const WESTERN_MIXED_LAYER_HASH: u64 = 1_924_612_264_055_993_315;
 
     #[test]
     fn western_mixed_building_layer_is_bit_identical() {

@@ -294,7 +294,11 @@ const waterFragmentShader = `
     float edgeFoam = smoothstep(0.16, 0.42, water) * (1.0 - smoothstep(0.42, 0.72, water));
     float streamFoam = river * flowStrength * smoothstep(0.73, 0.92, centre);
     base = mix(base, vec3(0.72, 0.79, 0.75), edgeFoam * ocean * 0.38 + streamFoam * 0.14);
-    float alpha = mix(0.52, 0.82, ocean) * smoothstep(0.12, 0.58, water);
+    // A river is opaque enough to read from kilometres off: sky on the surface,
+    // not the bed's green through a veil.
+    base = mix(base, vec3(0.30, 0.42, 0.46), river * (0.12 + 0.30 * fresnel));
+    float alpha = mix(mix(0.52, 0.86, river * smoothstep(0.2, 0.5, water)), 0.82, ocean) * smoothstep(0.12, 0.58, water);
+    alpha = max(alpha, river * 0.9 * smoothstep(0.16, 0.42, water));
     gl_FragColor = vec4(base, alpha);
   }
 `;
@@ -1854,6 +1858,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
         metresToScene,
       });
       scene.add(mass.mesh);
+      if (mass.water) scene.add(mass.water);
       return mass;
     });
     const updateCityMasses = () => {
@@ -1864,6 +1869,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
         const replaced = detailed !== null
           && Math.hypot(detailed.origin[0] - site.xKm, detailed.origin[1] - site.yKm) < 0.05;
         if (mass.mesh.visible === replaced) mass.mesh.visible = !replaced;
+        if (mass.water) mass.water.visible = !replaced;
       });
     };
     let cityCheckFrame = 0;
@@ -3543,10 +3549,38 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     waterPositions.needsUpdate = true;
     const hydrologyPixels = new Uint8Array(waterMask.length * 4);
     const flowPixels = new Uint8Array(waterMask.length * 4);
+    // A river a texel or two wide is a one-pixel diagonal chain in the mask, and
+    // bilinear filtering of a chain of diagonal neighbours falls below the discard
+    // level between them, so the river drew as a broken dotted line. Widen every
+    // river texel into its four neighbours (about 1.5 texels, near the real width
+    // of a lowland river at this resolution) so the ribbon is continuous.
+    const hydroSize = result.waterDataSize;
+    const riverKindMax = 0.18 * 255;
+    const riverMask = new Uint8Array(waterMask);
+    const riverKind = new Uint8Array(waterKind);
+    const riverFlow = new Uint8Array(flowStrength);
+    for (let y = 0; y < hydroSize; y += 1) {
+      for (let x = 0; x < hydroSize; x += 1) {
+        const i = y * hydroSize + x;
+        if (waterMask[i] === 0 || waterKind[i] > riverKindMax) continue;
+        const spread = Math.round(Math.min(255, waterMask[i] * 1.5) * 0.9);
+        const flowHere = Math.max(flowStrength[i], 96);
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= hydroSize || ny >= hydroSize) continue;
+          const j = ny * hydroSize + nx;
+          if (waterMask[j] === 0 && spread > riverMask[j]) {
+            riverMask[j] = spread;
+            riverKind[j] = waterKind[i];
+            riverFlow[j] = flowHere;
+          }
+        }
+      }
+    }
     for (let index = 0; index < waterMask.length; index += 1) {
-      hydrologyPixels[index * 4] = waterMask[index];
-      hydrologyPixels[index * 4 + 1] = waterKind[index];
-      hydrologyPixels[index * 4 + 2] = flowStrength[index];
+      hydrologyPixels[index * 4] = riverMask[index];
+      hydrologyPixels[index * 4 + 1] = riverKind[index];
+      hydrologyPixels[index * 4 + 2] = Math.max(riverFlow[index], flowStrength[index]);
       hydrologyPixels[index * 4 + 3] = 255;
       flowPixels[index * 4] = Math.round((flowDirection[index * 2] / 127 * 0.5 + 0.5) * 255);
       flowPixels[index * 4 + 1] = Math.round((flowDirection[index * 2 + 1] / 127 * 0.5 + 0.5) * 255);
@@ -3973,6 +4007,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       for (const mass of cityMasses) {
         if (!mass) continue;
         scene.remove(mass.mesh);
+        if (mass.water) scene.remove(mass.water);
         mass.dispose();
       }
       controls.dispose();

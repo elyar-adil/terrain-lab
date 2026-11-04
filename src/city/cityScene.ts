@@ -15,6 +15,7 @@
  * trying to stop producing.
  */
 
+import { applyGroundKind, GROUND_KIND } from "./parcelGround";
 import * as THREE from "three";
 
 import { patchBark } from "./bark";
@@ -448,6 +449,12 @@ export function createMaterials(
     pavingMap ? 0xffffff : 0x6e6e68,
   ), "paving");
   applyAntiTiling(standard("parcel.paving", { map: pavingMap ?? undefined, roughness: 0.92 }, 0xffffff), "paving");
+  // Big hard-standing by use (parcelGround.ts): a jointed concrete yard with
+  // container stacks, an asphalt lot with oil and lane lines, a car park with
+  // painted bays and parked cars. They take the world pattern, not the footway map.
+  applyGroundKind(standard("parcel.yard", { roughness: 0.93 }, 0x8c877c), GROUND_KIND.yard);
+  applyGroundKind(standard("parcel.lot", { roughness: 0.9 }, 0x62605c), GROUND_KIND.asphaltLot);
+  applyGroundKind(standard("parcel.parking", { roughness: 0.9 }, 0x6f6d69), GROUND_KIND.parking);
   // Kerb concrete: 25-35% reflectance, and a shade warmer than the asphalt it
   // sits beside, which is what makes a kerb line read at distance.
   // Kerb tops and dropped-kerb ramps lie a few millimetres over the footway

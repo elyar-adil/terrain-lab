@@ -326,6 +326,7 @@ export interface ModernCityPayload {  style: "chineseModern";
   }>;
   river: UrbanPoint[] | null;
   riverWidthMetres?: number;
+  tributaries?: Array<{ line: UrbanPoint[]; widthMetres: number }>;
   compounds?: UrbanCompound[];
   trees?: UrbanTree[];
 }

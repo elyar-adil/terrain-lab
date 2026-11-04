@@ -410,6 +410,23 @@ vec2 fTilt = vec2(0.0);
     float dirt = (0.10 + 0.20 * weather) * rain + (0.15 + 0.20 * weather) * tear + 0.18 * splash;
     // Grime is brown-grey, so it takes more blue than red off the wall.
     colour *= vec3(1.0) - vec3(0.85, 0.92, 1.0) * clamp(dirt, 0.0, 0.6) * wall;
+    // Repainted patches: a maintenance crew rolls a new coat on a rectangle of
+    // wall, and the new coat never quite matches (a few % lighter or warmer,
+    // with a straight edge). Cells ~4.5 m x 6 m, one in six repainted.
+    vec2 rpC = vec2(U / 4.5 + float(row) * 1.7, V * H / 6.0);
+    float rpH = fHash2(floor(rpC) + 11.0);
+    vec2 rpF = fract(rpC);
+    float rpIn = step(0.08, rpF.x) * step(rpF.x, 0.92) * step(0.1, rpF.y) * step(rpF.y, 0.9);
+    float rp = step(0.84, rpH) * rpIn * wall * (1.0 - wfine * 0.6);
+    colour *= mix(vec3(1.0), vec3(1.07, 1.05, 0.99) + (rpH - 0.92) * vec3(0.4, 0.2, -0.2), rp);
+    // Efflorescence and rising damp: pale lime blooms low on the wall, a damp
+    // darkening just above the pavement.
+    float lowZone = (s < 0.5 ? 1.0 - smoothstep(0.4, 2.2, ml) : 0.0);
+    float bloom = smoothstep(0.55, 0.8, fNoise(vec2(U * 2.3, ml * 3.1 + 7.0))) * lowZone * (0.4 + 0.6 * weather);
+    colour = mix(colour, colour * 0.45 + vec3(0.5, 0.5, 0.47), bloom * 0.45 * wall * (1.0 - wfine * 0.5));
+    colour *= 1.0 - 0.10 * lowZone * smoothstep(0.35, 0.65, fNoise(vec2(U * 0.8, 3.0))) * wall;
+    // Wet / dirty paint is glossier than dry chalky render in streaks.
+    rough = mix(rough, rough - 0.12, clamp(rain * 0.6, 0.0, 1.0) * wall);
   }
 
   // --- glass ----------------------------------------------------------------
@@ -486,7 +503,12 @@ vec2 fTilt = vec2(0.0);
     fEmit = inside * glassCov;
     fGlass = max(fGlass, glassCov);
     colour = mix(colour, vec3(0.0), glassCov);
-    rough = mix(rough, 0.035, glassCov);
+    // Dirty glass: dust and rain-borne grime dry in vertical runs, the pane is
+    // rougher and greyer there and reflects less crisply.
+    float gDirt = smoothstep(0.45, 0.9, fNoise(vec2(U * 3.3 + seed, V * H * 0.05))) * (0.55 + 0.45 * fNoise(vec2(U * 11.0, V * H * 0.2)));
+    gDirt = mix(gDirt, 0.25, smoothstep(0.1, 0.5, fw)) * (0.25 + 0.75 * weather);
+    rough = mix(rough, mix(0.035, 0.34, gDirt), glassCov);
+    colour += vec3(0.30, 0.29, 0.26) * gDirt * 0.35 * glassCov;
     fF0 = glassKind == 3 ? mix(vec3(0.04), coatC, 0.3) : glassKind == 2 ? vec3(0.10, 0.11, 0.12) : glassKind == 1 ? mix(vec3(0.05), coatC * 0.12, 0.5) : vec3(0.045);
     // Each pane is glazed a fraction of a degree off true.
     float pane = floor(gu * float(max(panes, 1)));

@@ -18,6 +18,7 @@ import * as THREE from "three";
 
 import type { ModernCityPayload } from "../types";
 import { tileKey, tileOfPoint } from "./cityTiles";
+import { GROUND_GLSL, GROUND_KIND } from "./parcelGround";
 
 /** Tiles the far form can hide. A city of more than this many tiles hides none past it. */
 const MAX_MASS_TILES = 256;
@@ -280,6 +281,20 @@ class MassBuilder {
     }
   }
 
+  /** A triangle with a colour per corner, facing up: water and its banks. */
+  smoothTri(a: number[], ca: THREE.Color, b: number[], cb: THREE.Color, c: number[], cc: THREE.Color) {
+    const up = (b[0] - a[0]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[0] - a[0]) < 0;
+    const corners: Array<[number[], THREE.Color]> = up ? [[a, ca], [b, cb], [c, cc]] : [[a, ca], [c, cc], [b, cb]];
+    for (const [p, colour] of corners) {
+      this.positions.push(p[0], p[1], p[2]);
+      this.normals.push(0, 1, 0);
+      this.colors.push(colour.r, colour.g, colour.b);
+      this.tileIds.push(this.current);
+      this.bases.push(0);
+      this.seeds.push(PLAIN_SEED);
+    }
+  }
+
   /** A flat ribbon along a polyline. Heights are per point. */
   ribbon(points: Array<[number, number, number]>, width: number, hex: number) {
     for (let i = 0; i + 1 < points.length; i += 1) {
@@ -349,6 +364,8 @@ function crown(builder: MassBuilder, x: number, ground: number, z: number, heigh
 
 export interface CityMass {
   mesh: THREE.Mesh;
+  /** The river and its tributaries as water, or null where the plan has none. */
+  water: THREE.Mesh | null;
   triangles: number;
   /** Hide or show one tile's share of the far form, as its detail is mounted or dropped. */
   setTileHidden(column: number, row: number, hidden: boolean): void;
@@ -364,6 +381,84 @@ function ringMean(points: Array<{ x_km: number; y_km: number }>): { x_km: number
   };
 }
 
+/**
+ * A river reach drawn from afar: the plan's centre line, rounded by corner
+ * cutting, as a continuous ribbon of the plan's width. Across it the colour goes
+ * from silt-green shallows to the dark, turbid channel, and a strip of wet mud
+ * and reed edges it where it meets the grass, so it has banks and not a painted
+ * line. Each vertex takes the highest ground across the section, so the surface
+ * never sinks into a valley side. Sky reflection is added by the material.
+ */
+const WATER_PROFILE: Array<{ at: number; colour: number }> = [
+  { at: -1, colour: 0x4d5a3e }, // reed and wet mud on the bank
+  { at: -0.9, colour: 0x6f7b5f },
+  { at: -0.62, colour: 0x4f6860 },
+  { at: -0.25, colour: 0x37535c },
+  { at: 0, colour: 0x2f4a56 }, // the channel
+  { at: 0.25, colour: 0x37535c },
+  { at: 0.62, colour: 0x4f6860 },
+  { at: 0.9, colour: 0x6f7b5f },
+  { at: 1, colour: 0x4d5a3e },
+];
+
+function waterReach(
+  builder: MassBuilder,
+  line: Array<{ x_km: number; y_km: number }>,
+  widthMetres: number,
+  frame: CityMassFrame,
+  select: (p: { x_km: number; y_km: number }) => void,
+): void {
+  const m = frame.metresToScene;
+  let pts = line.map((p) => frame.toScene(p.x_km, p.y_km));
+  if (pts.length < 2) return;
+  for (let pass = 0; pass < 3 && pts.length < 600; pass += 1) {
+    const next: Array<[number, number]> = [pts[0]];
+    for (let i = 0; i + 1 < pts.length; i += 1) {
+      const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+      next.push([ax * 0.75 + bx * 0.25, az * 0.75 + bz * 0.25], [ax * 0.25 + bx * 0.75, az * 0.25 + bz * 0.75]);
+    }
+    next.push(pts[pts.length - 1]);
+    pts = next;
+  }
+  const half = widthMetres * 0.5 * m;
+  const outer = half + Math.max(2.0 * m, half * 0.1);
+  const n = pts.length;
+  const normal: Array<[number, number]> = pts.map((_, i) => {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+    const dx = b[0] - a[0], dz = b[1] - a[1];
+    const len = Math.hypot(dx, dz) || 1;
+    return [-dz / len, dx / len];
+  });
+  const surface = pts.map(([x, z], i) => {
+    let y = frame.heightAt(x, z);
+    for (const side of [-1, 1]) {
+      y = Math.max(y, frame.heightAt(x + normal[i][0] * half * side, z + normal[i][1] * half * side));
+    }
+    return y + 0.22 * m;
+  });
+  const colours = WATER_PROFILE.map((s) => new THREE.Color(s.colour));
+  const turbid = new THREE.Color(0x5f6a4a);
+  let arc = 0;
+  for (let i = 0; i + 1 < n; i += 1) {
+    select(line[Math.min(line.length - 1, Math.round((i / (n - 1)) * (line.length - 1)))]);
+    arc += Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+    // Slowly varying turbidity along the reach: brown-green patches of silt.
+    const patch = 0.5 + 0.5 * Math.sin((arc / m) * 0.011 + 1.3) * Math.sin((arc / m) * 0.031);
+    const vertex = (index: number, k: number) => {
+      const t = WATER_PROFILE[k].at;
+      const off = t * (Math.abs(t) === 1 ? outer : half);
+      const colour = colours[k].clone();
+      if (k > 0 && k < WATER_PROFILE.length - 1) colour.lerp(turbid, patch * 0.28);
+      return { p: [pts[index][0] + normal[index][0] * off, surface[index], pts[index][1] + normal[index][1] * off], colour };
+    };
+    for (let k = 0; k + 1 < WATER_PROFILE.length; k += 1) {
+      const a0 = vertex(i, k), a1 = vertex(i, k + 1), b0 = vertex(i + 1, k), b1 = vertex(i + 1, k + 1);
+      builder.smoothTri(a0.p, a0.colour, a1.p, a1.colour, b1.p, b1.colour);
+      builder.smoothTri(a0.p, a0.colour, b1.p, b1.colour, b0.p, b0.colour);
+    }
+  }
+}
+
 export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): CityMass {
   const m = frame.metresToScene;
   const builder = new MassBuilder();
@@ -377,28 +472,59 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
 
   // The ground of every block, so buildings stand on paving rather than on the
   // meadow the terrain texture shows.
+  // The detail's block plate is grass (`block.ground`), so what no parcel covers
+  // is a drier, trampled lawn, not a grey slab.
   for (const block of city.blocks) {
     builder.select(...tileOfPoint(city.frame, ringMean(block.boundary)));
-    builder.flat(toRing(block.boundary), frame.heightAt, 0.15 * m, PAVING);
+    builder.seed = GROUND_KIND.lawn + hash01(block.boundary.length, 9) * 0.999;
+    builder.flat(toRing(block.boundary), frame.heightAt, 0.15 * m, 0x6c7a4e);
   }
 
   // Each parcel's ground over its block, by what it is used for: from a few
   // hundred metres a town is lawns, forecourts and yards, not one grey slab.
+  // Base colour and surface kind. The kind (parcelGround.ts) is drawn by the
+  // shader as joints, bays, containers, stains; a use with several surfaces
+  // picks one by the parcel's id, so neighbouring lots differ.
   const PARCEL_GROUND: Record<string, number> = {
     park: 0x4e6b36,
     residential: 0x667c4c,
     villa: 0x5f7746,
     farmstead: 0x6b7447,
     village: 0x7a7a62,
-    commercial: 0x96948c,
-    mixedUse: 0x8f8d86,
-    civic: 0x8a8a7e,
-    industrial: 0x837d72,
+    commercial: 0x6f6d69,
+    mixedUse: 0x74726d,
+    civic: 0x9a968c,
+    industrial: 0x8c877c,
+  };
+  const groundOf = (useType: string, id: number): { colour: number; kind: number } => {
+    // The detail's own rule (`hard_standing` in buildings/mod.rs).
+    const pick = ((id * 7919) % 100) / 100;
+    switch (useType) {
+      case "industrial":
+        return pick < 0.55
+          ? { colour: PARCEL_GROUND.industrial, kind: GROUND_KIND.yard }
+          : { colour: 0x62605c, kind: GROUND_KIND.asphaltLot };
+      case "commercial":
+      case "mixedUse":
+        return pick < 0.7
+          ? { colour: PARCEL_GROUND[useType], kind: GROUND_KIND.parking }
+          : { colour: PARCEL_GROUND.civic, kind: GROUND_KIND.plaza };
+      case "civic":
+        return { colour: PARCEL_GROUND.civic, kind: GROUND_KIND.plaza };
+      case "park":
+      case "residential":
+      case "villa":
+      case "farmstead":
+        return { colour: PARCEL_GROUND[useType], kind: GROUND_KIND.lawn };
+      default:
+        return { colour: PARCEL_GROUND[useType] ?? PAVING, kind: PLAIN_SEED };
+    }
   };
   for (const parcel of city.parcels) {
     builder.select(...tileOfPoint(city.frame, ringMean(parcel.ring)));
-    builder.seed = PLAIN_SEED;
-    builder.flat(toRing(parcel.ring), frame.heightAt, 0.25 * m, PARCEL_GROUND[parcel.useType] ?? PAVING);
+    const ground = groundOf(parcel.useType, parcel.id);
+    builder.seed = ground.kind + hash01(parcel.id, 6) * 0.999;
+    builder.flat(toRing(parcel.ring), frame.heightAt, 0.25 * m, ground.colour);
   }
 
   const streetTreeLines: Array<{ pts: Array<[number, number, number]>; offset: number; tile: [number, number] | null }> = [];
@@ -499,6 +625,68 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     dressRoof(builder, b, ring, roofTop, wall, shed, m);
   }
 
+  // Water: its own mesh and material, since it reflects the sky instead of being
+  // a plaster wall with windows. Hidden per tile with the same uniform.
+  const waterBuilder = new MassBuilder();
+  const selectWater = (p: { x_km: number; y_km: number }) => {
+    const [c, r] = tileOfPoint(city.frame, p);
+    const key = tileKey(c, r);
+    let index = builder.tileIndex.get(key);
+    if (index === undefined) {
+      index = builder.tileIndex.size;
+      builder.tileIndex.set(key, index);
+    }
+    waterBuilder.tileIndex.set(key, index);
+    waterBuilder.select(c, r);
+  };
+  if (city.river && city.river.length >= 2) {
+    waterReach(waterBuilder, city.river, city.riverWidthMetres ?? 60, frame, selectWater);
+  }
+  for (const tributary of city.tributaries ?? []) {
+    if (tributary.line.length >= 2) waterReach(waterBuilder, tributary.line, tributary.widthMetres, frame, selectWater);
+  }
+  let water: THREE.Mesh | null = null;
+  let waterMaterial: THREE.MeshStandardMaterial | null = null;
+  if (waterBuilder.triangles() > 0) {
+    waterMaterial = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.32,
+      metalness: 0,
+      envMapIntensity: 0.4,
+      polygonOffset: true,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -3,
+    });
+    waterMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.uHidden = { value: hidden };
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", "#include <common>\nattribute float aTile;\nvarying float vTile;\nvarying vec3 vWaterWorld;")
+        .replace("#include <worldpos_vertex>", "#include <worldpos_vertex>\nvTile = aTile;\nvWaterWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;");
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", "#include <common>\nuniform float uHidden[256];\nvarying float vTile;\nvarying vec3 vWaterWorld;")
+        .replace("#include <color_fragment>", "if (vTile >= 0.0 && uHidden[int(vTile + 0.5)] > 0.5) discard;\n#include <color_fragment>")
+        .replace(
+          "#include <emissivemap_fragment>",
+          `#include <emissivemap_fragment>
+          {
+            // Sky on the surface: a little face-on, most of it at a grazing angle.
+            float facing = clamp(abs(dot(normalize(vViewPosition), normal)), 0.0, 1.0);
+            float fresnel = pow(1.0 - facing, 3.0);
+            vec3 sky = vec3(0.30, 0.44, 0.60);
+            // A broad, slow ripple moves the reflection about, so the river is not a flat sheet.
+            float ripple = 0.5 + 0.5 * sin(dot(vWaterWorld.xz, vec2(0.7, 0.4)) / 0.0006 + sin(dot(vWaterWorld.xz, vec2(-0.3, 0.9)) / 0.0011) * 2.0);
+            totalEmissiveRadiance += sky * (0.02 + 0.55 * fresnel) * (0.75 + 0.5 * ripple);
+          }`,
+        );
+    };
+    const wg = waterBuilder.geometry();
+    water = new THREE.Mesh(wg, waterMaterial);
+    water.name = "cityWater";
+    water.receiveShadow = false;
+    water.castShadow = false;
+    water.renderOrder = 3;
+  }
+
   const geometry = builder.geometry();
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -525,7 +713,7 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     shader.fragmentShader = shader.fragmentShader
       .replace(
         "#include <common>",
-        "#include <common>\nuniform float uMetre;\nuniform float uHidden[256];\nvarying float vTile;\nvarying float vBase;\nvarying float vSeed;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;",
+        "#include <common>\nuniform float uMetre;\nuniform float uHidden[256];\nvarying float vTile;\nvarying float vBase;\nvarying float vSeed;\nvarying vec3 vMassWorld;\nvarying vec3 vMassNormal;\n" + GROUND_GLSL,
       )
       .replace(
         "#include <color_fragment>",
@@ -607,6 +795,11 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         float soffit = mix(0.08, smoothstep(0.07 - fh, 0.07 + fh, storey) * (1.0 - smoothstep(0.15 - fh, 0.15 + fh, storey)), bandFade);
         float slabs = office || blank ? 0.0 : wallness * faceOpen;
         diffuseColor.rgb *= (1.0 + 0.12 * slabEdge * slabs) * (1.0 - 0.22 * soffit * slabs);
+        // Open ground of a parcel: joints, bays, containers, stains by use.
+        if (kind > 3.5 && vMassNormal.y > 0.9) {
+          vec2 gp = vMassWorld.xz / uMetre;
+          diffuseColor.rgb = groundSurface(kind, diffuseColor.rgb, gp, length(fwidth(gp)), fract(vSeed));
+        }
         massGlass = glass;
         `,
       )
@@ -631,7 +824,8 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
   mesh.receiveShadow = true;
   return {
     mesh,
-    triangles: builder.triangles(),
+    water,
+    triangles: builder.triangles() + waterBuilder.triangles(),
     setTileHidden(column, row, isHidden) {
       const index = builder.tileIndex.get(tileKey(column, row));
       if (index !== undefined && index < MAX_MASS_TILES) hidden[index] = isHidden ? 1 : 0;
@@ -639,6 +833,8 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     dispose() {
       geometry.dispose();
       material.dispose();
+      water?.geometry.dispose();
+      waterMaterial?.dispose();
     },
   };
 }
