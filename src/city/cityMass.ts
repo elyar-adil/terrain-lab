@@ -19,6 +19,7 @@ import * as THREE from "three";
 import type { ModernCityPayload } from "../types";
 import { tileKey, tileOfPoint } from "./cityTiles";
 import { GROUND_GLSL, GROUND_KIND } from "./parcelGround";
+import { drawCrown, planSpecies, speciesSize, streetSpecies } from "./treeCrown";
 import {
   type FarLook, KIND_BLANK, KIND_CURTAIN, KIND_GRID, KIND_PUNCHED, KIND_RIBBON,
   blankLook, packLooks, podiumOf, shaftOf,
@@ -450,31 +451,12 @@ function offsetLine(pts: Array<[number, number, number]>, d: number): Array<[num
   });
 }
 
-/** A summer crown's green, varied tree to tree. */
-function treeTint(x: number, z: number): number {
-  const h = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
-  const greens = [0x3f5f2c, 0x4a6a30, 0x557236, 0x3c5a34, 0x5d7a3a];
-  return greens[Math.floor(h * greens.length)];
-}
-
 /**
- * A tree's crown from afar: an eight-sided double cone, wider than high, on a
- * trunk-height of clear stem, lit from above and darker below.
+ * A tree's crown from afar: the species' own form, size and colour, the same
+ * table the detail trees are grown from (see treeCrown.ts).
  */
-function crown(builder: MassBuilder, x: number, ground: number, z: number, height: number, radius: number, hex: number) {
-  const bottom = ground + height * 0.35;
-  const middle = ground + height * 0.62;
-  const top = ground + height;
-  const sides = 8;
-  for (let k = 0; k < sides; k += 1) {
-    const a0 = (k / sides) * Math.PI * 2, a1 = ((k + 1) / sides) * Math.PI * 2;
-    const p0 = [x + Math.cos(a0) * radius, middle, z + Math.sin(a0) * radius];
-    const p1 = [x + Math.cos(a1) * radius, middle, z + Math.sin(a1) * radius];
-    const am = (a0 + a1) * 0.5;
-    const out = [Math.cos(am), 0, Math.sin(am)];
-    builder.tri([x, top, z], p1, p0, [out[0] * 0.6, 0.8, out[2] * 0.6], hex, 1.0);
-    builder.tri([x, bottom, z], p0, p1, [out[0] * 0.6, -0.8, out[2] * 0.6], hex, 0.62);
-  }
+function crown(builder: MassBuilder, x: number, ground: number, z: number, height: number, radius: number, species: string) {
+  drawCrown(builder, x, ground, z, height, radius, species, Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1);
 }
 
 export interface CityMass {
@@ -825,7 +807,9 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     builder.select(...tileOfPoint(city.frame, tree.point));
     const [x, z] = frame.toScene(tree.point.x_km, tree.point.y_km);
     const y = frame.heightAt(x, z);
-    crown(builder, x, y, z, (tree.heightMetres ?? 9) * m, Math.max(tree.crownRadiusMetres ?? 3, 1.5) * m, treeTint(x, z));
+    const species = planSpecies(tree.species);
+    const size = speciesSize(species);
+    crown(builder, x, y, z, (tree.heightMetres ?? size.height) * m, Math.max(tree.crownRadiusMetres ?? size.crown, 1.5) * m, species);
   }
   for (const line of streetTreeLines) {
     // The street's own tile, as the road it lines is hidden with.
@@ -840,7 +824,9 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
         while (carry < len) {
           const t = carry / len;
           const x = ax + (bx - ax) * t, z = az + (bz - az) * t;
-          crown(builder, x, ay + (by - ay) * t - 0.35 * m, z, 10 * m, 3.4 * m, treeTint(x, z));
+          const species = streetSpecies(city.streetMix, x, z);
+          const size = speciesSize(species);
+          crown(builder, x, ay + (by - ay) * t - 0.35 * m, z, size.height * m, size.crown * m, species);
           carry += 8 * m;
         }
         carry -= len;
