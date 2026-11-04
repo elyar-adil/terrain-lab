@@ -185,6 +185,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
         _ => city,
     };
+    // `--river-setting moisture,discharge,slope,relief_m,sediment`: the terrain's account
+    // of the river, for checking how the valley and banks follow it.
+    let mut city = city;
+    if let Some(text) = flag("--river-setting") {
+        let v: Vec<f32> = text.split(',').filter_map(|s| s.parse().ok()).collect();
+        if v.len() == 5 {
+            city.river_setting = urban::RiverSetting {
+                moisture: v[0],
+                discharge: v[1],
+                slope: v[2],
+                relief_m: v[3],
+                sediment: v[4],
+                ..city.river_setting
+            };
+        }
+    }
     println!("{} buildings in the plan", city.buildings.len());
     if let Some(plan) = flag("--plan") {
         std::fs::write(&plan, serde_json::to_vec(&city)?)?;
