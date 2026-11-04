@@ -484,7 +484,7 @@ pub fn grass_texture_in(size: usize, lush: f32) -> BakedTexture {
         104.0 + 6.0 * wet_amount,
         50.0 - 6.0 * wet_amount,
     ];
-    let straw = [150.0, 128.0, 76.0];
+    let straw = [136.0, 120.0, 78.0];
     let mut rgba = vec![0_u8; size * size * 4];
     for y in 0..size {
         for x in 0..size {

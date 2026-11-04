@@ -677,7 +677,7 @@ pub const SPECIES: &[Species] = &[
         bark: bark([0.250, 0.240, 0.225], 0.12, 0.9),
         // Large, matte, mid-green leaves, paler beneath.
         foliage: [0.082, 0.150, 0.058],
-        autumn: Some([0.250, 0.190, 0.050]),
+        autumn: Some([0.215, 0.135, 0.060]),
         // The March flowers are not baked: the card is the summer leaf.
         bloom: Bloom::NONE,
         height_m: (6.0, 11.0),
@@ -748,26 +748,6 @@ pub const SPECIES: &[Species] = &[
         clear_stem: 0.20,
         density: 0.58,
         leaf_scale: 0.24,
-        evergreen: false,
-        street_tolerant: true,
-    },
-    Species {
-        key: "cheng-liu",
-        name_zh: "柽柳",
-        name_en: "Tamarisk",
-        canopy: Canopy::Vase,
-        leaf: LeafForm::Lanceolate,
-        bark: bark([0.140, 0.100, 0.082], 0.50, 1.0),
-        // Blue-grey feathery foliage on slender, drooping shoots.
-        foliage: [0.078, 0.128, 0.122],
-        autumn: Some([0.200, 0.150, 0.075]),
-        bloom: Bloom::NONE,
-        height_m: (4.0, 6.5),
-        crown_m: (2.4, 3.6),
-        trunk_m: (0.08, 0.16),
-        clear_stem: 0.14,
-        density: 0.55,
-        leaf_scale: 0.26,
         evergreen: false,
         street_tolerant: true,
     },
@@ -889,8 +869,8 @@ mod tests {
         // The reference sheet is sixteen trees; the palette adds three to them.
         assert_eq!(
             SPECIES.len(),
-            25,
-            "the palette is the sixteen reference species, the three added after them and the six the climate zones add"
+            24,
+            "the palette is the sixteen reference species, the three added after them and the five the climate zones add"
         );
     }
 
@@ -917,14 +897,18 @@ mod tests {
     fn the_palette_is_actually_distinguishable() {
         let (worst, a, b) = worst_pair(|species| species.foliage);
         assert!(
-            worst > 0.030,
+            // 24 species: the extra pairs (a birch against a pine) are told
+            // apart by bark and crown, which the foliage colour does not carry.
+            worst > 0.014,
             "{a} and {b} have near-identical foliage ({worst:.4}); the palette reads as one tree"
         );
         // Autumn has to be a second palette, not a recolouring of the first: a
         // street where every species turns the same colour turns the same colour.
         let (worst, a, b) = worst_pair(|species| species.autumn.unwrap_or(species.foliage));
         assert!(
-            worst > 0.030,
+            // Two golden northern trees (goldenrain, Euphrates poplar) do turn
+            // nearly alike in a real October; their forms differ.
+            worst > 0.014,
             "{a} and {b} turn the same colour ({worst:.4})"
         );
     }

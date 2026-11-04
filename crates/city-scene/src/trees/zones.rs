@@ -333,11 +333,10 @@ const ARID_NORTHWEST: ZonePlanting = ZonePlanting {
         ("hu-yang", 14),
         ("sha-zao", 10),
         ("huai-shu", 8),
-        ("cheng-liu", 6),
         ("bai-la", 4),
     ],
-    motorway: &[("yang-shu", 6), ("sha-zao", 3), ("cheng-liu", 2)],
-    median: &[("sha-zao", 4), ("cheng-liu", 4), ("yang-shu", 2)],
+    motorway: &[("yang-shu", 6), ("sha-zao", 3)],
+    median: &[("sha-zao", 4), ("yang-shu", 2)],
     park: &[
         ("hu-yang", 4),
         ("yang-shu", 4),
@@ -345,13 +344,12 @@ const ARID_NORTHWEST: ZonePlanting = ZonePlanting {
         ("sha-zao", 3),
         ("song-shu", 2),
         ("liu-shu", 2),
-        ("cheng-liu", 1),
     ],
-    compound: &[("yu-shu", 3), ("sha-zao", 3), ("yang-shu", 3), ("long-bai", 2), ("cheng-liu", 1)],
-    waterfront: &[("hu-yang", 4), ("liu-shu", 4), ("cheng-liu", 3), ("yang-shu", 2)],
+    compound: &[("yu-shu", 3), ("sha-zao", 3), ("yang-shu", 3), ("long-bai", 2)],
+    waterfront: &[("hu-yang", 4), ("liu-shu", 4), ("yang-shu", 2)],
     farm: &[("yang-shu", 6), ("yu-shu", 3), ("sha-zao", 3), ("liu-shu", 1)],
     orchard: &[("tao-shu", 1)],
-    island: &[("sha-zao", 3), ("cheng-liu", 3), ("long-bai", 2)],
+    island: &[("sha-zao", 3), ("long-bai", 2)],
 };
 
 /// Qinghai spruce (青海云杉) is `sha-shu`, the blue-green cone; Qilian juniper
@@ -364,10 +362,9 @@ const PLATEAU: ZonePlanting = ZonePlanting {
         ("long-bai", 14),
         ("liu-shu", 10),
         ("sha-zao", 10),
-        ("cheng-liu", 8),
     ],
     motorway: &[("yang-shu", 5), ("sha-shu", 3), ("long-bai", 2)],
-    median: &[("cheng-liu", 4), ("sha-zao", 3), ("long-bai", 2)],
+    median: &[("sha-zao", 3), ("long-bai", 2)],
     park: &[
         ("sha-shu", 5),
         ("long-bai", 3),
@@ -376,10 +373,10 @@ const PLATEAU: ZonePlanting = ZonePlanting {
         ("sha-zao", 2),
     ],
     compound: &[("sha-shu", 3), ("long-bai", 3), ("yang-shu", 3), ("sha-zao", 2)],
-    waterfront: &[("liu-shu", 5), ("yang-shu", 4), ("cheng-liu", 3)],
+    waterfront: &[("liu-shu", 5), ("yang-shu", 4)],
     farm: &[("yang-shu", 6), ("liu-shu", 3), ("sha-zao", 2)],
     orchard: &[("tao-shu", 1)],
-    island: &[("long-bai", 3), ("cheng-liu", 2), ("sha-shu", 2)],
+    island: &[("long-bai", 3), ("sha-shu", 2)],
 };
 
 // ---------------------------------------------------------------------------

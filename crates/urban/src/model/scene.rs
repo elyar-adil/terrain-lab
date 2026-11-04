@@ -36,7 +36,6 @@ impl CityFrameInfo {
     }
 }
 
-/// Rich output used by the Rust renderer.  `sd` is the city-scale graph,
 /// What the terrain simulation says about the river where it crosses the town.
 /// Everything the water and its banks look like follows from these: the
 /// valley's depth and slopes, bed material, bank vegetation, water colour.

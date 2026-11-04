@@ -54,8 +54,8 @@ park, compound, waterfront, farm, orchard, island) is in `zones.rs`.
 | humid-subtropical 亚热带湿润区 | Chengdu 16, Wuhan 17, Fuzhou 20 | 香樟, 榕树 (rong-shu), 悬铃木, 栾树, 合欢 (he-huan), 桂花 (gui-hua), 玉兰 |
 | coast-warm 南方滨海 | Xiamen 21, Guangzhou 22 | 榕树, 香樟, 桂花, 合欢, 紫薇 (zi-wei), 黑松 (song-shu) |
 | coast-cool 北方滨海 | Qingdao 13, Dalian 11 | 国槐, 悬铃木, 雪松 (xue-song), 黑松 (song-shu), 杨, 银杏 |
-| arid-northwest 西北干旱区 | Urumqi 7, Lanzhou 10, Yinchuan 9 | 新疆杨/杨 (yang-shu), 榆, 胡杨 (hu-yang), 沙枣 (sha-zao), 柽柳 (cheng-liu) |
-| plateau 高原与高山 | Xining 6, Lhasa 8 | 杨 (藏川杨), 青海云杉 (sha-shu), 祁连圆柏 (long-bai), 柳, 沙枣, 柽柳 |
+| arid-northwest 西北干旱区 | Urumqi 7, Lanzhou 10, Yinchuan 9 | 新疆杨/杨 (yang-shu), 榆, 胡杨 (hu-yang), 沙枣 (sha-zao) |
+| plateau 高原与高山 | Xining 6, Lhasa 8 | 杨 (藏川杨), 青海云杉 (sha-shu), 祁连圆柏 (long-bai), 柳, 沙枣 |
 
 Per-zone `keep` and `size` (before the moisture swing): plateau 0.55 / 0.62, arid
 0.60 / 0.72, cold-northeast 0.85 / 0.88, temperate-north 0.92 / 0.96, warm and

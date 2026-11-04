@@ -52,6 +52,7 @@ fn main() {
         water,
         setting
     );
+    println!("river line (local m): {:?}", line.iter().map(|p| [p[0].round(), p[1].round()]).collect::<Vec<_>>());
     let mut bad = 0;
     for road in &network.roads {
         let length = road.carriageway.length();

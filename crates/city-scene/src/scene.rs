@@ -872,8 +872,8 @@ mod tests {
         let instanced = scene.meshes.len() - plain;
         assert!(plain < 70, "the city needs {plain} material draw calls");
         assert!(
-            // 19 species were 109 groups; the six the climate zones add make 121.
-            instanced < 130,
+            // 19 species were 109 groups; the five the climate zones add make 115.
+            instanced < 125,
             "the city needs {instanced} instanced draw calls"
         );
     }
