@@ -216,8 +216,12 @@ fn in_ring(p: [f32; 2], ring: &[[f32; 2]]) -> bool {
 /// The footprint of a station in the line's own frame: along the line from
 /// the platform centre, and across it.
 pub fn station_zone_half_extent(plan: &RailStationPlan) -> (f32, f32) {
-    // Platforms, throat ladders either side, and 45 m across for the tracks.
-    (plan.platform_length_m * 0.5 + 220.0, 45.0)
+    // Platforms and throat ladders either side; across, the tracks and
+    // platforms on one side, a freight yard behind them when there is one.
+    (
+        plan.platform_length_m * 0.5 + 250.0,
+        if plan.yard { 130.0 } else { 45.0 },
+    )
 }
 
 /// Where a station's forecourt and building stand across the line: from the

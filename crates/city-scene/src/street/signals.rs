@@ -13,10 +13,10 @@
 //! pole clears the bracket, and
 //! `a_signal_housing_hangs_inside_the_gb_14886_window` locks it.
 
-use crate::math::{Rng, Vec2, Vec3};
+use crate::math::{Vec2, Vec3};
 use crate::mesh::{MeshBuilder, box_at};
 use crate::network::Network;
-use urban::{JunctionKind, ModernRoadClass};
+use urban::JunctionKind;
 
 /// A signal lamp that the renderer recolours as the phase advances.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -79,25 +79,8 @@ pub fn signal_axis(bearing: Vec2) -> &'static str {
 pub(super) fn build_signals(network: &Network, builder: &mut MeshBuilder) -> Vec<SignalRig> {
     let spec = &network.spec;
     let mut rigs = Vec::new();
-    let mut rng = Rng::new(0);
     for junction in &network.junctions {
         if junction.kind != JunctionKind::Signalized || junction.ports.len() < 3 {
-            continue;
-        }
-        let has_arterial = junction.ports.iter().any(|port| {
-            network.road(port.road).is_some_and(|road| {
-                matches!(
-                    road.class,
-                    ModernRoadClass::Arterial | ModernRoadClass::Expressway
-                )
-            })
-        });
-        if !has_arterial {
-            continue;
-        }
-        // Signalise the junctions that carry the traffic, not every corner.
-        rng.fork(junction.node);
-        if junction.ports.len() >= 4 && rng.chance(0.35) {
             continue;
         }
         for port in &junction.ports {

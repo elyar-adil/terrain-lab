@@ -17,7 +17,7 @@
 //! frame of the plan, the same ones the scene uses.
 
 mod checks;
-mod geom;
+pub(crate) mod geom;
 
 use serde::Serialize;
 
@@ -27,6 +27,9 @@ use crate::network::Network;
 use crate::scene::CityScene;
 
 pub use checks::Terrain;
+
+#[cfg(test)]
+mod tests;
 
 /// What one check is, who owns the code it judges, and how much it matters.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -65,7 +68,7 @@ pub const CHECKS: &[CheckInfo] = &[
     check!("water.building", "ground", "building footprint in the river channel", "urban parcels / buildings::river", 3, 3, 0),
     check!("water.road", "ground", "road at grade through the river channel", "urban roads + network deck", 3, 3, 0),
     check!("water.tree", "ground", "tree standing in the river channel", "trees::plant", 2, 2, 0),
-    check!("water.furniture", "ground", "lamp, pole or sign standing in the river channel", "furniture", 2, 2, 0),
+    check!("water.furniture", "ground", "lamp, pole or sign standing in the river channel", "furniture", 2, 2, 1),
     check!("water.field", "ground", "field ring in the river channel", "urban landscape / crops", 2, 3, 0),
     check!("ground.level", "ground", "object not on the surface under it (floating, or sunk into a deck)", "furniture / trees", 2, 2, 0),
     check!("ground.slope_building", "ground", "building on slope steeper than 15 percent", "urban parcels", 2, 2, 0),
@@ -92,12 +95,12 @@ pub const CHECKS: &[CheckInfo] = &[
     check!("network.warning", "bridge", "engineering problem the network derivation itself reported", "network", 2, 2, 0),
     // (d) road network
     check!("net.orphan", "network", "road component not connected to the main network", "urban graph", 3, 3, 0),
-    check!("net.dead_end", "network", "dead end implausible for its class or length", "urban graph", 2, 2, 0),
+    check!("net.dead_end", "network", "dead end implausible for its class or length", "urban graph", 2, 2, 2),
     check!("net.lane_width", "network", "lane or footway width outside the standard", "worldgen-contracts", 2, 2, 0),
     check!("net.junction_angle", "network", "junction arms closer than 30 degrees", "urban graph / tidy", 2, 2, 0),
     check!("net.junction_control", "network", "junction with the wrong or no control for its class", "network / street::signals", 2, 2, 0),
     // (e) buildings
-    check!("bldg.storey", "building", "floor-to-floor height outside the range for the use", "urban parcels / buildings", 2, 2, 0),
+    check!("bldg.storey", "building", "floor-to-floor height outside the range for the use", "urban parcels / buildings", 2, 2, 1),
     check!("bldg.height_use", "building", "height or storeys beyond what the use allows", "urban parcels", 2, 3, 0),
     check!("bldg.street_access", "building", "no street or footway within reach of the building", "urban parcels", 2, 1, 0),
     check!("bldg.spacing_highrise", "building", "two high-rises closer than 13 m (GB 50016)", "urban parcels", 2, 2, 0),
@@ -113,7 +116,7 @@ pub const CHECKS: &[CheckInfo] = &[
     check!("ramp.grade", "interchange", "ramp grade above 5 percent", "network deck / expressway", 3, 3, 0),
     check!("ramp.continuity", "interchange", "ramp end that joins no road", "urban expressway", 3, 3, 0),
     // (j) level of detail
-    check!("lod.roof", "lod", "far roof height differs from the detail roof", "buildings::far", 2, 3, 0),
+    check!("lod.roof", "lod", "far roof height differs from the detail roof", "buildings::far", 2, 3, 9),
     check!("lod.count", "lod", "buildings dropped from the detail but present in the far mass", "scene budget", 2, 3, 0),
 ];
 
@@ -164,6 +167,10 @@ pub struct Inventory {
     pub vehicles: usize,
     pub fields: usize,
     pub compounds: usize,
+    pub bridges: usize,
+    pub ramps: usize,
+    pub signalised: usize,
+    pub rivers: usize,
     pub scene_checked: bool,
     pub terrain_checked: bool,
 }
@@ -205,8 +212,8 @@ impl Report {
     pub fn print(&self, top: usize) {
         let i = &self.inventory;
         println!(
-            "audited {} buildings, {} roads, {} junctions, {} trees, {} furniture, {} vehicles, {} fields (scene {}, terrain {})",
-            i.buildings, i.roads, i.junctions, i.trees, i.furniture, i.vehicles, i.fields,
+            "audited {} buildings, {} roads ({} bridges, {} ramps), {} junctions ({} signalised), {} trees, {} furniture, {} vehicles, {} fields, {} waterways (scene {}, terrain {})",
+            i.buildings, i.roads, i.bridges, i.ramps, i.junctions, i.signalised, i.trees, i.furniture, i.vehicles, i.fields, i.rivers,
             if i.scene_checked { "yes" } else { "no" },
             if i.terrain_checked { "yes" } else { "no" }
         );

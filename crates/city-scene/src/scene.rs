@@ -165,6 +165,13 @@ pub struct SceneStats {
     pub shelters: usize,
     pub shrubs: usize,
     pub wire_spans: usize,
+    pub rail_sleepers: usize,
+    pub rail_masts: usize,
+    pub rail_piers: usize,
+    pub rail_level_crossings: usize,
+    pub rail_overpasses: usize,
+    pub rail_stations: usize,
+    pub rail_train_cars: usize,
     pub draw_calls: usize,
     pub vertices: usize,
     pub triangles: usize,
@@ -359,6 +366,7 @@ fn build_scene(
         spans,
     } = furniture::place(&network, &mut builder, city.seed);
     let shrubs = trees::plant_median_shrubs(&network, &mut builder, city.seed);
+    let rail = crate::rail::build(city, &network, &mut builder);
     // No parked cars until a car is modelled well enough to stand beside the
     // rest of the street (`furniture::park_cars` places them when it is).
     let parked = 0;
@@ -382,6 +390,18 @@ fn build_scene(
     }
     let mut buildings = city.buildings.clone();
     buildings.truncate(budget.max_buildings);
+    // Nothing planted or set out in the street layer stands inside a building:
+    // a lot reaching the kerb leaves no room for the bin, the lamp or the tree
+    // the verge pass put there. This is the sanity audit's `overlap.tree_building`
+    // and `overlap.furniture_building`.
+    let dropped = drop_inside_buildings(&mut builder, &street_mark, &city.buildings, city.frame);
+    let lost = |prefixes: &[&str]| -> usize {
+        dropped
+            .iter()
+            .filter(|(key, _)| prefixes.iter().any(|p| key.starts_with(p)))
+            .map(|(_, n)| *n)
+            .sum()
+    };
     let streets = street::footprints(&network, buildings::PLATE_UNDER_PAVING);
     let facade_table = buildings::build_among(
         &city.blocks,
@@ -515,6 +535,7 @@ fn build_scene(
     let signal_count = signals.len();
 
     let mut warnings = network.warnings.clone();
+    warnings.extend(rail.warnings.iter().cloned());
     if city.buildings.len() > budget.max_buildings {
         warnings.push(format!(
             "city has {} buildings; {} detail shells were dropped to stay inside the scene budget",
@@ -538,7 +559,7 @@ fn build_scene(
         stats: SceneStats {
             buildings: buildings.len(),
             trees: prototypes.len(),
-            tree_instances: tree_output.instances,
+            tree_instances: tree_output.instances.saturating_sub(lost(&["tree/"])),
             tufts: tree_output.tufts,
             parked_cars: parked,
             vehicles,
@@ -547,14 +568,21 @@ fn build_scene(
             connectors: network.connectors.len(),
             junctions: network.junctions.len(),
             signals: signal_count,
-            bollards,
-            lamps,
-            poles,
+            bollards: bollards.saturating_sub(lost(&["furniture/bollard"])),
+            lamps: lamps.saturating_sub(lost(&["furniture/lamp"])),
+            poles: poles.saturating_sub(lost(&["furniture/pole"])),
             railings,
-            signs,
-            shelters,
+            signs: signs.saturating_sub(lost(&["furniture/sign"])),
+            shelters: shelters.saturating_sub(lost(&["furniture/shelter", "furniture/bin"])),
             shrubs,
             wire_spans: spans,
+            rail_sleepers: rail.sleepers,
+            rail_masts: rail.masts,
+            rail_piers: rail.piers,
+            rail_level_crossings: rail.level_crossings,
+            rail_overpasses: rail.overpasses,
+            rail_stations: rail.stations,
+            rail_train_cars: rail.train_cars,
             draw_calls,
             vertices,
             triangles,
@@ -562,6 +590,47 @@ fn build_scene(
             tree_roles: tree_output.by_role,
         },
     }
+}
+
+/// Remove the trees and street furniture added since `mark` that stand inside a
+/// building's footprint; returns how many went, by instance key.
+fn drop_inside_buildings(
+    builder: &mut MeshBuilder,
+    mark: &crate::mesh::BuilderMark,
+    buildings: &[urban::ModernBuilding],
+    frame: urban::CityFrameInfo,
+) -> Vec<(String, usize)> {
+    use crate::audit::geom::{Grid, bounds};
+    use crate::math::{Vec2, point_in_ring};
+    let rings: Vec<Vec<Vec2>> = buildings
+        .iter()
+        .map(|b| {
+            b.footprint
+                .iter()
+                .map(|p| {
+                    let [x, z] = frame.to_local(*p);
+                    Vec2::new(x, z)
+                })
+                .collect()
+        })
+        .collect();
+    let mut grid = Grid::new(40.0);
+    for (i, ring) in rings.iter().enumerate() {
+        if ring.len() >= 3 {
+            let (lo, hi) = bounds(ring);
+            grid.insert(i as u32, lo, hi);
+        }
+    }
+    builder.retain_keyed_instances_since(mark, |key, instance| {
+        if !(key.starts_with("tree/") || key.starts_with("furniture/")) || key.ends_with("railing") {
+            return true;
+        }
+        let p = Vec2::new(instance.x, instance.z);
+        !grid
+            .query(p, p)
+            .into_iter()
+            .any(|i| point_in_ring(p, &rings[i as usize]))
+    })
 }
 
 /// A tiny deterministic jitter source for callers that want to vary the scene

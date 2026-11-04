@@ -1112,6 +1112,31 @@ impl MeshBuilder {
         dropped
     }
 
+    /// Drop the instances added since `mark` that `keep` refuses, judged with
+    /// the key of the list they are in; returns how many went from each key.
+    pub fn retain_keyed_instances_since(
+        &mut self,
+        mark: &BuilderMark,
+        keep: impl Fn(&str, &Instance) -> bool,
+    ) -> Vec<(String, usize)> {
+        let mut dropped = Vec::new();
+        for (key, list) in &mut self.instances {
+            let from = mark
+                .instances
+                .get(key)
+                .copied()
+                .unwrap_or(0)
+                .min(list.len());
+            let before = list.len();
+            let tail: Vec<Instance> = list.drain(from..).collect();
+            list.extend(tail.into_iter().filter(|i| keep(key, i)));
+            if before > list.len() {
+                dropped.push((key.clone(), before - list.len()));
+            }
+        }
+        dropped
+    }
+
     /// Finish every group.  Empty groups are dropped so the renderer never
     /// creates a zero-length buffer; instance lists with no bound geometry are
     /// dropped too.

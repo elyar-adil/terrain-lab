@@ -22,6 +22,7 @@ pub mod leaf_cards {
 pub mod math;
 pub mod mesh;
 pub mod network;
+pub mod rail;
 pub mod scene;
 pub mod spec;
 pub mod species;

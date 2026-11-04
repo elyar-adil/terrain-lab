@@ -306,7 +306,7 @@ impl Router {
             }
             if cell == ey * n + ex {
                 let aligned = dir1.is_none_or(|d| {
-                    din < 8 && unit_dirs[din][0] * d[0] + unit_dirs[din][1] * d[1] >= 0.64
+                    din < 8 && unit_dirs[din][0] * d[0] + unit_dirs[din][1] * d[1] >= 0.85
                 });
                 if aligned {
                     end_state = node.state;
@@ -400,28 +400,39 @@ fn perp(d: P) -> P {
     [-d[1], d[0]]
 }
 
-fn site_for(router: &Router, node: &StationNode, nidx: usize, dir: P) -> Site {
-    let off = match node.class {
+fn station_offset(node: &StationNode) -> f32 {
+    match node.class {
         SettlementClass::RegionalCentre => 1200.0,
         _ => 750.0,
-    };
-    let n = perp(dir);
-    let score = |side: f32| -> f32 {
-        let c = g::add_scaled(node.centre, n, side * off);
-        (-6..=6)
-            .map(|k| router.cost_at(g::add_scaled(c, dir, k as f32 * 250.0)))
-            .sum::<f32>()
-    };
-    let (a, b) = (score(1.0), score(-1.0));
-    let side = if b < a - 1.0e-3 { -1.0 } else { 1.0 };
+    }
+}
+
+/// Cost of putting a station on one side of the line through its town.
+fn side_score(router: &Router, node: &StationNode, dir: P, side: f32) -> f32 {
+    let c = g::add_scaled(node.centre, perp(dir), side * station_offset(node));
+    (-6..=6)
+        .map(|k| router.cost_at(g::add_scaled(c, dir, k as f32 * 250.0)))
+        .sum::<f32>()
+}
+
+fn site_on_side(node: &StationNode, nidx: usize, dir: P, side: f32) -> Site {
     Site {
         node: nidx,
-        s: g::add_scaled(node.centre, n, side * off),
+        s: g::add_scaled(node.centre, perp(dir), side * station_offset(node)),
         dir,
     }
 }
 
-const STUB_M: f32 = 2000.0;
+fn site_for(router: &Router, node: &StationNode, nidx: usize, dir: P) -> Site {
+    let side = if side_score(router, node, dir, -1.0) < side_score(router, node, dir, 1.0) - 1.0e-3 {
+        -1.0
+    } else {
+        1.0
+    };
+    site_on_side(node, nidx, dir, side)
+}
+
+const STUB_M: f32 = 1800.0;
 const TERMINAL_OVERRUN_M: f32 = 700.0;
 
 pub fn plan_railways(
@@ -500,7 +511,18 @@ pub fn plan_railways(
         }
         walk(s, usize::MAX, &adj, &nodes, &mut Vec::new(), 0.0, &mut best_chain);
     }
-    let chain = best_chain.1;
+    let mut chain = best_chain.1;
+    // A chain that turns sharply at a town ends there: the rest leaves it as
+    // a branch from a junction short of the station (a Y), the way real lines
+    // meet at a junction town instead of bending 90 degrees through it.
+    for j in 1..chain.len().saturating_sub(1) {
+        let d0 = g::unit(g::sub(nodes[chain[j]].centre, nodes[chain[j - 1]].centre));
+        let d1 = g::unit(g::sub(nodes[chain[j + 1]].centre, nodes[chain[j]].centre));
+        if d0[0] * d1[0] + d0[1] * d1[1] < 0.5 {
+            chain.truncate(j + 1);
+            break;
+        }
+    }
     let mut railways: Vec<Railway> = Vec::new();
 
     // --- the chain ---
@@ -517,17 +539,27 @@ pub fn plan_railways(
         };
         g::unit(g::sub(b, a))
     };
+    // One side of the line for every station of the chain, so the line stays
+    // straight between them.
+    let chain_side = {
+        let total = |side: f32| -> f32 {
+            (0..k)
+                .map(|j| side_score(&router, &nodes[chain[j]], dir_at(j), side))
+                .sum()
+        };
+        if total(-1.0) < total(1.0) - 1.0e-3 { -1.0 } else { 1.0 }
+    };
     let sites: Vec<Site> = (0..k)
-        .map(|j| site_for(&router, &nodes[chain[j]], chain[j], dir_at(j)))
+        .map(|j| site_on_side(&nodes[chain[j]], chain[j], dir_at(j), chain_side))
         .collect();
     let chain_length: f32 = (0..k - 1)
         .map(|j| g::dist(nodes[chain[j]].centre, nodes[chain[j + 1]].centre))
         .sum();
     let has_centre = chain.iter().any(|c| nodes[*c].class == SettlementClass::RegionalCentre);
     let kinds: &[RailKind] = if has_centre && chain_length >= 30_000.0 {
-        &[RailKind::HighSpeed, RailKind::Mainline]
+        &[RailKind::HighSpeed, RailKind::Mainline, RailKind::Branch]
     } else {
-        &[RailKind::Mainline]
+        &[RailKind::Mainline, RailKind::Branch]
     };
     // Vertex list.
     let mut verts: Vec<(P, Pin)> = Vec::new();
@@ -667,11 +699,19 @@ fn branch(
     }
     let (_, ji) = best?;
     let jp = rw.point_xy_m(ji);
-    // The merge runs 1.2 km along the parent line, on the child's side of it.
-    let step = (1200.0 / STEP_M) as usize;
-    let sign: isize = if rw.points[ji].s_m > st.plan.s_m { 1 } else { -1 };
-    // Merging toward the station would run into it; run away from it instead.
-    let ki = (ji as isize + sign * step as isize).clamp(0, rw.points.len() as isize - 1) as usize;
+    // The merge runs 2.4 km along the parent line, on the child's side of it.
+    let step = (2400.0 / STEP_M) as usize;
+    // Merge on whichever side of the junction the child lies ahead of.
+    let pick = |sign: isize| -> usize {
+        (ji as isize + sign * step as isize).clamp(0, rw.points.len() as isize - 1) as usize
+    };
+    let ahead = |ki: usize| -> f32 {
+        let k = rw.point_xy_m(ki);
+        let d = g::unit(g::sub(k, jp));
+        let t = g::unit(g::sub(target, k));
+        d[0] * t[0] + d[1] * t[1]
+    };
+    let ki = if ahead(pick(1)) >= ahead(pick(-1)) { pick(1) } else { pick(-1) };
     let kp0 = rw.point_xy_m(ki);
     let along = g::unit(g::sub(kp0, jp));
     let n = perp(along);

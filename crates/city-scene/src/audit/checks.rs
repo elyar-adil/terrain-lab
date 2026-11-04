@@ -179,6 +179,10 @@ impl<'a> Context<'a> {
             vehicles: scene.map_or(0, |s| s.traffic.agents.len()),
             fields: city.fields.len(),
             compounds: city.compounds.len(),
+            bridges: network.roads.iter().filter(|r| r.bridge || r.layer > 0).count(),
+            ramps: network.roads.iter().filter(|r| r.oneway).count(),
+            signalised: network.junctions.iter().filter(|j| j.kind == JunctionKind::Signalized).count(),
+            rivers: cx.channels.len(),
             scene_checked: scene.is_some(),
             terrain_checked: terrain.is_some(),
         };
@@ -531,7 +535,9 @@ impl<'a> Context<'a> {
             }
             // height and storeys against use, and tall buildings away from the core
             let (max_floors, max_h) = match use_type {
-                ParcelUse::Villa | ParcelUse::Village | ParcelUse::Farmstead => (4, 16.0),
+                ParcelUse::Villa | ParcelUse::Farmstead => (4, 16.0),
+                // The urban village (城中村) of handshake buildings: up to 15 storeys.
+                ParcelUse::Village => (15, 52.0),
                 ParcelUse::Industrial => (5, 30.0),
                 ParcelUse::Civic => (12, 60.0),
                 ParcelUse::Residential => (45, 140.0),
@@ -764,7 +770,8 @@ impl<'a> Context<'a> {
                 ids.push(format!("road:{road}"));
             }
             let what = if deck { "under a viaduct with too little headroom" } else { "into the carriageway" };
-            self.push("overlap.building_road", p, ids, depth, format!("{height:.0} m building {depth:.1} m {what}"));
+            let class = if road == 0 { String::new() } else { self.network.road(road).map_or(String::new(), |r| format!(" ({:?}, layer {})", r.class, r.layer)) };
+            self.push("overlap.building_road", p, ids, depth, format!("{height:.0} m building {depth:.1} m {what}{class}"));
         }
         // fields
         for fi in 0..self.city.fields.len() {

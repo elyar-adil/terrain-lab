@@ -125,7 +125,7 @@ pub fn fillet(
             break vec![0.0; n];
         }
         let seg: Vec<f32> = (0..n - 1).map(|i| dist(v[i].0, v[i + 1].0)).collect();
-        let allow = |i: usize| seg[i] * if v[i].2 { 0.5 } else { 0.9 };
+        let allow = |i: usize| seg[i] * if v[i].2 { 0.7 } else { 0.9 };
         let mut radii = vec![0.0_f32; n];
         let mut failing: Option<usize> = None;
         for i in 1..n - 1 {
