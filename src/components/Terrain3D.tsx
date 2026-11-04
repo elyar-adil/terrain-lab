@@ -22,6 +22,7 @@ import { buildFarTreeSet } from "./farTrees";
 import { createGroundCover } from "./groundCover";
 import { FARM_GLSL, FarmCrop, farmPlot } from "./farmland";
 import type { Automation } from "../devAutomation";
+import { buildAirport, buildRailways } from "./transport3d";
 import type { GenerationResult, SimulationConfig, UrbanBuilding, UrbanLane, UrbanPoint, UrbanRoad, VegetationPrototypePayload } from "../types";
 
 function decodeHeights(base64: string): Float32Array {
@@ -3391,6 +3392,28 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     roadMarkingGroup.visible = false;
     scene.add(roadSurfaceGroup, roadMarkingGroup);
 
+    // Railways between the towns, and the airport: planner output at metre scale.
+    const transportLayer = (colour: number, offset: number, extra?: THREE.MeshStandardMaterialParameters) =>
+      new THREE.MeshStandardMaterial({
+        color: colour,
+        roughness: 0.92,
+        polygonOffset: true,
+        polygonOffsetFactor: offset,
+        polygonOffsetUnits: offset,
+        ...extra,
+      });
+    const transportContext = {
+      metresToScene,
+      worldSizeKm: result.worldSizeKm,
+      terrainHeightAt,
+      layer: transportLayer,
+    };
+    const railBuilt = buildRailways(result.railways ?? [], transportContext);
+    railBuilt.group.visible = false;
+    scene.add(railBuilt.group);
+    const airportBuilt = result.airport ? buildAirport(result.airport, transportContext) : null;
+    if (airportBuilt) scene.add(airportBuilt.group);
+
     // Start focused on the actual surface. The previous fixed target represented
     // 1.4 km at the default world size and made close zoom orbit empty air.
     const initialTargetHeight = terrainHeightAt(controls.target.x, controls.target.z);
@@ -3942,6 +3965,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       const cityFade = smoothFadeIn(viewSpanMetres, 9_000, 26_000);
       const cityStreetFade = smoothFadeIn(viewSpanMetres, 650, 7_500);
       roadSurfaceGroup.visible = roadSurfaceFade > 0.001;
+      railBuilt.group.visible = roadSurfaceFade > 0.001;
       roadMarkingGroup.visible = roadMarkingFade > 0.001;
       cityStreetGroup.visible = false; // legacy renderer, retired: the Rust city layer draws cities
       cityDetailGroup.visible = false; // legacy renderer, retired: the Rust city layer draws cities
@@ -4144,6 +4168,12 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       for (const cityRiverGeometry of cityRiverGeometries) cityRiverGeometry.dispose();
       cityRiverMaterial.dispose();
       for (const roadGeometry of roadGeometries) roadGeometry.dispose();
+      for (const built of [railBuilt, airportBuilt]) {
+        if (!built) continue;
+        for (const geometry of built.geometries) geometry.dispose();
+        for (const material of built.materials) material.dispose();
+        scene.remove(built.group);
+      }
       asphaltMaterial.dispose();
       dirtRoadMaterial.dispose();
       whiteMarkingMaterial.dispose();

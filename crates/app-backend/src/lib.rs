@@ -51,6 +51,11 @@ pub struct GenerationResult {
     pub crop_data_base64: String,
     pub road_data_base64: String,
     pub roads: Vec<RenderRoad>,
+    /// Railway lines outside the towns' own plans: alignment, design level
+    /// and structure per point, in world kilometres and metres.
+    pub railways: Vec<RenderRailway>,
+    /// The airport's layout (`urban::AirfieldPlan` fields) with its access road.
+    pub airport: Option<serde_json::Value>,
     pub cities: serde_json::Value,
     /// Rich Chinese-city graph and parcel metadata. `cities` remains the
     /// legacy UrbanModel projection for older renderers.
@@ -108,6 +113,92 @@ fn regional_road_pieces(
         }
     }
     out
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderRailway {
+    id: u32,
+    kind: urban::RailKind,
+    /// Track-pair spacing and formation width, metres.
+    track_spacing_m: f32,
+    formation_width_m: f32,
+    /// One run of the line between towns (the towns' plans carry it through).
+    path_km: Vec<[f32; 2]>,
+    /// Chainage of each point, metres.
+    s_m: Vec<f32>,
+    ground_m: Vec<f32>,
+    design_m: Vec<f32>,
+    /// 0 at grade, 1 embankment, 2 cutting, 3 viaduct, 4 bridge, 5 tunnel.
+    structure: Vec<u8>,
+    stations: Vec<infrastructure::transport::rail::RailStation>,
+}
+
+fn render_railways(infrastructure: &InfrastructureData) -> Vec<RenderRailway> {
+    let towns = infrastructure.footprints();
+    let inside = |x: f32, y: f32| {
+        towns.iter().any(|f| {
+            (x - f.centre_km[0]).hypot(y - f.centre_km[1]) < f.radius_km * urban::REGIONAL_ROAD_HANDOVER
+        })
+    };
+    let mut out = Vec::new();
+    for rw in &infrastructure.railways {
+        let limits = rw.kind.limits();
+        let mut run: Vec<usize> = Vec::new();
+        let flush = |run: &mut Vec<usize>, out: &mut Vec<RenderRailway>| {
+            if run.len() >= 2 {
+                let first = rw.points[run[0]].s_m;
+                let last = rw.points[*run.last().unwrap()].s_m;
+                out.push(RenderRailway {
+                    id: rw.id,
+                    kind: rw.kind,
+                    track_spacing_m: limits.track_spacing_m,
+                    formation_width_m: limits.formation_width_m,
+                    path_km: run.iter().map(|i| [rw.points[*i].x_km, rw.points[*i].y_km]).collect(),
+                    s_m: run.iter().map(|i| rw.points[*i].s_m).collect(),
+                    ground_m: run.iter().map(|i| rw.points[*i].ground_m).collect(),
+                    design_m: run.iter().map(|i| rw.points[*i].design_m).collect(),
+                    structure: run
+                        .iter()
+                        .map(|i| match rw.points[*i].ground {
+                            urban::RailGround::AtGrade => 0,
+                            urban::RailGround::Embankment => 1,
+                            urban::RailGround::Cutting => 2,
+                            urban::RailGround::Viaduct => 3,
+                            urban::RailGround::Bridge => 4,
+                            urban::RailGround::Tunnel => 5,
+                        })
+                        .collect(),
+                    stations: rw
+                        .stations
+                        .iter()
+                        .filter(|s| s.plan.s_m >= first && s.plan.s_m <= last)
+                        .cloned()
+                        .collect(),
+                });
+            }
+            run.clear();
+        };
+        for (i, p) in rw.points.iter().enumerate() {
+            if inside(p.x_km, p.y_km) {
+                flush(&mut run, &mut out);
+            } else {
+                run.push(i);
+            }
+        }
+        flush(&mut run, &mut out);
+    }
+    out
+}
+
+fn render_airport(infrastructure: &InfrastructureData) -> Option<serde_json::Value> {
+    let a = infrastructure.airport.as_ref()?;
+    let mut value = serde_json::to_value(&a.plan).ok()?;
+    let object = value.as_object_mut()?;
+    object.insert("accessPathKm".into(), serde_json::to_value(&a.access_path_km).ok()?);
+    object.insert("windUsability".into(), a.wind_usability.into());
+    object.insert("distanceToCityKm".into(), a.distance_to_city_km.into());
+    Some(value)
 }
 
 fn render_roads(infrastructure: &InfrastructureData) -> Vec<RenderRoad> {
@@ -593,6 +684,93 @@ fn composite_world_surface(
             }
         }
     }
+    paint_transport(image, terrain.size, infrastructure, metres_per_pixel);
+}
+
+/// Railways and the airfield in the satellite view: the line unbroken through
+/// towns, the paved areas of the airport in their real size.
+fn paint_transport(
+    image: &mut RgbaImage,
+    terrain_size: usize,
+    infrastructure: &InfrastructureData,
+    metres_per_pixel: f32,
+) {
+    let _ = terrain_size;
+    let world_km = infrastructure.urban_land.grid.world_size_km;
+    let (w, h) = (image.width().max(2), image.height().max(2));
+    let to_px = |x_km: f32, y_km: f32| {
+        (x_km / world_km * (w - 1) as f32, y_km / world_km * (h - 1) as f32)
+    };
+    for rw in &infrastructure.railways {
+        // Ballast and formation read as a thin pale-grey line; the width is
+        // physical (12 m) and the coverage alpha keeps it from vanishing.
+        let width_px = rw.kind.limits().formation_width_m / metres_per_pixel;
+        for pair in rw.points.windows(2) {
+            let a = to_px(pair[0].x_km, pair[0].y_km);
+            let b = to_px(pair[1].x_km, pair[1].y_km);
+            let colour = if matches!(pair[0].ground, urban::RailGround::Viaduct | urban::RailGround::Bridge) {
+                [168.0, 165.0, 158.0]
+            } else {
+                [120.0, 114.0, 104.0]
+            };
+            draw_line_alpha(
+                image,
+                (a.0.round() as i32, a.1.round() as i32),
+                (b.0.round() as i32, b.1.round() as i32),
+                colour,
+                (width_px * 0.8).clamp(0.45, 1.0),
+            );
+        }
+    }
+    if let Some(airport) = &infrastructure.airport {
+        let plan = &airport.plan;
+        let half_diag = plan.platform.x1.hypot(plan.platform.z1.max(-plan.platform.z0)) / 1000.0;
+        let (cx, cy) = to_px(plan.centre.x_km, plan.centre.y_km);
+        let span = (half_diag / world_km * (w - 1) as f32).ceil() as i32 + 2;
+        let mut paint = |rect: (f32, f32, f32, f32), colour: [f32; 3], alpha: f32, grow: f32| {
+            for py in (cy as i32 - span).max(0)..=(cy as i32 + span).min(h as i32 - 1) {
+                for px in (cx as i32 - span).max(0)..=(cx as i32 + span).min(w as i32 - 1) {
+                    let km = urban::Point {
+                        x_km: px as f32 / (w - 1) as f32 * world_km,
+                        y_km: py as f32 / (h - 1) as f32 * world_km,
+                    };
+                    let [x, z] = plan.to_local(km);
+                    if x >= rect.0 - grow && x <= rect.1 + grow && z >= rect.2 - grow && z <= rect.3 + grow {
+                        blend_surface(image.get_pixel_mut(px as u32, py as u32), colour, alpha);
+                    }
+                }
+            }
+        };
+        let px_m = metres_per_pixel * 0.5;
+        let l = plan.runway_length_m * 0.5;
+        // Graded land, apron, taxiway, runway (drawn at least one pixel wide).
+        paint((plan.platform.x0, plan.platform.x1, plan.platform.z0, plan.platform.z1), [128.0, 140.0, 96.0], 0.55, 0.0);
+        paint((plan.apron.x0, plan.apron.x1, plan.apron.z0, plan.apron.z1), [158.0, 156.0, 150.0], 0.95, px_m);
+        paint((-l + 60.0, l - 60.0, plan.taxiway_z - plan.taxiway_width_m * 0.5, plan.taxiway_z + plan.taxiway_width_m * 0.5), [96.0, 96.0, 98.0], 0.95, px_m);
+        paint((-l, l, -plan.paved_width_m * 0.5, plan.paved_width_m * 0.5), [74.0, 74.0, 78.0], 1.0, px_m);
+        paint((-l + 30.0, l - 30.0, -0.9, 0.9), [236.0, 236.0, 230.0], 0.9, px_m * 0.5);
+        for link in &plan.links {
+            let steps = 12;
+            for k in 0..=steps {
+                let t = k as f32 / steps as f32;
+                let x = link.from[0] + (link.to[0] - link.from[0]) * t;
+                let z = link.from[1] + (link.to[1] - link.from[1]) * t;
+                paint((x, x, z, z), [96.0, 96.0, 98.0], 0.95, plan.taxiway_width_m * 0.5);
+            }
+        }
+        paint((plan.terminal.x0, plan.terminal.x1, plan.terminal.z0, plan.terminal.z1), [205.0, 205.0, 200.0], 1.0, 0.0);
+        paint((plan.car_park.x0, plan.car_park.x1, plan.car_park.z0, plan.car_park.z1), [110.0, 110.0, 112.0], 0.9, 0.0);
+        let access: Vec<(f32, f32)> = airport.access_path_km.iter().map(|p| to_px(p[0], p[1])).collect();
+        for pair in access.windows(2) {
+            draw_line_alpha(
+                image,
+                (pair[0].0.round() as i32, pair[0].1.round() as i32),
+                (pair[1].0.round() as i32, pair[1].1.round() as i32),
+                [148.0, 146.0, 138.0],
+                0.9,
+            );
+        }
+    }
 }
 
 fn infrastructure_image(
@@ -1074,6 +1252,9 @@ pub fn build_payload(
         config.world_size_km,
         &city_sites,
     );
+    if let Some(airport) = &infrastructure.airport {
+        airport.level_heights(&mut mesh_heights, mesh_size, config.world_size_km);
+    }
     let height_bytes: Vec<u8> = mesh_heights
         .into_iter()
         .flat_map(f32::to_le_bytes)
@@ -1182,6 +1363,8 @@ pub fn build_payload(
         crop_data_base64: STANDARD.encode(crop_bytes),
         road_data_base64: STANDARD.encode(road_bytes),
         roads: render_roads(&infrastructure),
+        railways: render_railways(&infrastructure),
+        airport: render_airport(&infrastructure),
         cities: serde_json::to_value(&infrastructure.cities).map_err(|error| error.to_string())?,
         city_sites,
         far_trees: city_scene::trees::far_tree_payload(),

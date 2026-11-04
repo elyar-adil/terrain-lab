@@ -55,6 +55,8 @@ export interface GenerationResult {
   cropDataBase64: string;
   roadDataBase64: string;
   roads: RenderRoad[];
+  railways?: RenderRailway[];
+  airport?: RenderAirport | null;
   cities: UrbanModel[];
   /** High-detail Chinese city graph emitted by the Rust urban generator. */
   modernCities?: ModernCityPayload[];
@@ -107,6 +109,52 @@ export interface RenderRoad {
   profile: RoadProfile;
   lengthKm: number;
   pathKm: [number, number][];
+}
+
+export interface RenderRailway {
+  id: number;
+  kind: "highSpeed" | "mainline" | "branch";
+  trackSpacingM: number;
+  formationWidthM: number;
+  pathKm: [number, number][];
+  sM: number[];
+  groundM: number[];
+  designM: number[];
+  /** 0 at grade, 1 embankment, 2 cutting, 3 viaduct, 4 bridge, 5 tunnel. */
+  structure: number[];
+  stations: Array<{
+    settlement: number;
+    plan: { sM: number; platformLengthM: number; tracks: number; buildingSide: number; terminal: boolean; yard: boolean };
+  }>;
+}
+
+export interface RenderRect { x0: number; x1: number; z0: number; z1: number; heightM: number }
+/** Airfield layout in a frame at the runway midpoint: x along the runway, z toward the terminal. */
+export interface RenderAirport {
+  code: string;
+  centre: UrbanPoint;
+  axis: [number, number];
+  normal: [number, number];
+  elevationM: number;
+  runwayLengthM: number;
+  runwayWidthM: number;
+  pavedWidthM: number;
+  designatorLo: string;
+  designatorHi: string;
+  taxiwayZ: number;
+  taxiwayWidthM: number;
+  links: Array<{ from: [number, number]; to: [number, number] }>;
+  apron: RenderRect;
+  stands: Array<[number, number]>;
+  terminal: RenderRect;
+  tower: RenderRect;
+  hangars: RenderRect[];
+  carPark: RenderRect;
+  fence: RenderRect;
+  platform: RenderRect;
+  accessPathKm: [number, number][];
+  windUsability: number;
+  distanceToCityKm: number;
 }
 
 export interface UrbanPoint { x_km: number; y_km: number }

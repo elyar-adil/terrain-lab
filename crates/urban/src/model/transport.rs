@@ -712,7 +712,7 @@ impl AirfieldPlan {
             limit = limit.min(45.0 + (d - 4000.0) * 0.05);
         }
         // Transitional: 14.3 % from the strip edge up to the inner horizontal.
-        if ox <= 0.0 && oz > 0.0 {
+        if ox <= 0.0 && oz > 0.0 && oz * 0.143 <= 45.0 {
             limit = limit.min(oz * 0.143);
         }
         // Approach: from the strip end, 280 m wide, 15 % divergence, 2 % for

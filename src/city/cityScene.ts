@@ -639,6 +639,17 @@ roughnessFactor = clamp(roughnessFactor + smoothstep(60.0, 700.0, waterDist) * 0
   }
   standard("bridge.steel", { roughness: 0.5, metalness: 0.6, side: THREE.DoubleSide, vertexColors: true }, 0x9aa0a6);
   standard("wire", { roughness: 0.55, metalness: 0.3, side: THREE.DoubleSide }, 0x14161a);
+  // Railway (docs/transport-infrastructure.md): crushed-stone ballast, concrete
+  // sleepers and platforms, station walls, roofs and glass, and rolling stock.
+  standard("rail.ballast", { roughness: 1.0 }, 0x7b776f);
+  standard("rail.sleeper", { roughness: 0.9 }, 0x9b988f);
+  standard("rail.platform", { roughness: 0.88, side: THREE.DoubleSide }, 0xb4b1a8);
+  standard("station.wall", { roughness: 0.85 }, 0xcdc9bf);
+  standard("station.roof", { roughness: 0.6, metalness: 0.2, side: THREE.DoubleSide }, 0xd3d6d8);
+  standard("station.glass", { roughness: 0.1, metalness: 0.1, envMapIntensity: 1.2 }, 0x56788c);
+  standard("train.body", { roughness: 0.32, metalness: 0.3, side: THREE.DoubleSide, vertexColors: true }, 0xffffff);
+  standard("train.glass", { roughness: 0.08, metalness: 0.1, side: THREE.DoubleSide, envMapIntensity: 1.3 }, 0x151f27);
+  standard("train.stripe", { roughness: 0.4, side: THREE.DoubleSide }, 0x1f4f9a);
 
   // --- road paint -----------------------------------------------------------
   /**
