@@ -64,7 +64,7 @@ use crate::mesh::{GroupStyle, MeshBuilder};
 use crate::spec::FACADE_TILES;
 
 mod river;
-pub use river::build_water;
+pub use river::{build_water, drop_depth, water_level};
 
 pub(crate) use shell::building_shell;
 

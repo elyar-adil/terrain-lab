@@ -333,9 +333,11 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "i_overlay",
+ "infrastructure",
  "procedural",
  "serde",
  "serde_json",
+ "terrain-core",
  "urban",
  "worldgen-core",
 ]

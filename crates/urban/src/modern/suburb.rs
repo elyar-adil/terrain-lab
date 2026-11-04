@@ -608,14 +608,17 @@ pub(super) fn place_fields(f: &Frontage<'_>, lots: &[Vec<V>], sink: &mut Sink<'_
                     } else {
                         noise(1217)
                     };
-                    let crop =
-                        choices[((pick * choices.len() as f32) as usize).min(choices.len() - 1)];
+                    let Some(plot) = super::country::plan_plot(f.frame, c, choices, pick, angle)
+                    else {
+                        continue;
+                    };
                     sink.fields.push(Field {
                         id: *sink.next_field,
                         ring: corners.iter().map(|p| f.frame.to_world(p.0, p.1)).collect(),
-                        crop,
-                        row_angle: angle,
+                        crop: plot.crop,
+                        row_angle: plot.row_angle,
                         variant: (noise(1219) * 3.0) as u8,
+                        terraced: plot.terraced,
                     });
                     *sink.next_field += 1;
                     made += 1;
@@ -646,8 +649,10 @@ pub(super) fn roadside_fields(
     occupied: &mut Vec<Vec<V>>,
     fields: &mut Vec<Field>,
     next_field: &mut u32,
+    belt_trees: &mut Vec<crate::TreeInstance>,
 ) {
     let mut count = 0;
+    let mut belts = 0;
     for (ei, &(ia, ib, class)) in edges.iter().enumerate() {
         let (a, b) = (pts[ia], pts[ib]);
         let len = (b.0 - a.0).hypot(b.1 - a.1);
@@ -667,6 +672,31 @@ pub(super) fn roadside_fields(
             let preferred = modern_hash(seed, key, 11, 1301);
             let width = 20.0 + 24.0 * modern_hash(seed, key, 11, 1303);
             let mut off = row + 7.0;
+            // A row of trees along the roadside on the fertile plain.
+            if let Some(sample) = frame.country_at(mid.0, mid.1) {
+                if super::country::belts_here(&sample)
+                    && modern_hash(seed, key, 11, 1323) < 0.5
+                    && !matches!(class, ModernRoadClass::Expressway)
+                {
+                    let mut ts = 10.0;
+                    while ts < len - 10.0 && belts < 1500 {
+                        let p = (
+                            a.0 + t.0 * ts + n.0 * (row + 2.0),
+                            a.1 + t.1 * ts + n.1 * (row + 2.0),
+                        );
+                        let hit = edges.iter().any(|&(ja, jb, cl)| {
+                            point_seg_dist(p, pts[ja], pts[jb]) < right_of_way(cl) + 0.5
+                        });
+                        if !hit && !frame.near_water(&[p, p, p], 4.0) {
+                            belt_trees.push(super::country::belt_tree(
+                                frame, p, &sample, seed, key * 977 + belts as i32 % 977,
+                            ));
+                            belts += 1;
+                        }
+                        ts += 9.0 + 4.0 * modern_hash(seed, key, belts as i32, 1325);
+                    }
+                }
+            }
             for depth in 0..3 {
                 let at =
                     |s: f32, d: f32| -> V { (a.0 + t.0 * s + n.0 * d, a.1 + t.1 * s + n.1 * d) };
@@ -689,6 +719,32 @@ pub(super) fn roadside_fields(
                     if frame.urbanness(c.0, c.1) >= TOWN_BUILT {
                         continue;
                     }
+                    let choices = crop_choices(zone(frame.urbanness(c.0, c.1)));
+                    let pick = if noise(1311) < 0.66 {
+                        preferred
+                    } else {
+                        noise(1313)
+                    };
+                    // The land decides: no field on steep or soil-less ground, only
+                    // sparse fallow where it is dry, terraces along the contour on
+                    // a slope (a narrow plot laid across the fall line).
+                    let Some(plot) = super::country::plan_plot(frame, c, choices, pick, angle)
+                    else {
+                        continue;
+                    };
+                    let corners = if plot.terraced {
+                        let u = (plot.row_angle.cos(), plot.row_angle.sin());
+                        let v = (-u.1, u.0);
+                        let (hl, hw) = (l.min(60.0) * 0.5, (8.0 + 6.0 * noise(1317)) * 0.5);
+                        vec![
+                            (c.0 - u.0 * hl - v.0 * hw, c.1 - u.1 * hl - v.1 * hw),
+                            (c.0 + u.0 * hl - v.0 * hw, c.1 + u.1 * hl - v.1 * hw),
+                            (c.0 + u.0 * hl + v.0 * hw, c.1 + u.1 * hl + v.1 * hw),
+                            (c.0 - u.0 * hl + v.0 * hw, c.1 - u.1 * hl + v.1 * hw),
+                        ]
+                    } else {
+                        corners
+                    };
                     // Clear of every street (this one included, since the road bends).
                     let clear = edges.iter().all(|&(ja, jb, cl)| {
                         let ro = right_of_way(cl) + 2.0;
@@ -709,20 +765,39 @@ pub(super) fn roadside_fields(
                     if occupied.iter().any(|o| overlap(&corners, o, 2.0)) {
                         continue;
                     }
-                    let choices = crop_choices(zone(frame.urbanness(c.0, c.1)));
-                    let pick = if noise(1311) < 0.66 {
-                        preferred
-                    } else {
-                        noise(1313)
-                    };
-                    let crop =
-                        choices[((pick * choices.len() as f32) as usize).min(choices.len() - 1)];
+                    // Shelterbelt: a row of trees along the field's outer long edge on
+                    // the fertile, watered plain.
+                    if let Some(sample) = frame.country_at(c.0, c.1) {
+                        if super::country::belts_here(&sample) && depth == 2 && noise(1319) < 0.6 && belts < 1500 {
+                            let (p, q) = (corners[3], corners[2]);
+                            let el = (q.0 - p.0).hypot(q.1 - p.1);
+                            let out = (n.0, n.1);
+                            let mut ts = 3.0;
+                            while ts < el - 3.0 {
+                                let at = (
+                                    p.0 + (q.0 - p.0) * ts / el + out.0 * 2.5,
+                                    p.1 + (q.1 - p.1) * ts / el + out.1 * 2.5,
+                                );
+                                let hit = edges.iter().any(|&(ja, jb, cl)| {
+                                    point_seg_dist(at, pts[ja], pts[jb]) < right_of_way(cl) + 1.0
+                                });
+                                if !hit && !frame.near_water(&[at, at, at], 4.0) {
+                                    belt_trees.push(super::country::belt_tree(
+                                        frame, at, &sample, seed, k2 * 64 + belts as i32 % 64,
+                                    ));
+                                    belts += 1;
+                                }
+                                ts += 8.0 + 3.0 * modern_hash(seed, k2, belts as i32, 1321);
+                            }
+                        }
+                    }
                     fields.push(Field {
                         id: *next_field,
                         ring: corners.iter().map(|p| frame.to_world(p.0, p.1)).collect(),
-                        crop,
-                        row_angle: angle,
+                        crop: plot.crop,
+                        row_angle: plot.row_angle,
                         variant: (noise(1315) * 3.0) as u8,
+                        terraced: plot.terraced,
                     });
                     *next_field += 1;
                     occupied.push(corners);

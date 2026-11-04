@@ -68,6 +68,7 @@ fn planted(
             &city.parcels,
             &city.buildings,
             &city.fields,
+            &city.shelterbelts,
             city.river.as_deref(),
             city.river_width_metres,
             city.frame,

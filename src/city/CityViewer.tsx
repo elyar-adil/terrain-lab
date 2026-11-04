@@ -17,6 +17,7 @@ import {
   type CityHandles,
   type CityScene,
   type MaterialCatalogue,
+  RIVER_GROUND_ORDER,
   buildCityScene,
   createMaterials,
   decodeFloats,
@@ -102,6 +103,7 @@ function createGround(extent: number): THREE.Mesh {
   const ground = new THREE.Mesh(geometry, material);
   ground.name = "ground";
   ground.receiveShadow = true;
+  ground.renderOrder = RIVER_GROUND_ORDER; // under the river valley, which clears depth after it
   ground.position.y = -0.45; // well below the roadbed: at 100 m+ a 5 cm gap is lost in the depth buffer
   return ground;
 }

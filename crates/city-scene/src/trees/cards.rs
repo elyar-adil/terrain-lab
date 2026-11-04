@@ -168,17 +168,22 @@ fn form_metrics(form: LeafForm) -> (f32, f32) {
     // few plate-sized ones.  The scatter solves its count from area, so coverage
     // (and therefore canopy opacity) is unchanged.
     let (unit, fill) = match form {
-        LeafForm::Ovate => (0.155, 0.62),
-        LeafForm::Elliptic => (0.145, 0.72),
-        LeafForm::Palmate => (0.235, 0.30),
-        LeafForm::Pinnate => (0.300, 0.46),
+        // Sizes are the leaf's real length over the card's physical width: a
+        // scholar-tree leaf is 20 cm on a 1.9 m card and a plane leaf 20 cm on a
+        // 2.7 m one. Drawn larger, a pinnate or palmate leaf reads as a palm
+        // frond or a star at street distance; the coverage solver spends the
+        // saved area on more, smaller leaves.
+        LeafForm::Ovate => (0.125, 0.62),
+        LeafForm::Elliptic => (0.120, 0.72),
+        LeafForm::Palmate => (0.150, 0.30),
+        LeafForm::Pinnate => (0.200, 0.46),
         LeafForm::Needle => (0.340, 0.14),
         // A willow's lance is long and narrow, so it covers very little of its
         // box.
-        LeafForm::Lanceolate => (0.170, 0.44),
+        LeafForm::Lanceolate => (0.150, 0.44),
         // A ginkgo fan is broad for its length but opens only in its outer
         // half, so the fill is a fan's, not a blade's.
-        LeafForm::Fan => (0.190, 0.36),
+        LeafForm::Fan => (0.150, 0.36),
     };
     (unit * LEAF_FINENESS, fill)
 }
@@ -247,18 +252,73 @@ fn leaf_card(species: &Species, index: usize, size: usize) -> BakedTexture {
 fn paint(card: &mut Card, species: &Species, size: usize, leaves: f32, petals: f32) {
     let (unit, _) = form_metrics(species.leaf);
     let leaves = leaves.round().max(0.0) as usize;
+    // A card is a crop of a canopy and a canopy is lumpy: leaves gather in
+    // clumps with sky between them, they do not fall like rain. Two to four
+    // clump centres per card (distances wrap, so any crop of the tile is still
+    // a plausible clump pattern), leaves accepted by distance to the nearest
+    // centre. Conifer sprays keep their own structure.
+    let clumpy = species.leaf != LeafForm::Needle;
+    let clumps: Vec<(f32, f32, f32, f32)> = if clumpy {
+        let n = 2 + card.rng.int(3) as usize;
+        (0..n)
+            .map(|_| {
+                (
+                    card.rng.unit(),
+                    card.rng.unit(),
+                    card.rng.range(0.16, 0.27),
+                    // Each clump's own hue: young shoots yellow-green, old
+                    // inner foliage blue-green.
+                    card.rng.range(-1.0, 1.0),
+                )
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     for index in 0..leaves {
         // Cards are crops of a canopy, so foliage runs off the edge and gets
         // clipped: that is what makes a canopy of cards read as continuous
         // rather than as a field of separate stickers.
-        let x = card.rng.range(-0.06, 1.06) * size as f32;
-        let y = card.rng.range(-0.06, 1.06) * size as f32;
+        let (mut x, mut y, mut occlusion, mut hue) = (0.0_f32, 0.0_f32, 1.0_f32, 0.0_f32);
+        for _ in 0..8 {
+            x = card.rng.range(-0.06, 1.06);
+            y = card.rng.range(-0.06, 1.06);
+            if !clumpy {
+                break;
+            }
+            let mut best = 0.0_f32;
+            for &(cx, cy, sigma, h) in &clumps {
+                let wrap = |d: f32| {
+                    let d = d.abs() % 1.0;
+                    d.min(1.0 - d)
+                };
+                let (dx, dy) = (wrap(x - cx), wrap(y - cy));
+                let w = (-(dx * dx + dy * dy) / (2.0 * sigma * sigma)).exp();
+                if w > best {
+                    best = w;
+                    // Inside a clump the leaves lie in each other's shade; the
+                    // outer ones catch the sky.
+                    occlusion = 0.88 + 0.12 * (1.0 - w);
+                    hue = h;
+                }
+            }
+            if card.rng.unit() < 0.10 + 0.90 * best {
+                break;
+            }
+        }
+        let (x, y) = (x * size as f32, y * size as f32);
         let angle = card.rng.range(0.0, TAU);
         let length = size as f32 * unit * card.rng.range(0.78, 1.26);
         // Back of the crown first: leaves drawn later are on the outside, where
         // they see more sky, so they are lighter.  The gradient is the real one.
-        let value = 0.78 + 0.24 * (index as f32 / leaves.max(1) as f32);
-        let tint = scaled(leaf_colour(species, card.rng.unit()), value);
+        let value = (0.82 + 0.24 * (index as f32 / leaves.max(1) as f32)) * occlusion;
+        let mut tint = scaled(leaf_colour(species, card.rng.unit()), value);
+        // Clump hue: a few percent toward yellow or toward blue.
+        tint = [
+            tint[0] * (1.0 + 0.04 * hue),
+            tint[1],
+            tint[2] * (1.0 - 0.06 * hue),
+        ];
         match species.leaf {
             LeafForm::Palmate => draw_palmate(card, x, y, length, angle, tint),
             LeafForm::Pinnate => draw_pinnate(card, x, y, length, angle, tint),

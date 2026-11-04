@@ -7,6 +7,7 @@ import { buildCityMass, type CityMass } from "../city/cityMass";
 import { createFramePerf, perfEnabled, perfTiming } from "../city/perf";
 import { Roam } from "../city/roam";
 import type { CityScene } from "../city/cityScene";
+import { RIVER_GROUND_ORDER } from "../city/cityScene";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
@@ -856,6 +857,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
 }`);
     };
     const terrain = new THREE.Mesh(geometry, terrainMaterial);
+    terrain.renderOrder = RIVER_GROUND_ORDER; // draws before the city river clears depth in its valley
     terrain.rotation.x = -Math.PI / 2;
     scene.add(terrain);
 

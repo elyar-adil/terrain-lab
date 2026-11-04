@@ -324,6 +324,16 @@ fn build_scene(
     budget: SceneBudget,
 ) -> CityScene {
     let mut builder = MeshBuilder::new();
+    // The river's water lies below the ground: structures in the channel (bridge
+    // piers) are built to this level, so it is set before the streets.
+    if city.river.is_some() || !city.tributaries.is_empty() {
+        let width = if city.river.is_some() {
+            city.river_width_metres
+        } else {
+            city.tributaries.first().map_or(40.0, |t| t.width_metres)
+        };
+        builder.water_y = Some(buildings::water_level(&city.river_setting, width));
+    }
     // Prototypes first, so their groups exist and can be bound before anything
     // instances into them.
     let prototypes: Vec<TreePrototype> = trees::prototype_set();
@@ -352,11 +362,12 @@ fn build_scene(
     // No parked cars until a car is modelled well enough to stand beside the
     // rest of the street (`furniture::park_cars` places them when it is).
     let parked = 0;
-    let tree_output = trees::plant_styled(
+    let tree_output = trees::plant_in_climate(
         &network,
         &city.parcels,
         &city.buildings,
         &city.fields,
+        &city.shelterbelts,
         city.river.as_deref(),
         city.river_width_metres,
         city.frame,
@@ -364,6 +375,7 @@ fn build_scene(
         &mut builder,
         city.seed,
         city.style,
+        &city.climate,
     );
     if let Some((min, max)) = crop {
         builder.crop_since(&street_mark, min, max);
@@ -398,12 +410,24 @@ fn build_scene(
                 station += 6.0;
             }
         }
+        let built: Vec<crate::math::Vec2> = buildings
+            .iter()
+            .filter_map(|b| {
+                let n = b.footprint.len().max(1) as f32;
+                let (x, y) = b.footprint.iter().fold((0.0, 0.0), |a, p| (a.0 + p.x_km, a.1 + p.y_km));
+                let local = city.frame.to_local(urban::Point { x_km: x / n, y_km: y / n });
+                (!b.footprint.is_empty()).then(|| crate::math::Vec2::new(local[0], local[1]))
+            })
+            .collect();
         if let Some(river) = city.river.as_deref() {
             buildings::build_water(
                 river,
                 city.river_width_metres,
                 city.frame,
                 &crossings,
+                &city.river_setting,
+                &built,
+                &streets,
                 &mut builder,
             );
         }
@@ -413,6 +437,9 @@ fn build_scene(
                 tributary.width_metres,
                 city.frame,
                 &crossings,
+                &city.river_setting,
+                &built,
+                &streets,
                 &mut builder,
             );
         }
@@ -432,7 +459,11 @@ fn build_scene(
     let draw_calls = geometry.meshes.len();
     let (meshes, instances) = encode_geometry(geometry);
     let mut texture_set =
-        crate::bake::standard_set(budget.facade_texture_size, budget.ground_texture_size);
+        crate::bake::standard_set_in(
+            budget.facade_texture_size,
+            budget.ground_texture_size,
+            &city.climate,
+        );
     // The procedural facade's elevation table, which only exists once the
     // buildings have drawn their designs.
     texture_set.push(facade_table.bake());
@@ -841,7 +872,8 @@ mod tests {
         let instanced = scene.meshes.len() - plain;
         assert!(plain < 70, "the city needs {plain} material draw calls");
         assert!(
-            instanced < 110,
+            // 19 species were 109 groups; the six the climate zones add make 121.
+            instanced < 130,
             "the city needs {instanced} instanced draw calls"
         );
     }

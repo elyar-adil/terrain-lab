@@ -467,6 +467,24 @@ pub fn flower_texture(size: usize, colour: &str) -> BakedTexture {
 /// back on every 4 m square as a lattice of dark dots across every lawn.
 /// Mown grass has an albedo of about 0.2; its green is a yellowish one.
 pub fn grass_texture(size: usize) -> BakedTexture {
+    grass_texture_in(size, 0.0)
+}
+
+/// The lawn of a climate. `lush` runs from -1 (an arid town: straw-coloured,
+/// thin turf with bare soil showing and many dead blades, watered only on the
+/// verge) through 0 (a temperate mown lawn) to 1 (a humid south: deep, rich
+/// green, close turf).
+pub fn grass_texture_in(size: usize, lush: f32) -> BakedTexture {
+    let lush = lush.clamp(-1.0, 1.0);
+    let dry_amount = (-lush).max(0.0);
+    let wet_amount = lush.max(0.0);
+    // Live-turf colour, then the straw it fades to.
+    let live = [
+        78.0 - 12.0 * wet_amount,
+        104.0 + 6.0 * wet_amount,
+        50.0 - 6.0 * wet_amount,
+    ];
+    let straw = [150.0, 128.0, 76.0];
     let mut rgba = vec![0_u8; size * size * 4];
     for y in 0..size {
         for x in 0..size {
@@ -484,10 +502,24 @@ pub fn grass_texture(size: usize) -> BakedTexture {
             let tone = signed_noise(41, u * 5.0, v * 5.0, 5.0) * 5.0;
             // Soil between the blades, and the odd dry blade.
             let gap = hash(43, x as i32, y as i32);
-            let (soil, dry) = (gap < 0.07, gap > 0.95);
+            let (soil, dry) = (
+                gap < 0.07 + 0.30 * dry_amount,
+                gap > 0.95 - 0.40 * dry_amount,
+            );
             let lift = blade + clump + tone;
+            // Patches of dry turf at a scale of a metre or two, yellower where
+            // the sprinklers miss.
+            let straw_share = (dry_amount * 0.85
+                + 0.30 * (signed_noise(47, u * 7.0, v * 7.0, 7.0) + 0.5).clamp(0.0, 1.0)
+                    * (0.25 + dry_amount))
+                .clamp(0.0, 0.95);
+            let base = [
+                live[0] + (straw[0] - live[0]) * straw_share,
+                live[1] + (straw[1] - live[1]) * straw_share,
+                live[2] + (straw[2] - live[2]) * straw_share,
+            ];
             let (mut red, mut green, mut blue) =
-                (86.0 + lift * 0.9, 103.0 + lift, 58.0 + lift * 0.6);
+                (base[0] + lift * 0.9, base[1] + lift, base[2] + lift * 0.6);
             if soil {
                 // Dark loam, brown rather than black.
                 (red, green, blue) = (red * 0.62 + 18.0, green * 0.52 + 10.0, blue * 0.60 + 6.0);

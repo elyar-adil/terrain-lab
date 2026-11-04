@@ -27,6 +27,8 @@ pub(super) struct ParcelOutput {
     pub parcels: Vec<Parcel>,
     pub buildings: Vec<ModernBuilding>,
     pub fields: Vec<crate::Field>,
+    /// Shelterbelt trees along fields and roads (ids assigned by the caller).
+    pub belt_trees: Vec<crate::TreeInstance>,
 }
 
 /// A point's exact bits, to look a node up by its coordinates.
@@ -109,6 +111,7 @@ pub(super) fn build_parcels(
     let mut next_parcel = 0_u32;
     let mut next_building = 0_u32;
     let mut fields: Vec<crate::Field> = Vec::new();
+    let mut belt_trees: Vec<crate::TreeInstance> = Vec::new();
     let mut next_field = 0_u32;
     let to_world =
         |ring: &[V]| -> Vec<Point> { ring.iter().map(|p| frame.to_world(p.0, p.1)).collect() };
@@ -964,9 +967,11 @@ pub(super) fn build_parcels(
             &mut occupied,
             &mut fields,
             &mut next_field,
+            &mut belt_trees,
         );
     }
     ParcelOutput {
+        belt_trees,
         blocks,
         parcels,
         buildings,

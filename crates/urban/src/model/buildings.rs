@@ -131,4 +131,7 @@ pub struct Field {
     pub row_angle: f32,
     /// Which of the crop's looks (stage of growth, variety) this plot has, 0..3.
     pub variant: u8,
+    /// Cut as a terrace along the contour of a slope.
+    #[serde(default)]
+    pub terraced: bool,
 }

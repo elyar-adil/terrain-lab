@@ -492,14 +492,18 @@ export function createMaterials(
     ), "grass") as THREE.MeshStandardMaterial);
   }
   {
-    // Water is lit like a smooth dielectric and shaped by moving ripples: a few
-    // travelling sine waves perturb the *normal* only, so the surface stays flat
-    // (it sits a few centimetres above the ground) but the sky reflection breaks
-    // up into the streaky glints a real river has. The bank colours come from
-    // vertex colours (sandy shallows, deep centre), written by the Rust layer.
+    // Water is lit like a smooth dielectric and shaped by slow, long swell: a few
+    // travelling waves perturb the *normal* only, so the surface stays flat. Each
+    // wave is filtered by the pixel footprint of its own phase (a wave that
+    // changes by more than a radian per pixel averages out, as it does for the
+    // eye), and the whole ripple fades with distance and rises in roughness, so
+    // from the air the river is a smooth sky reflection and not a field of
+    // glints; near the bank it breaks up into the soft streaks a real river has.
+    // Colour is in the vertex colours (depth, silt and turbidity, from the Rust
+    // layer, which reads them from the terrain simulation).
     const water = standard(
       "water",
-      { roughness: 0.12, metalness: 0.05, envMapIntensity: 1.3, vertexColors: true },
+      { roughness: 0.2, metalness: 0.0, envMapIntensity: 0.45, vertexColors: true },
       0xffffff,
     );
     const waterTime = { value: 0 };
@@ -512,28 +516,56 @@ export function createMaterials(
       shader.fragmentShader = shader.fragmentShader
         .replace(
           "#include <common>",
-          "#include <common>\nvarying vec2 vWaterP;\nuniform float uWaterTime;",
+          `#include <common>
+varying vec2 vWaterP;
+uniform float uWaterTime;
+float waterHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float waterNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(waterHash(i), waterHash(i + vec2(1.0, 0.0)), f.x),
+             mix(waterHash(i + vec2(0.0, 1.0)), waterHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+// One travelling wave's slope, faded out once its phase aliases.
+vec2 waterWave(vec2 p, vec2 dir, float k, float speed, float amp) {
+  float phase = dot(p, dir) * k + uWaterTime * speed;
+  float fw = max(abs(dFdx(phase)), abs(dFdy(phase)));
+  float keep = 1.0 - smoothstep(0.7, 2.4, fw);
+  return dir * (cos(phase) * amp * keep);
+}`,
+        )
+        .replace(
+          "#include <roughnessmap_fragment>",
+          `#include <roughnessmap_fragment>
+float waterDist = length(vViewPosition);
+roughnessFactor = clamp(roughnessFactor + smoothstep(60.0, 700.0, waterDist) * 0.22, 0.0, 1.0);`,
         )
         .replace(
           "#include <normal_fragment_maps>",
           `#include <normal_fragment_maps>
 {
   vec2 p = vWaterP;
-  float t = uWaterTime;
-  // Warp the lookup so no wave front stays a straight, grid-aligned line.
-  p += 2.3 * vec2(sin(p.y * 0.071 + t * 0.21), cos(p.x * 0.063 - t * 0.17));
+  // Warp the lookup with low-frequency noise so no wave front is a straight,
+  // grid-aligned line and the pattern does not repeat.
+  p += 3.5 * (vec2(waterNoise(p * 0.031 + 3.1), waterNoise(p * 0.029 - 7.7)) - 0.5);
   vec2 g = vec2(0.0);
-  g += vec2(0.8, 0.6) * cos(dot(p, vec2(0.8, 0.6)) * 0.53 + t * 1.1) * 0.85;
-  g += vec2(-0.5, 0.86) * cos(dot(p, vec2(-0.5, 0.86)) * 0.97 - t * 1.5) * 0.7;
-  g += vec2(0.96, -0.28) * cos(dot(p, vec2(0.96, -0.28)) * 1.73 + t * 2.1) * 0.5;
-  g += vec2(-0.31, -0.95) * cos(dot(p, vec2(-0.31, -0.95)) * 2.9 - t * 2.7) * 0.32;
-  g += vec2(0.62, -0.78) * cos(dot(p, vec2(0.62, -0.78)) * 4.3 + t * 3.3) * 0.18;
-  g += vec2(-0.91, 0.41) * cos(dot(p, vec2(-0.91, 0.41)) * 6.1 - t * 4.1) * 0.1;
-  vec3 gw = vec3(g.x, 0.0, g.y) * 0.05;
+  g += waterWave(p, vec2(0.80, 0.60), 0.31, 0.62, 0.85);
+  g += waterWave(p, vec2(-0.50, 0.86), 0.57, -0.83, 0.70);
+  g += waterWave(p, vec2(0.96, -0.28), 0.93, 1.07, 0.48);
+  g += waterWave(p, vec2(-0.31, -0.95), 1.61, -1.31, 0.30);
+  g += waterWave(p, vec2(0.62, -0.78), 2.70, 1.67, 0.16);
+  float far = 1.0 - smoothstep(120.0, 900.0, waterDist);
+  vec3 gw = vec3(g.x, 0.0, g.y) * 0.032 * (0.25 + 0.75 * far);
   normal = normalize(normal - normalize(mat3(viewMatrix) * gw) * length(gw));
 }`,
         );
     };
+  }
+  {
+    // Banks of the river: vertex-coloured earth, grass, sand, mud and cobble,
+    // broken up by weathering noise so a long slope is not one flat tone.
+    patchWeathering(standard("bank.earth", { roughness: 0.96, side: THREE.DoubleSide, vertexColors: true }, 0xffffff), 0.5);
   }
   // Clipped hedge and topiary: small dense leaves (`foliage/hedge`), the hedge
   // strip and the instanced balls in one leaf.
@@ -1381,6 +1413,28 @@ export interface CityBuild {
  * to mount the group; a host that mounts only after `done` never shows a
  * half-built city.
  */
+/** Materials of the river's own surfaces: the valley the host's ground is cut for. */
+const RIVER_SURFACES = new Set(["water", "bank.earth", "quay.stone"]);
+/**
+ * Render order a host gives its opaque ground (terrain, ground plane) so the
+ * river valley can show through it: the ground draws first, the river's mask
+ * clears depth under the valley, then the city draws over what is left.
+ */
+export const RIVER_GROUND_ORDER = -20;
+let riverMask: THREE.ShaderMaterial | null = null;
+function riverMaskMaterial(): THREE.ShaderMaterial {
+  riverMask ??= new THREE.ShaderMaterial({
+    vertexShader: "void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position.z = gl_Position.w; }",
+    fragmentShader: "void main() { gl_FragColor = vec4(0.0); }",
+    colorWrite: false,
+    depthWrite: true,
+    depthTest: true,
+    depthFunc: THREE.AlwaysDepth,
+    side: THREE.DoubleSide,
+  });
+  return riverMask;
+}
+
 export function beginCityBuild(
   scene: CityScene,
   materials: MaterialCatalogue,
@@ -1555,6 +1609,16 @@ export function beginCityBuild(
         ownedGeometries.push(geometry);
         statics.push(object);
         group.add(object);
+        if (RIVER_SURFACES.has(mesh.material)) {
+          // The river lies in a valley below the host's ground: this resets the
+          // depth in its footprint so the ground drawn before it (see
+          // RIVER_GROUND_ORDER) does not hide the water and banks.
+          const mask = new THREE.Mesh(geometry, riverMaskMaterial());
+          mask.name = "river.mask";
+          mask.renderOrder = RIVER_GROUND_ORDER + 5;
+          mask.frustumCulled = object.frustumCulled;
+          group.add(mask);
+        }
         yield;
       }
     }

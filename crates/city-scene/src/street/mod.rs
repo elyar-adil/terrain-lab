@@ -45,6 +45,7 @@
 //! * [`signals`] — the signal heads the renderer's phase driver recolours.
 
 mod bridge;
+pub use bridge::river_girder_depth;
 mod markings;
 mod signals;
 mod surfaces;

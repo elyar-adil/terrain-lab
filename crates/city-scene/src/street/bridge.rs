@@ -216,12 +216,19 @@ fn tube(b: &mut MeshBuilder, mat: &str, a: Vec3, c: Vec3, r: f32, col: [f32; 3])
     b.tube(mat, a, c, r, r, 5, Some(col));
 }
 
+/// Structural depth under the deck of a river bridge, metres: a slender
+/// prestressed girder, about a twentieth of the span for a long one, never less
+/// than a metre and a half under the carriageway.
+pub fn river_girder_depth(deck_thickness: f32) -> f32 {
+    (deck_thickness * 1.2).max(1.5)
+}
+
 /// A deck over water. Kind, colour and proportions come from a hash of where the
 /// bridge is and how long it is, so a city has a mix of structures and the same
 /// seed always gives the same ones.
 fn river_bridge(road: &Road, surface: &Carriageway, length: f32, builder: &mut MeshBuilder) {
     let half = road.half_width();
-    let depth = (road.deck_thickness * 2.2).max(1.6);
+    let depth = river_girder_depth(road.deck_thickness);
     let start = surface.path.sample(0.0).0;
     let (ha, hb) = ((start.x * 0.5) as i32, (start.z * 0.5) as i32);
     let lu = length as u32;
@@ -408,7 +415,9 @@ fn river_bridge(road: &Road, surface: &Carriageway, length: f32, builder: &mut M
     }
 
     // Piers with cutwaters under the girder types; cable and arch bridges span
-    // clear.
+    // clear. They stand in the channel, on its bed, and are dressed at the
+    // water's own level.
+    let water = builder.water_y.unwrap_or(0.03);
     if kind == Kind::Girder || kind == Kind::Truss {
         let spans = ((length / 34.0).round() as usize).max(1);
         for i in 1..spans {
@@ -435,7 +444,7 @@ fn river_bridge(road: &Road, surface: &Carriageway, length: f32, builder: &mut M
                     yaw,
                     half * 0.85,
                     2.6,
-                    -4.0,
+                    water - 4.0,
                     top - 1.1,
                     PIER,
                 );
@@ -447,13 +456,13 @@ fn river_bridge(road: &Road, surface: &Carriageway, length: f32, builder: &mut M
                     yaw,
                     half * 0.85 + 1.6,
                     3.6,
-                    -4.0,
-                    0.9,
+                    water - 4.0,
+                    water + 0.9,
                     STONE,
                 );
                 if st > length * 0.3 && st < length * 0.7 {
                     // Soft foam where the current splits on the cutwater.
-                    for (grow, y) in [(0.6_f32, 0.05_f32), (1.5, 0.055), (2.8, 0.06)] {
+                    for (grow, y) in [(0.6_f32, water + 0.02), (1.5, water + 0.025), (2.8, water + 0.03)] {
                         let (l, w) = (
                             (half * 0.85 + 1.6 + grow * 2.0) * 0.5,
                             (3.6 + grow * 2.0) * 0.5,

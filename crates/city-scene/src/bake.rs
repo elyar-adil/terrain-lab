@@ -13,7 +13,7 @@ pub use crate::facades::{
 pub use crate::leaf_cards::{leaf_card_textures, tuft_texture};
 pub use crate::textures::{
     GROUND_TILE_M, asphalt_texture, crosswalk_texture, dashed_line_texture, flower_texture,
-    grass_texture, hedge_texture, paving_texture, signage_texture, tactile_texture,
+    grass_texture, grass_texture_in, hedge_texture, paving_texture, signage_texture, tactile_texture,
 };
 
 use crate::textures::BakedTexture;
@@ -26,6 +26,18 @@ use crate::textures::BakedTexture;
 /// flat untextured colour, so `facade_elevations_cover_every_facade_material`
 /// and its siblings assert both directions.
 pub fn standard_set(facade_size: usize, ground_size: usize) -> Vec<BakedTexture> {
+    standard_set_in(facade_size, ground_size, &urban::SiteClimate::default())
+}
+
+/// [`standard_set`] for a town in a given climate: the lawn follows the site's
+/// wetness (straw and bare soil where the terrain is dry, deep green where it is
+/// humid).
+pub fn standard_set_in(
+    facade_size: usize,
+    ground_size: usize,
+    climate: &urban::SiteClimate,
+) -> Vec<BakedTexture> {
+    let lush = (climate.moisture - 0.5) / 0.35;
     let mut set = facade_textures(facade_size);
     set.push(crate::facades::cn_shopfront_texture(ground_size));
     set.extend(ground_floor_textures(ground_size));
@@ -35,7 +47,7 @@ pub fn standard_set(facade_size: usize, ground_size: usize) -> Vec<BakedTexture>
     }
     set.push(asphalt_texture(ground_size));
     set.push(paving_texture(ground_size));
-    set.push(grass_texture(ground_size));
+    set.push(grass_texture_in(ground_size, lush));
     set.push(hedge_texture(ground_size));
     set.push(tactile_texture(128, false));
     set.push(tactile_texture(128, true));

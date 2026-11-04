@@ -1,4 +1,5 @@
 mod blocks;
+mod country;
 mod expressway;
 mod geom;
 mod graph;
@@ -9,6 +10,7 @@ pub mod roundabout;
 mod suburb;
 mod tidy;
 
+pub use country::{CountryFn, CountrySample};
 pub use graph::junction_trim_m;
 use graph::{GraphOutput, build_graph, legacy_hash, modern_hash, modern_phase};
 use landscape::derive_compounds_and_trees;
@@ -36,6 +38,8 @@ pub(super) struct ExternalFrame {
     river: Vec<geom::V>,
     /// Other waterways in local metres, each with its half width.
     tributaries: Vec<(Vec<geom::V>, f32)>,
+    /// The terrain under the country around the town, when the world supplies it.
+    country: Option<CountryFn>,
 }
 
 struct CityFrame {
@@ -94,6 +98,12 @@ impl CityFrame {
                 line.len() >= 2 && geom::ring_polyline_dist(ring, line) < half + margin
             })
         })
+    }
+
+    /// The terrain at a local point, if the plan was given a sampler.
+    fn country_at(&self, x: f32, z: f32) -> Option<CountrySample> {
+        let f = self.external.as_ref()?.country.as_ref()?;
+        Some(f(self.to_world(x, z)))
     }
 
     fn to_world(&self, x_m: f32, z_m: f32) -> Point {
@@ -312,6 +322,7 @@ pub fn generate_modern_chinese_city_with_options(
         parcels,
         buildings,
         fields,
+        ..
     } = build_parcels(&frame, &nodes, &sd_roads, &hd_roads, layout.reserved());
     expressway::grade_separate(&frame, &mut nodes, &mut sd_roads, &mut hd_roads, &layout);
     let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
@@ -342,10 +353,13 @@ pub fn generate_modern_chinese_city_with_options(
         compounds,
         trees,
         fields,
+        shelterbelts: Vec::new(),
         river: Some(river),
         river_width_metres: frame.river_half * 2.0,
+        river_setting: Default::default(),
         tributaries: Vec::new(),
         morphology_score,
+        climate: Default::default(),
     }
 }
 
@@ -393,8 +407,19 @@ pub struct ExternalFields {
 /// where local metres are; `radius_km` bounds the area that gets buildings.
 pub fn generate_modern_chinese_city_from_streets(
     spec: ModernChinaSpec,
+    streets: ExternalStreets,
+    fields: ExternalFields,
+) -> ModernCity {
+    generate_modern_chinese_city_from_streets_with_country(spec, streets, fields, None)
+}
+
+/// As [`generate_modern_chinese_city_from_streets`], with a terrain sampler: the
+/// farmland, shelterbelts and terraces around the town then follow the land.
+pub fn generate_modern_chinese_city_from_streets_with_country(
+    spec: ModernChinaSpec,
     mut streets: ExternalStreets,
     fields: ExternalFields,
+    country: Option<CountryFn>,
 ) -> ModernCity {
     tidy::tidy(&mut streets);
     let mut frame = CityFrame::new(spec);
@@ -425,6 +450,7 @@ pub fn generate_modern_chinese_city_from_streets(
                 )
             })
             .collect(),
+        country,
     });
     let frame = frame;
 
@@ -507,9 +533,18 @@ pub fn generate_modern_chinese_city_from_streets(
         parcels,
         buildings,
         fields,
+        belt_trees,
     } = build_parcels(&frame, &nodes, &sd_roads, &hd_roads, layout.reserved());
     expressway::grade_separate(&frame, &mut nodes, &mut sd_roads, &mut hd_roads, &layout);
     let (compounds, trees) = derive_compounds_and_trees(&parcels, spec.seed);
+    let shelterbelts: Vec<crate::TreeInstance> = belt_trees
+        .into_iter()
+        .enumerate()
+        .map(|(i, mut tree)| {
+            tree.id = i as u32;
+            tree
+        })
+        .collect();
     roundabout::mark(
         crate::model::scene::CityFrameInfo {
             origin: spec.centre,
@@ -537,13 +572,16 @@ pub fn generate_modern_chinese_city_from_streets(
         compounds,
         trees,
         fields,
+        shelterbelts,
         river: (!streets.river.is_empty()).then_some(streets.river),
         river_width_metres: frame.river_half * 2.0,
+        river_setting: Default::default(),
         tributaries: streets
             .tributaries
             .into_iter()
             .map(|(line, width_metres)| crate::Tributary { line, width_metres })
             .collect(),
         morphology_score,
+        climate: Default::default(),
     }
 }

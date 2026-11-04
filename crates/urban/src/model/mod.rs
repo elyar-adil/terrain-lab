@@ -1,4 +1,5 @@
 mod buildings;
+mod climate;
 mod core;
 pub(crate) mod jurisdiction;
 pub(crate) mod morphology;
@@ -11,6 +12,7 @@ pub use buildings::{
     BuildingFacade, Compound, CropKind, Field, ModernBuilding, Parcel, ParcelUse, TreeInstance,
     TreeSpecies,
 };
+pub use climate::SiteClimate;
 pub use core::{
     BuildingMass, CitySpec, CityStyle, ModernChinaSpec, ModernRoadClass, Point, RoofStyle,
     StreetClass, StreetSegment, UrbanBlock, UrbanModel,
@@ -25,5 +27,5 @@ pub use roads::{
     Movement, RoadConnector, RoadCrossSection, SdNode, SdRoad, SignalHead, TurnArrow,
     cross_section, ramp_cross_section,
 };
-pub use scene::{CityFrameInfo, ModernCity, Tributary};
+pub use scene::{CityFrameInfo, ModernCity, RiverSetting, Tributary};
 pub use traffic::{ApproachSpec, synthesize_junction};

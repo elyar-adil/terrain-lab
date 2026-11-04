@@ -13,6 +13,7 @@ use world_core::{GridPoint, ScalarLayer, WorldError};
 use worldgen_core::hash::mix32;
 use worldgen_core::{clamp01, smoothstep};
 
+mod climate;
 pub mod fabric;
 pub mod rivers;
 
@@ -304,6 +305,7 @@ pub fn generate_infrastructure_with(
                 u64::from(config.seed),
             )
             .map_err(|e| InfrastructureError::Fabric(e.to_string()))?;
+            let country = country_sampler(terrain, grid);
             settlements
                 .iter()
                 .enumerate()
@@ -311,7 +313,7 @@ pub fn generate_infrastructure_with(
                     Ok(town) => {
                         let radius_km =
                             settlement_radius_km(settlement.class) * 1.35 + WINDOW_TAIL_KM;
-                        urban::generate_modern_chinese_city_from_streets(
+                        urban::generate_modern_chinese_city_from_streets_with_country(
                             ModernChinaSpec {
                                 style: urban::CityStyle::ChineseModern,
                                 centre: settlement_centre_km(grid, settlement),
@@ -329,6 +331,7 @@ pub fn generate_infrastructure_with(
                             },
                             town.streets,
                             town.fields,
+                            Some(country.clone()),
                         )
                     }
                     Err(_) => legacy_city(settlement),
@@ -336,6 +339,14 @@ pub fn generate_infrastructure_with(
                 .collect()
         }
     };
+    let modern_cities: Vec<ModernCity> = modern_cities
+        .into_iter()
+        .map(|mut city| {
+            city.river_setting = river_setting(terrain, grid, &city);
+            city.climate = climate::site_climate(terrain, grid, &city);
+            city
+        })
+        .collect();
     let cities = modern_cities.iter().map(ModernCity::urban_model).collect();
     Ok(InfrastructureData {
         travel_cost: ScalarLayer::new("travelCost", grid, travel_cost)?,
@@ -354,6 +365,108 @@ pub fn generate_infrastructure_with(
         modern_cities,
         cities,
     })
+}
+
+/// A sampler of the terrain for the planner's countryside: slope and fall line
+/// from the height, wetness and warmth from the climate fields, soil depth,
+/// bare ground and flood plain. Farmland, terraces and shelterbelts follow it.
+fn country_sampler(terrain: &TerrainData, grid: WorldGrid) -> urban::CountryFn {
+    struct Layers {
+        n: usize,
+        km_per_cell: f32,
+        cell_m: f32,
+        height: Vec<f32>,
+        moisture: Vec<f32>,
+        temperature: Vec<f32>,
+        soil: Vec<f32>,
+        bare: Vec<f32>,
+        flood: Vec<f32>,
+    }
+    let layers = Layers {
+        n: grid.size,
+        km_per_cell: grid.cell_metres() / 1000.0,
+        cell_m: grid.cell_metres(),
+        height: terrain.height.clone(),
+        moisture: terrain.moisture.clone(),
+        temperature: terrain.temperature.clone(),
+        soil: terrain.soil_depth.clone(),
+        bare: terrain.bare_ground.clone(),
+        flood: terrain.floodplain.clone(),
+    };
+    std::sync::Arc::new(move |p: urban::Point| {
+        let n = layers.n;
+        let x = ((p.x_km / layers.km_per_cell).round().max(0.0) as usize).min(n - 1);
+        let y = ((p.y_km / layers.km_per_cell).round().max(0.0) as usize).min(n - 1);
+        let h = |x: usize, y: usize| layers.height[y * n + x];
+        let dx = (h((x + 1).min(n - 1), y) - h(x.saturating_sub(1), y)) / (2.0 * layers.cell_m);
+        let dy = (h(x, (y + 1).min(n - 1)) - h(x, y.saturating_sub(1))) / (2.0 * layers.cell_m);
+        let i = y * n + x;
+        urban::CountrySample {
+            slope: dx.hypot(dy),
+            downhill: (-dy).atan2(-dx),
+            moisture: layers.moisture[i].clamp(0.0, 1.0),
+            temperature_c: layers.temperature[i],
+            soil: layers.soil[i].clamp(0.0, 1.0),
+            bare: layers.bare[i].clamp(0.0, 1.0),
+            floodplain: layers.flood[i].clamp(0.0, 1.0),
+        }
+    })
+}
+
+/// The terrain's account of a town's river: climate, discharge, channel slope,
+/// valley relief and sediment, read from the fields along the river's centre
+/// line, so the scene's water and banks follow the simulation.
+fn river_setting(terrain: &TerrainData, grid: WorldGrid, city: &ModernCity) -> urban::RiverSetting {
+    let default = urban::RiverSetting::default();
+    let Some(river) = city.river.as_deref().filter(|r| r.len() >= 2) else {
+        return default;
+    };
+    let n = grid.size;
+    let km_per_cell = grid.cell_metres() / 1000.0;
+    let cell = |p: &urban::Point| {
+        let x = (p.x_km / km_per_cell).round().clamp(0.0, (n - 1) as f32) as usize;
+        let y = (p.y_km / km_per_cell).round().clamp(0.0, (n - 1) as f32) as usize;
+        y * n + x
+    };
+    let max_flow = terrain.flow.iter().copied().fold(1.0_f32, f32::max);
+    let count = river.len() as f32;
+    let mean = |field: &[f32]| river.iter().map(|p| field[cell(p)]).sum::<f32>() / count;
+    let flow = river.iter().map(|p| terrain.flow[cell(p)]).fold(0.0_f32, f32::max);
+    let discharge = (flow.ln_1p() / max_flow.ln_1p()).clamp(0.0, 1.0);
+    let (first, last) = (&river[0], &river[river.len() - 1]);
+    let length_m: f32 = river
+        .windows(2)
+        .map(|w| (w[1].x_km - w[0].x_km).hypot(w[1].y_km - w[0].y_km) * 1000.0)
+        .sum();
+    let fall = terrain.filled_height[cell(first)] - terrain.filled_height[cell(last)];
+    let slope = if length_m > 50.0 {
+        (fall / length_m).abs().clamp(0.000_1, 0.02)
+    } else {
+        default.slope
+    };
+    // Relief: spread of the ground within 1.5 km of the town's middle.
+    let mid = &river[river.len() / 2];
+    let reach = (1.5 / km_per_cell).ceil() as i64;
+    let (cx, cy) = (cell(mid) % n, cell(mid) / n);
+    let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+    for dy in -reach..=reach {
+        for dx in -reach..=reach {
+            let (x, y) = (cx as i64 + dx, cy as i64 + dy);
+            if x >= 0 && y >= 0 && (x as usize) < n && (y as usize) < n {
+                let h = terrain.height[y as usize * n + x as usize];
+                lo = lo.min(h);
+                hi = hi.max(h);
+            }
+        }
+    }
+    urban::RiverSetting {
+        moisture: mean(&terrain.moisture).clamp(0.0, 1.0),
+        temperature_c: mean(&terrain.temperature),
+        discharge,
+        slope,
+        relief_m: if hi > lo { (hi - lo).clamp(2.0, 400.0) } else { default.relief_m },
+        sediment: mean(&terrain.sediment).clamp(0.0, 1.0),
+    }
 }
 
 /// What a settlement's finished scene may cost. A village does not need four
@@ -1185,6 +1298,37 @@ mod tests {
             cloud_coverage: 35.0,
             cloud_speed: 24.0,
         }
+    }
+
+    #[test]
+    fn farmland_follows_the_terrain() {
+        let mut terraced = 0;
+        let mut fields = 0;
+        for landform in [Landform::Plains, Landform::Plateau, Landform::Coastal] {
+            let config = SimulationConfig { landform, ..config() };
+            let terrain = generate(&config, |_, _| {}).unwrap();
+            let grid = WorldGrid::new(terrain.size, config.world_size_km).unwrap();
+            let sample = country_sampler(&terrain, grid);
+            let data = generate_infrastructure(&terrain, &config).unwrap();
+            for city in &data.modern_cities {
+                for field in &city.fields {
+                    let n = field.ring.len() as f32;
+                    let c = urban::Point {
+                        x_km: field.ring.iter().map(|p| p.x_km).sum::<f32>() / n,
+                        y_km: field.ring.iter().map(|p| p.y_km).sum::<f32>() / n,
+                    };
+                    let s = sample(c);
+                    fields += 1;
+                    if field.terraced {
+                        terraced += 1;
+                        assert!(s.slope > 0.05, "terrace on flat ground: {}", s.slope);
+                    }
+                    assert!(s.slope < 0.6, "field on a cliff: {}", s.slope);
+                }
+            }
+        }
+        assert!(fields > 0);
+        eprintln!("fields {fields}, terraced {terraced}");
     }
 
     #[test]

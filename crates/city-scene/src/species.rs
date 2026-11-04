@@ -644,6 +644,133 @@ pub const SPECIES: &[Species] = &[
         evergreen: false,
         street_tolerant: false,
     },
+    // --- the species the climate zones add (`trees::zones`), after the rest so
+    // no earlier prototype's seed moves ---------------------------------------
+    Species {
+        key: "luan-shu",
+        name_zh: "栾树",
+        name_en: "Goldenrain tree",
+        canopy: Canopy::Rounded,
+        leaf: LeafForm::Pinnate,
+        bark: bark([0.185, 0.165, 0.145], 0.70, 1.0),
+        // Light, fresh green with a yellow cast; the pinnate leaf is thin and
+        // the crown is the loosest of the rounded trees.
+        foliage: [0.150, 0.190, 0.052],
+        autumn: Some([0.330, 0.240, 0.040]),
+        // Its yellow July panicles are not baked: the card carries the leaf.
+        bloom: Bloom::NONE,
+        height_m: (8.0, 14.0),
+        crown_m: (4.5, 7.0),
+        trunk_m: (0.20, 0.34),
+        clear_stem: 0.32,
+        density: 0.60,
+        leaf_scale: 0.30,
+        evergreen: false,
+        street_tolerant: true,
+    },
+    Species {
+        key: "yu-lan",
+        name_zh: "玉兰",
+        name_en: "Yulan magnolia",
+        canopy: Canopy::Oval,
+        leaf: LeafForm::Elliptic,
+        bark: bark([0.250, 0.240, 0.225], 0.12, 0.9),
+        // Large, matte, mid-green leaves, paler beneath.
+        foliage: [0.082, 0.150, 0.058],
+        autumn: Some([0.250, 0.190, 0.050]),
+        // The March flowers are not baked: the card is the summer leaf.
+        bloom: Bloom::NONE,
+        height_m: (6.0, 11.0),
+        crown_m: (3.2, 5.0),
+        trunk_m: (0.16, 0.28),
+        clear_stem: 0.24,
+        density: 0.74,
+        leaf_scale: 0.32,
+        evergreen: false,
+        street_tolerant: false,
+    },
+    Species {
+        key: "bai-hua",
+        name_zh: "白桦",
+        name_en: "Silver birch",
+        canopy: Canopy::Open,
+        leaf: LeafForm::Ovate,
+        // White papery bark with black lenticels is the identification.
+        bark: bark([0.290, 0.282, 0.262], 0.10, 1.0),
+        foliage: [0.098, 0.168, 0.088],
+        autumn: Some([0.340, 0.260, 0.040]),
+        bloom: Bloom::NONE,
+        height_m: (8.0, 13.0),
+        crown_m: (3.2, 4.6),
+        trunk_m: (0.10, 0.20),
+        clear_stem: 0.38,
+        density: 0.50,
+        leaf_scale: 0.22,
+        evergreen: false,
+        street_tolerant: false,
+    },
+    Species {
+        key: "hu-yang",
+        name_zh: "胡杨",
+        name_en: "Euphrates poplar",
+        canopy: Canopy::Open,
+        leaf: LeafForm::Ovate,
+        bark: bark([0.200, 0.172, 0.140], 0.85, 1.0),
+        // Grey-green, leathery leaves; the crown is gnarled and open.
+        foliage: [0.135, 0.165, 0.080],
+        // Gold in October: the most photographed poplar in the northwest.
+        autumn: Some([0.360, 0.265, 0.035]),
+        bloom: Bloom::NONE,
+        height_m: (8.0, 15.0),
+        crown_m: (4.0, 7.0),
+        trunk_m: (0.28, 0.50),
+        clear_stem: 0.30,
+        density: 0.48,
+        leaf_scale: 0.26,
+        evergreen: false,
+        street_tolerant: true,
+    },
+    Species {
+        key: "sha-zao",
+        name_zh: "沙枣",
+        name_en: "Russian olive",
+        canopy: Canopy::Rounded,
+        leaf: LeafForm::Lanceolate,
+        bark: bark([0.150, 0.130, 0.110], 0.60, 1.0),
+        // Silvery grey-green: the scale hairs on a Russian olive leaf make it the
+        // palest foliage in the table.
+        foliage: [0.150, 0.178, 0.115],
+        autumn: Some([0.230, 0.200, 0.090]),
+        bloom: Bloom::NONE,
+        height_m: (4.0, 8.0),
+        crown_m: (2.6, 4.2),
+        trunk_m: (0.12, 0.24),
+        clear_stem: 0.20,
+        density: 0.58,
+        leaf_scale: 0.24,
+        evergreen: false,
+        street_tolerant: true,
+    },
+    Species {
+        key: "cheng-liu",
+        name_zh: "柽柳",
+        name_en: "Tamarisk",
+        canopy: Canopy::Vase,
+        leaf: LeafForm::Lanceolate,
+        bark: bark([0.140, 0.100, 0.082], 0.50, 1.0),
+        // Blue-grey feathery foliage on slender, drooping shoots.
+        foliage: [0.078, 0.128, 0.122],
+        autumn: Some([0.200, 0.150, 0.075]),
+        bloom: Bloom::NONE,
+        height_m: (4.0, 6.5),
+        crown_m: (2.4, 3.6),
+        trunk_m: (0.08, 0.16),
+        clear_stem: 0.14,
+        density: 0.55,
+        leaf_scale: 0.26,
+        evergreen: false,
+        street_tolerant: true,
+    },
 ];
 
 /// Look a species up by its stable key.
@@ -762,8 +889,8 @@ mod tests {
         // The reference sheet is sixteen trees; the palette adds three to them.
         assert_eq!(
             SPECIES.len(),
-            19,
-            "the palette is the sixteen reference species and the three added after them"
+            25,
+            "the palette is the sixteen reference species, the three added after them and the six the climate zones add"
         );
     }
 

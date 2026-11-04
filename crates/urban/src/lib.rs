@@ -5,14 +5,15 @@ mod model;
 pub mod modern;
 
 pub use legacy::{BarcelonaGenerator, ManhattanGenerator, ParisianGenerator, UrbanGenerator};
+pub use modern::{CountryFn, CountrySample, generate_modern_chinese_city_from_streets_with_country};
 pub use model::{
     ActionCandidate, ActionKind, ApproachSpec, ArrowStyle, BuildingFacade, BuildingMass,
     CityFrameInfo, CityGraph, CityJunction, CitySpec, CityStyle, Compound, CropKind, DrivingSide,
     Field, GrowthState, HdLane, HdRoad, JunctionKind, JunctionPhase, JurisdictionId, LaneMarking,
     LaneUse, MarkingKind, ModelWeights, ModernBuilding, ModernChinaSpec, ModernCity,
     ModernRoadClass, MorphologyPrior, MorphologyStats, Movement, Parcel, ParcelUse, Point,
-    RoadConnector, RoadCrossSection, RoofStyle, SdNode, SdRoad, SignalHead, SignalStyle,
-    SplitMix64, StreetClass, StreetSegment, TrafficRules, TreeInstance, TreeSpecies, Tributary,
+    RoadConnector, RoadCrossSection, RoofStyle, SdNode, SiteClimate, SdRoad, SignalHead, SignalStyle,
+    SplitMix64, StreetClass, StreetSegment, TrafficRules, TreeInstance, TreeSpecies, Tributary, RiverSetting,
     TurnArrow, UrbanBlock, UrbanModel, cross_section, measure, ramp_cross_section, sample_action,
     synthesize_junction,
 };

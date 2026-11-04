@@ -12,6 +12,7 @@
 
 use urban::{CityFrameInfo, CityStyle, Parcel, ParcelUse, Point, TreeSpecies, modern};
 
+use super::zones::{self, Share};
 use super::{TAU, TREE_BUDGET, TUFT_BUDGET, TreePrototype, two_variant_count};
 use crate::buildings::level;
 use crate::math::{Rng, Vec2};
@@ -38,6 +39,8 @@ pub enum TreeRole {
     Island,
     /// A fruit tree in an orchard row.
     Orchard,
+    /// A tree of a shelterbelt along a field or a country road.
+    Shelterbelt,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -110,6 +113,9 @@ const WATERFRONT: &[&str] = &["liu-shu", "shui-shan", "yang-shu", "yu-shu"];
 
 /// An orchard is peach and its cousins; the grower knows more fruit than the old
 /// prototype set does, and will say so when the set is widened.
+const POPLAR: &[&str] = &["yang-shu"];
+const WILLOW: &[&str] = &["liu-shu"];
+const SPRUCE: &[&str] = &["xue-song"];
 const ORCHARD: &[&str] = &["tao-shu"];
 
 /// A farmyard: poplars and willows, the locust and the elm, a peach by the door.
@@ -227,6 +233,23 @@ impl Lists {
             _ => Lists::LEGACY,
         }
     }
+
+    /// The lists of a climate zone (`zones::ZONES`), for a ChineseModern town.
+    fn for_zone(zone: &'static zones::Zone) -> Lists {
+        let w = |share: Share| Planting::Weighted(share);
+        let p = zone.planting;
+        Lists {
+            street: w(p.street),
+            motorway: w(p.motorway),
+            median: w(p.median),
+            park: w(p.park),
+            compound: w(p.compound),
+            waterfront: w(p.waterfront),
+            orchard: w(p.orchard),
+            farm: w(p.farm),
+            island: w(p.island),
+        }
+    }
 }
 
 /// Plant every tree a city should have, from the legacy lists.
@@ -251,6 +274,7 @@ pub fn plant(
         parcels,
         buildings,
         fields,
+        &[],
         river,
         river_width,
         frame,
@@ -258,6 +282,7 @@ pub fn plant(
         builder,
         seed,
         Lists::LEGACY,
+        Env::FULL,
     )
 }
 
@@ -272,6 +297,7 @@ pub fn plant_styled(
     parcels: &[Parcel],
     buildings: &[urban::ModernBuilding],
     fields: &[urban::Field],
+    belts: &[urban::TreeInstance],
     river: Option<&[Point]>,
     river_width: f32,
     frame: CityFrameInfo,
@@ -280,18 +306,70 @@ pub fn plant_styled(
     seed: u32,
     style: CityStyle,
 ) -> TreeOutput {
-    plant_with(
+    plant_in_climate(
         network,
         parcels,
         buildings,
         fields,
+        belts,
         river,
         river_width,
         frame,
         prototypes,
         builder,
         seed,
-        Lists::for_style(style),
+        style,
+        &urban::SiteClimate::default(),
+    )
+}
+
+/// Plant every tree a city should have, from the lists of its style and the
+/// planting zone its climate puts it in (see [`zones`]).
+pub fn plant_in_climate(
+    network: &Network,
+    parcels: &[Parcel],
+    buildings: &[urban::ModernBuilding],
+    fields: &[urban::Field],
+    belts: &[urban::TreeInstance],
+    river: Option<&[Point]>,
+    river_width: f32,
+    frame: CityFrameInfo,
+    prototypes: &[TreePrototype],
+    builder: &mut MeshBuilder,
+    seed: u32,
+    style: CityStyle,
+    climate: &urban::SiteClimate,
+) -> TreeOutput {
+    // Only the ChineseModern vocabulary follows the climate zones; every other
+    // style keeps its own lists and plants at the table's size.
+    let (lists, env) = match style {
+        CityStyle::ChineseModern => {
+            let e = zones::environment_for(climate);
+            (
+                Lists::for_zone(e.zone),
+                Env {
+                    keep: e.keep,
+                    size: e.size,
+                    dry: e.dry,
+                },
+            )
+        }
+        _ => (Lists::for_style(style), Env::FULL),
+    };
+    plant_with(
+        network,
+        parcels,
+        buildings,
+        fields,
+        belts,
+        river,
+        river_width,
+        frame,
+        prototypes,
+        builder,
+        seed,
+        lists,
+        env,
     )
 }
 
@@ -319,6 +397,24 @@ fn pick(list: Planting, rng: &mut Rng) -> &'static str {
     }
 }
 
+/// How a site's climate scales the planting: the share of planted trees that
+/// survive and their height relative to the species table.
+#[derive(Clone, Copy)]
+struct Env {
+    keep: f32,
+    size: f32,
+    /// 0 watered .. 1 arid: tint and thinning of the ground cover.
+    dry: f32,
+}
+
+impl Env {
+    const FULL: Env = Env {
+        keep: 1.0,
+        size: 1.0,
+        dry: 0.0,
+    };
+}
+
 fn role_name(role: TreeRole) -> String {
     format!("{role:?}").to_lowercase()
 }
@@ -328,6 +424,7 @@ fn plant_with(
     parcels: &[Parcel],
     buildings: &[urban::ModernBuilding],
     fields: &[urban::Field],
+    belts: &[urban::TreeInstance],
     river: Option<&[Point]>,
     river_width: f32,
     frame: CityFrameInfo,
@@ -335,6 +432,7 @@ fn plant_with(
     builder: &mut MeshBuilder,
     seed: u32,
     lists: Lists,
+    env: Env,
 ) -> TreeOutput {
     super::declare(builder);
     let planted_from = builder.mark();
@@ -353,8 +451,19 @@ fn plant_with(
         builder: &mut MeshBuilder,
         output: &mut TreeOutput,
         counts: &mut Vec<(TreeRole, &'static str, usize)>,
+        env: Env,
     ) {
         if output.instances >= TREE_BUDGET {
+            return;
+        }
+        // A dry or cold site waters and keeps only part of what was planned.
+        // Road verges and parks are watered first, so they thin least.
+        let keep = match role {
+            TreeRole::Street | TreeRole::Median | TreeRole::Island => env.keep.sqrt(),
+            TreeRole::Waterfront => (env.keep + 1.0) * 0.5,
+            _ => env.keep,
+        };
+        if keep < 1.0 && rng.unit() > keep {
             return;
         }
         let key = pick(list, rng);
@@ -370,14 +479,24 @@ fn plant_with(
             })
             .unwrap_or(0);
         let prototype = &prototypes[index];
-        let jitter = 0.90 + rng.unit() * 0.22;
+        // A kerb row is one planting year and one nursery lot, so its trees are
+        // alike; a park, garden or field edge has every age in it. Age is size.
+        let (low, high) = match role {
+            TreeRole::Street | TreeRole::Median | TreeRole::Island => (0.90, 1.10),
+            _ => (0.66, 1.26),
+        };
+        let jitter = (low + rng.unit() * (high - low)) * env.size;
         // Per-tree variation, and only downwards: an instance tint above 1.0
         // clips in the payload's `u8` tint and the tree is brighter than the
-        // species, which is the one direction that has to be impossible.
+        // species, which is the one direction that has to be impossible. Value
+        // spans a fifth of the range; hue slides each tree between a yellow-green
+        // and a blue-green cast, so no two neighbours are the same green.
+        let value = 0.76 + rng.unit() * 0.24;
+        let hue = rng.unit() * 2.0 - 1.0;
         let tint = [
-            0.84 + rng.unit() * 0.16,
-            0.86 + rng.unit() * 0.14,
-            0.82 + rng.unit() * 0.18,
+            (value * (1.0 + 0.09 * hue)).min(1.0),
+            value,
+            (value * (1.0 - 0.14 * hue)).min(1.0),
         ];
         builder.add_instance(
             &prototype.key,
@@ -402,6 +521,30 @@ fn plant_with(
             Some(entry) => entry.2 += 1,
             None => counts.push((role, species.key, 1)),
         }
+    }
+
+    // --- shelterbelts: rows of poplar along fields and country roads, by the
+    // water willows, in the cold spruce; where they stand is the planner's call
+    // (fertile, watered, flat ground) ----------------------------------------
+    // A share of the budget is kept for them, or the town's own streets would use it all.
+    for tree in belts.iter().take(TREE_BUDGET / 5) {
+        let [x, z] = frame.to_local(tree.point);
+        let list = match tree.species {
+            urban::TreeSpecies::Willow => WILLOW,
+            urban::TreeSpecies::Cedar => SPRUCE,
+            _ => POPLAR,
+        };
+        place(
+            TreeRole::Shelterbelt,
+            Vec2::new(x, z),
+            Planting::Ordered(list),
+            prototypes,
+            &mut rng,
+            builder,
+            &mut output,
+            &mut counts,
+            env,
+        );
     }
 
     // --- kerbside avenues and planted medians -------------------------------
@@ -460,6 +603,7 @@ fn plant_with(
                     builder,
                     &mut output,
                     &mut counts,
+                    env,
                 );
                 if output.instances > before {
                     tree_pit(builder, at, path.tangent_at(station), pit, style);
@@ -486,6 +630,7 @@ fn plant_with(
                     builder,
                     &mut output,
                     &mut counts,
+                    env,
                 );
                 at += 24.0;
             }
@@ -566,6 +711,7 @@ fn plant_with(
                         builder,
                         &mut output,
                         &mut counts,
+                        env,
                     );
                     break;
                 }
@@ -615,6 +761,7 @@ fn plant_with(
                         builder,
                         &mut output,
                         &mut counts,
+                        env,
                     );
                     planted += 1;
                 }
@@ -653,6 +800,7 @@ fn plant_with(
                     builder,
                     &mut output,
                     &mut counts,
+                    env,
                 );
             }
             station += 30.0;
@@ -677,6 +825,7 @@ fn plant_with(
                 builder,
                 &mut output,
                 &mut counts,
+                env,
             );
         }
     }
@@ -699,7 +848,46 @@ fn plant_with(
             continue;
         }
         let bounds = bounds_of(&ring);
-        for _ in 0..40 {
+        // Understory: loose clumps of shrub, three to six to a park, each of a
+        // few irregular bushes of different sizes. They stand in groups with
+        // lawn between, as planted beds do, not on a grid.
+        let clusters = ((3.0 + (parcel.id % 4) as f32) * (1.0 - env.dry * 0.7)) as usize;
+        for _ in 0..clusters {
+            let centre = Vec2::new(
+                bounds.0 + rng.unit() * (bounds.2 - bounds.0),
+                bounds.1 + rng.unit() * (bounds.3 - bounds.1),
+            );
+            if !crate::math::point_in_ring(centre, &ring) {
+                continue;
+            }
+            for _ in 0..(3 + rng.int(3)) {
+                let at = centre + Vec2::new(rng.unit() - 0.5, rng.unit() - 0.5) * 4.5;
+                if !crate::math::point_in_ring(at, &ring) {
+                    continue;
+                }
+                // Hue slides yellow-green to blue-green, value falls with age;
+                // only downwards, like every instance tint.
+                let value = 0.70 + rng.unit() * 0.28;
+                let hue = rng.unit() * 2.0 - 1.0;
+                builder.add_instance(
+                    "hedge",
+                    Instance {
+                        x: at.x,
+                        y: level::GROUND - 0.02,
+                        z: at.y,
+                        rotation_y: rng.unit() * TAU,
+                        scale_x: 0.8 + rng.unit() * 1.1,
+                        scale_y: 0.7 + rng.unit() * 0.9,
+                        scale_z: 0.8 + rng.unit() * 1.1,
+                        tint_r: (value * (1.0 + 0.10 * hue + 0.18 * env.dry)).min(1.0),
+                        tint_g: value * (1.0 - 0.05 * env.dry),
+                        tint_b: (value * (1.0 - 0.16 * hue - 0.25 * env.dry)).min(1.0),
+                    },
+                );
+            }
+        }
+        let tuft_attempts = (40.0 * (1.0 - env.dry * 0.75)) as usize;
+        for _ in 0..tuft_attempts {
             if tufts >= TUFT_BUDGET {
                 break 'tufts;
             }
@@ -724,9 +912,10 @@ fn plant_with(
                     scale_x: 0.55 + rng.unit() * 0.5,
                     scale_y: 0.55 + rng.unit() * 0.5,
                     scale_z: 0.55 + rng.unit() * 0.5,
-                    tint_r: green * 0.96,
-                    tint_g: green,
-                    tint_b: green * 0.90,
+                    // Dry sites: the blades are straw, not green.
+                    tint_r: (green * (0.96 + 0.30 * env.dry)).min(1.0),
+                    tint_g: green * (1.0 - 0.10 * env.dry),
+                    tint_b: green * (0.90 - 0.30 * env.dry),
                 },
             );
             tufts += 1;
@@ -776,6 +965,7 @@ fn plant_with(
                             builder,
                             &mut output,
                             &mut counts,
+                            env,
                         );
                     }
                 }

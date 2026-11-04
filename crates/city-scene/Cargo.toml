@@ -15,3 +15,7 @@ i_overlay = "9.1"
 urban = { path = "../urban" }
 procedural = { path = "../procedural" }
 
+
+[dev-dependencies]
+infrastructure = { path = "../infrastructure" }
+terrain-core = { path = "../terrain-core" }

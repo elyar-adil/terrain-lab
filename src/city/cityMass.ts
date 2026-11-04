@@ -401,13 +401,40 @@ const WATER_PROFILE: Array<{ at: number; colour: number }> = [
   { at: 1, colour: 0x4d5a3e },
 ];
 
+/** The river's colours from the terrain simulation: sediment and climate set turbidity and bank material. */
+function waterProfileFor(setting: ModernCityPayload["riverSetting"]): Array<{ at: number; colour: number }> {
+  if (!setting) return WATER_PROFILE;
+  const moisture = Math.min(1, Math.max(0, setting.moisture));
+  const turb = Math.min(1, Math.max(0, 0.3 + 1.2 * setting.sediment + 0.25 * (1 - moisture)));
+  const lerp = (a: number, b: number, t: number) => new THREE.Color(a).lerp(new THREE.Color(b), t).getHex();
+  const channel = lerp(0x2c4a52, 0x4a4a30, turb);
+  const mid = lerp(0x37585c, 0x5a553a, turb);
+  const shallow = lerp(0x4f6860, 0x7a7048, turb);
+  // Dry climates leave pale gravel and sand at the edge, wet ones dark silt and reeds.
+  const edge = lerp(0x4d5a3e, 0x9a9078, Math.min(1, (1 - moisture) * 1.4));
+  const edgeIn = lerp(0x6f7b5f, 0xb0a384, Math.min(1, (1 - moisture) * 1.4));
+  return [
+    { at: -1, colour: edge },
+    { at: -0.9, colour: edgeIn },
+    { at: -0.62, colour: shallow },
+    { at: -0.25, colour: mid },
+    { at: 0, colour: channel },
+    { at: 0.25, colour: mid },
+    { at: 0.62, colour: shallow },
+    { at: 0.9, colour: edgeIn },
+    { at: 1, colour: edge },
+  ];
+}
+
 function waterReach(
   builder: MassBuilder,
   line: Array<{ x_km: number; y_km: number }>,
   widthMetres: number,
   frame: CityMassFrame,
   select: (p: { x_km: number; y_km: number }) => void,
+  setting?: ModernCityPayload["riverSetting"],
 ): void {
+  const WATER_PROFILE = waterProfileFor(setting);
   const m = frame.metresToScene;
   let pts = line.map((p) => frame.toScene(p.x_km, p.y_km));
   if (pts.length < 2) return;
@@ -640,10 +667,10 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     waterBuilder.select(c, r);
   };
   if (city.river && city.river.length >= 2) {
-    waterReach(waterBuilder, city.river, city.riverWidthMetres ?? 60, frame, selectWater);
+    waterReach(waterBuilder, city.river, city.riverWidthMetres ?? 60, frame, selectWater, city.riverSetting);
   }
   for (const tributary of city.tributaries ?? []) {
-    if (tributary.line.length >= 2) waterReach(waterBuilder, tributary.line, tributary.widthMetres, frame, selectWater);
+    if (tributary.line.length >= 2) waterReach(waterBuilder, tributary.line, tributary.widthMetres, frame, selectWater, city.riverSetting);
   }
   let water: THREE.Mesh | null = null;
   let waterMaterial: THREE.MeshStandardMaterial | null = null;
@@ -673,9 +700,19 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
             float facing = clamp(abs(dot(normalize(vViewPosition), normal)), 0.0, 1.0);
             float fresnel = pow(1.0 - facing, 3.0);
             vec3 sky = vec3(0.30, 0.44, 0.60);
-            // A broad, slow ripple moves the reflection about, so the river is not a flat sheet.
-            float ripple = 0.5 + 0.5 * sin(dot(vWaterWorld.xz, vec2(0.7, 0.4)) / 0.0006 + sin(dot(vWaterWorld.xz, vec2(-0.3, 0.9)) / 0.0011) * 2.0);
-            totalEmissiveRadiance += sky * (0.02 + 0.55 * fresnel) * (0.75 + 0.5 * ripple);
+            // A broad, slow, non-repeating swell moves the reflection about; it is
+            // value noise on world position, averaged out once a pixel spans it, so
+            // from the air the river is a smooth sky reflection.
+            vec2 wp = vWaterWorld.xz / 0.0016;
+            vec2 wi = floor(wp); vec2 wf = fract(wp); wf = wf * wf * (3.0 - 2.0 * wf);
+            float h00 = fract(sin(dot(wi, vec2(127.1, 311.7))) * 43758.5453);
+            float h10 = fract(sin(dot(wi + vec2(1.0, 0.0), vec2(127.1, 311.7))) * 43758.5453);
+            float h01 = fract(sin(dot(wi + vec2(0.0, 1.0), vec2(127.1, 311.7))) * 43758.5453);
+            float h11 = fract(sin(dot(wi + vec2(1.0, 1.0), vec2(127.1, 311.7))) * 43758.5453);
+            float swell = mix(mix(h00, h10, wf.x), mix(h01, h11, wf.x), wf.y);
+            float pix = max(length(dFdx(wp)), length(dFdy(wp)));
+            float ripple = mix(swell, 0.5, smoothstep(0.35, 1.2, pix));
+            totalEmissiveRadiance += sky * (0.02 + 0.55 * fresnel) * (0.88 + 0.24 * ripple);
           }`,
         );
     };

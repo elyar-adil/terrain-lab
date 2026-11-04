@@ -340,6 +340,9 @@ pub struct MeshBuilder {
     /// facade group (`cnfacade`): the row of the elevation table the wall is
     /// drawn from.  Other groups keep an opaque alpha.
     pub facade_row: Option<u8>,
+    /// Height of the river's water surface in this scene, when it has one:
+    /// structures standing in the channel (bridge piers) are built to it.
+    pub water_y: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]

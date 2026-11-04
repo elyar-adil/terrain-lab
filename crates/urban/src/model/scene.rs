@@ -37,6 +37,42 @@ impl CityFrameInfo {
 }
 
 /// Rich output used by the Rust renderer.  `sd` is the city-scale graph,
+/// What the terrain simulation says about the river where it crosses the town.
+/// Everything the water and its banks look like follows from these: the
+/// valley's depth and slopes, bed material, bank vegetation, water colour.
+/// The default is a temperate lowland river, for plans made without terrain.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RiverSetting {
+    /// Climate wetness 0 (arid) to 1 (humid), from the terrain moisture field.
+    pub moisture: f32,
+    /// Mean annual temperature, degrees Celsius.
+    pub temperature_c: f32,
+    /// Discharge relative to the largest river of the world, 0 to 1
+    /// (log scale of the flow accumulation).
+    pub discharge: f32,
+    /// Channel slope along the river, metres of fall per metre.
+    pub slope: f32,
+    /// Relief of the surrounding ground, metres: how deep a valley the river
+    /// has had to cut.
+    pub relief_m: f32,
+    /// Sediment load on the river's cells, 0 to 1: sets turbidity and bars.
+    pub sediment: f32,
+}
+
+impl Default for RiverSetting {
+    fn default() -> Self {
+        Self {
+            moisture: 0.6,
+            temperature_c: 16.0,
+            discharge: 0.5,
+            slope: 0.0006,
+            relief_m: 25.0,
+            sediment: 0.3,
+        }
+    }
+}
+
 /// A waterway besides the main river.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,8 +103,14 @@ pub struct ModernCity {
     /// Farmland around the town.
     #[serde(default)]
     pub fields: Vec<super::buildings::Field>,
+    /// Rows of trees along fields and country roads that the terrain favours.
+    #[serde(default)]
+    pub shelterbelts: Vec<super::buildings::TreeInstance>,
     pub river: Option<Vec<Point>>,
     pub river_width_metres: f32,
+    /// The terrain's account of the river here (valley, climate, flow).
+    #[serde(default)]
+    pub river_setting: RiverSetting,
     /// Other waterways through the town, each with its own width: a plan made on a
     /// real landscape has more than one.
     #[serde(default)]
@@ -77,6 +119,9 @@ pub struct ModernCity {
     /// prior (`MorphologyPrior::default`).  Exposed so callers and tests can
     /// assert a generated plan actually reads like a Chinese street network.
     pub morphology_score: f64,
+    /// Climate and landform at the town centre, from the terrain simulation.
+    #[serde(default)]
+    pub climate: super::SiteClimate,
 }
 
 /// The mean of a ring's corners: where a block, parcel or field is for clipping.
@@ -117,6 +162,7 @@ impl ModernCity {
         out.buildings.retain(|b| parcels.contains(&b.parcel_id));
         out.compounds.retain(|c| parcels.contains(&c.parcel_id));
         out.trees.retain(|t| near(&t.point, 0.0));
+        out.shelterbelts.retain(|t| near(&t.point, 0.0));
         out.fields
             .retain(|f| middle(&f.ring).is_some_and(|c| near(&c, 0.0)));
         // Waterways are cut to the neighbourhood too, or the water alone would be the
@@ -165,6 +211,7 @@ impl ModernCity {
         out.buildings.retain(|b| parcels.contains(&b.parcel_id));
         out.compounds.retain(|c| parcels.contains(&c.parcel_id));
         out.trees.retain(|t| inside(&t.point));
+        out.shelterbelts.retain(|t| inside(&t.point));
         out.fields
             .retain(|f| ring_centre(&f.ring).is_some_and(|c| inside(&c)));
         let cut =

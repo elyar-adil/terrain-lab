@@ -326,6 +326,15 @@ export interface ModernCityPayload {  style: "chineseModern";
   }>;
   river: UrbanPoint[] | null;
   riverWidthMetres?: number;
+  /** The terrain simulation's account of the river here: climate, flow, slope, relief, sediment. */
+  riverSetting?: {
+    moisture: number;
+    temperatureC: number;
+    discharge: number;
+    slope: number;
+    reliefM: number;
+    sediment: number;
+  };
   tributaries?: Array<{ line: UrbanPoint[]; widthMetres: number }>;
   compounds?: UrbanCompound[];
   trees?: UrbanTree[];
