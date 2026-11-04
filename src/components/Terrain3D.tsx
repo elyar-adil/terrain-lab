@@ -1847,6 +1847,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
         }
         cityLayer = warm.layer;
         cityWarm = null;
+        console.info("[city] whole-city layer mounted");
         perfTiming("cityMountedAtS", performance.now() / 1000);
         renderer.shadowMap.needsUpdate = true;
       }
