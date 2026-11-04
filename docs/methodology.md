@@ -54,6 +54,12 @@ break in the model, down to:
    (`scripts/sanity-audit`, described in `docs/sanity-audit.md`) and a failure counts as a
    defect in the generator.
 
+8. **The real application is the only acceptance interface.** What `cargo run`
+   (the desktop app in `src-tauri`) shows is the product. Harness pages, the
+   single-file web build and `dump_scene` renders are development aids; a
+   feature counts as done only when it has been seen in the real app. Reports
+   must say which interface a check was made in.
+
 ## Scale ladder and what each rung needs
 
 | Scale | Must be true | State |

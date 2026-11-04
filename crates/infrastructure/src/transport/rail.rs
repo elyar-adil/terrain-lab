@@ -700,7 +700,7 @@ fn branch(
     let (_, ji) = best?;
     let jp = rw.point_xy_m(ji);
     // The merge runs 2.4 km along the parent line, on the child's side of it.
-    let step = (2400.0 / STEP_M) as usize;
+    let step = (3000.0 / STEP_M) as usize;
     // Merge on whichever side of the junction the child lies ahead of.
     let pick = |sign: isize| -> usize {
         (ji as isize + sign * step as isize).clamp(0, rw.points.len() as isize - 1) as usize
@@ -728,7 +728,7 @@ fn branch(
     let b = g::add_scaled(site.s, site.dir, TERMINAL_OVERRUN_M);
     let path = router.route(kp, a, Some(along), Some(site.dir))?;
     let mut verts: Vec<(P, Pin)> = vec![(jp, Pin::Fixed), (kp, Pin::Fixed)];
-    let mut straight = vec![true, false];
+    let mut straight = vec![false, false];
     push_interior(router, &mut verts, &mut straight, kp, a, &path);
     verts.push((a, Pin::Fixed));
     straight.push(true);
