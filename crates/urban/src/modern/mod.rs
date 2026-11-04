@@ -361,6 +361,7 @@ pub fn generate_modern_chinese_city_with_options(
         morphology_score,
         climate: Default::default(),
         street_mix: Vec::new(),
+        rail: Vec::new(),
     }
 }
 
@@ -585,5 +586,6 @@ pub fn generate_modern_chinese_city_from_streets_with_country(
         morphology_score,
         climate: Default::default(),
         street_mix: Vec::new(),
+        rail: Vec::new(),
     }
 }

@@ -125,6 +125,11 @@ pub struct ModernCity {
     /// so the far form's crowns can be the same species as the detail's.
     #[serde(default)]
     pub street_mix: Vec<(String, u32)>,
+    /// Railway lines through the plan's window (world planner output). The plan
+    /// has cleared their protection zone; the scene builds track, structures,
+    /// stations and crossings from them.
+    #[serde(default)]
+    pub rail: Vec<super::transport::RailCorridor>,
 }
 
 /// The mean of a ring's corners: where a block, parcel or field is for clipping.
