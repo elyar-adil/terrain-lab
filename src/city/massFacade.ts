@@ -304,7 +304,7 @@ if (vBld > -0.5 && wallness > 0.01) {
   colour *= 1.0 - vec3(0.85, 0.92, 1.0) * (0.10 + 0.20 * weather) * streak * (1.0 - glassCov);
   // A foot that is darker where the street's dirt and the neighbour's shade meet it.
   float foot = 1.0 - smoothstep(0.0, 6.0, hM);
-  colour *= 1.0 - 0.22 * foot * (1.0 - glassCov * 0.5);
+  if (lookKind != 4) colour *= 1.0 - 0.22 * foot * (1.0 - glassCov * 0.5);
 
   diffuseColor.rgb = mix(diffuseColor.rgb, colour, wallness);
   massRough = mix(0.92, rough, wallness);

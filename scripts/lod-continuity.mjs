@@ -15,6 +15,8 @@
 //              floors, bays and windows do not. A mip that averages the windows
 //              away shows as this falling off a cliff while the building still
 //              has pixels to show floors in.
+//   roof dark  share of pixels under 0.05 linear luminance seen from straight above (limit 0.10), and mean
+//              roof luminance (at least 0.12): the check that no roof is a black slab.
 //   lc@N       the local contrast where the building is N pixels tall: how much
 //              of the facade structure is still on the picture.
 //
@@ -105,13 +107,15 @@ for (const row of stats.rows) {
   const at = (px) => steps.reduce((best, s) => (Math.abs(s.heightPx - px) < Math.abs(best.heightPx - px) ? s : best), steps[0]);
   const near = steps[0], far = steps[steps.length - 1];
   const drift = near && far ? worst(near.mean.map((v, c) => Math.abs(far.mean[c] - v) / Math.max(v, 1e-3))) : 0;
-  const pass = pop <= maxPop && collapse >= minCollapse;
+  // A roof seen from straight above must read as a roof: not mostly black.
+  const roofOk = row.roof.darkShare <= 0.10 && row.roof.mean >= 0.12;
+  const pass = pop <= maxPop && collapse >= minCollapse && roofOk;
   if (!pass) failed = true;
   rows.push({
     building: `${row.label} #${row.id} (${row.floors} fl, ${row.heightM.toFixed(0)} m${row.farLook ? "" : ", plan look"})`,
     pop: pop.toFixed(3), popAt, collapse: collapse.toFixed(2), collapseAt,
     "lc@200px": at(200).lc.toFixed(3), "lc@100px": at(100).lc.toFixed(3), "lc@50px": at(50).lc.toFixed(3), "lc@25px": at(25).lc.toFixed(3),
-    drift: drift.toFixed(3), pass: pass ? "ok" : "FAIL",
+    drift: drift.toFixed(3), "roof dark": row.roof.darkShare.toFixed(3), "roof mean": row.roof.mean.toFixed(3), pass: pass ? "ok" : "FAIL",
   });
 }
 console.table(rows);

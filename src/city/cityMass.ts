@@ -70,9 +70,12 @@ const VILLAGE_WALLS = [
   0xceb5a2, 0xceb5a2, 0xceb5a2, 0xceb5a2, 0xceb5a2, 0xc09e8e, 0xc09e8e, 0xc09e8e, 0xc09e8e, 0xac8e84, 0xac8e84, 0xac8e84, 0xac8e84, 0xd7c5b5, 0xd7c5b5, 0xd7c5b5, 0xd7c5b5, 0xa27973, 0xa27973, 0xa27973, 0xddd6cb, 0xddd6cb, 0xddd6cb, 0xc4c0bc, 0xc4c0bc, 0xc4c0bc, 0xc4c0bc, 0xa29e99, 0xa29e99, 0xa29e99, 0xe1dfdb, 0xe1dfdb, 0x8e6961, 0x8e6961, 0xc08976, 0xc08976, 0x6c8995, 0xacbcc4, 0xaac4b3,
 ];
 const STEEL_BLUE = 0x5f7f9f;
-const SOLAR = 0x3a4048;
+// A row of solar water heaters seen from the air: white tanks and dark tube racks
+// with gaps, so about 0.15 linear on average, not the racks' own near-black.
+const SOLAR = 0x6e757c;
 const TANK = 0xd8d8d0;
-const PLANT = 0x5e5c58;
+// Louvre screen of a plant enclosure: pale blades with dark gaps, mean about 0.3.
+const PLANT = 0x949494;
 const TERRACOTTA = 0x8a5a45;
 // Aged asphalt, as the detail bakes it (about 13 %, neutral grey).
 const ASPHALT = 0x64625e;
@@ -148,9 +151,10 @@ function dressRoof(
   }
   if (b.heightMetres < 9) return;
   if (b.useType === "commercial") {
-    // A plant screen over a share of the roof, and a cooling tower or two.
-    const [x, z] = along((a0 + a1) * 0.5 + length * 0.1 * (h(74) - 0.5), (w0 + w1) * 0.5);
-    builder.orientedBox(x, z, ux, uz, length * (0.18 + 0.12 * h(75)), width * (0.2 + 0.1 * h(76)), roofTop, roofTop + 3.2 * m, PLANT);
+    // The detail's plant screen: a ring of louvres 3.2 m high, 3.5 m in from the
+    // parapet, open to the roof inside. Not a solid lid, which read as a black slab.
+    const screen = insetRing(ring, 3.5 * m);
+    if (screen && ringArea(screen) > 60 * m * m) builder.parapet(screen, roofTop, 3.2 * m, PLANT);
     const towers = 1 + Math.floor(h(77) * 2);
     for (let k = 0; k < towers; k += 1) {
       const [tx, tz] = along(a0 + length * (0.15 + 0.2 * k), w1 - width * 0.22);
@@ -615,6 +619,16 @@ function hexLinear(hex: number): [number, number, number] {
  * podium tower. Null where the result collapses, flips, or is under a third of
  * the plan.
  */
+function ringArea(ring: Ring): number {
+  let a = 0;
+  for (let i = 0; i < ring.length; i += 1) {
+    const [ax, az] = ring[i];
+    const [bx, bz] = ring[(i + 1) % ring.length];
+    a += ax * bz - bx * az;
+  }
+  return Math.abs(a) * 0.5;
+}
+
 function insetRing(ring: Ring, d: number): Ring | null {
   const n = ring.length;
   if (n < 3 || d <= 0) return null;

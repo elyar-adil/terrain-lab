@@ -167,7 +167,25 @@ async function main() {
       const col = sheetSteps.indexOf(i);
       if (col >= 0) sctx.drawImage(renderer.domElement, 0, 0, SIZE, SIZE, col * tile, rowIndex * tile, tile, tile);
     }
-    rows.push({ label, id: building.id, floors: building.floors, heightM: height, useType: building.useType, farLook: !!building.farLook, steps });
+    // Straight down from above: what the roof is. Real roofs are screed, membrane,
+    // tile or blue steel, grey to light; a black slab here is a defect.
+    camera.position.set(0, height + 120, 0.001);
+    camera.up.set(0, 0, -1);
+    camera.lookAt(0, height, 0);
+    camera.updateProjectionMatrix();
+    renderer.render(scene, camera);
+    pctx.drawImage(renderer.domElement, 0, 0);
+    const top = pctx.getImageData(0, 0, SIZE, SIZE).data;
+    let tn = 0, tdark = 0, tsum = 0;
+    for (let o = 0; o < top.length; o += 4) {
+      if (top[o] > 250 && top[o + 1] < 5 && top[o + 2] > 250) continue;
+      const lum = 0.2126 * linear(top[o]) + 0.7152 * linear(top[o + 1]) + 0.0722 * linear(top[o + 2]);
+      tn += 1; tsum += lum;
+      if (lum < 0.05) tdark += 1;
+    }
+    camera.up.set(0, 1, 0);
+    const roof = { px: tn, darkShare: tn ? tdark / tn : 0, mean: tn ? tsum / tn : 0 };
+    rows.push({ label, id: building.id, roof, floors: building.floors, heightM: height, useType: building.useType, farLook: !!building.farLook, steps });
     mass.dispose();
   }
   window.__LOD_STATS__ = { ladder: ladder.map(Math.round), sheetAt: SHEET_AT, rows };
