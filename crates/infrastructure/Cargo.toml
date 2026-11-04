@@ -30,3 +30,7 @@ city-scene = { path = "../city-scene" }
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
 serde_json = "1"
+
+[[example]]
+name = "transport_report"
+path = "examples/transport_report.rs"

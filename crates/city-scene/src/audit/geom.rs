@@ -140,7 +140,6 @@ pub struct OnRoad {
     pub lateral: f32,
     /// Deck height at the nearest point.
     pub y: f32,
-    pub station: f32,
 }
 
 /// Every road's carriageway segments in a grid.
@@ -201,13 +200,11 @@ impl<'a> RoadIndex<'a> {
                 continue;
             }
             let side = if ab.cross(point - a) >= 0.0 { 1.0 } else { -1.0 };
-            let seg_len = len2.sqrt();
             let entry = OnRoad {
                 road: ri as usize,
                 distance,
                 lateral: side * distance,
                 y: p.y + (q.y - p.y) * t,
-                station: road.carriageway.stations()[si as usize] + seg_len * t,
             };
             match best.get(&ri) {
                 Some(old) if old.distance <= distance => {}

@@ -6,6 +6,7 @@
 //! agents — so the browser side never re-derives geometry and cannot disagree
 //! with the simulation about where anything is.
 
+pub mod audit;
 pub mod bake;
 pub mod buildings;
 pub mod corner;

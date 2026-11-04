@@ -16,6 +16,7 @@ use worldgen_core::{clamp01, smoothstep};
 mod climate;
 pub mod fabric;
 pub mod rivers;
+pub mod transport;
 
 #[derive(Debug, Error)]
 pub enum InfrastructureError {
@@ -132,6 +133,12 @@ pub struct InfrastructureData {
     pub settlements: Vec<SettlementSite>,
     pub roads: Vec<Road>,
     pub crossings: Vec<CrossingCandidate>,
+    /// Railway lines: alignment, design profile, structures, stations.
+    #[serde(default)]
+    pub railways: Vec<transport::rail::Railway>,
+    /// The regional airport, when the terrain has a site for one.
+    #[serde(default)]
+    pub airport: Option<transport::airport::Airport>,
     /// Rich modern Chinese city payload.  `cities` below remains as a
     /// compatibility projection for the existing renderer, while this field
     /// preserves SD/HD roads, parcels, stable building ids and river geometry.
@@ -271,6 +278,7 @@ pub fn generate_infrastructure_with(
     let cultivated_land =
         realize_cultivated_land(grid, &agricultural_suitability, &urban_land, &settlements);
     let crossings = find_crossings(terrain, grid, &roads);
+    let (railways, airport) = plan_transport(terrain, config, grid, &settlements, &roads, &urban_land);
     let legacy_city = |settlement: &SettlementSite| {
         let radius_km = settlement_radius_km(settlement.class);
         let centre = settlement_centre_km(grid, settlement);
@@ -341,6 +349,14 @@ pub fn generate_infrastructure_with(
     };
     let modern_cities: Vec<ModernCity> = modern_cities
         .into_iter()
+        .zip(&settlements)
+        .map(|(mut city, settlement)| {
+            apply_transport(terrain, grid, &mut city, settlement, &railways, airport.as_ref());
+            city
+        })
+        .collect();
+    let modern_cities: Vec<ModernCity> = modern_cities
+        .into_iter()
         .map(|mut city| {
             city.river_setting = river_setting(terrain, grid, &city);
             city.climate = climate::site_climate(terrain, grid, &city);
@@ -363,9 +379,73 @@ pub fn generate_infrastructure_with(
         settlements,
         roads,
         crossings,
+        railways,
+        airport,
         modern_cities,
         cities,
     })
+}
+
+/// Railways and the airport, from the same terrain, settlements and roads.
+fn plan_transport(
+    terrain: &TerrainData,
+    config: &SimulationConfig,
+    grid: WorldGrid,
+    settlements: &[SettlementSite],
+    roads: &[Road],
+    urban_land: &[f32],
+) -> (Vec<transport::rail::Railway>, Option<transport::airport::Airport>) {
+    let world = transport::World::new(terrain, config.world_size_km);
+    let lines: Vec<transport::rail::RoadLine> = roads
+        .iter()
+        .map(|road| transport::rail::RoadLine {
+            id: road.id,
+            class: road.class,
+            line_m: road_centreline_km(road, grid)
+                .iter()
+                .map(|p| [p[0] * 1000.0, p[1] * 1000.0])
+                .collect(),
+        })
+        .collect();
+    let railways = transport::rail::plan_railways(&world, grid, settlements, &lines, urban_land);
+    let rose = transport::wind::WindRose::from_config(config.wind_direction, config.wind_speed);
+    let airport = transport::airport::plan_airport(
+        &world,
+        grid,
+        settlements,
+        urban_land,
+        rose,
+        config.seed ^ 0xa17_0001,
+    );
+    (railways, airport)
+}
+
+/// A town accepts the lines through it and the height limits of a nearby airfield.
+fn apply_transport(
+    terrain: &TerrainData,
+    grid: WorldGrid,
+    city: &mut ModernCity,
+    settlement: &SettlementSite,
+    railways: &[transport::rail::Railway],
+    airport: Option<&transport::airport::Airport>,
+) {
+    let centre = settlement_centre_km(grid, settlement);
+    let reach = settlement_radius_km(settlement.class) * 1.35 + WINDOW_TAIL_KM;
+    let corridors: Vec<urban::RailCorridor> = railways
+        .iter()
+        .flat_map(|r| r.corridors_near([centre.x_km, centre.y_km], reach))
+        .collect();
+    if !corridors.is_empty() {
+        city.set_rail(corridors);
+    }
+    if let Some(airport) = airport {
+        let size_m = grid.world_size_km * 1000.0;
+        let world = transport::World::new(terrain, grid.world_size_km);
+        city.cap_heights_for_airfield(&airport.plan, |p| {
+            world.height(p.x_km * 1000.0, p.y_km * 1000.0)
+        });
+        let _ = size_m;
+    }
 }
 
 /// A sampler of the terrain for the planner's countryside: slope and fall line

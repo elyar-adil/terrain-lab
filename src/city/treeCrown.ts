@@ -146,31 +146,59 @@ function unit(v: number[]): number[] {
   return [v[0] / l, v[1] / l, v[2] / l];
 }
 
-/** A noise-displaced icosahedron: a clump of foliage. */
+/** The icosahedron split once: 42 vertices, 80 faces, a rounder clump. */
+const SUB_V: number[][] = ICO_V.map((v) => v.slice());
+const SUB_F: number[][] = [];
+{
+  const mid = new Map<string, number>();
+  const half = (i: number, j: number) => {
+    const key = i < j ? `${i}_${j}` : `${j}_${i}`;
+    let at = mid.get(key);
+    if (at === undefined) {
+      SUB_V.push(unit([(SUB_V[i][0] + SUB_V[j][0]) / 2, (SUB_V[i][1] + SUB_V[j][1]) / 2, (SUB_V[i][2] + SUB_V[j][2]) / 2]));
+      at = SUB_V.length - 1;
+      mid.set(key, at);
+    }
+    return at;
+  };
+  for (const [i, j, k] of ICO_F) {
+    const a = half(i, j), b = half(j, k), c = half(k, i);
+    SUB_F.push([i, a, c], [a, j, b], [c, b, k], [a, b, c]);
+  }
+}
+
+/** A noise-displaced sphere: a clump of foliage. `fine` uses the split mesh. */
 function lump(
   out: CrownSink,
   cx: number, cy: number, cz: number,
   rx: number, ry: number, rz: number,
   seed: number, hex: number, shadeBase: number, rough: number,
+  fine = true,
 ): void {
-  const pts = ICO_V.map((u, i) => {
-    const d = 1 + rough * (hash(seed, i, 1.7) * 2 - 1);
+  const V = fine ? SUB_V : ICO_V;
+  const F = fine ? SUB_F : ICO_F;
+  const pts = V.map((u, i) => {
+    // Two scales of bump: the clump's own lobes and the leaf-cluster knobbles.
+    const lobe = hash(seed, i, 1.7) * 2 - 1;
+    const knob = hash(seed, i, 8.3) * 2 - 1;
+    const d = 1 + rough * (0.7 * lobe + (fine ? 0.35 * knob : 0));
     return [cx + u[0] * rx * d, cy + u[1] * ry * d, cz + u[2] * rz * d];
   });
-  for (let f = 0; f < ICO_F.length; f += 1) {
-    const [i, j, k] = ICO_F[f];
+  const big = Math.max(rx, ry, rz);
+  for (let f = 0; f < F.length; f += 1) {
+    const [i, j, k] = F[f];
     const centre = [
-      (ICO_V[i][0] + ICO_V[j][0] + ICO_V[k][0]) / 3,
-      (ICO_V[i][1] + ICO_V[j][1] + ICO_V[k][1]) / 3,
-      (ICO_V[i][2] + ICO_V[j][2] + ICO_V[k][2]) / 3,
+      (V[i][0] + V[j][0] + V[k][0]) / 3,
+      (V[i][1] + V[j][1] + V[k][1]) / 3,
+      (V[i][2] + V[j][2] + V[k][2]) / 3,
     ];
-    // Soft shading: the radial direction, not the facet's own, so a lump reads
-    // as a rounded clump of leaves.
-    const n = unit([centre[0] / rx * Math.max(rx, ry), centre[1] / ry * Math.max(rx, ry), centre[2] / rz * Math.max(rx, ry)]);
+    // Soft shading: the radial direction of the ellipsoid, not the facet's own,
+    // so a lump reads as a rounded clump of leaves.
+    const n = unit([centre[0] / rx * big, centre[1] / ry * big, centre[2] / rz * big]);
     // Underside darkens (the clump's own occlusion and the sky it cannot see).
-    const lit = 0.50 + 0.50 * (0.5 + 0.5 * n[1]);
-    const jitter = 0.92 + 0.16 * hash(seed, f, 3.3);
-    out.tri(pts[i], pts[j], pts[k], n, mix(hex, jitter, (hash(seed, f, 9.1) - 0.5) * 0.5), shadeBase * lit);
+    const lit = 0.46 + 0.54 * (0.5 + 0.5 * n[1]);
+    const jitter = 0.96 + 0.08 * hash(seed, f, 3.3);
+    out.tri(pts[i], pts[j], pts[k], n, mix(hex, jitter, (hash(seed, f, 9.1) - 0.5) * 0.25), shadeBase * lit);
   }
 }
 
@@ -229,18 +257,18 @@ export function drawCrown(
   const value = 0.84 + 0.30 * hash(seed, 1.3, 7.7);
   const hue = hash(seed, 2.9, 1.1) * 2 - 1;
   // A lit canopy of leaf cards reads lighter than its leaf reflectance.
-  const leaf = mix(s.leaf, 1.28 * value, hue);
+  const leaf = mix(s.leaf, 1.0 * value, hue);
   const wood = mix(s.bark, 0.9, 0);
   const sd = Math.floor(seed * 1e6);
   const clear = Math.min(0.7, Math.max(0.05, s.clear));
   const base = ground + height * clear;
   const crownH = height * (1 - clear);
-  const trunkR = Math.max(radius * 0.07, height * 0.016);
+  const trunkR = Math.max(radius * 0.09, height * 0.022);
   const bare = (top: number) => trunk(out, x, ground, z, top, trunkR, wood);
   const form = s.form;
   if (form === "Conical" || form === "Layered") {
     const tiers = form === "Layered" ? 4 : 3;
-    const narrow = form === "Layered" ? 0.95 : 0.62;
+    const narrow = form === "Layered" ? 1.2 : 0.80;
     bare(base + crownH * 0.15);
     for (let t = 0; t < tiers; t += 1) {
       const f0 = t / tiers, f1 = (t + 1.35) / tiers;
@@ -291,14 +319,14 @@ export function drawCrown(
     const tall = form === "Oval" ? 1.25 : form === "Fan" ? 1.1 : 1.0;
     const wide = form === "Banyan" ? 1.15 : 1;
     bare(base + crownH * 0.3);
-    lump(out, x, base + crownH * 0.52, z, radius * 0.92 * wide, crownH * 0.40 * tall, radius * 0.92 * wide, sd, leaf, 1, open ? 0.24 : 0.16);
+    lump(out, x, base + crownH * 0.52, z, radius * 1.05 * wide, crownH * 0.44 * tall, radius * 1.05 * wide, sd, leaf, 1, open ? 0.22 : 0.17);
     const sat = open ? 3 : 2;
     for (let k = 0; k < sat; k += 1) {
       const a = hash(sd, k, 3.9) * Math.PI * 2;
       const d = radius * (0.45 + 0.25 * hash(sd, k, 4.1));
       const h = base + crownH * (0.40 + 0.35 * hash(sd, k, 5.7));
       const r = radius * (0.48 + 0.20 * hash(sd, k, 6.3));
-      lump(out, x + Math.cos(a) * d, h, z + Math.sin(a) * d, r, crownH * 0.26, r, sd + 3 + k, mix(leaf, 0.94 + 0.12 * hash(sd, k, 2.5), 0), 1, 0.20);
+      lump(out, x + Math.cos(a) * d, h, z + Math.sin(a) * d, r, crownH * 0.26, r, sd + 3 + k, mix(leaf, 0.94 + 0.12 * hash(sd, k, 2.5), 0), 1, 0.20, false);
     }
   }
 }

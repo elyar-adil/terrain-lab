@@ -248,6 +248,31 @@ class MassBuilder {
   }
 
   /**
+   * A triangle with a normal at each corner, wound to face their mean: soft-shaded
+   * foliage clumps (tree crowns, `treeCrown.ts`) read as rounded, not faceted.
+   */
+  triSmooth(a: number[], b: number[], c: number[], na: number[], nb: number[], nc: number[], hex: number, shade = 1) {
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const mx = na[0] + nb[0] + nc[0], my = na[1] + nb[1] + nc[1], mz = na[2] + nb[2] + nc[2];
+    const flip = nx * mx + ny * my + nz * mz < 0;
+    const pts = flip ? [a, c, b] : [a, b, c];
+    const norms = flip ? [na, nc, nb] : [na, nb, nc];
+    this.colour.setHex(hex);
+    for (let i = 0; i < 3; i += 1) {
+      this.positions.push(pts[i][0], pts[i][1], pts[i][2]);
+      this.normals.push(norms[i][0], norms[i][1], norms[i][2]);
+      this.colors.push(this.colour.r * shade, this.colour.g * shade, this.colour.b * shade);
+      this.tileIds.push(this.current);
+      this.bases.push(this.base);
+      this.seeds.push(this.seed);
+      this.blds.push(this.bld);
+      this.faces.push(0, 1);
+    }
+  }
+
+  /**
    * A prism over `ring` from `bottom` to `top`, walls and flat roof. `datum` is
    * where its storeys count from (the building's ground; the top of a podium for
    * the shaft above it), `roofToo` false leaves the lid off for a tier that
