@@ -305,6 +305,77 @@ pub(crate) fn bay_of(elevation: &Elevation) -> Bay {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use urban::{BuildingFacade, ParcelUse, Point, RoofStyle};
+
+    fn building(id: u32, use_type: ParcelUse, floors: u16, side_m: f32) -> ModernBuilding {
+        let k = side_m / 1000.0;
+        ModernBuilding {
+            id,
+            parcel_id: id / 3,
+            footprint: vec![
+                Point { x_km: 0.0, y_km: 0.0 },
+                Point { x_km: k, y_km: 0.0 },
+                Point { x_km: k, y_km: k },
+                Point { x_km: 0.0, y_km: k },
+            ],
+            height_metres: floors as f32 * 3.0,
+            floors,
+            use_type,
+            roof: RoofStyle::Flat,
+            facade: BuildingFacade::PlasterResidential,
+            podium_height_metres: 0.0,
+            window_bays: 8,
+            balcony_bays: 0,
+            entrance_count: 1,
+        }
+    }
+
+    /// The far form must be the detail's own height, storey and colour, not a
+    /// second opinion: the whole reason the field exists.
+    #[test]
+    fn the_far_look_is_the_detail_design() {
+        use crate::buildings::{cn_commercial, cn_residential};
+        use crate::facades::cn_grammar::FacadeTable;
+        let mut table = FacadeTable::new();
+        for id in 0..60_u32 {
+            let residential = building(id, ParcelUse::Residential, 6 + (id % 30) as u16, 60.0);
+            let look = far_look(&residential, None).expect("residential has a look");
+            assert!((look.roof_m - cn_residential::roof_height(&residential, &mut table)).abs() < 1e-4);
+            assert!(look.storey_m >= 2.7 && look.storey_m <= 3.1, "storey {}", look.storey_m);
+            assert!(look.wall.iter().all(|c| (0.0..=1.0).contains(c)));
+            assert!(look.unit_w > 2.0 && look.window[1] <= look.unit_w + 1e-3);
+
+            let office = building(id, ParcelUse::Commercial, 4 + (id % 40) as u16, 50.0);
+            let look = far_look(&office, None).expect("commercial has a look");
+            let area = area_m2(&office.footprint);
+            assert!((look.roof_m - cn_commercial::roof_height_of_area(&office, area)).abs() < 1e-4);
+            assert!(look.storey_m >= 3.6 && look.storey_m <= 4.3);
+            assert_eq!(look.shop_m, 4.5);
+            if look.podium_floors > 0 {
+                assert!(office.floors >= 12 && area > 500.0);
+            }
+        }
+    }
+
+    #[test]
+    fn a_tower_stands_on_the_podium_that_contains_its_centre() {
+        let mut podium = building(1, ParcelUse::Commercial, 4, 80.0);
+        podium.footprint = podium
+            .footprint
+            .iter()
+            .map(|p| Point { x_km: p.x_km - 0.02, y_km: p.y_km - 0.02 })
+            .collect();
+        let tower = building(2, ParcelUse::Residential, 30, 30.0);
+        let found = podiums_of(&[podium.clone(), tower.clone()]);
+        assert!(found[0].is_none());
+        let (top, floors) = found[1].expect("the tower stands on the podium");
+        assert_eq!(floors, 4);
+        let look = far_look(&tower, found[1]).unwrap();
+        assert_eq!(look.start_m, top);
+        assert_eq!(look.shop_m, 0.0);
+        assert!(look.roof_m > top);
+    }
+
     use crate::facades::cn_grammar::{Era, OfficeSkin, office_elevation, residential_design};
 
     #[test]

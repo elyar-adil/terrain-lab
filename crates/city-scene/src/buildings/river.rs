@@ -422,9 +422,6 @@ pub fn build_water(
                 Kind::Natural
             };
             kinds[side] = kind;
-            if std::env::var("RIVER_DEBUG").is_ok() {
-                eprintln!("reach {cell} side {side} at ({:.0},{:.0}) urban {urban:.2} -> {kind:?}", pos[(i0 + i1) / 2].x, pos[(i0 + i1) / 2].y);
-            }
             let bar_noise = 0.6 + 0.8 * cell01(0xA14, cell as i32, side_id, 2);
             let bar = match kind {
                 Kind::Wall | Kind::Terrace | Kind::Paved => low_flow * 3.0 * bar_noise,

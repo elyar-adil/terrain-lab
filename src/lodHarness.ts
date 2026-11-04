@@ -114,44 +114,52 @@ async function main() {
       camera.position.set(Math.sin(azimuth) * Math.cos(elevation) * d, height * 0.5 + Math.sin(elevation) * d, Math.cos(azimuth) * Math.cos(elevation) * d);
       camera.lookAt(0, height * 0.5, 0);
       camera.updateProjectionMatrix();
-      renderer.render(scene, camera);
-      pctx.drawImage(renderer.domElement, 0, 0);
-      const data = pctx.getImageData(0, 0, SIZE, SIZE).data;
+      // Four renders half a pixel apart, pooled: a building a few dozen pixels
+      // across otherwise changes its mean with which pixels the edge happens to hit.
       let count = 0, minY = SIZE, maxY = -1;
       let r = 0, g = 0, b = 0;
       const lums: number[] = [];
-      const grid = new Float32Array(SIZE * SIZE).fill(-1);
-      for (let y = 0; y < SIZE; y += 1) {
-        for (let x = 0; x < SIZE; x += 1) {
-          const o = (y * SIZE + x) * 4;
-          if (data[o] > 250 && data[o + 1] < 5 && data[o + 2] > 250) continue;
-          count += 1;
-          minY = Math.min(minY, y);
-          maxY = Math.max(maxY, y);
-          const lr = linear(data[o]), lg = linear(data[o + 1]), lb = linear(data[o + 2]);
-          r += lr; g += lg; b += lb;
-          const lum = 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
-          lums.push(lum);
-          grid[y * SIZE + x] = lum;
-        }
-      }
-      // Local contrast: how far a pixel sits from the mean of its four
-      // neighbours, over pixels whose neighbours are all the building. Light and
-      // shade on whole faces cancel; floors, bays and windows do not.
       let lcSum = 0, lcCount = 0;
-      for (let y = 1; y < SIZE - 1; y += 1) {
-        for (let x = 1; x < SIZE - 1; x += 1) {
-          const v = grid[y * SIZE + x];
-          const a = grid[y * SIZE + x - 1], b = grid[y * SIZE + x + 1], c = grid[(y - 1) * SIZE + x], e = grid[(y + 1) * SIZE + x];
-          if (v < 0 || a < 0 || b < 0 || c < 0 || e < 0) continue;
-          lcSum += Math.abs(v - (a + b + c + e) * 0.25);
-          lcCount += 1;
+      let cropped = false;
+      for (const [ox, oy] of [[0, 0], [0.5, 0.25], [0.25, 0.5], [0.75, 0.75]]) {
+        camera.setViewOffset(SIZE, SIZE, ox, oy, SIZE, SIZE);
+        renderer.render(scene, camera);
+        pctx.drawImage(renderer.domElement, 0, 0);
+        const data = pctx.getImageData(0, 0, SIZE, SIZE).data;
+        const grid = new Float32Array(SIZE * SIZE).fill(-1);
+        for (let y = 0; y < SIZE; y += 1) {
+          for (let x = 0; x < SIZE; x += 1) {
+            const o = (y * SIZE + x) * 4;
+            if (data[o] > 250 && data[o + 1] < 5 && data[o + 2] > 250) continue;
+            if (y === 0 || y === SIZE - 1 || x === 0 || x === SIZE - 1) cropped = true;
+            count += 1;
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+            const lr = linear(data[o]), lg = linear(data[o + 1]), lb = linear(data[o + 2]);
+            r += lr; g += lg; b += lb;
+            const lum = 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
+            lums.push(lum);
+            grid[y * SIZE + x] = lum;
+          }
+        }
+        // Local contrast: how far a pixel sits from the mean of its four
+        // neighbours, over pixels whose neighbours are all the building. Light and
+        // shade on whole faces cancel; floors, bays and windows do not.
+        for (let y = 1; y < SIZE - 1; y += 1) {
+          for (let x = 1; x < SIZE - 1; x += 1) {
+            const v = grid[y * SIZE + x];
+            const a = grid[y * SIZE + x - 1], b2 = grid[y * SIZE + x + 1], c = grid[(y - 1) * SIZE + x], e = grid[(y + 1) * SIZE + x];
+            if (v < 0 || a < 0 || b2 < 0 || c < 0 || e < 0) continue;
+            lcSum += Math.abs(v - (a + b2 + c + e) * 0.25);
+            lcCount += 1;
+          }
         }
       }
+      camera.clearViewOffset();
       const mean = lums.reduce((s, v) => s + v, 0) / Math.max(count, 1);
       const variance = lums.reduce((s, v) => s + (v - mean) * (v - mean), 0) / Math.max(count, 1);
       steps.push({
-        d: Math.round(d), px: count, heightPx: count ? maxY - minY + 1 : 0,
+        d: Math.round(d), px: Math.round(count / 4), cropped, heightPx: count ? maxY - minY + 1 : 0,
         mean: [r / Math.max(count, 1), g / Math.max(count, 1), b / Math.max(count, 1)],
         lum: mean, std: Math.sqrt(variance), cv: mean > 0 ? Math.sqrt(variance) / mean : 0,
         lc: lcCount > 20 && mean > 0 ? lcSum / lcCount / mean : 0, lcPx: lcCount,

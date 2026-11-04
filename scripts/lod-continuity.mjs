@@ -90,7 +90,9 @@ const worst = (v) => Math.max(...v);
 let failed = false;
 const rows = [];
 for (const row of stats.rows) {
-  const steps = row.steps.filter((s) => s.heightPx >= MIN_HEIGHT_PX && s.px > 60 && s.lcPx > 20);
+  // Pictures where the building is cropped by the frame show a different part of it,
+  // which is not an LOD effect, so they are left out.
+  const steps = row.steps.filter((s) => !s.cropped && s.heightPx >= MIN_HEIGHT_PX && s.px > 60 && s.lcPx > 20);
   let pop = 0, popAt = 0, collapse = 1, collapseAt = 0;
   for (let i = 1; i < steps.length; i += 1) {
     const a = steps[i - 1], b = steps[i];
@@ -100,7 +102,7 @@ for (const row of stats.rows) {
     // Only a loss of spread counts: the spread may rise as a building grows.
     if (ratio < collapse) { collapse = ratio; collapseAt = b.d; }
   }
-  const at = (px) => row.steps.reduce((best, s) => (Math.abs(s.heightPx - px) < Math.abs(best.heightPx - px) ? s : best), row.steps[0]);
+  const at = (px) => steps.reduce((best, s) => (Math.abs(s.heightPx - px) < Math.abs(best.heightPx - px) ? s : best), steps[0]);
   const near = steps[0], far = steps[steps.length - 1];
   const drift = near && far ? worst(near.mean.map((v, c) => Math.abs(far.mean[c] - v) / Math.max(v, 1e-3))) : 0;
   const pass = pop <= maxPop && collapse >= minCollapse;
@@ -113,6 +115,6 @@ for (const row of stats.rows) {
   });
 }
 console.table(rows);
-console.log(`limits: pop <= ${maxPop}, collapse >= ${minCollapse}; pictures ${MIN_HEIGHT_PX}+ px tall; ladder ${stats.ladder[0]}..${stats.ladder.at(-1)} m`);
+console.log(`limits: pop <= ${maxPop}, collapse >= ${minCollapse}; whole-building pictures ${MIN_HEIGHT_PX}+ px tall; ladder ${stats.ladder[0]}..${stats.ladder.at(-1)} m`);
 if (problems.length) console.log("page problems:", problems.slice(0, 5));
 process.exit(failed ? 1 : 0);
