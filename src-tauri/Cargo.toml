@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 workspace = true
 
 [dependencies]
+app-backend = { path = "../crates/app-backend" }
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }
 infrastructure = { path = "../crates/infrastructure" }

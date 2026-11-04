@@ -1,0 +1,52 @@
+# Builds the browser version of the app (npm run build:web: Rust backend compiled to
+# WebAssembly + the unchanged frontend) and publishes it to the gh-pages branch, which
+# GitHub Pages serves at https://<owner>.github.io/terrain-lab/.
+# Needs Settings > Pages > Source: "Deploy from a branch" > gh-pages / (root).
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "src/**"
+      - "index.html"
+      - "vite.web.config.ts"
+      - "scripts/build-web.mjs"
+      - "package-lock.json"
+      - "Cargo.lock"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:web
+      - name: Publish dist-web to gh-pages
+        run: |
+          cd dist-web
+          git init -q
+          git checkout -q -b gh-pages
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Publish browser build from ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" gh-pages

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isDesktop } from "./backend/invoke";
 import type { CityScene } from "./city/cityScene";
 import type { GenerationResult, ProjectDocument, SimulationConfig } from "./types";
 
@@ -43,13 +43,30 @@ export async function exportTerrain(
   outputPath: string,
   outputSize: number,
 ): Promise<string> {
+  if (!isDesktop()) {
+    // The browser has no file system: the "path" is the download's file name.
+    const { exportPng } = await import("./backend/webBackend");
+    return exportPng(config, outputPath, outputSize);
+  }
   return invoke<string>("export_terrain", { config, outputPath, outputSize });
 }
 
 export async function saveProject(project: ProjectDocument, outputPath: string): Promise<string> {
+  if (!isDesktop()) {
+    const { projectToFile } = await import("./backend/webBackend");
+    return projectToFile(project, outputPath);
+  }
   return invoke<string>("save_project", { project, outputPath });
 }
 
 export async function loadProject(inputPath: string): Promise<ProjectDocument> {
+  if (!isDesktop()) {
+    // `inputPath` is the token the browser file picker returned (see platform.ts).
+    const { pickedFiles } = await import("./platform");
+    const file = pickedFiles.get(inputPath);
+    if (!file) throw new Error("the chosen project file is no longer available");
+    const { projectFromBytes } = await import("./backend/webBackend");
+    return projectFromBytes<ProjectDocument>(new Uint8Array(await file.arrayBuffer()));
+  }
   return invoke<ProjectDocument>("load_project", { inputPath });
 }

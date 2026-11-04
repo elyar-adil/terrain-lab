@@ -57,7 +57,7 @@ export function decodeCityBinary(buffer: ArrayBuffer): CityScene {
 
 /** Fetch one city from the desktop shell and decode it. */
 export async function loadCityScene(index: number): Promise<CityScene> {
-  const { invoke } = await import("@tauri-apps/api/core");
+  const { invoke } = await import("../backend/invoke");
   const started = performance.now();
   const raw = await invoke<ArrayBuffer | number[]>("city_scene_bin", { index });
   perfTiming("cityFetchMs", performance.now() - started);

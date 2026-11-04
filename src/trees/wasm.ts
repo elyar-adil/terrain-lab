@@ -94,7 +94,7 @@ export class TreeGrower {
     this.speciesKeys = keys;
   }
 
-  static async load(url = "/worldgen_trees.wasm"): Promise<TreeGrower> {
+  static async load(url = `${import.meta.env.BASE_URL}worldgen_trees.wasm`): Promise<TreeGrower> {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`${url}: ${response.status} ${response.statusText}`);
     const bytes = await response.arrayBuffer();
@@ -188,7 +188,7 @@ export class TreePool {
   private next = 1;
 
   /** Null if workers are not available here. */
-  static create(count = Math.max(1, Math.min(3, (navigator.hardwareConcurrency ?? 4) - 1)), url = "/worldgen_trees.wasm"): TreePool | null {
+  static create(count = Math.max(1, Math.min(3, (navigator.hardwareConcurrency ?? 4) - 1)), url = `${import.meta.env.BASE_URL}worldgen_trees.wasm`): TreePool | null {
     if (typeof Worker === "undefined") return null;
     try {
       const pool = new TreePool();

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { isDesktop } from "./backend/invoke";
+import { listen, open, save } from "./platform";
 import {
   exportTerrain,
   fetchCityScene,
@@ -212,11 +212,11 @@ function App() {
 
   const jumpToCityOption = (option: (typeof cityOptions)[number], optionIndex: number) => {
     setCityFocus({ xKm: option.xKm, yKm: option.yKm, spanKm: option.spanKm, nonce: Date.now() });
+    // The city's detail streams in as tiles around the camera (Terrain3D). It must not
+    // also be requested as a whole scene here: that mounted the entire city (every
+    // building, up to 9 million triangles) on top of the tiles, drawing it twice.
     const sceneIndex = optionIndex - 1;
-    if (sceneIndex >= 0) {
-      setCitySceneIndex(sceneIndex);
-      setViewMode("3d");
-    }
+    if (sceneIndex >= 0) { setCitySceneIndex(sceneIndex); setViewMode("3d"); }
   };
 
   const update = <K extends keyof SimulationConfig>(key: K, value: SimulationConfig[K]) => {
@@ -370,7 +370,7 @@ function App() {
           <div><h1>风与水</h1><p>无限地貌实验室 · Desktop Alpha</p></div>
         </div>
         <div className="top-actions">
-          <span className="engine-badge"><i /> RUST NATIVE</span>
+          <span className="engine-badge"><i /> {isDesktop() ? "RUST NATIVE" : "RUST · WASM"}</span>
           <button className="ghost" onClick={openExistingProject} disabled={busy}>打开</button>
           <button className="ghost" onClick={saveCurrentProject} disabled={busy}>保存</button>
           <button className="ghost" onClick={randomizeSeed} disabled={busy}>随机种子</button>
@@ -422,7 +422,7 @@ function App() {
         </aside>
 
         <section className="viewport" ref={viewportRef}>
-          {result ? (viewMode === "analysis" ? <img className="terrain-preview" src={result.analysisPreviews[analysisLayer]} alt={`${ANALYSIS_LAYERS[analysisLayer]}分析图层`} /> : <Terrain3D result={result} config={config} cameraMode={viewMode} cityFocus={cityFocus} cityScene={activeCityScene} shot={automation} onShotReady={(detail) => { reportAutomation("ready", detail); if (automation?.exitAfterReadyMs !== undefined) window.setTimeout(() => reportAutomation("exit"), automation.exitAfterReadyMs); }} onNeedCity={(index) => { if (index === null) { setCitySceneIndex(null); } else { setCitySceneIndex((current) => (current === index ? current : index)); } }} />) : <div className="empty-state"><div className="contour-art" /><span>80 × 80 KM SYNTHETIC EARTH</span><h2>创造一片不存在，却足够真实的土地</h2><p>原生 Rust 地貌演化 · 河网推演 · 多尺度卫星辐射合成</p><button className="primary large" onClick={runGeneration}>生成第一片地貌</button></div>}
+          {result ? (viewMode === "analysis" ? <img className="terrain-preview" src={result.analysisPreviews[analysisLayer]} alt={`${ANALYSIS_LAYERS[analysisLayer]}分析图层`} /> : <Terrain3D result={result} config={config} cameraMode={viewMode} cityFocus={cityFocus} cityScene={activeCityScene} shot={automation && (!automation.focus || cityFocus) ? automation : null} onShotReady={(detail) => { reportAutomation("ready", detail); if (automation?.exitAfterReadyMs !== undefined) window.setTimeout(() => reportAutomation("exit"), automation.exitAfterReadyMs); }} onNeedCity={(index) => { if (index === null) { setCitySceneIndex(null); } else { setCitySceneIndex((current) => (current === index ? current : index)); } }} />) : <div className="empty-state"><div className="contour-art" /><span>80 × 80 KM SYNTHETIC EARTH</span><h2>创造一片不存在，却足够真实的土地</h2><p>原生 Rust 地貌演化 · 河网推演 · 多尺度卫星辐射合成</p><button className="primary large" onClick={runGeneration}>生成第一片地貌</button></div>}
           {result && <div className="view-switcher">{(<><button className={viewMode === "3d" ? "active" : ""} onClick={() => setViewMode("3d")}>3D 地形</button><button className={viewMode === "satellite" ? "active" : ""} onClick={() => setViewMode("satellite")}>动态卫星</button><select className={viewMode === "analysis" ? "active" : ""} value={analysisLayer} onChange={(event) => { setAnalysisLayer(event.target.value as AnalysisLayer); setViewMode("analysis"); }}><option disabled>分析图层</option>{(Object.keys(ANALYSIS_LAYERS) as AnalysisLayer[]).map((layer) => <option key={layer} value={layer}>{ANALYSIS_LAYERS[layer]}</option>)}</select><select value="" className="city-jump" onChange={(event) => { const index = Number(event.target.value); const option = cityOptions[index]; if (option) jumpToCityOption(option, index); }}><option disabled value="">跳转城市</option>{cityOptions.map((option, index) => <option key={option.label} value={index}>{option.label}</option>)}</select></>)}<button onClick={toggleFullscreen}>全屏</button></div>}
           <div className="viewport-meta"><span>{viewMode === "3d" ? "3D TERRAIN · VERTICAL 1:1 · LIVE WEATHER" : viewMode === "analysis" ? `SEMANTIC LAYER · ${ANALYSIS_LAYERS[analysisLayer]}` : "LIVE ORTHOGRAPHIC · SAME WORLD · SAME TIME"}</span><span>{citySceneLoading ? "正在加载城市细节…" : activeCityScene && citySceneIndex !== null ? `${cityOptions[citySceneIndex + 1]?.label ?? "城市"} · 米制细节已载入` : `${config.worldSizeKm} KM / ${config.gridSize} PX`}</span></div>
           {busy && <div className="progress-overlay"><div><span>{status}</span><b>{Math.round(progress * 100)}%</b></div><progress value={progress} max={1} /></div>}

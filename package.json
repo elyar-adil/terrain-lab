@@ -15,7 +15,8 @@
     "desktop:build": "tauri build",
     "render:validate": "powershell -ExecutionPolicy Bypass -File scripts/headless-render.ps1",
     "verify:city": "node scripts/verify-city.mjs",
-    "verify:city:quick": "node scripts/verify-city.mjs --quick"
+    "verify:city:quick": "node scripts/verify-city.mjs --quick",
+    "build:web": "node scripts/build-web.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
