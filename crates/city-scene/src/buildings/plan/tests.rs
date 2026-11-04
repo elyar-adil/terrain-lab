@@ -175,3 +175,21 @@ fn typologies_have_the_units_per_core_they_name() {
         }
     }
 }
+
+#[test]
+fn every_facade_combination_can_be_drawn() {
+    // The residential facade reads plans for these combinations (cn_grammar).
+    let eras = [PlanEra::Estate, PlanEra::Millennium, PlanEra::Contemporary];
+    let kinds = [(Typology::WalkUp, 7u16), (Typology::SlabTwoUnit, 14), (Typology::TowerFourUnit, 26)];
+    for era in eras {
+        for (typology, storeys) in kinds {
+            let failed = (0..200u32)
+                .filter(|&seed| {
+                    Plan::try_generate(PlanSpec { typology, era, latitude: 31.0, storeys, seed }).is_err()
+                })
+                .count();
+            println!("{typology:?} {era:?}: {failed} of 200 seeds without a valid plan");
+            assert_eq!(failed, 0, "{typology:?} {era:?}");
+        }
+    }
+}

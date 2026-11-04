@@ -300,7 +300,7 @@ pub(super) fn tower(spec: PlanSpec, climate: Climate, rng: &mut Rng) -> Option<P
     }
     let evac = evac_max(&b, &core.stair_doors);
     Some(Plan {
-        spec,
+        spec: PlanSpec { era, ..spec },
         climate,
         plate: Rect::new(0.0, 0.0, s, s),
         floor_height: er.floor_height,

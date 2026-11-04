@@ -342,3 +342,62 @@ multi-floor stair connection (flight geometry), duplex/penthouse units, the
 ground floor (shops, lobby, garage), townhouses, gallery-access old blocks,
 unit-level uniqueness of furnishing, and verification of the [R] numbers
 against the standards.
+
+## 12. Prototype status and measurements
+
+Code: `crates/city-scene/src/buildings/plan/` (`geom`, `unit`, `residential`,
+`office`, `tests`), example `plan_floor_svg`. All numbers below are produced by
+`cargo test --release -p city-scene --lib plan::tests -- --nocapture`.
+
+| Typology, era | distinct signatures / 500 seeds | mean redraws | worst unit-door-to-stair |
+|---|---|---|---|
+| slab, 2000s | 500 | 1.3 | 3.6 m |
+| slab, 2010s | 500 | 2.1 | 5.6 m |
+| tower 一梯四户, 2010s | 500 | 3.6 | 4.3 m |
+| tower 一梯四户, 2000s | 500 | 7.8 | 4.3 m |
+| walk-up 80s-90s | 500 | 5.7 | 1.5 m |
+| walk-up Soviet | 500 | 1.5 | 1.7 m |
+| office 2010s | 431 | 0.1 | 28.2 m (any point, limit 30) |
+| office 80s-90s | 472 | 0.1 | 28.2 m |
+
+* Every generated residential plan passes: room minima (GB 50096 5.2-5.4, on net
+  area inside the walls), 1/7 daylight for every living room, bedroom and
+  kitchen, reachability of every room from the stair or lobby by the door graph,
+  evacuation, no lift against a bedroom, unit use area inside the era window.
+  All 9 era x typology combinations the facade uses draw for 200 of 200 seeds.
+* Mean window-to-wall ratio by face (slab, 2010s): south 0.40, north 0.18-0.21,
+  east and west gables 0.11; tower 0.28-0.31 on every face (the pinwheel is
+  rotationally symmetric); walk-up south 0.30-0.36, north 0.18.
+* Room mix (share of net use area): living+dining 19-29 %, bedrooms 40-48 %.
+  The reference medians of section 5 are 25-30 % and 38-45 %: slabs and walk-ups
+  run low on living (the dining room is only a separate room in the 2000s+ north
+  row) and high on bedrooms.
+* The office plate has a 15-30 % core share by test; its uniqueness is lower
+  because a real office floor is a small set of plans (grid, depth, core
+  position, lift count).
+
+Known defects seen in the rendered plans (not hidden): units take their slack as
+oversized bedrooms (master 26 m2 in a 4-bedroom slab unit), north-row `store`
+rooms appear beside kitchens more often than real plans have them, tower halls
+are 17-26 m2 (too big), the stair window of a slab is drawn at the plate
+centre although the stair sits to one side of the core, office doors between
+open bands are drawn like doors, and the fire-code figures are [R].
+
+### Facade integration
+
+`cn_grammar::residential_design` still draws its random elevations (so all other
+choices of a design are unchanged) and then replaces the three elevation span
+lists by the faces of the block's plan: tile = the first dwelling (living face
+south, service face north, gable west or east), openings become spans by kind
+(balcony door -> balcony, window with its plan sill and head, bay, A/C ledge ->
+niche, stair window half-width at the tile edge where the mirror makes it
+whole). The tile is mirrored at its edges by the existing geometry, which gives
+the mirrored pair of a two-unit core and, in a tower, the rotated corner
+units. Villages and commercial buildings are untouched. Deviations: the
+latitude is fixed at 31 N for the plan, the tile is the first dwelling only
+(the second is its mirror even when the plan drew two different flats), and the
+slab's stair window is at the plate centre.
+
+Not yet done: full interior geometry (wall thickness, structural walls),
+furniture, multi-floor stair flights, duplex/penthouse, ground-floor and roof
+plans, townhouses, gallery-access old blocks, and checking the [R] numbers.

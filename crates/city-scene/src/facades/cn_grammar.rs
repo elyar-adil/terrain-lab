@@ -876,6 +876,144 @@ fn gable_spans(rng: &mut Rng, voc: &Vocabulary, storey: f32) -> Vec<Span> {
     lay.spans
 }
 
+/// The spans of one face of a plan, from `lo` to `hi` along the face (plan
+/// frame metres).  Openings become parts by kind; the gaps between them walls.
+/// The stair window is drawn half-width at the end of the tile, where the
+/// tile's mirror makes it whole.
+fn face_spans(
+    plan: &crate::buildings::plan::Plan,
+    side: crate::buildings::plan::Side,
+    (lo, hi): (f32, f32),
+    rng: &mut Rng,
+    voc: &Vocabulary,
+    storey: f32,
+    strip: bool,
+) -> Vec<Span> {
+    use crate::buildings::plan::OpeningKind;
+    let mut ops: Vec<_> = plan
+        .openings_on(side)
+        .filter(|o| o.along >= lo - 1e-3 && o.along <= hi + 1e-3 && o.kind != OpeningKind::StairWindow)
+        .collect();
+    ops.sort_by(|a, b| a.along.total_cmp(&b.along));
+    let stair = plan
+        .openings_on(side)
+        .any(|o| o.kind == OpeningKind::StairWindow);
+    let rail = pick(rng, voc.rails);
+    let end = hi - lo - if stair { 0.6 } else { 0.0 };
+    let mut lay = Lay::new();
+    let mut first = true;
+    for o in ops {
+        let x0 = (o.along - o.width * 0.5 - lo).max(0.0);
+        let x1 = (o.along + o.width * 0.5 - lo).min(end);
+        if x0 < lay.x - 0.01 || x1 - x0 < 0.2 {
+            continue;
+        }
+        let gap = x0 - lay.x;
+        if gap > 0.04 {
+            if first && strip && gap >= 0.6 {
+                lay.push(0.25, Part::Strip);
+                lay.push(gap - 0.25, Part::Wall);
+            } else {
+                lay.push(gap, Part::Wall);
+            }
+        }
+        first = false;
+        let w = x1 - x0;
+        let part = match o.kind {
+            OpeningKind::BalconyDoor => Part::Balcony { rail },
+            OpeningKind::Bay => Part::Bay { panes: 3, sash: pick(rng, voc.sashes) },
+            OpeningKind::AcLedge => Part::AcNiche,
+            _ => match window(rng, voc, storey, w) {
+                Part::Window { panes, sash, .. } => {
+                    let sill = r5(o.sill.clamp(0.3, 1.6));
+                    let head = r5(o.head.min(storey - 0.4).max(sill + 0.6));
+                    Part::Window { sill, head, panes, sash }
+                }
+                other => other,
+            },
+        };
+        lay.push(w, part);
+    }
+    if end - lay.x > 0.04 {
+        lay.push(end - lay.x, Part::Wall);
+    }
+    if stair {
+        lay.push(0.6, Part::Stair);
+    }
+    lay.spans
+}
+
+/// Replace the three elevations of a block by the faces of its floor plan.  A
+/// tile is one dwelling wide and is mirrored at its edges, which reproduces the
+/// mirrored pair of a two-unit core and the rotated corner units of a tower.
+/// Falls back to the drawn elevations when the plan cannot be drawn.
+fn plan_elevations(
+    seed: u32,
+    era: Era,
+    floors: u16,
+    tower: bool,
+    voc: &Vocabulary,
+    storey: f32,
+    mut front: Elevation,
+    mut back: Elevation,
+    mut gable: Elevation,
+) -> (Elevation, Elevation, Elevation) {
+    use crate::buildings::plan::{Plan, PlanEra, PlanSpec, Side as PSide, Typology};
+    let plan_era = match era {
+        Era::WalkUp => PlanEra::Estate,
+        Era::Tile | Era::Euro => PlanEra::Millennium,
+        Era::Modern | Era::NewChinese => PlanEra::Contemporary,
+        _ => return (front, back, gable),
+    };
+    let typology = if tower {
+        Typology::TowerFourUnit
+    } else if era == Era::WalkUp || floors <= 7 {
+        Typology::WalkUp
+    } else {
+        Typology::SlabTwoUnit
+    };
+    // The latitude of the demonstration world sits in the hot-summer,
+    // cold-winter zone; the climate class only moves window caps and balcony
+    // glazing.
+    let spec = PlanSpec { typology, era: plan_era, latitude: 31.0, storeys: floors, seed };
+    let Ok(plan) = Plan::try_generate(spec) else {
+        return (front, back, gable);
+    };
+    let Some(unit) = plan.units.first() else {
+        return (front, back, gable);
+    };
+    // The first dwelling's footprint is the tile; its living face is the south
+    // face, its gable the west or (in a mirrored plan) the east face.
+    let (mut bx0, mut bx1, mut by0, mut by1) = (f32::MAX, 0.0f32, f32::MAX, 0.0f32);
+    for &i in &unit.rooms {
+        let r = &plan.rooms[i];
+        if !r.func.is_balcony() {
+            bx0 = bx0.min(r.rect.x0);
+            bx1 = bx1.max(r.rect.x1);
+            by0 = by0.min(r.rect.y0);
+            by1 = by1.max(r.rect.y1);
+        }
+    }
+    let (tile_w, tile_d) = (bx1 - bx0, by1 - by0);
+    let mut rng = Rng::new(seed ^ 0x7a1e_0b3d);
+    let strip = era != Era::Euro;
+    let f = face_spans(&plan, PSide::South, (bx0, bx1), &mut rng, voc, storey, strip);
+    let b = if tower {
+        face_spans(&plan, PSide::South, (bx0, bx1), &mut rng, voc, storey, strip)
+    } else {
+        face_spans(&plan, PSide::North, (bx0, bx1), &mut rng, voc, storey, strip)
+    };
+    let gable_side = if bx0 < 0.01 { PSide::West } else { PSide::East };
+    let g = face_spans(&plan, gable_side, (by0, by1), &mut rng, voc, storey, false);
+    for (e, spans, w) in [(&mut front, f, tile_w), (&mut back, b, tile_w), (&mut gable, g, tile_d)] {
+        if !spans.is_empty() {
+            e.width = w;
+            e.spans = spans;
+        }
+    }
+    (front, back, gable)
+}
+
 fn width_of(spans: &[Span]) -> f32 {
     spans.last().map_or(1.0, |span| span.x1)
 }
@@ -948,6 +1086,14 @@ pub fn residential_design(seed: u32, era: Era, floors: u16, tower: bool) -> Desi
     let front = elevation(Side::Front, front_spans(&mut rng, &voc, storey, village));
     let back = elevation(Side::Back, back_spans(&mut rng, &voc, storey, village));
     let gable = elevation(Side::Gable, gable_spans(&mut rng, &voc, storey));
+    // The random draws above are kept so every other choice of the design is
+    // unchanged; for a block with a floor plan the three elevations are then
+    // read from the plan instead (windows by room function, balconies, ledges).
+    let (front, back, gable) = if village {
+        (front, back, gable)
+    } else {
+        plan_elevations(seed, era, floors, tower, &voc, storey, front, back, gable)
+    };
 
     let shade = |c: [f32; 3], k: f32| [c[0] * k, c[1] * k, c[2] * k];
     let base_storeys = match era {
