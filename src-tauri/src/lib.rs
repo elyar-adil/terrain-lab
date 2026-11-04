@@ -1195,8 +1195,14 @@ pub fn build_payload(
         cities: serde_json::to_value(&infrastructure.cities).map_err(|error| error.to_string())?,
         city_sites,
         far_trees: city_scene::trees::far_tree_payload(),
-        modern_cities: serde_json::to_value(&infrastructure.modern_cities)
-            .map_err(|error| error.to_string())?,
+        modern_cities: {
+            let mut cities = serde_json::to_value(&infrastructure.modern_cities)
+                .map_err(|error| error.to_string())?;
+            // The far form of each building, read off the facade grammar the
+            // detail is built from, so the merged mass and the detail agree.
+            city_scene::buildings::far::attach_far_looks(&mut cities, &infrastructure.modern_cities);
+            cities
+        },
         // The city scenes are **not** part of this payload. They are tens of
         // megabytes of base64 vertex buffers per city, and a three-city world
         // serialises to several hundred megabytes of JSON. Handing that to a

@@ -26,6 +26,7 @@ export default defineConfig({
         "city-harness": path.resolve(__dirname, "city-harness.html"),
         gallery: path.resolve(__dirname, "gallery.html"),
         "tree-harness": path.resolve(__dirname, "tree-harness.html"),
+        "lod-harness": path.resolve(__dirname, "lod-harness.html"),
       },
       output: {
         manualChunks: {
