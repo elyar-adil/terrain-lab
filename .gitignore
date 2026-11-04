@@ -33,3 +33,4 @@ render-out/
 
 # Single-file web build output (npm run build:single).
 /dist-single/
+dist-app/
