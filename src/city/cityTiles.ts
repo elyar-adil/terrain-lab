@@ -83,6 +83,7 @@ export class CityTileStreamer {
   private readonly tiles = new Map<string, Tile>();
   private fetching = 0;
   private disposed = false;
+  private lastCamera: THREE.Vector3 | null = null;
 
   constructor(
     private readonly index: number,
@@ -99,6 +100,7 @@ export class CityTileStreamer {
    */
   update(camera: THREE.Vector3, budgetMs: number): void {
     if (this.disposed) return;
+    this.lastCamera = camera.clone();
     const started = performance.now();
     const reach = Math.ceil((this.loadM + CITY_TILE_M) / CITY_TILE_M);
     const centreColumn = Math.floor(camera.x / CITY_TILE_M);
@@ -154,6 +156,20 @@ export class CityTileStreamer {
     const counts: Record<string, number> = {};
     for (const tile of this.tiles.values()) counts[tile.state] = (counts[tile.state] ?? 0) + 1;
     return counts;
+  }
+
+  /**
+   * Tiles still on their way to being drawn: in range and not yet fetched, being
+   * fetched, or being built. Zero means the detail around the camera has settled
+   * (a dropped tile out of range does not count).
+   */
+  pending(): number {
+    let count = 0;
+    for (const tile of this.tiles.values()) {
+      if (tile.state === "fetching" || tile.state === "ready" || tile.state === "building") count += 1;
+      else if (tile.state === "idle" && this.lastCamera && tileDistance(tile.column, tile.row, this.lastCamera) <= this.loadM) count += 1;
+    }
+    return count;
   }
 
   dispose(): void {

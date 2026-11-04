@@ -89,6 +89,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 landform: match flag("--landform").as_deref() {
                     Some("plateau") => Landform::Plateau,
                     Some("coastal") => Landform::Coastal,
+                    Some("mountainRange" | "mountain") => Landform::MountainRange,
+                    Some("hills") => Landform::Hills,
+                    Some("archipelago") => Landform::Archipelago,
                     _ => Landform::Plains,
                 },
                 grid_size: flag("--grid").and_then(|v| v.parse().ok()).unwrap_or(256),

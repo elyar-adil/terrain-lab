@@ -18,6 +18,7 @@ import type {
 import type { CityScene } from "./city/cityScene";
 import { loadCityScene } from "./city/cityLoader";
 import { Terrain3D } from "./components/Terrain3D";
+import { type Automation, forwardConsole, loadAutomation, reportAutomation } from "./devAutomation";
 
 const PRESETS: Record<TerrainPreset, Pick<SimulationConfig, "rainfall" | "evaporation" | "windSpeed" | "windDirection"> & { name: string; description: string }> = {
   arid: { name: "干旱高山", description: "裸岩、冲积扇与干涸河谷", rainfall: 425, evaporation: 975, windSpeed: 11, windDirection: 35 },
@@ -101,9 +102,23 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("3d");
   const [analysisLayer, setAnalysisLayer] = useState<AnalysisLayer>("discharge");
-  const [cityFocus, setCityFocus] = useState<{ xKm: number; yKm: number; spanKm: number; nonce: number } | null>(null);
+  const [cityFocus, setCityFocus] = useState<{ xKm: number; yKm: number; spanKm: number; nonce: number; pitchDeg?: number; azimuthDeg?: number } | null>(null);
   const [citySceneIndex, setCitySceneIndex] = useState<number | null>(null);
   const viewportRef = useRef<HTMLElement>(null);
+
+  // Dev-only automation: null in every normal run (see src/devAutomation.ts).
+  const [automation, setAutomation] = useState<Automation | null>(null);
+  const [automationRun, setAutomationRun] = useState(0);
+  const automationFocused = useRef(false);
+  useEffect(() => {
+    loadAutomation().then((spec) => {
+      if (!spec) return;
+      forwardConsole();
+      setAutomation(spec);
+      if (spec.config) setConfig((current) => ({ ...current, ...spec.config }));
+      setAutomationRun(1);
+    });
+  }, []);
 
   useEffect(() => {
     let dispose: (() => void) | undefined;
@@ -244,6 +259,45 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    if (automationRun === 1) {
+      setAutomationRun(2);
+      reportAutomation("generating", { config });
+      runGeneration().then(() => reportAutomation("generated", {}));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [automationRun]);
+
+  useEffect(() => {
+    if (!automation || !result || automationFocused.current) return;
+    automationFocused.current = true;
+    if (automation.view === "satellite") setViewMode("satellite");
+    else if (automation.view === "analysis") {
+      setAnalysisLayer((automation.layer ?? "discharge") as AnalysisLayer);
+      setViewMode("analysis");
+    }
+    const focus = automation.focus;
+    if (focus) {
+      const option = cityOptions[focus.option];
+      if (option) {
+        setCityFocus({
+          xKm: option.xKm, yKm: option.yKm, spanKm: focus.spanKm ?? option.spanKm, nonce: Date.now(),
+          pitchDeg: focus.pitchDeg, azimuthDeg: focus.azimuthDeg,
+        });
+        if (focus.option >= 1) setCitySceneIndex(focus.option - 1);
+      }
+    }
+    // The non-3D views have no Terrain3D to report from: say so after a beat.
+    if (automation.view === "satellite" || automation.view === "analysis") {
+      window.setTimeout(() => reportAutomation("ready", { view: automation.view }), 4000);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [automation, result]);
+
+  useEffect(() => {
+    if (error && automation) reportAutomation("error", { error });
+  }, [error, automation]);
+
   const runExport = async () => {
     const outputPath = await save({
       title: "导出卫星正射影像",
@@ -368,7 +422,7 @@ function App() {
         </aside>
 
         <section className="viewport" ref={viewportRef}>
-          {result ? (viewMode === "analysis" ? <img className="terrain-preview" src={result.analysisPreviews[analysisLayer]} alt={`${ANALYSIS_LAYERS[analysisLayer]}分析图层`} /> : <Terrain3D result={result} config={config} cameraMode={viewMode} cityFocus={cityFocus} cityScene={activeCityScene} onNeedCity={(index) => { if (index === null) { setCitySceneIndex(null); } else { setCitySceneIndex((current) => (current === index ? current : index)); } }} />) : <div className="empty-state"><div className="contour-art" /><span>80 × 80 KM SYNTHETIC EARTH</span><h2>创造一片不存在，却足够真实的土地</h2><p>原生 Rust 地貌演化 · 河网推演 · 多尺度卫星辐射合成</p><button className="primary large" onClick={runGeneration}>生成第一片地貌</button></div>}
+          {result ? (viewMode === "analysis" ? <img className="terrain-preview" src={result.analysisPreviews[analysisLayer]} alt={`${ANALYSIS_LAYERS[analysisLayer]}分析图层`} /> : <Terrain3D result={result} config={config} cameraMode={viewMode} cityFocus={cityFocus} cityScene={activeCityScene} shot={automation} onShotReady={(detail) => { reportAutomation("ready", detail); if (automation?.exitAfterReadyMs !== undefined) window.setTimeout(() => reportAutomation("exit"), automation.exitAfterReadyMs); }} onNeedCity={(index) => { if (index === null) { setCitySceneIndex(null); } else { setCitySceneIndex((current) => (current === index ? current : index)); } }} />) : <div className="empty-state"><div className="contour-art" /><span>80 × 80 KM SYNTHETIC EARTH</span><h2>创造一片不存在，却足够真实的土地</h2><p>原生 Rust 地貌演化 · 河网推演 · 多尺度卫星辐射合成</p><button className="primary large" onClick={runGeneration}>生成第一片地貌</button></div>}
           {result && <div className="view-switcher">{(<><button className={viewMode === "3d" ? "active" : ""} onClick={() => setViewMode("3d")}>3D 地形</button><button className={viewMode === "satellite" ? "active" : ""} onClick={() => setViewMode("satellite")}>动态卫星</button><select className={viewMode === "analysis" ? "active" : ""} value={analysisLayer} onChange={(event) => { setAnalysisLayer(event.target.value as AnalysisLayer); setViewMode("analysis"); }}><option disabled>分析图层</option>{(Object.keys(ANALYSIS_LAYERS) as AnalysisLayer[]).map((layer) => <option key={layer} value={layer}>{ANALYSIS_LAYERS[layer]}</option>)}</select><select value="" className="city-jump" onChange={(event) => { const index = Number(event.target.value); const option = cityOptions[index]; if (option) jumpToCityOption(option, index); }}><option disabled value="">跳转城市</option>{cityOptions.map((option, index) => <option key={option.label} value={index}>{option.label}</option>)}</select></>)}<button onClick={toggleFullscreen}>全屏</button></div>}
           <div className="viewport-meta"><span>{viewMode === "3d" ? "3D TERRAIN · VERTICAL 1:1 · LIVE WEATHER" : viewMode === "analysis" ? `SEMANTIC LAYER · ${ANALYSIS_LAYERS[analysisLayer]}` : "LIVE ORTHOGRAPHIC · SAME WORLD · SAME TIME"}</span><span>{citySceneLoading ? "正在加载城市细节…" : activeCityScene && citySceneIndex !== null ? `${cityOptions[citySceneIndex + 1]?.label ?? "城市"} · 米制细节已载入` : `${config.worldSizeKm} KM / ${config.gridSize} PX`}</span></div>
           {busy && <div className="progress-overlay"><div><span>{status}</span><b>{Math.round(progress * 100)}%</b></div><progress value={progress} max={1} /></div>}

@@ -21,6 +21,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { buildFarTreeSet } from "./farTrees";
 import { createGroundCover } from "./groundCover";
 import { FARM_GLSL, FarmCrop, farmPlot } from "./farmland";
+import type { Automation } from "../devAutomation";
 import type { GenerationResult, SimulationConfig, UrbanBuilding, UrbanLane, UrbanPoint, UrbanRoad, VegetationPrototypePayload } from "../types";
 
 function decodeHeights(base64: string): Float32Array {
@@ -304,7 +305,7 @@ const waterFragmentShader = `
   }
 `;
 
-export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, onNeedCity }: { result: GenerationResult; config: SimulationConfig; cameraMode: "3d" | "satellite"; cityFocus?: { xKm: number; yKm: number; spanKm: number; nonce: number; pitchDeg?: number; azimuthDeg?: number } | null; cityScene?: CityScene | null; onNeedCity?: (index: number | null) => void }) {
+export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, onNeedCity, shot, onShotReady }: { result: GenerationResult; config: SimulationConfig; cameraMode: "3d" | "satellite"; cityFocus?: { xKm: number; yKm: number; spanKm: number; nonce: number; pitchDeg?: number; azimuthDeg?: number } | null; cityScene?: CityScene | null; onNeedCity?: (index: number | null) => void; shot?: Automation | null; onShotReady?: (detail: Record<string, unknown>) => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
   // The metre-scale city lives inside this scene. The scene is built once per
   // terrain, so the loaded city and the request callback travel by ref.
@@ -320,6 +321,11 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
   // scene is never rebuilt for a change of viewpoint.
   const cityFocusRef = useRef(cityFocus);
   cityFocusRef.current = cityFocus;
+  // Dev-only automation (see src/devAutomation.ts): absent in normal use.
+  const shotRef = useRef(shot);
+  shotRef.current = shot;
+  const onShotReadyRef = useRef(onShotReady);
+  onShotReadyRef.current = onShotReady;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -1888,7 +1894,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     tileDebug.log = tileLog;
     // Milliseconds of tile building per frame. `?tilebudget=<ms>` raises it for the
     // software renderer in the audit, where a frame takes seconds anyway.
-    const tileBudgetMs = Number(new URLSearchParams(window.location.search).get("tilebudget")) || 6;
+    const tileBudgetMs = Number(new URLSearchParams(window.location.search).get("tilebudget")) || (shotRef.current?.tileBudgetMs ?? 6);
     const streamCityTiles = (seconds: number) => {
       (result.modernCities ?? []).forEach((plan, index) => {
         const origin = plan.frame.origin;
@@ -1898,7 +1904,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
         let streamer = cityStreamers[index];
         if (!streamer && distanceM < CITY_LOAD_DISTANCE_M) {
           // `?tileload=<m>` narrows the streamed range, for the software renderer in the audit.
-          const tileLoadM = Number(new URLSearchParams(window.location.search).get("tileload"));
+          const tileLoadM = Number(new URLSearchParams(window.location.search).get("tileload")) || (shotRef.current?.tileLoadM ?? 0);
           streamer = new CityTileStreamer(index, loadCityTile, (column, row, mounted) => {
             cityMasses[index]?.setTileHidden(column, row, mounted);
           }, tileLoadM > 0 ? tileLoadM : undefined);
@@ -3709,6 +3715,8 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     let worldTime = 0;
     let frame = 0;
     let handledFocusNonce = 0;
+    // Dev-only: counts settled frames for the automation's ready marker.
+    const shotState = { applied: false, settled: 0, frames: 0, reported: false, startedAt: performance.now() };
     let frameCounter = 0;
     const animate = () => {
       const delta = clock.getDelta();
@@ -3736,6 +3744,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       // City-focus jumps: reposition the orbit target and set the viewing
       // distance so the requested span fills the frame.  Handled before
       // controls.update() so the orbit math adopts the new target at once.
+      const shotSpec = shotRef.current;
       const focusRequest = cityFocusRef.current;
       if (focusRequest && focusRequest.nonce !== handledFocusNonce) {
         handledFocusNonce = focusRequest.nonce;
@@ -3762,6 +3771,45 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
           ortho.zoom = 3.4 / Math.max(1e-6, focusRequest.spanKm * 1000 * metresToScene);
           ortho.updateProjectionMatrix();
           camera.position.set(fx, fy + 5.2, fz + 0.001);
+        }
+      }
+      if (shotSpec?.camera && !shotState.applied && camera instanceof THREE.PerspectiveCamera) {
+        shotState.applied = true;
+        const place = (point: [number, number, number]) => {
+          const camSpec = shotSpec.camera!;
+          let worldX: number;
+          let worldZ: number;
+          if (camSpec.city !== undefined) {
+            const frame = result.modernCities?.[camSpec.city]?.frame;
+            if (!frame) return null;
+            const localX = point[0] * metresToScene;
+            const localZ = point[2] * metresToScene;
+            const cos = Math.cos(frame.rotationRadians);
+            const sin = Math.sin(frame.rotationRadians);
+            worldX = (frame.origin.x_km - cityHalfExtentKm) * kilometreToScene + localX * cos - localZ * sin;
+            worldZ = (frame.origin.y_km - cityHalfExtentKm) * kilometreToScene + localX * sin + localZ * cos;
+          } else {
+            worldX = (point[0] - cityHalfExtentKm) * kilometreToScene;
+            worldZ = (point[2] - cityHalfExtentKm) * kilometreToScene;
+          }
+          return new THREE.Vector3(worldX, terrainHeightAt(worldX, worldZ) + point[1] * metresToScene, worldZ);
+        };
+        const eye = place(shotSpec.camera.pos);
+        const look = place(shotSpec.camera.target);
+        if (eye && look) {
+          camera.up.set(0, 1, 0);
+          camera.position.copy(eye);
+          camera.lookAt(look);
+          camera.updateMatrixWorld(true);
+          controls.target.copy(look);
+          const mode = shotSpec.camera.mode ?? "orbit";
+          if (mode === "orbit") controls.update();
+          else if (roam) {
+            if (roam.active) roam.exit();
+            roam.enter(mode === "walk");
+            controls.enabled = false;
+            refreshRoamUi();
+          }
         }
       }
       if (roam?.active) {
@@ -3982,6 +4030,36 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
         renderer.render(scene, camera);
       }
       framePerf.end();
+      if (shotSpec && !shotState.reported) {
+        shotState.frames += 1;
+        const focusWanted = cityFocusRef.current?.nonce ?? 0;
+        const arrived = (shotSpec.camera ? shotState.applied : true) && handledFocusNonce === focusWanted;
+        const pending = cityStreamers.reduce((sum, streamer) => sum + (streamer ? streamer.pending() : 0), 0);
+        shotState.settled = arrived && pending === 0 ? shotState.settled + 1 : 0;
+        const waitedSec = (performance.now() - shotState.startedAt) / 1000;
+        const timedOut = waitedSec > (shotSpec.tileTimeoutSec ?? 240);
+        if (shotState.settled >= (shotSpec.settleFrames ?? 6) || (timedOut && arrived)) {
+          shotState.reported = true;
+          const mounted = cityStreamers.map((streamer) => (streamer ? streamer.summary() : null));
+          onShotReadyRef.current?.({
+            frames: shotState.frames,
+            waitedSec: Number(waitedSec.toFixed(1)),
+            timedOut,
+            camera: {
+              xm: camera.position.x * sceneToMetres,
+              ym: camera.position.y * sceneToMetres,
+              zm: camera.position.z * sceneToMetres,
+              groundYm: terrainHeightAt(camera.position.x, camera.position.z) * sceneToMetres,
+              roam: roam?.active ? (roam.walking ? "walk" : "fly") : "orbit",
+            },
+            streamers: mounted,
+            wholeCityMounted: Boolean(cityLayer),
+            render: { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures },
+            webgl2: renderer.capabilities.isWebGL2,
+            composer: Boolean(composer && cameraMode === "3d"),
+          });
+        }
+      }
       if (perfEnabled) {
         // Headless captures: a compositor screenshot never lands while software GL
         // saturates the main thread, so copy the canvas in the task that drew it.

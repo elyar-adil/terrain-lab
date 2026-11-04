@@ -1,3 +1,5 @@
+mod dev_automation;
+
 use base64::{Engine, engine::general_purpose::STANDARD};
 use image::{ImageFormat, Rgba, RgbaImage};
 use infrastructure::{CrossingKind, InfrastructureData, generate_infrastructure};
@@ -1358,7 +1360,13 @@ fn traffic_capacities() -> Vec<usize> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            dev_automation::start_watchdog(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            dev_automation::automation_spec,
+            dev_automation::automation_event,
             generate_terrain,
             city_scene,
             city_scene_bin,

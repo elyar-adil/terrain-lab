@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Run the REAL desktop app (src-tauri binary) under Xvfb with the dev-only
+# automation hook, wait for its ready marker, screenshot the window, and stop only
+# the processes this script started. See docs/real-app-verification.md.
+#
+#   scripts/app-shot --name aerial --spec '{"config":{"seed":284735},"camera":{...}}' --out DIR
+#   scripts/app-shot --name street --spec-file spec.json --out DIR
+#
+# Options:
+#   --name NAME        output base name (NAME.png, NAME.log, NAME.ready.json)
+#   --spec JSON        automation document (inline JSON)
+#   --spec-file PATH   automation document (file)
+#                      (neither: the app starts normally, as a user would see it; the
+#                      screenshot is taken --extra-wait seconds after launch)
+#   --out DIR          output directory (default: ./app-shots)
+#   --bin PATH         app binary (default: target/release/wind-water-terrain-lab, else target/debug)
+#   --size WxH         X screen size (default 1440x900; the window is 1440x900 and centred)
+#   --timeout SECS     give up (and still screenshot) after this long (default 900)
+#   --extra-wait SECS  pause between the ready marker and the screenshot (default 3)
+set -u
+root="$(cd "$(dirname "$0")/.." && pwd)"
+name=shot; spec=''; specfile=''; out="$PWD/app-shots"; bin=''; size=1440x900; timeout=900; extra=3
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --name) name="$2"; shift 2;;
+    --spec) spec="$2"; shift 2;;
+    --spec-file) specfile="$2"; shift 2;;
+    --out) out="$2"; shift 2;;
+    --bin) bin="$2"; shift 2;;
+    --size) size="$2"; shift 2;;
+    --timeout) timeout="$2"; shift 2;;
+    --extra-wait) extra="$2"; shift 2;;
+    *) echo "unknown option $1" >&2; exit 64;;
+  esac
+done
+if [ -z "$bin" ]; then
+  for candidate in "$root/target/release/wind-water-terrain-lab" "$root/target/debug/wind-water-terrain-lab"; do
+    [ -x "$candidate" ] && { bin="$candidate"; break; }
+  done
+fi
+[ -x "$bin" ] || { echo "no app binary; build it: cargo build --release -p wind-water-terrain-lab (after npm run build)" >&2; exit 66; }
+[ -n "$specfile" ] && spec="$(cat "$specfile")"
+mkdir -p "$out"
+ready="$out/$name.ready.json"; log="$out/$name.log"; png="$out/$name.png"
+rm -f "$ready" "$log" "$png"
+
+xpid=''; apppid=''
+cleanup() {
+  [ -n "$apppid" ] && kill "$apppid" 2>/dev/null
+  [ -n "$xpid" ] && kill "$xpid" 2>/dev/null
+  wait 2>/dev/null
+}
+trap cleanup EXIT INT TERM
+
+# A free display number, found by trying to start our own Xvfb on it.
+disp=''
+for n in $(shuf -i 90-190); do
+  [ -e "/tmp/.X11-unix/X$n" ] && continue
+  Xvfb ":$n" -screen 0 "${size}x24" -nolisten tcp >"$out/$name.xvfb.log" 2>&1 &
+  xpid=$!
+  sleep 1
+  if kill -0 "$xpid" 2>/dev/null; then disp=":$n"; break; fi
+  xpid=''
+done
+[ -n "$disp" ] || { echo "could not start Xvfb" >&2; exit 69; }
+
+export DISPLAY="$disp"
+export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+export WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1
+export GDK_BACKEND=x11 NO_AT_BRIDGE=1
+[ -n "$spec" ] && export TERRAIN_LAB_AUTOMATION="$spec"
+export TERRAIN_LAB_LOG="$log" TERRAIN_LAB_READY_FILE="$ready"
+export TERRAIN_LAB_EXIT_AFTER_SECS="$((timeout + 120))"
+"$bin" >"$out/$name.app.log" 2>&1 &
+apppid=$!
+
+start=$(date +%s)
+while [ -n "$spec" ] && [ ! -e "$ready" ]; do
+  kill -0 "$apppid" 2>/dev/null || { echo "app exited before ready (see $out/$name.app.log)" >&2; break; }
+  [ $(( $(date +%s) - start )) -gt "$timeout" ] && { echo "timeout waiting for ready" >&2; break; }
+  sleep 2
+done
+sleep "$extra"
+import -window root "$png" 2>>"$out/$name.xvfb.log" && echo "screenshot: $png"
+[ -e "$ready" ] && cat "$ready"
