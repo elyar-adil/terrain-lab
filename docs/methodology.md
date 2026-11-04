@@ -43,6 +43,16 @@ break in the model, down to:
 6. **Honest limits.** What is not modelled is recorded in `docs/city-issues.md`
    instead of being hidden by a plausible-looking default.
 
+7. **Everything must make sense.** A generated feature is acceptable only if a
+   person who knows the real thing would find it plausible in place, function
+   and relation to its neighbours. Plausibility is checked by rules, not by
+   eye: no road or building under water, no object overlapping another, every
+   bridge clears the water or road below it, every road connects to the
+   network, every building has an entrance reachable from a street, every
+   plant fits its climate, every shop sign belongs to a shop on a ground floor.
+   These checks run automatically over the generated scene
+   (`scripts/sanity-audit`) and a failure counts as a defect in the generator.
+
 ## Scale ladder and what each rung needs
 
 | Scale | Must be true | State |
