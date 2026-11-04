@@ -50,6 +50,7 @@ mod cn_shopsigns;
 pub(crate) mod details;
 pub mod far;
 pub(crate) mod house;
+pub mod plan;
 mod industrial;
 pub(crate) mod roofscape;
 mod shell;
