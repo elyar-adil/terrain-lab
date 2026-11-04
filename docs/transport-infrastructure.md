@@ -4,6 +4,12 @@ Design study for the rail and air layers of the world planner. It follows
 `docs/methodology.md`: every rule names its terrain inputs, cites a standard or
 observation, is deterministic, and has a statistic we can measure on the output.
 
+Implementation: `crates/infrastructure/src/transport/` (`rail.rs`, `airport.rs`,
+`wind.rs`, `geometry.rs`), `crates/urban/src/model/transport.rs` (shared types,
+corridor clearing, airfield layout and obstacle surfaces),
+`crates/city-scene/src/rail.rs` (track, catenary, stations, trains, crossings),
+`src/components/transport3d.ts` (terrain-view railways and airport).
+
 Status of numbers. Values marked **[checked]** were confirmed against a source
 fetched while writing this note; values marked **[std]** are the published
 figures of the named standard as recalled from its text and must be re-checked
@@ -215,7 +221,11 @@ The simulation has a `wind_direction` (degrees) and `wind_speed` (m/s) in its
 configuration. They define the *prevailing* wind; we build a deterministic wind
 rose from them: a von Mises distribution of direction around the prevailing
 direction with concentration κ = 0.8 + 0.25 · speed(m/s), and a Weibull speed
-distribution (k = 2) with mean equal to the configured speed [sim]. The
+distribution (k = 2) whose mean is half the configured flow speed (surface wind
+at aerodrome height is weaker than the flow aloft the terrain model uses) [sim].
+In a light-wind climate nearly every heading reaches 95 % at the 20 kt limit, so
+candidate headings are ranked on the stricter 13 kt limit (reference field length
+under 1 500 m, or poor braking); both figures are reported. The
 usability of a candidate heading is the integral of that rose over the
 (direction, speed) pairs whose crosswind is below the limit; a runway may be
 used in either direction, so headings are modulo 180°. Annual climate
@@ -234,6 +244,10 @@ code.
 | wind | candidate headings scored by usability; best must reach 95 % |
 | roads | the expressway access runs from the airport to the regional centre along the least-cost path; its class is Motorway |
 | terrain beyond the strip | the approach surfaces must clear the terrain: terrain rising above 1:50 from the threshold along the approach axis for 3 000 m is a rejection |
+
+Runway designators: the number painted at a threshold is the compass bearing
+of the landing direction over ten, so the end an aircraft lands toward +x carries
+the designator of that bearing and the far end the reciprocal (18 apart).
 
 The airport is placed by maximising `score = flatness · distance_term ·
 wind_term · (1 − hazard)` over a coarse grid of positions and headings; ties
