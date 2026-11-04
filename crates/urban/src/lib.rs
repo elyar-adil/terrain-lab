@@ -6,6 +6,10 @@ pub mod modern;
 
 pub use legacy::{BarcelonaGenerator, ManhattanGenerator, ParisianGenerator, UrbanGenerator};
 pub use modern::{CountryFn, CountrySample, generate_modern_chinese_city_from_streets_with_country};
+pub use model::transport::{
+    AerodromeCode, AirfieldPlan, RailCorridor, RailGround, RailKind, RailLimits, RailStationPlan,
+    RailVertex,
+};
 pub use model::{
     ActionCandidate, ActionKind, ApproachSpec, ArrowStyle, BuildingFacade, BuildingMass,
     CityFrameInfo, CityGraph, CityJunction, CitySpec, CityStyle, Compound, CropKind, DrivingSide,

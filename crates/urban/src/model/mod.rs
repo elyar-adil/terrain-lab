@@ -7,6 +7,7 @@ pub(crate) mod probability;
 mod roads;
 pub mod scene;
 pub(crate) mod traffic;
+pub mod transport;
 
 pub use buildings::{
     BuildingFacade, Compound, CropKind, Field, ModernBuilding, Parcel, ParcelUse, TreeInstance,
