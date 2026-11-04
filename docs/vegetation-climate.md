@@ -82,7 +82,7 @@ from a measurement:
 ## What is not modelled (and what stands in)
 
 * Palms (棕榈, 大王椰子, 蒲葵, 椰子), casuarina (木麻黄), bamboo (竹), litchi and
-  mango, mangrove and reeds on tidal flats, 沙棘 and 梭梭 shrubs, cushion plants
+  mango, tamarisk (柽柳), mangrove and reeds on tidal flats, 沙棘 and 梭梭 shrubs, cushion plants
   and alpine meadow have no canopy form or prototype yet. The warm coast and
   subtropical zones use 榕树 and 香樟; alpine and arid zones use the lawn texture
   and thinning to look dry and bare. Wind-bent crowns are not modelled.
