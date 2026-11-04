@@ -51,7 +51,8 @@ break in the model, down to:
    network, every building has an entrance reachable from a street, every
    plant fits its climate, every shop sign belongs to a shop on a ground floor.
    These checks run automatically over the generated scene
-   (`scripts/sanity-audit`) and a failure counts as a defect in the generator.
+   (`scripts/sanity-audit`, described in `docs/sanity-audit.md`) and a failure counts as a
+   defect in the generator.
 
 ## Scale ladder and what each rung needs
 
