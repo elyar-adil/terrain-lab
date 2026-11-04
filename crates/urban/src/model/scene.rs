@@ -121,6 +121,10 @@ pub struct ModernCity {
     /// Climate and landform at the town centre, from the terrain simulation.
     #[serde(default)]
     pub climate: super::SiteClimate,
+    /// The kerb-tree species mix `(key, share)` the town's planting zone uses,
+    /// so the far form's crowns can be the same species as the detail's.
+    #[serde(default)]
+    pub street_mix: Vec<(String, u32)>,
 }
 
 /// The mean of a ring's corners: where a block, parcel or field is for clipping.

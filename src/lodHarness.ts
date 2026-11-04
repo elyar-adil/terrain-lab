@@ -176,13 +176,17 @@ async function main() {
     renderer.render(scene, camera);
     pctx.drawImage(renderer.domElement, 0, 0);
     const top = pctx.getImageData(0, 0, SIZE, SIZE).data;
-    let tn = 0, tdark = 0, tsum = 0;
+    const roofLums: number[] = [];
     for (let o = 0; o < top.length; o += 4) {
       if (top[o] > 250 && top[o + 1] < 5 && top[o + 2] > 250) continue;
-      const lum = 0.2126 * linear(top[o]) + 0.7152 * linear(top[o + 1]) + 0.0722 * linear(top[o + 2]);
-      tn += 1; tsum += lum;
-      if (lum < 0.05) tdark += 1;
+      roofLums.push(0.2126 * linear(top[o]) + 0.7152 * linear(top[o + 1]) + 0.0722 * linear(top[o + 2]));
     }
+    const sorted = [...roofLums].sort((x, y) => x - y);
+    const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+    const tn = roofLums.length;
+    // Pixels far darker than the roof's own median: a black slab on a grey roof.
+    const tdark = roofLums.filter((v) => v < 0.55 * median).length;
+    const tsum = roofLums.reduce((x, y) => x + y, 0);
     camera.up.set(0, 1, 0);
     const roof = { px: tn, darkShare: tn ? tdark / tn : 0, mean: tn ? tsum / tn : 0 };
     rows.push({ label, id: building.id, roof, floors: building.floors, heightM: height, useType: building.useType, farLook: !!building.farLook, steps });

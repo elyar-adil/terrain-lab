@@ -53,6 +53,8 @@ export interface FarLook {
   weather: number;
   crown: number;
   terracotta: boolean;
+  /** The roof covering's mean colour (linear): the detail's own roof texture. */
+  roof: [number, number, number];
   solar: boolean;
   podiumFloors: number;
   podiumStoreyM: number;
@@ -71,7 +73,7 @@ export function blankLook(wall: [number, number, number]): FarLook {
     roofM: 0, startM: 0, storeyM: 3, shopM: 0, wall, baseBand: wall, baseN: 0, topBand: wall, topN: 0,
     unitW: 3.6, kind: KIND_BLANK, window: [0, 0, 0, 0], balcony: [0, 0, 0], moduleM: 0,
     glass: [0.1, 0.12, 0.14], glassKind: 0, frame: [0.3, 0.3, 0.3], trim: wall, skin: 0, flags: 0,
-    weather: 0.4, crown: 0, terracotta: false, solar: false, podiumFloors: 0, podiumStoreyM: 3,
+    weather: 0.4, crown: 0, terracotta: false, roof: [0.17, 0.165, 0.152], solar: false, podiumFloors: 0, podiumStoreyM: 3,
     setbackM: 0, podiumUnitW: 3.6, podiumKind: KIND_BLANK, podiumWindow: [0, 0, 0, 0],
   };
 }

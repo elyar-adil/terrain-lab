@@ -69,6 +69,8 @@ pub struct FarLook {
     pub crown: u8,
     /// Clay roof (red) rather than grey.
     pub terracotta: bool,
+    /// The roof covering's mean colour, linear: the detail's own roof texture.
+    pub roof: [f32; 3],
     /// Solar water heaters on the roof.
     pub solar: bool,
     /// Storeys of a retail podium under a set-back shaft; 0 for none.
@@ -203,6 +205,41 @@ pub fn attach_far_looks(payload: &mut serde_json::Value, cities: &[urban::Modern
                 object.insert("farLook".to_string(), look);
             }
         }
+    }
+}
+
+fn srgb_to_linear(byte: u8) -> f32 {
+    let v = byte as f32 / 255.0;
+    if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+}
+
+fn texture_mean(texture: &crate::textures::BakedTexture) -> [f32; 3] {
+    let mut sum = [0.0_f64; 3];
+    let n = (texture.rgba.len() / 4) as f64;
+    for px in texture.rgba.chunks_exact(4) {
+        for c in 0..3 {
+            sum[c] += srgb_to_linear(px[c]) as f64;
+        }
+    }
+    [(sum[0] / n) as f32, (sum[1] / n) as f32, (sum[2] / n) as f32]
+}
+
+/// The mean colour of the roof covering the detail puts on a building: the flat
+/// bitumen membrane, or `pitched` clay (`Some(true)` terracotta, `Some(false)` grey).
+pub fn roof_mean(pitched: Option<bool>) -> [f32; 3] {
+    use crate::facades::{RoofCovering, pitched_roof_texture, roof_texture};
+    static MEANS: std::sync::OnceLock<[[f32; 3]; 3]> = std::sync::OnceLock::new();
+    let means = MEANS.get_or_init(|| {
+        [
+            texture_mean(&roof_texture(64)),
+            texture_mean(&pitched_roof_texture(RoofCovering::GreyClay, 64)),
+            texture_mean(&pitched_roof_texture(RoofCovering::Terracotta, 64)),
+        ]
+    });
+    match pitched {
+        None => means[0],
+        Some(false) => means[1],
+        Some(true) => means[2],
     }
 }
 
@@ -387,6 +424,33 @@ mod tests {
             assert!(bay.window[1] <= design.front.width + 1e-3);
             assert!(bay.window[3] > bay.window[2]);
             assert!(bay.window[3] <= design.front.storey_m + 1e-3);
+        }
+    }
+
+    /// No roof may be black, and the far roof is the detail's roof texture.
+    #[test]
+    fn far_roofs_are_the_detail_roofs_and_none_is_black() {
+        let lum = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        for pitched in [None, Some(false), Some(true)] {
+            let mean = roof_mean(pitched);
+            assert!(lum(mean) >= 0.08, "roof {pitched:?} luminance {}", lum(mean));
+            assert!(lum(mean) <= 0.5);
+        }
+        for id in 0..80_u32 {
+            for use_type in [ParcelUse::Residential, ParcelUse::Commercial, ParcelUse::Village] {
+                let b = building(id, use_type, 3 + (id % 35) as u16, 55.0);
+                let look = far_look(&b, None).unwrap();
+                assert!(lum(look.roof) >= 0.08, "building {id} {use_type:?} roof is dark");
+                let expected = roof_mean(match (look.crown, b.floors >= 19) {
+                    (2, false) if b.use_type != ParcelUse::Commercial => Some(look.terracotta),
+                    (3, false) => Some(false),
+                    (4, false) if b.floors <= 7 => Some(false),
+                    _ => None,
+                });
+                for c in 0..3 {
+                    assert!((look.roof[c] - expected[c]).abs() < 1e-6);
+                }
+            }
         }
     }
 

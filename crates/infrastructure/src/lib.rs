@@ -344,6 +344,7 @@ pub fn generate_infrastructure_with(
         .map(|mut city| {
             city.river_setting = river_setting(terrain, grid, &city);
             city.climate = climate::site_climate(terrain, grid, &city);
+            city.street_mix = city_scene::trees::street_mix(&city.climate);
             city
         })
         .collect();

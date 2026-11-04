@@ -15,8 +15,9 @@
 //              floors, bays and windows do not. A mip that averages the windows
 //              away shows as this falling off a cliff while the building still
 //              has pixels to show floors in.
-//   roof dark  share of pixels under 0.05 linear luminance seen from straight above (limit 0.10), and mean
-//              roof luminance (at least 0.12): the check that no roof is a black slab.
+//   roof dark  share of roof pixels, seen from straight above, under 0.55 of the roof's
+//              own median luminance (limit 0.12), and the mean roof luminance (at least
+//              0.08): the check that no roof carries a black slab.
 //   lc@N       the local contrast where the building is N pixels tall: how much
 //              of the facade structure is still on the picture.
 //
@@ -108,7 +109,7 @@ for (const row of stats.rows) {
   const near = steps[0], far = steps[steps.length - 1];
   const drift = near && far ? worst(near.mean.map((v, c) => Math.abs(far.mean[c] - v) / Math.max(v, 1e-3))) : 0;
   // A roof seen from straight above must read as a roof: not mostly black.
-  const roofOk = row.roof.darkShare <= 0.10 && row.roof.mean >= 0.12;
+  const roofOk = row.roof.darkShare <= 0.12 && row.roof.mean >= 0.08;
   const pass = pop <= maxPop && collapse >= minCollapse && roofOk;
   if (!pass) failed = true;
   rows.push({

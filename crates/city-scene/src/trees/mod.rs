@@ -55,6 +55,11 @@ mod grow;
 mod plant;
 mod plants;
 pub(crate) mod zones;
+
+/// The kerb-tree species mix of the planting zone a climate falls in.
+pub fn street_mix(site: &urban::SiteClimate) -> Vec<(String, u32)> {
+    zones::street_mix(site)
+}
 mod shrub;
 
 pub use cards::{

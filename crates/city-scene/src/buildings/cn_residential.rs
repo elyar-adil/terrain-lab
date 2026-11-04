@@ -1117,6 +1117,12 @@ pub(crate) fn far_look(building: &ModernBuilding, podium: Option<(f32, u16)>) ->
         weather: front.weather,
         crown: crown_code(design.crown),
         terracotta: design.terracotta,
+        roof: super::far::roof_mean(match (design.crown, building.floors >= 19) {
+            (Crown::Hip, false) => Some(design.terracotta),
+            (Crown::Mansard, false) => Some(false),
+            (Crown::NewChinese, false) if building.floors <= 7 => Some(false),
+            _ => None,
+        }),
         solar: design.solar,
         podium_floors: 0,
         podium_storey_m: storey,

@@ -492,6 +492,7 @@ pub(crate) fn far_look(
         weather: shaft.weather,
         crown: crown_code(crate::facades::cn_grammar::Crown::Flat),
         terracotta: false,
+        roof: super::far::roof_mean(None),
         solar: false,
         podium_floors: stack.podium,
         podium_storey_m: podium_elevation.storey_m,

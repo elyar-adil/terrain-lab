@@ -281,6 +281,8 @@ export interface BakedMaterialTexture {
 }
 
 export interface ModernCityPayload {  style: "chineseModern";
+  /** The kerb-tree species mix `[key, share]` of the town's planting zone. */
+  streetMix?: Array<[string, number]>;
   seed: number;
   /** The plan's frame: its origin in world kilometres and its rotation. Tiles are cut from it. */
   frame: { origin: { x_km: number; y_km: number }; rotationRadians: number };

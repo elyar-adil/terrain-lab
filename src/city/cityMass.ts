@@ -57,10 +57,9 @@ const BRICK = 0x9c5b4a;
 const WALLS = [0xc9c3b6, 0xb9b2a4, 0xd2cdc1, 0xa8a398, 0xbfb59f, 0x9fa3a3, 0xd8cbb0, BRICK, 0xe6e4df];
 // Office towers are glass and cladding: cooler, darker, and more often blue-grey.
 const TOWER_WALLS = [0x5b6670, 0x6d7780, 0x8a939b, 0xb8bcc0, 0x4d5b66];
-// Flat roofs seen from the air: cement screed and grey membrane, silver
-// reflective membrane, the odd green-grey screed, and blue steel sheeting over a
-// rooftop shed. Mostly light; the dark greys made every roof a hole.
-const ROOFS = [0x9a978f, 0xa8a59d, 0x8c8a84, 0xb9b8b3, 0xc8c8c4, 0x8f948c, 0x6f8aa3];
+// Flat roofs of buildings without a far look: the detail's bitumen membrane
+// (about 0.165 linear, `roof_texture`), a hair apart so a town is not one swatch.
+const ROOFS = [0x737171, 0x707070, 0x757372];
 // Profiled steel cladding and the blue or grey steel roofs of sheds.
 const SHED_WALLS = [0xdcdedd, 0xc5c9cc, 0xaebccb, 0xd6cfbd, 0xbfc3bf];
 const SHED_ROOFS = [0x5c7d9e, 0x4f6f8f, 0x8a9399, 0xa5acb0, 0x6e8aa0];
@@ -877,11 +876,15 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     const roofM = b.farLook ? look.roofM : Math.max(b.heightMetres, 3);
     const total = roofM * m;
     const wall = linearHex(look.wall);
-    const roof = shed
-      ? SHED_ROOFS[Math.floor(hash01(b.id, 2) * SHED_ROOFS.length)]
-      : b.roof === "terracotta"
-        ? TERRACOTTA
-        : ROOFS[Math.floor(hash01(b.id, 2) * ROOFS.length)];
+    // The roof is the detail's own covering (bitumen membrane, grey or red clay),
+    // so the roof does not change colour at the hand-off.
+    const roof = b.farLook
+      ? linearHex(look.roof)
+      : shed
+        ? SHED_ROOFS[Math.floor(hash01(b.id, 2) * SHED_ROOFS.length)]
+        : b.roof === "terracotta"
+          ? TERRACOTTA
+          : ROOFS[Math.floor(hash01(b.id, 2) * ROOFS.length)];
     const roofTop = base + total;
     builder.seed = hash01(b.id, 61) * 0.999 + (shed ? SHED_SEED : 0);
     const topPaint = linearHex(look.topN > 0 || look.baseN > 0 ? look.topBand : look.wall);
@@ -891,7 +894,7 @@ export function buildCityMass(city: ModernCityPayload, frame: CityMassFrame): Ci
     const designHip = b.farLook ? (look.crown === 2 && !tower) || (look.crown === 4 && !tower && b.floors <= 7) || (look.crown === 3 && !tower) : false;
     const planPitch = !b.farLook && (b.roof === "gable" || b.roof === "hip") && ring.length === 4;
     const pitched = (designHip || planPitch) && ring.length === 4;
-    const clay = b.farLook ? (look.terracotta ? TERRACOTTA : 0x6a6d70) : b.roof === "terracotta" ? TERRACOTTA : 0x7d5a4a;
+    const clay = b.farLook ? roof : b.roof === "terracotta" ? TERRACOTTA : 0x7d5a4a;
     const podiumTop = look.podiumFloors > 0 ? (look.shopM + look.podiumFloors * look.podiumStoreyM) * m : 0;
     const shaftRing = startM === 0 && podiumTop > 0 && podiumTop < total - 6 * m ? insetRing(ring, look.setbackM * m) : null;
     if (shaftRing) {

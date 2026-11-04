@@ -495,6 +495,17 @@ pub(crate) fn environment_for(site: &SiteClimate) -> Environment {
     }
 }
 
+/// The kerb-tree allocation of the zone a site falls in, as `(key, share)`, for
+/// the far-form crowns the terrain view draws from the plan alone.
+pub(crate) fn street_mix(site: &SiteClimate) -> Vec<(String, u32)> {
+    zone_for(site)
+        .planting
+        .street
+        .iter()
+        .map(|&(key, weight)| (key.to_string(), weight))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
