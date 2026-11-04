@@ -54,7 +54,7 @@ async function main() {
   const scene: CityScene = Array.isArray(data) ? data[0] : data;
 
   // Place one detail tree per species, at the prototype's own real size.
-  const pitch = 24;
+  const pitch = num("pitch", 24);
   const heights = new Map<string, number>();
   for (const list of scene.instances as Array<{ key: string; count: number; data: string }>) {
     const m = /^tree\/([^/]+)\/0$/.exec(list.key);
@@ -67,7 +67,7 @@ async function main() {
     const f = b64Floats(list.data);
     const scale = f[4];
     heights.set(m[1], scale);
-    const x = (i - (species.length - 1) / 2) * pitch - 5.5;
+    const x = (i - (species.length - 1) / 2) * pitch - pitch * 0.23;
     list.count = mode === "far" ? 0 : 1;
     list.data = floatsB64([x, 0, 0, 0.7, scale, scale, scale, 1, 1, 1]);
   }
@@ -96,6 +96,8 @@ async function main() {
 
   const materials = createMaterials(scene.textures);
   const city = buildCityScene(scene, materials);
+  // A tree view: the city's streets and buildings are not part of it.
+  if (params.get("statics") !== "1") for (const mesh of city.statics) mesh.visible = false;
   world.add(city.group);
 
   // The far crowns, in the layer's own vertex-colour material.
@@ -116,9 +118,25 @@ async function main() {
       }
     },
   };
+  Object.assign(sink, {
+    triSmooth(a: number[], b: number[], c: number[], na: number[], nb: number[], nc: number[], hex: number, shade = 1) {
+      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+      const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const flip = nx * (na[0] + nb[0] + nc[0]) + ny * (na[1] + nb[1] + nc[1]) + nz * (na[2] + nb[2] + nc[2]) < 0;
+      const pts = flip ? [a, c, b] : [a, b, c];
+      const ns = flip ? [na, nc, nb] : [na, nb, nc];
+      colour.setHex(hex);
+      for (let i = 0; i < 3; i += 1) {
+        positions.push(pts[i][0], pts[i][1], pts[i][2]);
+        normals.push(ns[i][0], ns[i][1], ns[i][2]);
+        colors.push(colour.r * shade, colour.g * shade, colour.b * shade);
+      }
+    },
+  });
   if (mode !== "near") {
     species.forEach((key, i) => {
-      const x = (i - (species.length - 1) / 2) * pitch + 5.5;
+      const x = (i - (species.length - 1) / 2) * pitch + pitch * 0.23;
       const size = speciesSize(key);
       const h = heights.get(key) ?? size.height;
       drawCrown(sink, x, 0, 0, h, size.crown, key, 0.37 + i * 0.11);

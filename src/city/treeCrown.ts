@@ -18,6 +18,8 @@
 
 export interface CrownSink {
   tri(a: number[], b: number[], c: number[], normal: number[], hex: number, shade?: number): void;
+  /** A triangle with a normal per corner; clumps use it to shade as rounded. */
+  triSmooth?(a: number[], b: number[], c: number[], na: number[], nb: number[], nc: number[], hex: number, shade?: number): void;
 }
 
 interface CrownSpecies {
@@ -54,10 +56,10 @@ const SPECIES: Record<string, CrownSpecies> = {
   "bai-hua": { form: "Open", leaf: 0x587254, bark: 0x93918c, height: 10.5, crown: 3.9, clear: 0.38 },
   "hu-yang": { form: "Open", leaf: 0x677150, bark: 0x7c7369, height: 11.5, crown: 5.5, clear: 0.30 },
   "sha-zao": { form: "Rounded", leaf: 0x6c755f, bark: 0x6c655d, height: 6.0, crown: 3.4, clear: 0.20 },
-  "zong-lu": { form: "Palm", leaf: 0x466140, bark: 0x655749, height: 6.0, crown: 1.8, clear: 0.80 },
-  "pu-kui": { form: "Palm", leaf: 0x4b673f, bark: 0x736c63, height: 9.0, crown: 2.6, clear: 0.82 },
-  "da-wang-ye": { form: "Palm", leaf: 0x456746, bark: 0x898682, height: 16.0, crown: 3.4, clear: 0.84 },
-  "ye-zi": { form: "Palm", leaf: 0x526c3f, bark: 0x79736a, height: 12.5, crown: 3.5, clear: 0.86 },
+  "zong-lu": { form: "Palm", leaf: 0x4d6c45, bark: 0x655749, height: 6.0, crown: 3.1, clear: 0.80 },
+  "pu-kui": { form: "Palm", leaf: 0x557345, bark: 0x736c63, height: 9.0, crown: 4.8, clear: 0.82 },
+  "da-wang-ye": { form: "Palm", leaf: 0x52794b, bark: 0x898682, height: 16.0, crown: 8.0, clear: 0.84 },
+  "ye-zi": { form: "Palm", leaf: 0x5d7e45, bark: 0x79736a, height: 12.5, crown: 7.0, clear: 0.86 },
   "mu-ma-huang": { form: "Conical", leaf: 0x4b6156, bark: 0x73695f, height: 17.0, crown: 4.0, clear: 0.40 },
   "zhu": { form: "Bamboo", leaf: 0x527144, bark: 0x6c804d, height: 8.0, crown: 2.3, clear: 0.35 },
   "lu-wei": { form: "Reed", leaf: 0x5d6f4b, bark: 0x898061, height: 2.9, crown: 1.2, clear: 0.10 },
@@ -185,6 +187,9 @@ function lump(
     return [cx + u[0] * rx * d, cy + u[1] * ry * d, cz + u[2] * rz * d];
   });
   const big = Math.max(rx, ry, rz);
+  // Corner normals: radial on the ellipsoid, so neighbouring facets shade as one
+  // rounded surface.
+  const vn = V.map((u) => unit([u[0] / rx * big, u[1] / ry * big, u[2] / rz * big]));
   for (let f = 0; f < F.length; f += 1) {
     const [i, j, k] = F[f];
     const centre = [
@@ -198,7 +203,9 @@ function lump(
     // Underside darkens (the clump's own occlusion and the sky it cannot see).
     const lit = 0.46 + 0.54 * (0.5 + 0.5 * n[1]);
     const jitter = 0.96 + 0.08 * hash(seed, f, 3.3);
-    out.tri(pts[i], pts[j], pts[k], n, mix(hex, jitter, (hash(seed, f, 9.1) - 0.5) * 0.25), shadeBase * lit);
+    const colour = mix(hex, jitter, (hash(seed, f, 9.1) - 0.5) * 0.25);
+    if (out.triSmooth) out.triSmooth(pts[i], pts[j], pts[k], vn[i], vn[j], vn[k], colour, shadeBase * lit);
+    else out.tri(pts[i], pts[j], pts[k], n, colour, shadeBase * lit);
   }
 }
 
@@ -221,8 +228,8 @@ function tier(
     const am = ((k + 0.5) / sides) * Math.PI * 2;
     const n = unit([Math.cos(am) * 0.7, 0.55, Math.sin(am) * 0.7]);
     const j = 0.92 + 0.16 * hash(seed, k, 6.6);
-    out.tri(apex, p1, p0, n, mix(hex, j, 0), 1.0);
-    out.tri(base, p0, p1, [n[0], -0.7, n[2]], mix(hex, 0.7, 0), 0.55);
+    out.tri(apex, p1, p0, n, mix(hex, j * 0.78, 0.6), 1.0);
+    out.tri(base, p0, p1, [n[0], -0.7, n[2]], mix(hex, 0.5, 0.6), 0.55);
   }
 }
 
@@ -288,16 +295,29 @@ export function drawCrown(
     lump(out, x, base + crownH * 0.58, z, radius * 0.95, crownH * 0.34, radius * 0.95, sd, leaf, 1, 0.14);
     lump(out, x, base + crownH * 0.28, z, radius * 0.86, crownH * 0.34, radius * 0.86, sd + 1, mix(leaf, 0.94, 0.2), 0.95, 0.20);
   } else if (form === "Palm") {
-    const top = ground + height * 0.82;
-    trunk(out, x, ground, z, top, Math.max(height * 0.016, 0.1 * radius), wood);
-    const fr = radius * 1.7;
-    for (let k = 0; k < 7; k += 1) {
-      const a = (k / 7) * Math.PI * 2 + hash(sd, k, 1.1);
-      const tip = [x + Math.cos(a) * fr, top - height * 0.07, z + Math.sin(a) * fr];
-      const w = fr * 0.28;
-      const l = [x + Math.cos(a + 1.5708) * w, top + height * 0.015, z + Math.sin(a + 1.5708) * w];
-      const r2 = [x + Math.cos(a - 1.5708) * w, top + height * 0.015, z + Math.sin(a - 1.5708) * w];
-      out.tri(tip, l, r2, [0, 1, 0], mix(leaf, 0.9 + 0.2 * hash(sd, k, 2.2), 0), 1.0);
+    const top = ground + height * 0.84;
+    trunk(out, x, ground, z, top, Math.max(height * 0.017, 0.08 * radius), mix(wood, 1.5, 0));
+    const fr = radius * 1.05;
+    // Two rings of fronds: the old, drooping ones outside and the new, upright
+    // ones inside, each a triangle bent over its midrib.
+    for (let ring = 0; ring < 2; ring += 1) {
+      const n = ring === 0 ? 9 : 6;
+      const reach = fr * (ring === 0 ? 1.0 : 0.62);
+      const lift = ring === 0 ? -height * 0.075 : height * 0.03;
+      for (let k = 0; k < n; k += 1) {
+        const a = (k / n) * Math.PI * 2 + hash(sd, k, 1.1) + ring * 0.4;
+        const w = reach * (ring === 0 ? 0.26 : 0.20);
+        const tip = [x + Math.cos(a) * reach, top + lift, z + Math.sin(a) * reach];
+        const mid = [x + Math.cos(a) * reach * 0.5, top + height * 0.035, z + Math.sin(a) * reach * 0.5];
+        const l = [mid[0] + Math.cos(a + 1.5708) * w, mid[1], mid[2] + Math.sin(a + 1.5708) * w];
+        const r2 = [mid[0] + Math.cos(a - 1.5708) * w, mid[1], mid[2] + Math.sin(a - 1.5708) * w];
+        const base = [x, top + height * 0.01, z];
+        const c = mix(leaf, 0.85 + 0.2 * hash(sd, k, 2.2), 0);
+        out.tri(base, l, mid, [0, 1, 0.2], c, 1.0);
+        out.tri(base, mid, r2, [0, 1, 0.2], c, 1.0);
+        out.tri(mid, l, tip, [0, 0.8, 0.3], c, 0.95);
+        out.tri(mid, tip, r2, [0, 0.8, 0.3], c, 0.95);
+      }
     }
   } else if (form === "Bamboo") {
     for (let k = 0; k < 3; k += 1) {

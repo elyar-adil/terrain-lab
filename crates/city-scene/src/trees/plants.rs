@@ -144,7 +144,15 @@ impl Plant<'_> {
 
     /// Card size in unit space, as the grower's `Plan::card`.
     fn card_size(&self) -> f32 {
-        card_tile_m(self.species) / self.height * 0.66
+        // Small plants carry proportionally larger sprays than trees do: a
+        // 0.2 m card on a 3 m bush is a speck, so the card grows with the crown.
+        let tile = card_tile_m(self.species);
+        let boost = match self.species.canopy {
+            Canopy::Shrub | Canopy::Bamboo => 2.1,
+            Canopy::Cushion => 1.6,
+            _ => 1.0,
+        };
+        tile * boost / self.height * 0.66
     }
 
     // -- palm -----------------------------------------------------------------
@@ -235,7 +243,7 @@ impl Plant<'_> {
         let collar = self.bark_colour(0.85);
         self.builder
             .tube(self.bark, top, collar_top, tr * 1.1, tr * 1.5, sides, Some(collar));
-        let length = if fan { crown_r * 0.62 } else { crown_r * 0.95 };
+        let length = if fan { crown_r * 0.58 } else { crown_r * 0.60 };
         let width = if fan { length * 0.55 } else { length * 0.36 };
         let spin = self.rng.range(0.0, TAU);
         for k in 0..fronds {
@@ -285,8 +293,8 @@ impl Plant<'_> {
             }
             // Leaf sprays on the upper third, hanging off short side twigs.
             let shoot_dir = (pts[steps] - pts[steps - 2]).normalized_or_up();
-            for j in 0..9 {
-                let t = 0.62 + 0.38 * (j as f32 / 8.0);
+            for j in 0..16 {
+                let t = 0.50 + 0.50 * (j as f32 / 15.0);
                 let idx = ((t * steps as f32) as usize).min(steps);
                 let c = pts[idx]
                     + Vec3::new(
@@ -362,9 +370,9 @@ impl Plant<'_> {
         let spread = self.r() * 1.7;
         let card = self.card_size();
         let cards_per_stem = match key {
-            "suo-suo" => 7,
-            "hong-shu" => 14,
-            _ => 11,
+            "suo-suo" => 9,
+            "hong-shu" => 22,
+            _ => 20,
         };
         let r0 = (self.trunk / self.height).max(0.004);
         let lift = if mangrove { 0.30 } else { 0.0 };
