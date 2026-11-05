@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isDesktop } from "./backend/invoke";
-import { isConstrainedDevice, listen, open, save } from "./platform";
+import { LIGHT_MODE_NOTICE, isConstrainedDevice, isSafeMode, listen, open, save } from "./platform";
 import {
   exportTerrain,
   fetchCityScene,
@@ -105,6 +105,8 @@ function App() {
   const [cityFocus, setCityFocus] = useState<{ xKm: number; yKm: number; spanKm: number; nonce: number; pitchDeg?: number; azimuthDeg?: number } | null>(null);
   const [citySceneIndex, setCitySceneIndex] = useState<number | null>(null);
   const viewportRef = useRef<HTMLElement>(null);
+  // Phone width: the two side panels are sheets over the viewport, opened from the top bar.
+  const [sheet, setSheet] = useState<"left" | "right" | null>(null);
 
   // Dev-only automation: null in every normal run (see src/devAutomation.ts).
   const [automation, setAutomation] = useState<Automation | null>(null);
@@ -242,14 +244,15 @@ function App() {
     setBusy(true);
     setError(null);
     setProgress(0.02);
-    setStatus("初始化原生计算核心");
+    setStatus(isConstrainedDevice ? `初始化计算核心 · ${LIGHT_MODE_NOTICE}` : "初始化原生计算核心");
     try {
       const next = await generateTerrain(config);
       setResult(next);
       setViewMode("3d");
       setCitySceneIndex(null);
       setProgress(1);
-      setStatus(`完成 · ${(next.elapsedMs / 1000).toFixed(2)} 秒`);
+      setStatus(`完成 · ${(next.elapsedMs / 1000).toFixed(2)} 秒${isConstrainedDevice ? ` · ${LIGHT_MODE_NOTICE}` : ""}`);
+      setSheet(null);
     } catch (reason) {
       setError(String(reason));
       setStatus("生成失败");
@@ -372,12 +375,14 @@ function App() {
           <button className="ghost" onClick={openExistingProject} disabled={busy}>打开</button>
           <button className="ghost" onClick={saveCurrentProject} disabled={busy}>保存</button>
           <button className="ghost" onClick={randomizeSeed} disabled={busy}>随机种子</button>
+          <button className="sheet-toggle" onClick={() => setSheet(sheet === "left" ? null : "left")}>参数</button>
+          <button className="sheet-toggle" onClick={() => setSheet(sheet === "right" ? null : "right")}>光照</button>
           <button className="primary" onClick={runGeneration} disabled={busy}>{busy ? "计算中…" : "生成地貌"}</button>
         </div>
       </header>
 
       <section className="workspace">
-        <aside className="sidebar left-panel">
+        <aside className={`sidebar left-panel${sheet === "left" ? " sheet-open" : ""}`}>
           <section>
             <div className="section-title"><span>地貌骨架</span><em>01</em></div>
             <div className="landform-grid">
@@ -422,11 +427,12 @@ function App() {
         <section className="viewport" ref={viewportRef}>
           {result ? (viewMode === "analysis" ? <img className="terrain-preview" src={result.analysisPreviews[analysisLayer]} alt={`${ANALYSIS_LAYERS[analysisLayer]}分析图层`} /> : <Terrain3D result={result} config={config} cameraMode={viewMode} cityFocus={cityFocus} cityScene={activeCityScene} shot={automation && (!automation.focus || cityFocus) ? automation : null} onShotReady={(detail) => { reportAutomation("ready", detail); if (automation?.exitAfterReadyMs !== undefined) window.setTimeout(() => reportAutomation("exit"), automation.exitAfterReadyMs); }} onNeedCity={(index) => { if (index === null) { setCitySceneIndex(null); } else { setCitySceneIndex((current) => (current === index ? current : index)); } }} />) : <div className="empty-state"><div className="contour-art" /><span>80 × 80 KM SYNTHETIC EARTH</span><h2>创造一片不存在，却足够真实的土地</h2><p>原生 Rust 地貌演化 · 河网推演 · 多尺度卫星辐射合成</p><button className="primary large" onClick={runGeneration}>生成第一片地貌</button></div>}
           {result && <div className="view-switcher">{(<><button className={viewMode === "3d" ? "active" : ""} onClick={() => setViewMode("3d")}>3D 地形</button><button className={viewMode === "satellite" ? "active" : ""} onClick={() => setViewMode("satellite")}>动态卫星</button><select className={viewMode === "analysis" ? "active" : ""} value={analysisLayer} onChange={(event) => { setAnalysisLayer(event.target.value as AnalysisLayer); setViewMode("analysis"); }}><option disabled>分析图层</option>{(Object.keys(ANALYSIS_LAYERS) as AnalysisLayer[]).map((layer) => <option key={layer} value={layer}>{ANALYSIS_LAYERS[layer]}</option>)}</select><select value="" className="city-jump" onChange={(event) => { const index = Number(event.target.value); const option = cityOptions[index]; if (option) jumpToCityOption(option, index); }}><option disabled value="">跳转城市</option>{cityOptions.map((option, index) => <option key={option.label} value={index}>{option.label}</option>)}</select></>)}<button onClick={toggleFullscreen}>全屏</button></div>}
+          {isConstrainedDevice && <div className="light-notice">{LIGHT_MODE_NOTICE}{isSafeMode ? " · 安全模式" : ""}</div>}
           <div className="viewport-meta"><span>{viewMode === "3d" ? "3D TERRAIN · VERTICAL 1:1 · LIVE WEATHER" : viewMode === "analysis" ? `SEMANTIC LAYER · ${ANALYSIS_LAYERS[analysisLayer]}` : "LIVE ORTHOGRAPHIC · SAME WORLD · SAME TIME"}</span><span>{citySceneLoading ? "正在加载城市细节…" : activeCityScene && citySceneIndex !== null ? `${cityOptions[citySceneIndex + 1]?.label ?? "城市"} · 米制细节已载入` : `${config.worldSizeKm} KM / ${config.gridSize} PX`}</span></div>
           {busy && <div className="progress-overlay"><div><span>{status}</span><b>{Math.round(progress * 100)}%</b></div><progress value={progress} max={1} /></div>}
         </section>
 
-        <aside className="sidebar right-panel">
+        <aside className={`sidebar right-panel${sheet === "right" ? " sheet-open" : ""}`}>
           <section>
             <div className="section-title"><span>光照与大气</span><em>04</em></div>
             <Slider label="太阳方位" value={config.sunAzimuth} min={0} max={359} unit="°" onChange={(v) => update("sunAzimuth", v)} />
@@ -462,7 +468,7 @@ function App() {
         </aside>
       </section>
 
-      <footer className="statusbar"><span className={error ? "error" : ""}>{error ?? status}</span><span>CORE 0.1 · LOCAL ONLY · NO TELEMETRY</span></footer>
+      <footer className="statusbar"><span className={error ? "error" : ""}>{error ?? status}{isSafeMode ? " · 上次 3D 视图被系统终止，已启用安全模式（?safe=0 恢复）" : ""}</span><span>CORE 0.1 · LOCAL ONLY · NO TELEMETRY</span></footer>
     </main>
   );
 }

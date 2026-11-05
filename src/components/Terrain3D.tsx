@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { isConstrainedDevice } from "../platform";
+import { useEffect, useRef, useState } from "react";
+import { isConstrainedDevice, isSafeMode, markMountFinished, markMountStarted } from "../platform";
 import * as THREE from "three";
 import { beginCityLayer, type CityLayer, type CityLayerBuild } from "../city/cityLayer";
 import { CityTileStreamer, tileDebug } from "../city/cityTiles";
@@ -329,10 +329,8 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
   const onShotReadyRef = useRef(onShotReady);
   onShotReadyRef.current = onShotReady;
 
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-
+  const [mountError, setMountError] = useState<string | null>(null);
+  const mountTerrain = (host: HTMLDivElement): (() => void) => {
     const scene = new THREE.Scene();
     const baseFogDensity = 0.085 + config.haze * 0.006;
     // 路口工坊移植:线性雾贴穹顶地平线色,距离随视野自适应(在 animate 中更新)。
@@ -354,11 +352,19 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     // 路口工坊移植:PCFSoft 阴影;太阳只随视野/时间低频刷新,不逐帧重绘。
-    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.enabled = !isSafeMode;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.shadowMap.autoUpdate = false;
     renderer.toneMappingExposure = 1.08;
     host.appendChild(renderer.domElement);
+    // What the device can actually do, checked before anything is allocated: the
+    // scene needs WebGL2, textures as large as the grid, and half-float textures.
+    const glCaps = renderer.capabilities;
+    if (!glCaps.isWebGL2) throw new Error("此浏览器没有 WebGL2，无法绘制 3D 地形。");
+    if (result.meshSize > glCaps.maxTextureSize) throw new Error(`此设备的最大纹理尺寸为 ${glCaps.maxTextureSize}，低于网格 ${result.meshSize}；请选择更小的网格。`);
+    // Half-float render targets (sky bake, HDR post chain) are the usual gap on phones.
+    const halfFloatTargets = renderer.extensions.has("EXT_color_buffer_float") || renderer.extensions.has("EXT_color_buffer_half_float");
+    const lightRender = isConstrainedDevice || isSafeMode;
     // A lost context leaves a transparent canvas that reads as a white frame. Say
     // so, and prevent the default so the browser may restore it.
     renderer.domElement.addEventListener("webglcontextlost", (event) => {
@@ -386,7 +392,14 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     scene.add(skyDome);
     // The lower half of the bake is the city floor, not more sky: with the dome's
     // own lower half every shaded wall was lit from below by blue sky.
-    scene.environment = bakeSkyEnvironment(renderer, skyMaterial);
+    try {
+      if (!halfFloatTargets && lightRender) throw new Error("no half-float render targets");
+      scene.environment = bakeSkyEnvironment(renderer, skyMaterial);
+    } catch (error) {
+      // Without the baked sky the lights alone shade the scene.
+      console.warn("[terrain3d] sky environment skipped", error);
+      scene.environment = null;
+    }
     // Shade is lit by sky and bounce alone. With environment 0.5, hemisphere 0.4
     // and fill 0.18 a sunlit wall was only 2.3 times its shaded side, where a clear
     // day gives 4 - 6 (skylight 15 - 25 % of the total); every frame looked hazy,
@@ -414,7 +427,7 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     // `?ao=0` turns the occlusion pass off, for diagnosis.
     const aoOff = new URLSearchParams(window.location.search).get("ao") === "0";
     try {
-      if (isConstrainedDevice || new URLSearchParams(window.location.search).get("post") === "0") throw new Error("post disabled for diagnosis");
+      if (isConstrainedDevice || !halfFloatTargets || new URLSearchParams(window.location.search).get("post") === "0") throw new Error("post disabled for diagnosis");
       const composerTarget = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, samples: 4 });
       const post = new EffectComposer(renderer, composerTarget);
       post.setPixelRatio(renderer.getPixelRatio());
@@ -516,7 +529,7 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
 
     const texture = new THREE.TextureLoader().load(result.previewDataUrl);
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    texture.anisotropy = Math.min(lightRender ? 4 : 16, renderer.capabilities.getMaxAnisotropy());
     const terrainMaterial = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.96, metalness: 0.0 });
     // The heightfield as a texture (metres above the lowest point, half float so
     // it filters everywhere). The fragment shader marches it along the sun
@@ -873,6 +886,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     const vegetationExclusion = decodeBytes(result.vegetationExclusionDataBase64);
     // Forest prototypes come from Rust (`farTrees`, species records shared with
     // the city's near trees); regional stands use the few-dozen-triangle LOD.
+    const regionalTreeCap = isSafeMode ? 0 : isConstrainedDevice ? 12_000 : 45_000;
     const regionalSet = buildFarTreeSet(result.farTrees, 2, metresToScene);
     const treeMaterial = regionalSet.material;
     const treeMatrices: THREE.Matrix4[] = [];
@@ -886,7 +900,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       for (let x = 1; x + 1 < result.meshSize; x += 1) {
         const index = y * result.meshSize + x;
         const density = forestValues[index] / 255;
-        if (vegetationExclusion[index] > 32 || density < 0.38 || hash01(x, y, 1) > density * 0.62 || treeMatrices.length >= 45_000) continue;
+        if (vegetationExclusion[index] > 32 || density < 0.38 || hash01(x, y, 1) > density * 0.62 || treeMatrices.length >= regionalTreeCap) continue;
         const jitterX = (hash01(x, y, 2) - 0.5) * 0.86;
         const jitterY = (hash01(x, y, 3) - 0.5) * 0.86;
         const worldX = -1.6 + (x + jitterX) / (result.meshSize - 1) * 3.2;
@@ -932,7 +946,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     // the texture supplies the canopy at satellite scale, the mesh above marks
     // regional stands, and this local layer streams individual trees around the
     // camera target. World-aligned cells keep trees stable while panning.
-    const detailTreeCapacity = 32_000;
+    const detailTreeCapacity = isSafeMode ? 0 : isConstrainedDevice ? 6_000 : 32_000;
     // Two streamed LODs: about 600 triangles per tree while the patch is a few
     // hundred metres across, about 110 beyond that. Both share one material.
     const detailSets = [buildFarTreeSet(result.farTrees, 0, metresToScene), buildFarTreeSet(result.farTrees, 1, metresToScene)];
@@ -1445,7 +1459,12 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     // Prefer the rich ModernCity graph when available. `cities` remains the
     // compatibility projection sent by older Rust builds, so selecting one
     // source avoids drawing every building and road twice.
-    const renderCities = result.modernCities?.length
+    // On a phone the per-city merged layers (up to 8000 buildings, every street) are
+    // left out: the metre-scale city streams in as tiles when the camera is near it,
+    // and a city's far form is built for the one city in view (see cityMasses).
+    const renderCities = isConstrainedDevice
+      ? []
+      : result.modernCities?.length
       ? result.modernCities.map((city) => ({
           style: "modernChinese" as const,
           streets: [],
@@ -1862,7 +1881,15 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     // silhouette (same footprints, heights and street lines as the metre-scale
     // scene) at every zoom, with nothing to load. The detailed scene replaces it
     // in place once mounted, instead of a city appearing from a patch of texture.
-    const cityMasses: Array<CityMass | null> = (result.modernCities ?? []).map((plan) => {
+    // Each mass is built from JS arrays (about 35 MB of heap per city, 700 MB for the
+    // twenty of a payload), which is what killed phone tabs at the moment the scene
+    // appeared. On a phone a city's mass is built only while the camera is within
+    // `MASS_VIEW_DISTANCE_M` of it, one at a time, and dropped when it leaves; safe
+    // mode builds none. Desktops build all of them up front, as before.
+    const modernPlans = result.modernCities ?? [];
+    const cityMasses: Array<CityMass | null> = modernPlans.map(() => null);
+    const buildMass = (index: number) => {
+      const plan = modernPlans[index];
       const mass = buildCityMass(plan, {
         toScene: (xKm, yKm) => [(xKm - cityHalfExtentKm) * kilometreToScene, (yKm - cityHalfExtentKm) * kilometreToScene],
         heightAt: terrainHeightAt,
@@ -1870,9 +1897,37 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       });
       scene.add(mass.mesh);
       if (mass.water) scene.add(mass.water);
-      return mass;
-    });
+      cityMasses[index] = mass;
+    };
+    const dropMass = (index: number) => {
+      const mass = cityMasses[index];
+      if (!mass) return;
+      scene.remove(mass.mesh);
+      if (mass.water) scene.remove(mass.water);
+      mass.dispose();
+      cityMasses[index] = null;
+    };
+    const MASS_VIEW_DISTANCE_M = 9000;
+    let massFrame = 0;
+    const streamCityMasses = () => {
+      massFrame += 1;
+      if (isSafeMode || massFrame % 30 !== 1) return;
+      let nearest = -1;
+      let nearestDistance = MASS_VIEW_DISTANCE_M;
+      modernPlans.forEach((_plan, index) => {
+        const site = citySites[index];
+        if (!site) return;
+        const dx = (site.xKm - cityHalfExtentKm) * kilometreToScene - camera.position.x;
+        const dz = (site.yKm - cityHalfExtentKm) * kilometreToScene - camera.position.z;
+        const distance = Math.hypot(dx, dz) * sceneToMetres;
+        if (distance < nearestDistance) { nearestDistance = distance; nearest = index; }
+      });
+      cityMasses.forEach((mass, index) => { if (mass && index !== nearest) dropMass(index); });
+      if (nearest >= 0 && !cityMasses[nearest]) buildMass(nearest);
+    };
+    if (!isConstrainedDevice) modernPlans.forEach((_plan, index) => buildMass(index));
     const updateCityMasses = () => {
+      if (isConstrainedDevice) streamCityMasses();
       const detailed = cityLayer ? cityLoadedRef.current : null;
       cityMasses.forEach((mass, index) => {
         const site = citySites[index];
@@ -3745,6 +3800,8 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     // Dev-only: counts settled frames for the automation's ready marker.
     const shotState = { applied: false, settled: 0, frames: 0, reported: false, startedAt: performance.now() };
     let frameCounter = 0;
+    let mountFrames = 0;
+    let mountMarked = false;
     const animate = () => {
       const delta = clock.getDelta();
       worldTime += delta;
@@ -4059,6 +4116,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
         renderer.render(scene, camera);
       }
       framePerf.end();
+      if (!mountMarked && (mountFrames += 1) >= 3) { mountMarked = true; markMountFinished(); }
       if (shotSpec && !shotState.reported) {
         shotState.frames += 1;
         const focusWanted = cityFocusRef.current?.nonce ?? 0;
@@ -4191,9 +4249,43 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       shadowGeometry.dispose();
       shadowMaterial.dispose();
       renderer.dispose();
+      // A browser keeps a limited number of live contexts (and their memory) per page;
+      // on a phone a view switch must hand the old one back.
+      if (isConstrainedDevice) renderer.forceContextLoss();
       renderer.domElement.remove();
     };
+  };
+
+  // Building the scene allocates most of the page's memory, so on a phone it is the
+  // step that gets the tab killed. A marker written before and cleared once frames
+  // are drawn lets the next load start in safe mode (see platform.ts); a failure that
+  // can be caught is shown instead of leaving a blank view.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    setMountError(null);
+    markMountStarted();
+    try {
+      return mountTerrain(host);
+    } catch (error) {
+      console.error("[terrain3d] mount failed", error);
+      host.replaceChildren();
+      markMountFinished();
+      setMountError(error instanceof Error ? error.message : String(error));
+      return undefined;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result, cameraMode, config.cloudCoverage, config.cloudSpeed, config.haze, config.sunAzimuth, config.sunElevation, config.windDirection]);
 
-  return <div ref={hostRef} className="terrain-3d" />;
+  return (
+    <div ref={hostRef} className="terrain-3d">
+      {mountError ? (
+        <div className="mount-error" role="alert">
+          <strong>3D 视图无法在此设备上启动</strong>
+          <span>{mountError}</span>
+          <small>可切换到「动态卫星」或分析图层查看同一片地貌，或在设置中降低网格后重新生成。</small>
+        </div>
+      ) : null}
+    </div>
+  );
 }

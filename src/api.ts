@@ -1,9 +1,38 @@
 import { invoke, isDesktop } from "./backend/invoke";
+import { isConstrainedDevice } from "./platform";
 import type { CityScene } from "./city/cityScene";
 import type { GenerationResult, ProjectDocument, SimulationConfig } from "./types";
 
+let previewUrls: string[] = [];
+
 export async function generateTerrain(config: SimulationConfig): Promise<GenerationResult> {
-  return invoke<GenerationResult>("generate_terrain", { config });
+  const result = await invoke<GenerationResult>("generate_terrain", { config });
+  if (isConstrainedDevice) await moveAnalysisPreviewsToBlobs(result);
+  return result;
+}
+
+/**
+ * The sixteen analysis images arrive as PNG data URLs (about 1.4 MB of strings at
+ * 256 and 5 MB at 512) that are only shown when the analysis tab is open. On a phone
+ * they are moved into blobs, so the page keeps short URLs and the bytes live outside
+ * the JS heap.
+ */
+async function moveAnalysisPreviewsToBlobs(result: GenerationResult): Promise<void> {
+  for (const url of previewUrls) URL.revokeObjectURL(url);
+  previewUrls = [];
+  const previews = result.analysisPreviews as Record<string, string>;
+  for (const key of Object.keys(previews)) {
+    const value = previews[key];
+    if (typeof value !== "string" || !value.startsWith("data:")) continue;
+    try {
+      const blob = await (await fetch(value)).blob();
+      const url = URL.createObjectURL(blob);
+      previewUrls.push(url);
+      previews[key] = url;
+    } catch {
+      // Keep the data URL: slower to hold, still correct.
+    }
+  }
 }
 
 /**

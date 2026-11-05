@@ -68,3 +68,54 @@ export const isConstrainedDevice: boolean = (() => {
     return false;
   }
 })();
+
+export const LIGHT_MODE_NOTICE = "该设备内存有限，已使用轻量模式";
+
+/**
+ * A tab the system killed while the 3D scene was mounting cannot say so itself.
+ * The scene writes a marker before it builds and clears it once frames are being
+ * drawn; finding the marker on the next load means the last build was fatal, and
+ * the page then starts in safe mode (no city silhouettes, no trees, no shadow
+ * map) instead of repeating it. `?safe=0` clears it, `?safe=1` forces it.
+ */
+const MOUNT_MARKER = "terrainLab.mounting";
+const SAFE_MARKER = "terrainLab.safeMode";
+const storage = (): Storage | null => {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+};
+
+export const crashedLastTime: boolean = (() => {
+  try {
+    const store = storage();
+    const forced = new URLSearchParams(window.location.search).get("safe");
+    if (forced === "0") {
+      store?.removeItem(SAFE_MARKER);
+      store?.removeItem(MOUNT_MARKER);
+      return false;
+    }
+    if (forced === "1") return true;
+    if (!isConstrainedDevice || !store) return false;
+    if (store.getItem(MOUNT_MARKER)) {
+      store.removeItem(MOUNT_MARKER);
+      store.setItem(SAFE_MARKER, "1");
+    }
+    return store.getItem(SAFE_MARKER) === "1";
+  } catch {
+    return false;
+  }
+})();
+
+/** Phones start light; a phone whose tab died during a 3D mount also drops the heavy layers. */
+export const isSafeMode: boolean = crashedLastTime;
+
+export function markMountStarted(): void {
+  if (isConstrainedDevice) storage()?.setItem(MOUNT_MARKER, String(Date.now()));
+}
+
+export function markMountFinished(): void {
+  storage()?.removeItem(MOUNT_MARKER);
+}

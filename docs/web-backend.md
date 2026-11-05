@@ -137,3 +137,20 @@ node scripts/web-shot.mjs --url http://localhost:4173/terrain-lab/ --out /tmp/sh
 
 `dist-web/` is deployed to the `gh-pages` branch root. Build output is never committed
 to `main`.
+
+## Phones (iOS Safari)
+
+A phone tab is killed at roughly 1-1.5 GB. Measured in headless Chromium at 256^2 with
+`?mobile=1`, the 3D scene's mount alone took the JS heap to about 1.86 GB: `buildCityMass`
+(src/city/cityMass.ts) builds each city's far form from JS number arrays, about 35 MB
+each, 20 cities per payload. The constrained path (`isConstrainedDevice`, platform.ts)
+therefore builds a city's mass only while the camera is within 9 km of it, one at a time,
+skips the per-city merged layers, caps tree instances (12k regional, 6k streamed), limits
+anisotropy to 4, and moves the analysis PNGs into blob URLs. After the change the same
+run peaks at about 260 MB heap. Desktop and Tauri take the unchanged path.
+
+Capability checks (WebGL2, max texture size vs. grid, half-float render targets) run
+before allocation; a failure to mount shows a message in the view. A marker in
+localStorage written before the mount and cleared after three frames makes the next load
+start in safe mode (no masses, no trees, no shadow map) if the tab died in between;
+`?safe=0` clears it.
