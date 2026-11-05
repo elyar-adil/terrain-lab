@@ -1,7 +1,7 @@
 //! Print the railways and airport of generated worlds: the statistics the
 //! transport design study names for validation.
 //!
-//! cargo run --release -p infrastructure --example transport_report -- [seed] [plains|plateau|coastal] [grid]
+//! cargo run --release -p infrastructure --example transport_report -- [seed] [plains|plateau|coastal|mountain] [grid]
 
 use infrastructure::generate_infrastructure;
 use terrain_core::{Landform, SimulationConfig, TerrainPreset, generate};
@@ -13,6 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let landform = match args.get(2).map(String::as_str) {
         Some("plateau") => Landform::Plateau,
         Some("coastal") => Landform::Coastal,
+        Some("mountain") => Landform::MountainRange,
         _ => Landform::Plains,
     };
     let grid_size: usize = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(256);
@@ -36,16 +37,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data = generate_infrastructure(&terrain, &config)?;
     println!("seed {seed} {landform:?} grid {grid_size}: {} settlements", data.settlements.len());
     for r in &data.railways {
-        let mut crossings = [0; 2];
+        let mut crossings = [0; 3];
         for c in &r.crossings {
             crossings[c.treatment as usize] += 1;
         }
         let straight = ((r.points[0].x_km - r.points.last().unwrap().x_km).hypot(r.points[0].y_km - r.points.last().unwrap().y_km))
             / r.length_km.max(1e-3);
         println!(
-            "rail {} {:?} {}->{} len {:.1} km circ {:.2} Rmin {:.0} grade {:.2}% stations {} crossings level {} over {} | viaduct {:.0}% bridge {:.0}% tunnel {:.0}% emb {:.0}% cut {:.0}%",
+            "rail {} {:?} {}->{} len {:.1} km circ {:.2} Rmin {:.0} grade {:.2}% stations {} crossings level {} over {} under {} | mountain {:.1} km fill {:.0} m depth {:.0} m | viaduct {:.0}% bridge {:.0}% tunnel {:.0}% emb {:.0}% cut {:.0}%",
             r.id, r.kind, r.from_settlement, r.to_settlement, r.length_km, 1.0 / straight.max(1e-3),
-            r.min_radius_m, r.max_grade * 100.0, r.stations.len(), crossings[0], crossings[1],
+            r.min_radius_m, r.max_grade * 100.0, r.stations.len(), crossings[0], crossings[1], crossings[2],
+            r.mountain_m / 1000.0,
+            r.points.iter().map(|p| p.design_m - p.ground_m).fold(0.0_f32, f32::max),
+            r.points.iter().map(|p| p.ground_m - p.design_m).fold(0.0_f32, f32::max),
             r.share(RailGround::Viaduct) * 100.0, r.share(RailGround::Bridge) * 100.0,
             r.share(RailGround::Tunnel) * 100.0, r.share(RailGround::Embankment) * 100.0,
             r.share(RailGround::Cutting) * 100.0

@@ -27,6 +27,10 @@ pub struct RailLimits {
     pub min_radius_m: f32,
     /// Ruling gradient of the design profile, metres per metre.
     pub max_grade: f32,
+    /// Steepest gradient of a mountain section (a pass the ruling grade cannot
+    /// reach without kilometres of deep tunnel), worked with banking or
+    /// double heading on conventional lines.
+    pub mountain_grade: f32,
     pub track_spacing_m: f32,
     pub platform_length_m: f32,
     pub platform_height_m: f32,
@@ -47,6 +51,7 @@ impl RailKind {
                 design_speed_kmh: 300.0,
                 min_radius_m: 5000.0,
                 max_grade: 0.020,
+                mountain_grade: 0.030,
                 track_spacing_m: 5.0,
                 platform_length_m: 450.0,
                 platform_height_m: 1.25,
@@ -61,6 +66,7 @@ impl RailKind {
                 design_speed_kmh: 160.0,
                 min_radius_m: 1200.0,
                 max_grade: 0.012,
+                mountain_grade: 0.025,
                 track_spacing_m: 4.0,
                 platform_length_m: 650.0,
                 platform_height_m: 1.10,
@@ -75,6 +81,7 @@ impl RailKind {
                 design_speed_kmh: 120.0,
                 min_radius_m: 800.0,
                 max_grade: 0.012,
+                mountain_grade: 0.025,
                 track_spacing_m: 4.0,
                 platform_length_m: 650.0,
                 platform_height_m: 1.10,

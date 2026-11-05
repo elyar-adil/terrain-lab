@@ -78,7 +78,19 @@ of which become code:
    difference is too large. We route on the ground (cost rises with the ground
    gradient along the line and with cross-slope) and then fit a design grade
    line that satisfies the ruling grade by construction. Cut/fill is the
-   difference.
+   difference. The grade line is the highest one that stays under the
+   smoothed ground (a grade-limited lower envelope), then raised for bridges,
+   road crossings and soft ground where the line is near the surface: a climb
+   steeper than the grade becomes a cutting or tunnel, never a kilometre-high
+   fill. Bounds above a line already more than 10 m down in tunnel are
+   dropped (the river or road passes over it).
+4. **Mountain sections [sim].** Where the line at its ruling grade would be
+   more than 60 m under the ground, the approaches on either side (long enough
+   to climb that depth at the extra grade, 3–25 km) are refitted at the
+   class mountain grade: 30 ‰ HSR (the TB 10621 limit), 25 ‰ conventional
+   (banking / double heading). The summit tunnel is then short and high, as on
+   a real line over a pass. `Railway::mountain_m` is the length worked steeper
+   than the ruling grade. Development (spirals, zigzags) is not modelled.
 3. **Structures from the difference, not from decoration.**
    - Embankment where the design is above ground by up to 9 m; viaduct when
      the fill would exceed 9 m, over rivers (river order ≥ 2 or open water),
@@ -95,6 +107,8 @@ of which become code:
 | Input (terrain-core / infrastructure) | Effect |
 |---|---|
 | `height` along the line | design grade line, cut/fill, structures |
+| `height` against the line's reach | route cost: ground higher than a line at 25 ‰ can climb to from either end is tunnel; it costs 6 open-line cells per cell plus one per 100 m of excess height, and the surface slope there no longer counts, so routes seek the lowest pass |
+| travel cost between towns | the network's spanning tree joins towns by least travel cost over the terrain (not straight-line distance), so a range is crossed once, where it is cheapest |
 | local slope (`slope_ratio`) and cross-slope | route cost; cross-slope above 25 % is side-hill cut and is penalised |
 | `water`, `river_order`, `lake` | bridge or viaduct; no embankment across a lake; ocean cells forbidden with a buffer |
 | `wetland`, `floodplain` | soft ground: cost up, viaduct when the line cannot avoid it |
@@ -160,7 +174,8 @@ Station layout (GB 50091 / TB10621):
 ### 2.6 Validation statistics (railways)
 
 1. Max design grade along every line ≤ class limit (equals, within 1e-4, by
-   construction; the test checks the stored profile).
+   construction; the test checks the stored profile); above the ruling grade
+   only on a line with a mountain section, and never above the mountain grade.
 2. Min radius along every line ≥ class `R_min` (computed from the stored
    centreline by three-point circles at 100 m spacing).
 3. Fraction of line length on structure, by kind (a real HSR on plains is 40–

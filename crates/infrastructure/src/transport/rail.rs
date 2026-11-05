@@ -79,6 +79,9 @@ pub struct Railway {
     pub min_radius_m: f32,
     /// Steepest grade of the design profile, metres per metre.
     pub max_grade: f32,
+    /// Length of line worked at the class mountain grade, metres.
+    #[serde(default)]
+    pub mountain_m: f32,
 }
 
 impl Railway {
@@ -154,6 +157,16 @@ impl Railway {
 
 // --- routing ---------------------------------------------------------------
 
+/// The grade routes are planned for: the conventional lines' mountain grade
+/// (high-speed lines are steeper-capable, so a route that suits them suits
+/// both). Above the height a line at this grade can reach is tunnel.
+const ROUTE_GRADE: f32 = 0.025;
+/// A cell of tunnel costs this many cells of open line on level ground...
+const TUNNEL_CELL_COST: f32 = 6.0;
+/// ...plus one more for every this many metres of rock above the line, so a
+/// lower pass wins over a shorter crossing under the high peaks.
+const TUNNEL_COST_DEPTH_M: f32 = 100.0;
+
 struct Router {
     n: usize,
     cell_m: f32,
@@ -187,7 +200,7 @@ impl Ord for Node {
 /// railway cost surface, used for roads that serve transport sites.
 pub fn route_between(world: &World, urban_land: &[f32], from: P, to: P) -> Option<Vec<P>> {
     let router = Router::new(world, urban_land, &[]);
-    router.route(from, to, None, None)
+    router.route(from, to, None, None, ROUTE_GRADE)
 }
 
 impl Router {
@@ -264,10 +277,22 @@ impl Router {
     }
 
     /// Least-cost path of cell centres with a turning penalty (rail curves).
-    fn route(&self, from: P, to: P, dir0: Option<P>, dir1: Option<P>) -> Option<Vec<P>> {
+    ///
+    /// Ground higher than a line at `grade` can climb to from either end
+    /// (straight-line distance, so an upper bound) can only be passed in
+    /// tunnel; its cost grows with that excess height, which steers the
+    /// line to low passes and around ranges instead of under them.
+    fn route(&self, from: P, to: P, dir0: Option<P>, dir1: Option<P>, grade: f32) -> Option<Vec<P>> {
         let (sx, sy) = self.cell(from);
         let (ex, ey) = self.cell(to);
         let n = self.n;
+        let (hs, he) = (self.height[sy * n + sx], self.height[ey * n + ex]);
+        let reach = |cell: usize| -> f32 {
+            let (cx, cy) = ((cell % n) as f32, (cell / n) as f32);
+            let d0 = (cx - sx as f32).hypot(cy - sy as f32) * self.cell_m;
+            let d1 = (cx - ex as f32).hypot(cy - ey as f32) * self.cell_m;
+            (hs + grade * d0).min(he + grade * d1)
+        };
         let states = 9;
         let dirs: [(i32, i32); 8] = [
             (1, 0),
@@ -335,9 +360,16 @@ impl Router {
                 let c0 = self.cost[cell];
                 let c1 = self.cost[ncell];
                 let run = len * self.cell_m;
-                let grade = ((self.height[ncell] - self.height[cell]) / run).abs();
-                let step = len * 0.5 * (c0 + c1) + 90.0 * (grade - 0.012).max(0.0) * len
-                    + (turn * turn) as f32 * 2.2;
+                let step_grade = ((self.height[ncell] - self.height[cell]) / run).abs();
+                let over = self.height[ncell] - reach(ncell);
+                let ground = if over > TUNNEL_DEPTH_M {
+                    // Only in tunnel: the surface (its slopes, valleys and
+                    // land) no longer matters, the tunnel's length and depth do.
+                    len * (TUNNEL_CELL_COST + over / TUNNEL_COST_DEPTH_M)
+                } else {
+                    len * 0.5 * (c0 + c1) + 90.0 * (step_grade - 0.012).max(0.0) * len
+                };
+                let step = ground + (turn * turn) as f32 * 2.2;
                 let ns = ncell * states + d;
                 let t = dist[node.state] + step;
                 if t < dist[ns] {
@@ -353,6 +385,9 @@ impl Router {
         if end_state == usize::MAX {
             return None;
         }
+        if std::env::var("RAIL_DEBUG").is_ok() {
+            eprintln!("route ({sx},{sy})->({ex},{ey}) cost {} hs {hs} he {he}", dist[end_state]);
+        }
         let mut path = vec![end_state / states];
         let mut cur = end_state;
         while cur != start {
@@ -365,6 +400,42 @@ impl Router {
                 .map(|c| [(c % n) as f32 * self.cell_m, (c / n) as f32 * self.cell_m])
                 .collect(),
         )
+    }
+
+    /// Least travel cost from `from` to every cell over the open-line cost
+    /// surface (no curvature or tunnel model): ranks which towns are near each
+    /// other for a line, so a range between them counts and a plain does not.
+    fn travel_costs(&self, from: P) -> Vec<f32> {
+        let n = self.n;
+        let (sx, sy) = self.cell(from);
+        let mut dist = vec![f32::INFINITY; n * n];
+        let mut q = BinaryHeap::new();
+        dist[sy * n + sx] = 0.0;
+        q.push(Node { f: 0.0, state: sy * n + sx });
+        while let Some(Node { f, state: cell }) = q.pop() {
+            if f > dist[cell] {
+                continue;
+            }
+            let (cx, cy) = ((cell % n) as i32, (cell / n) as i32);
+            for oy in -1..=1_i32 {
+                for ox in -1..=1_i32 {
+                    let (x, y) = (cx + ox, cy + oy);
+                    if (ox == 0 && oy == 0) || x < 0 || y < 0 || x >= n as i32 || y >= n as i32 {
+                        continue;
+                    }
+                    let ncell = y as usize * n + x as usize;
+                    let len = if ox != 0 && oy != 0 { 1.414 } else { 1.0 };
+                    let grade = ((self.height[ncell] - self.height[cell]) / (len * self.cell_m)).abs();
+                    let t = f + len * 0.5 * (self.cost[cell] + self.cost[ncell])
+                        + 90.0 * (grade - 0.012).max(0.0) * len;
+                    if t < dist[ncell] {
+                        dist[ncell] = t;
+                        q.push(Node { f: t, state: ncell });
+                    }
+                }
+            }
+        }
+        dist
     }
 
     fn h(&self, cell: usize, ex: usize, ey: usize) -> f32 {
@@ -463,8 +534,16 @@ pub fn plan_railways(
         return Vec::new();
     }
     let router = Router::new(world, urban_land, &nodes);
-    // Spanning tree by distance from the regional centre (node 0).
+    // Spanning tree from the regional centre (node 0) by travel cost over the
+    // terrain, so towns on the same side of a range join up first and the
+    // range is crossed once, where it is cheapest.
     let m = nodes.len();
+    let reach: Vec<Vec<f32>> = nodes.iter().map(|nd| router.travel_costs(nd.centre)).collect();
+    let link_cost = |a: usize, b: usize| -> f32 {
+        let (bx, by) = router.cell(nodes[b].centre);
+        let (ax, ay) = router.cell(nodes[a].centre);
+        0.5 * (reach[a][by * router.n + bx] + reach[b][ay * router.n + ax])
+    };
     let mut in_tree = vec![false; m];
     in_tree[0] = true;
     let mut edges: Vec<(usize, usize)> = Vec::new();
@@ -472,7 +551,7 @@ pub fn plan_railways(
         let mut best: Option<(f32, usize, usize)> = None;
         for a in (0..m).filter(|a| in_tree[*a]) {
             for b in (0..m).filter(|b| !in_tree[*b]) {
-                let d = g::dist(nodes[a].centre, nodes[b].centre);
+                let d = link_cost(a, b);
                 if best.is_none_or(|(bd, _, _)| d < bd) {
                     best = Some((d, a, b));
                 }
@@ -575,7 +654,7 @@ pub fn plan_railways(
         let b = g::add_scaled(site.s, site.dir, fwd);
         if j > 0 {
             let from = *verts.last().map(|v| &v.0).unwrap();
-            match router.route(from, a, Some(sites[j - 1].dir), Some(site.dir)) {
+            match router.route(from, a, Some(sites[j - 1].dir), Some(site.dir), ROUTE_GRADE) {
                 Some(path) => push_interior(&router, &mut verts, &mut straight, from, a, &path),
                 None => {
                     if std::env::var("RAIL_DEBUG").is_ok() {
@@ -728,7 +807,7 @@ fn branch(
     let site = site_for(router, &nodes[child], child, dir);
     let a = g::add_scaled(site.s, site.dir, -STUB_M);
     let b = g::add_scaled(site.s, site.dir, TERMINAL_OVERRUN_M);
-    let path = router.route(kp, a, Some(along), Some(site.dir))?;
+    let path = router.route(kp, a, Some(along), Some(site.dir), ROUTE_GRADE)?;
     let mut verts: Vec<(P, Pin)> = vec![(jp, Pin::Fixed), (kp, Pin::Fixed)];
     let mut straight = vec![false, false];
     push_interior(router, &mut verts, &mut straight, kp, a, &path);
@@ -775,6 +854,10 @@ fn moving_average(v: &[f32], half: usize) -> Vec<f32> {
     }
     out
 }
+
+/// A line this far under the ground at its ruling grade is crossing a range:
+/// the approaches are refitted at the class mountain grade.
+const MOUNTAIN_TRIGGER_M: f32 = 60.0;
 
 /// Below this depth under the ground the line is in tunnel, and the raises
 /// for rivers, roads and soft ground above it no longer apply.
@@ -1027,7 +1110,38 @@ fn finish(
         ));
     }
 
-    let design = fit_profile(&ground, &lo, &limit, STEP_M, start_height);
+    let mut design = fit_profile(&ground, &lo, &limit, STEP_M, start_height);
+    // Mountain sections: where the ruling grade leaves the line deep in rock,
+    // the climb on either side is worked at the class mountain grade so the
+    // summit tunnel is short and high, as a real line over a pass is built.
+    let mut mountain = vec![false; n];
+    for _ in 0..2 {
+        let deep: Vec<usize> = (0..n)
+            .filter(|&i| ground[i] - design[i] > MOUNTAIN_TRIGGER_M)
+            .collect();
+        if deep.is_empty() {
+            break;
+        }
+        for &i in &deep {
+            // The approach long enough to climb that depth at the extra grade.
+            let gain = (limits.mountain_grade - limits.max_grade).max(1.0e-3);
+            let pad = (((ground[i] - design[i]) / gain).clamp(3000.0, 25_000.0) / STEP_M) as usize;
+            for flag in mountain.iter_mut().take((i + pad + 1).min(n)).skip(i.saturating_sub(pad)) {
+                *flag = true;
+            }
+        }
+        for i in 0..n {
+            // Stations keep their level platform grade.
+            if mountain[i] && limit[i] > limits.max_grade - 1.0e-6 {
+                limit[i] = limits.mountain_grade;
+            }
+        }
+        design = fit_profile(&ground, &lo, &limit, STEP_M, start_height);
+    }
+    let mountain_m = (0..n.saturating_sub(1))
+        .filter(|&i| (design[i + 1] - design[i]).abs() > limits.max_grade * STEP_M + 1.0e-3)
+        .count() as f32
+        * STEP_M;
     let max_grade = design
         .windows(2)
         .map(|w| (w[1] - w[0]).abs() / STEP_M)
@@ -1133,5 +1247,6 @@ fn finish(
         crossings,
         min_radius_m: min_radius,
         max_grade,
+        mountain_m,
     })
 }
