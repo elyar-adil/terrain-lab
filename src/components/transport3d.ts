@@ -4,7 +4,7 @@
 // widths from any camera.
 
 import * as THREE from "three";
-import type { RenderAirport, RenderRailway } from "../types";
+import type { RenderAirport, RenderRailLine, RenderRailway } from "../types";
 
 export interface TransportContext {
   metresToScene: number;
@@ -38,6 +38,29 @@ class Batch {
 function quad2(batch: Batch, a: number[], b: number[], c: number[], d: number[]) {
   batch.quad(a, b, c, d);
   batch.quad(d, c, b, a);
+}
+
+/** The whole line as one unbroken polyline, seen at any distance (through towns too). */
+export function buildRailLines(lines: RenderRailLine[], ctx: TransportContext) {
+  const group = new THREE.Group();
+  const geometries: THREE.BufferGeometry[] = [];
+  const half = ctx.worldSizeKm * 0.5;
+  const material = new THREE.LineBasicMaterial({ color: 0x2b2a28 });
+  for (const line of lines) {
+    const positions: number[] = [];
+    line.pathKm.forEach(([kx, kz], i) => {
+      const x = (kx - half) * 1000 * ctx.metresToScene;
+      const z = (kz - half) * 1000 * ctx.metresToScene;
+      positions.push(x, ctx.terrainHeightAt(x, z) + (Math.max(line.fillM[i], 0) + 6) * ctx.metresToScene, z);
+    });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometries.push(geometry);
+    const mesh = new THREE.Line(geometry, material);
+    mesh.frustumCulled = false;
+    group.add(mesh);
+  }
+  return { group, geometries, materials: [material] as THREE.Material[] };
 }
 
 export function buildRailways(railways: RenderRailway[], ctx: TransportContext) {
@@ -259,8 +282,6 @@ export function buildAirport(airport: RenderAirport, ctx: TransportContext) {
   };
   const L = airport.runwayLengthM * 0.5;
   const W = airport.runwayWidthM;
-  const grass = layer("grass", 0x6f8751, -1, 1);
-  flat(grass, airport.platform.x0, airport.platform.x1, airport.platform.z0, airport.platform.z1, 0.02);
   const shoulder = layer("shoulder", 0x4c4d50, -2, 2);
   flat(shoulder, -L, L, -airport.pavedWidthM / 2, airport.pavedWidthM / 2, 0.05);
   const asphalt = layer("asphalt", 0x37383b, -3, 3);

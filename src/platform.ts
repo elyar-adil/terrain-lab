@@ -51,3 +51,20 @@ export async function open(options: OpenOptions): Promise<string | null> {
     input.click();
   });
 }
+
+/**
+ * Phones and tablets: a browser tab there is killed at roughly 1-1.5 GB, so the
+ * browser build starts with a small grid and a light render path (no MSAA, no
+ * ambient-occlusion pass, pixel ratio 1). `?mobile=0` / `?mobile=1` override.
+ */
+export const isConstrainedDevice: boolean = (() => {
+  try {
+    const forced = new URLSearchParams(window.location.search).get("mobile");
+    if (forced === "0") return false;
+    if (forced === "1") return true;
+    const ua = navigator.userAgent;
+    return /iPhone|iPad|iPod|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  } catch {
+    return false;
+  }
+})();

@@ -159,8 +159,31 @@ impl Line {
         self.head_at(s) - HEAD_ABOVE_GROUND >= 4.0
     }
 
+    /// A point `off` metres to the left of the line at station `s` and `lift`
+    /// above its rail head. The direction is blended between the segments
+    /// either side of a vertex, so offset edges (platforms, ballast) run
+    /// smoothly round a curve instead of stepping at every vertex.
     fn point(&self, s: f32, off: f32, lift: f32) -> Vec3 {
-        self.path.offset_at(s, off, lift)
+        let (p, _) = self.path.sample(s);
+        let pts = self.path.points();
+        let i = self
+            .stations
+            .partition_point(|st| *st <= s)
+            .saturating_sub(1)
+            .min(pts.len() - 2);
+        let seg = |k: usize| {
+            Vec2::new(pts[k + 1].x - pts[k].x, pts[k + 1].z - pts[k].z).normalize()
+        };
+        let at_vertex = |k: usize| {
+            let a = if k > 0 { seg(k - 1) } else { seg(0) };
+            let b = if k + 1 < pts.len() { seg(k) } else { seg(pts.len() - 2) };
+            (a + b).normalize()
+        };
+        let span = (self.stations[i + 1] - self.stations[i]).max(1.0e-3);
+        let t = ((s - self.stations[i]) / span).clamp(0.0, 1.0);
+        let d = (at_vertex(i) * (1.0 - t) + at_vertex(i + 1) * t).normalize();
+        let n = d.left_normal();
+        Vec3::new(p.x + n.x * off, p.y + lift, p.z + n.y * off)
     }
 }
 

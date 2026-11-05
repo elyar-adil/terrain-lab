@@ -56,6 +56,7 @@ export interface GenerationResult {
   roadDataBase64: string;
   roads: RenderRoad[];
   railways?: RenderRailway[];
+  railLines?: RenderRailLine[];
   airport?: RenderAirport | null;
   cities: UrbanModel[];
   /** High-detail Chinese city graph emitted by the Rust urban generator. */
@@ -127,6 +128,9 @@ export interface RenderRailway {
     plan: { sM: number; platformLengthM: number; tracks: number; buildingSide: number; terminal: boolean; yard: boolean };
   }>;
 }
+
+/** A railway's whole alignment, unbroken, for the far view. */
+export interface RenderRailLine { id: number; pathKm: [number, number][]; fillM: number[] }
 
 export interface RenderRect { x0: number; x1: number; z0: number; z1: number; heightM: number }
 /** Airfield layout in a frame at the runway midpoint: x along the runway, z toward the terminal. */

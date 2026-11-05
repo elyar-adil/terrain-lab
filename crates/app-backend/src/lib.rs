@@ -54,6 +54,8 @@ pub struct GenerationResult {
     /// Railway lines outside the towns' own plans: alignment, design level
     /// and structure per point, in world kilometres and metres.
     pub railways: Vec<RenderRailway>,
+    /// Each line's whole alignment, unbroken, for the far view.
+    pub rail_lines: Vec<RenderRailLine>,
     /// The airport's layout (`urban::AirfieldPlan` fields) with its access road.
     pub airport: Option<serde_json::Value>,
     pub cities: serde_json::Value,
@@ -132,6 +134,26 @@ pub struct RenderRailway {
     /// 0 at grade, 1 embankment, 2 cutting, 3 viaduct, 4 bridge, 5 tunnel.
     structure: Vec<u8>,
     stations: Vec<infrastructure::transport::rail::RailStation>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderRailLine {
+    id: u32,
+    path_km: Vec<[f32; 2]>,
+    fill_m: Vec<f32>,
+}
+
+fn render_rail_lines(infrastructure: &InfrastructureData) -> Vec<RenderRailLine> {
+    infrastructure
+        .railways
+        .iter()
+        .map(|rw| RenderRailLine {
+            id: rw.id,
+            path_km: rw.points.iter().step_by(4).map(|p| [p.x_km, p.y_km]).collect(),
+            fill_m: rw.points.iter().step_by(4).map(|p| p.design_m - p.ground_m).collect(),
+        })
+        .collect()
 }
 
 fn render_railways(infrastructure: &InfrastructureData) -> Vec<RenderRailway> {
@@ -709,16 +731,16 @@ fn paint_transport(
             let a = to_px(pair[0].x_km, pair[0].y_km);
             let b = to_px(pair[1].x_km, pair[1].y_km);
             let colour = if matches!(pair[0].ground, urban::RailGround::Viaduct | urban::RailGround::Bridge) {
-                [168.0, 165.0, 158.0]
+                [92.0, 90.0, 86.0]
             } else {
-                [120.0, 114.0, 104.0]
+                [62.0, 58.0, 52.0]
             };
             draw_line_alpha(
                 image,
                 (a.0.round() as i32, a.1.round() as i32),
                 (b.0.round() as i32, b.1.round() as i32),
                 colour,
-                (width_px * 0.8).clamp(0.45, 1.0),
+                (width_px * 1.2).clamp(0.8, 1.0),
             );
         }
     }
@@ -1364,6 +1386,7 @@ pub fn build_payload(
         road_data_base64: STANDARD.encode(road_bytes),
         roads: render_roads(&infrastructure),
         railways: render_railways(&infrastructure),
+        rail_lines: render_rail_lines(&infrastructure),
         airport: render_airport(&infrastructure),
         cities: serde_json::to_value(&infrastructure.cities).map_err(|error| error.to_string())?,
         city_sites,

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { isConstrainedDevice } from "../platform";
 import * as THREE from "three";
 import { beginCityLayer, type CityLayer, type CityLayerBuild } from "../city/cityLayer";
 import { CityTileStreamer, tileDebug } from "../city/cityTiles";
@@ -22,7 +23,7 @@ import { buildFarTreeSet } from "./farTrees";
 import { createGroundCover } from "./groundCover";
 import { FARM_GLSL, FarmCrop, farmPlot } from "./farmland";
 import type { Automation } from "../devAutomation";
-import { buildAirport, buildRailways } from "./transport3d";
+import { buildAirport, buildRailLines, buildRailways } from "./transport3d";
 import type { GenerationResult, SimulationConfig, UrbanBuilding, UrbanLane, UrbanPoint, UrbanRoad, VegetationPrototypePayload } from "../types";
 
 function decodeHeights(base64: string): Float32Array {
@@ -348,8 +349,8 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
       camera.position.set(3.15, 1.65, 3.15);
     }
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const renderer = new THREE.WebGLRenderer({ antialias: !isConstrainedDevice, powerPreference: "high-performance" });
+    renderer.setPixelRatio(isConstrainedDevice ? 1 : Math.min(window.devicePixelRatio, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     // 路口工坊移植:PCFSoft 阴影;太阳只随视野/时间低频刷新,不逐帧重绘。
@@ -413,7 +414,7 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     // `?ao=0` turns the occlusion pass off, for diagnosis.
     const aoOff = new URLSearchParams(window.location.search).get("ao") === "0";
     try {
-      if (new URLSearchParams(window.location.search).get("post") === "0") throw new Error("post disabled for diagnosis");
+      if (isConstrainedDevice || new URLSearchParams(window.location.search).get("post") === "0") throw new Error("post disabled for diagnosis");
       const composerTarget = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, samples: 4 });
       const post = new EffectComposer(renderer, composerTarget);
       post.setPixelRatio(renderer.getPixelRatio());
@@ -3411,6 +3412,8 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     const railBuilt = buildRailways(result.railways ?? [], transportContext);
     railBuilt.group.visible = false;
     scene.add(railBuilt.group);
+    const railLinesBuilt = buildRailLines(result.railLines ?? [], transportContext);
+    scene.add(railLinesBuilt.group);
     const airportBuilt = result.airport ? buildAirport(result.airport, transportContext) : null;
     if (airportBuilt) scene.add(airportBuilt.group);
 
@@ -3530,7 +3533,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     const sun = new THREE.DirectionalLight(0xfff1d6, 1.95);
     sun.position.set(Math.sin(azimuth) * Math.cos(elevation) * 5, Math.sin(elevation) * 5, Math.cos(azimuth) * Math.cos(elevation) * 5);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(isConstrainedDevice ? 1024 : 2048, isConstrainedDevice ? 1024 : 2048);
     sun.shadow.camera.near = 0.001;
     sun.shadow.camera.far = 12;
     sun.shadow.bias = -0.0003;
@@ -3966,6 +3969,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       const cityStreetFade = smoothFadeIn(viewSpanMetres, 650, 7_500);
       roadSurfaceGroup.visible = roadSurfaceFade > 0.001;
       railBuilt.group.visible = roadSurfaceFade > 0.001;
+      railLinesBuilt.group.visible = roadSurfaceFade < 0.999;
       roadMarkingGroup.visible = roadMarkingFade > 0.001;
       cityStreetGroup.visible = false; // legacy renderer, retired: the Rust city layer draws cities
       cityDetailGroup.visible = false; // legacy renderer, retired: the Rust city layer draws cities
@@ -4168,7 +4172,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       for (const cityRiverGeometry of cityRiverGeometries) cityRiverGeometry.dispose();
       cityRiverMaterial.dispose();
       for (const roadGeometry of roadGeometries) roadGeometry.dispose();
-      for (const built of [railBuilt, airportBuilt]) {
+      for (const built of [railBuilt, railLinesBuilt, airportBuilt]) {
         if (!built) continue;
         for (const geometry of built.geometries) geometry.dispose();
         for (const material of built.materials) material.dispose();

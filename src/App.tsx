@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isDesktop } from "./backend/invoke";
-import { listen, open, save } from "./platform";
+import { isConstrainedDevice, listen, open, save } from "./platform";
 import {
   exportTerrain,
   fetchCityScene,
@@ -39,7 +39,7 @@ const DEFAULT_CONFIG: SimulationConfig = {
   seed: 284735,
   preset: "temperate",
   landform: "mountainRange",
-  gridSize: 512,
+  gridSize: isConstrainedDevice ? 256 : 512,
   worldSizeKm: 80,
   rainfall: PRESETS.temperate.rainfall,
   evaporation: PRESETS.temperate.evaporation,
@@ -215,8 +215,7 @@ function App() {
     // The city's detail streams in as tiles around the camera (Terrain3D). It must not
     // also be requested as a whole scene here: that mounted the entire city (every
     // building, up to 9 million triangles) on top of the tiles, drawing it twice.
-    const sceneIndex = optionIndex - 1;
-    if (sceneIndex >= 0) { setCitySceneIndex(sceneIndex); setViewMode("3d"); }
+    if (optionIndex >= 1) setViewMode("3d");
   };
 
   const update = <K extends keyof SimulationConfig>(key: K, value: SimulationConfig[K]) => {
@@ -284,7 +283,6 @@ function App() {
           xKm: option.xKm, yKm: option.yKm, spanKm: focus.spanKm ?? option.spanKm, nonce: Date.now(),
           pitchDeg: focus.pitchDeg, azimuthDeg: focus.azimuthDeg,
         });
-        if (focus.option >= 1) setCitySceneIndex(focus.option - 1);
       }
     }
     // The non-3D views have no Terrain3D to report from: say so after a beat.
@@ -405,7 +403,7 @@ function App() {
           <section>
             <div className="section-title"><span>计算域</span><em>03</em></div>
             <label className="select-control"><span>模拟网格</span><select value={config.gridSize} onChange={(e) => update("gridSize", Number(e.target.value))} disabled={busy}>
-              <option value={512}>512² · 快速</option><option value={1024}>1024² · 精细</option><option value={2048}>2048² · 专业</option>
+              {isConstrainedDevice ? <option value={256}>256² · 手机</option> : null}<option value={512}>512² · 快速</option>{isConstrainedDevice ? null : <><option value={1024}>1024² · 精细</option><option value={2048}>2048² · 专业</option></>}
             </select></label>
             <Slider label="区域尺度" value={config.worldSizeKm} min={20} max={160} step={10} unit=" km" onChange={(v) => update("worldSizeKm", v)} />
             <div className="domain-note"><span>物理分辨率</span><b>{metresPerPixel} m/cell</b></div>

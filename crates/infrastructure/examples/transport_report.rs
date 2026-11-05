@@ -60,7 +60,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
         None => println!("no airport site"),
     }
+    for r in &data.railways {
+        for st in &r.stations {
+            let p = r.points.iter().min_by(|a, b| (a.s_m - st.plan.s_m).abs().total_cmp(&(b.s_m - st.plan.s_m).abs())).unwrap();
+            println!("  rail {} station of settlement {} at ({:.2}, {:.2}) km, {} tracks, ground {:?}", r.id, st.settlement, p.x_km, p.y_km, st.plan.tracks, p.ground);
+        }
+    }
+    if let Some(a) = &data.airport {
+        println!("  airport centre ({:.2}, {:.2}) km axis ({:.2}, {:.2})", a.plan.centre.x_km, a.plan.centre.y_km, a.plan.axis[0], a.plan.axis[1]);
+    }
+    for s in data.settlements.iter().take(4) {
+        println!("  settlement {} {:?} at grid {:?}", s.id, s.class, s.location);
+    }
     for (i, c) in data.modern_cities.iter().enumerate().take(4) {
+        for corridor in &c.rail {
+            let line = corridor.local_line(c);
+            let st = corridor.stations.first();
+            let at = |s: f32| {
+                let k = corridor.vertices.iter().position(|v| v.s_m >= s).unwrap_or(0);
+                line[k]
+            };
+            if let Some(st) = st {
+                println!("  city {i} station local {:?}, -300 m {:?}, +300 m {:?}, side {}", at(st.s_m), at(st.s_m - 300.0), at(st.s_m + 300.0), st.building_side);
+            }
+            let mid = corridor.vertices[corridor.vertices.len() / 2].s_m;
+            println!("  city {i} corridor mid {:?} ground {:?} above {:.1}", at(mid), corridor.vertices[corridor.vertices.len() / 2].ground, corridor.vertices[corridor.vertices.len() / 2].above_ground_m);
+        }
         println!("city {i}: {} rail corridors, {} buildings", c.rail.len(), c.buildings.len());
     }
     Ok(())
