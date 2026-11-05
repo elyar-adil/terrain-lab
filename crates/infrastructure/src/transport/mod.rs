@@ -129,8 +129,14 @@ mod tests {
                 lines += 1;
                 let limits = r.kind.limits();
                 assert!(
-                    r.max_grade <= limits.max_grade + 1.0e-4,
+                    r.max_grade <= limits.mountain_grade + 1.0e-4,
                     "{:?} grade {} over {}",
+                    r.kind, r.max_grade, limits.mountain_grade
+                );
+                // Steeper than the ruling grade only on mountain sections.
+                assert!(
+                    r.max_grade <= limits.max_grade + 1.0e-4 || r.mountain_m > 0.0,
+                    "{:?} grade {} over the ruling {} without a mountain section",
                     r.kind, r.max_grade, limits.max_grade
                 );
                 // Three-point circles over 100 m on 25 m samples are slightly tight on arcs.
