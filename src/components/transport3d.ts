@@ -120,8 +120,10 @@ export function buildRailways(railways: RenderRailway[], ctx: TransportContext) 
           slopes.quad(at(i, side * w, lift), lo(i, run), lo(j, runJ), at(j, side * w, lift));
         }
         if (elevated) {
-          const down = (k: number) => [at(k, side * w, 0)[0], pts[k].y0, at(k, side * w, 0)[2]];
-          walls.quad(at(i, side * w, lift), at(j, side * w, lift), down(j), down(i));
+          // The deck's girder face (about 2.5 m deep); the piers carry it, so the
+          // side is not a solid wall down to the ground.
+          const girder = (k: number) => Math.max(0, Math.min(pts[k].fill, 2.5));
+          walls.quad(at(i, side * w, lift), at(j, side * w, lift), at(j, side * w, -girder(j)), at(i, side * w, -girder(i)));
         }
         for (const gauge of [-1, 1]) {
           const o = sp * (side) + gauge * 0.75;

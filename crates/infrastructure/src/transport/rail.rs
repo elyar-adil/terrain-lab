@@ -49,6 +49,8 @@ pub enum CrossingTreatment {
     LevelProtected,
     /// The line passes over the road on a structure.
     RailOverRoad,
+    /// The line is in tunnel or a deep cutting under the road.
+    RoadOverRail,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -774,30 +776,52 @@ fn moving_average(v: &[f32], half: usize) -> Vec<f32> {
     out
 }
 
-/// Design grade line: follows the smoothed ground, never steeper than the
-/// per-sample grade limit, never below the lower bounds.
+/// Below this depth under the ground the line is in tunnel, and the raises
+/// for rivers, roads and soft ground above it no longer apply.
+const TUNNEL_DEPTH_M: f32 = 10.0;
+
+/// Design grade line: the highest line, never steeper than the per-sample
+/// grade limit, that stays under the smoothed ground; then raised to the lower
+/// bounds where the line is near the surface.
+///
+/// Fitting under the ground means a climb steeper than the ruling grade is a
+/// cutting or tunnel, never an embankment: a line that must cross a 1,700 m
+/// pass at 1.2 % goes through a base tunnel instead of standing on a
+/// kilometre-high viaduct across the plain on either side.
 fn fit_profile(ground: &[f32], lo: &[f32], limit: &[f32], ds: f32, start: Option<f32>) -> Vec<f32> {
     let n = ground.len();
-    let mut h = moving_average(ground, 32);
-    if let Some(h0) = start {
-        for (i, v) in h.iter_mut().enumerate().take(24) {
-            let w = 1.0 - i as f32 / 24.0;
-            *v = *v * (1.0 - w) + h0 * w;
-        }
-    }
     let lim = |i: usize, j: usize| limit[i].min(limit[j]) * ds;
-    for _ in 0..3 {
+    // Smoothed, but never above the ground by more than a low bank.
+    let mut h: Vec<f32> = moving_average(ground, 32)
+        .iter()
+        .zip(ground)
+        .map(|(m, g)| m.min(g + 3.0))
+        .collect();
+    // Grade-limited lower envelope (exact in two passes along a line).
+    for i in 1..n {
+        h[i] = h[i].min(h[i - 1] + lim(i - 1, i));
+    }
+    for i in (0..n - 1).rev() {
+        h[i] = h[i].min(h[i + 1] + lim(i, i + 1));
+    }
+    // A branch leaves its parent at the junction's level.
+    if let Some(h0) = start {
+        h[0] = h0;
         for i in 1..n {
             let l = lim(i - 1, i);
-            h[i] = h[i].clamp(h[i - 1] - l, h[i - 1] + l);
-        }
-        for i in (0..n - 1).rev() {
-            let l = lim(i, i + 1);
-            h[i] = h[i].clamp(h[i + 1] - l, h[i + 1] + l);
+            let v = h[i].clamp(h[i - 1] - l, h[i - 1] + l);
+            if v == h[i] {
+                break;
+            }
+            h[i] = v;
         }
     }
+    // Raises (bridges, road crossings, soft ground) only where the line is not
+    // already passing beneath in tunnel; the ramps up to them keep the grade.
     for i in 0..n {
-        h[i] = h[i].max(lo[i]);
+        if lo[i].is_finite() && h[i] > ground[i] - TUNNEL_DEPTH_M {
+            h[i] = h[i].max(lo[i]);
+        }
     }
     for i in 1..n {
         h[i] = h[i].max(h[i - 1] - lim(i - 1, i));
@@ -1013,9 +1037,11 @@ fn finish(
     let mut kinds = vec![RailGround::AtGrade; n];
     for i in 0..n {
         let d = design[i] - ground[i];
-        kinds[i] = if bridge[i] {
+        // Deep under the ground the river, road or town is above the tunnel.
+        let surface = d > -TUNNEL_DEPTH_M;
+        kinds[i] = if bridge[i] && surface {
             RailGround::Bridge
-        } else if crossing_bridge[i] || elevated_urban[i] || d > 9.0 || (lo[i].is_finite() && d >= 5.0) {
+        } else if (surface && (crossing_bridge[i] || elevated_urban[i])) || d > 9.0 || (lo[i].is_finite() && d >= 5.0) {
             RailGround::Viaduct
         } else if d > 1.0 {
             RailGround::Embankment
@@ -1064,14 +1090,16 @@ fn finish(
     let crossings: Vec<RailRoadCrossing> = raw
         .iter()
         .map(|c| {
-            let sep = design[c.i] - ground[c.i] >= 5.0;
+            let above = design[c.i] - ground[c.i];
             RailRoadCrossing {
                 road_id: roads[c.road].id,
                 s_m: s[c.i],
                 x_km: c.point[0] / 1000.0,
                 y_km: c.point[1] / 1000.0,
-                treatment: if sep {
+                treatment: if above >= 5.0 {
                     CrossingTreatment::RailOverRoad
+                } else if above <= -6.5 {
+                    CrossingTreatment::RoadOverRail
                 } else {
                     CrossingTreatment::LevelProtected
                 },

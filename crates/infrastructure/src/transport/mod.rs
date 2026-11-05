@@ -159,6 +159,9 @@ mod tests {
                         super::rail::CrossingTreatment::RailOverRoad => {
                             assert!(over >= 5.0, "rail over road with only {over} m")
                         }
+                        super::rail::CrossingTreatment::RoadOverRail => {
+                            assert!(over <= -6.5, "road over rail with the line only {over} m down")
+                        }
                         super::rail::CrossingTreatment::LevelProtected => {
                             assert!(!limits.closed, "level crossing on a closed line")
                         }
