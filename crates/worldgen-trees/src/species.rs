@@ -143,7 +143,7 @@ pub const SPECIES: &[Species] = &[
     },
     species! {
         key: "yin-xing", name_zh: "银杏", name_en: "Ginkgo", habit: Habit::Fan, leaf: LeafForm::Fan,
-        bark: bark([0.200, 0.190, 0.175], 0.30), foliage: [0.083, 0.157, 0.052], autumn: Some([0.320, 0.225, 0.030]), bloom: None,
+        bark: bark([0.200, 0.190, 0.175], 0.30), foliage: [0.083, 0.157, 0.052], autumn: Some([0.480, 0.360, 0.035]), bloom: None,
         height_m: (12.0, 20.0), crown_m: (4.5, 6.5), trunk_m: (0.24, 0.38), clear_stem: 0.44, leaf_cover: 3.0,
         leaf_len_m: 0.07, leaf_aspect: 1.25, evergreen: false, leaf_out: 0.30, leaf_fall: 0.84, street_tolerant: true,
     },
@@ -155,7 +155,7 @@ pub const SPECIES: &[Species] = &[
     },
     species! {
         key: "huai-shu", name_zh: "槐树", name_en: "Scholar tree", habit: Habit::Rounded, leaf: LeafForm::Pinnate,
-        bark: bark([0.185, 0.175, 0.160], 0.60), foliage: [0.067, 0.149, 0.049], autumn: Some([0.260, 0.190, 0.070]), bloom: None,
+        bark: bark([0.185, 0.175, 0.160], 0.60), foliage: [0.067, 0.149, 0.049], autumn: Some([0.250, 0.250, 0.060]), bloom: None,
         height_m: (10.0, 16.0), crown_m: (5.5, 8.0), trunk_m: (0.28, 0.40), clear_stem: 0.34, leaf_cover: 3.6,
         leaf_len_m: 0.22, leaf_aspect: 0.32, evergreen: false, leaf_out: 0.32, leaf_fall: 0.87, street_tolerant: true,
     },
@@ -280,6 +280,23 @@ pub const SPECIES: &[Species] = &[
         bark: bark([0.150, 0.130, 0.110], 0.80), foliage: [0.063, 0.146, 0.048], autumn: Some([0.300, 0.250, 0.060]), bloom: None,
         height_m: (4.0, 8.0), crown_m: (2.4, 4.0), trunk_m: (0.10, 0.20), clear_stem: 0.30, leaf_cover: 2.6,
         leaf_len_m: 0.05, leaf_aspect: 0.50, evergreen: false, leaf_out: 0.36, leaf_fall: 0.86, street_tolerant: false,
+    },
+    // Appended, never inserted: a tree's seed is derived from its species index.
+    // The two commonest street trees of a north-Chinese city that the table
+    // lacked; a city planting either got a camphor in its place, a black-green
+    // evergreen dome where the street should turn gold in October.
+    species! {
+        key: "bai-la", name_zh: "白蜡", name_en: "Chinese ash", habit: Habit::Rounded, leaf: LeafForm::Pinnate,
+        bark: bark([0.190, 0.180, 0.165], 0.65), foliage: [0.072, 0.152, 0.050], autumn: Some([0.420, 0.320, 0.045]), bloom: None,
+        height_m: (10.0, 16.0), crown_m: (5.0, 7.5), trunk_m: (0.24, 0.38), clear_stem: 0.36, leaf_cover: 3.2,
+        leaf_len_m: 0.24, leaf_aspect: 0.34, evergreen: false, leaf_out: 0.33, leaf_fall: 0.85, street_tolerant: true,
+    },
+    species! {
+        key: "luan-shu", name_zh: "栾树", name_en: "Goldenrain tree", habit: Habit::Rounded, leaf: LeafForm::Pinnate,
+        bark: bark([0.165, 0.150, 0.135], 0.70), foliage: [0.070, 0.150, 0.050], autumn: Some([0.400, 0.260, 0.050]),
+        bloom: Some(Bloom { colour: [0.620, 0.520, 0.080], density: 0.30, at: 0.55 }),
+        height_m: (8.0, 14.0), crown_m: (4.5, 7.0), trunk_m: (0.22, 0.34), clear_stem: 0.34, leaf_cover: 3.0,
+        leaf_len_m: 0.26, leaf_aspect: 0.36, evergreen: false, leaf_out: 0.33, leaf_fall: 0.86, street_tolerant: true,
     },
 ];
 

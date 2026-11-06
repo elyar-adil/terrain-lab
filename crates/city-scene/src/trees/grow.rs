@@ -339,12 +339,16 @@ impl<'a, 'b> Grower<'a, 'b> {
                     // not one flat grey cylinder.
                     let facet = 0.90 + 0.10 * ((side * 7 + ring * 13) as f32 * 0.618).sin();
                     let colour = self.bark_colour(facet);
+                    // Wound a, d, c, b: counter-clockwise from outside the
+                    // tube. The other order put every face inside-out, and a
+                    // single-sided flat-shaded trunk then showed its far
+                    // inner wall, lit from the wrong side.
                     self.builder.quad_shaded(
                         self.bark,
                         (a.0, a.1),
-                        (b.0, b.1),
-                        (c.0, c.1),
                         (d.0, d.1),
+                        (c.0, c.1),
+                        (b.0, b.1),
                         Some(colour),
                     );
                 }

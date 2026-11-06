@@ -1440,3 +1440,54 @@ fn no_tree_stands_under_a_viaduct_deck() {
         }
     }
 }
+
+/// Bark triangles wind counter-clockwise seen from outside the limb, so their
+/// geometric normal agrees with the outward vertex normal.  The renderer draws
+/// bark single-sided and flat-shaded (normal from the triangle itself): a tube
+/// wound the other way shows its inside faces, lit from the wrong side, which
+/// is the black, inside-out trunk the street view had.
+#[test]
+fn bark_faces_point_outward() {
+    let (prototypes, meshes) = built();
+    for prototype in &prototypes {
+        for mesh in groups_of(&meshes, prototype, "bark") {
+            let p = |i: u32| {
+                let i = i as usize * 3;
+                [
+                    mesh.positions[i],
+                    mesh.positions[i + 1],
+                    mesh.positions[i + 2],
+                ]
+            };
+            let n = |i: u32| {
+                let i = i as usize * 3;
+                [mesh.normals[i], mesh.normals[i + 1], mesh.normals[i + 2]]
+            };
+            let (mut agree, mut total) = (0usize, 0usize);
+            for tri in mesh.indices.chunks_exact(3) {
+                let (a, b, c) = (p(tri[0]), p(tri[1]), p(tri[2]));
+                let e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                let e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                let g = [
+                    e1[1] * e2[2] - e1[2] * e2[1],
+                    e1[2] * e2[0] - e1[0] * e2[2],
+                    e1[0] * e2[1] - e1[1] * e2[0],
+                ];
+                let v = n(tri[0]);
+                let dot = g[0] * v[0] + g[1] * v[1] + g[2] * v[2];
+                if dot.abs() < 1.0e-9 {
+                    continue;
+                }
+                total += 1;
+                if dot > 0.0 {
+                    agree += 1;
+                }
+            }
+            assert!(
+                agree as f32 >= total as f32 * 0.95,
+                "{}#bark: only {agree} of {total} triangles face outward",
+                prototype.key
+            );
+        }
+    }
+}

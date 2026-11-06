@@ -187,10 +187,10 @@ pub fn asphalt_texture(size: usize) -> BakedTexture {
     }
 }
 
-/// Footway paving: small grey concrete bricks, 0.1 x 0.2 m, in running bond.
+/// Footway paving: grey concrete pavers, 0.25 x 0.125 m, in running bond.
 ///
 /// This is the surface a Chinese street footway really has (the 透水砖 /
-/// 广场砖 of every city's sidewalk): a mid-grey brick about 100 x 200 mm, laid
+/// 广场砖 of every city's sidewalk): a mid-grey paver about 250 x 125 mm, laid
 /// in courses parallel to the kerb, with narrow dark, gritty joints.  The
 /// previous bake drew 250 x 500 mm slabs at 60 % brightness, which read as a
 /// pale tiled floor; the real thing is darker, finer and far more mottled.
@@ -198,8 +198,8 @@ pub fn asphalt_texture(size: usize) -> BakedTexture {
 /// The long side of a brick runs along `V`, which on a footway is along the
 /// street (`Uvs::Frame`).
 ///
-/// * **Value** — brick face about 21-27 % linear (sRGB 125-145), a cool neutral
-///   grey, joints about 8 % (sRGB ~62).
+/// * **Value** — paver face about 30 % linear (sRGB ~150), a cool neutral
+///   grey; joints about 6 % (sRGB ~65), drawn as sub-texel coverage.
 /// * **Brick to brick** — every unit is a slightly different batch: a wide tone
 ///   spread, a few clearly darker (wet or oil-stained) and a few paler ones.
 /// * **Face** — pressed-in grit, a lighter worn arris and a darker lower edge,
@@ -209,13 +209,13 @@ pub fn asphalt_texture(size: usize) -> BakedTexture {
 ///   brick grid up.
 pub fn paving_texture(size: usize) -> BakedTexture {
     let mut rgba = vec![0_u8; size * size * 4];
-    // 4 m per tile: 0.2 m bricks along V (20 per tile), 0.1 m across U (40).
-    let brick_len = size as f32 / 20.0;
-    let brick_wid = size as f32 / 40.0;
+    // 4 m per tile: 0.25 m pavers along V (16 per tile), 0.125 m across U (32).
+    let brick_len = size as f32 / 16.0;
+    let brick_wid = size as f32 / 32.0;
     // A joint is about 6 mm wide, a fraction of a texel at any bake size, so it
     // is drawn as coverage (a darker texel on the brick edge) and never as a
-    // whole-texel line that would swallow a tenth-metre brick.
-    let joint = (size as f32 * 0.0015).max(0.45);
+    // whole-texel line that would swallow a paver an eighth of a metre wide.
+    let joint = (size as f32 * 0.0015).max(0.65);
     for v in 0..size {
         for u in 0..size {
             // Courses run along `V`: the bond is drawn with the axes swapped.
@@ -230,18 +230,18 @@ pub fn paving_texture(size: usize) -> BakedTexture {
             let column = (shifted / brick_len).floor();
             let local_x = shifted - column * brick_len;
             let local_y = y - row * brick_wid;
-            let (cx, cy) = (column.rem_euclid(20.0) as i32, row.rem_euclid(40.0) as i32);
+            let (cx, cy) = (column.rem_euclid(16.0) as i32, row.rem_euclid(32.0) as i32);
             let edge = (local_x + 0.5).min(local_y + 0.5);
             let cover = (joint + 0.5 - edge).clamp(0.0, 1.0);
             let roll = hash(23, cx, cy);
             let batch = hash(29, cx, cy) - 0.5;
             // Wrapping, so the 4 m tile has no seam.
             let dirt = signed_noise(0x33b7, x / 18.0, y / 18.0, size as f32 / 18.0) * 6.0;
-            let grit = (hash(31, v as i32, u as i32) - 0.5) * 16.0;
-            let stained = if roll < 0.08 {
-                -26.0
-            } else if roll > 0.94 {
-                14.0
+            let grit = (hash(31, v as i32, u as i32) - 0.5) * 10.0;
+            let stained = if roll < 0.06 {
+                -18.0
+            } else if roll > 0.95 {
+                8.0
             } else {
                 0.0
             };
@@ -250,15 +250,15 @@ pub fn paving_texture(size: usize) -> BakedTexture {
                 let edge_x = (local_x - joint).min(brick_len - local_x);
                 let edge_y = (local_y - joint).min(brick_wid - local_y);
                 let arris = if edge_x < 1.2 || edge_y < 1.2 {
-                    7.0
+                    3.0
                 } else {
                     0.0
                 };
                 let shade = if local_y > brick_wid * 0.8 { -6.0 } else { 0.0 };
-                150.0 + batch * 30.0 + dirt + grit + stained + arris + shade
+                150.0 + batch * 16.0 + dirt + grit + stained + arris + shade
             };
             // Dirt and sand in the joint, darker than anything on the face.
-            let joint_value = 70.0 + hash(37, v as i32, u as i32) * 14.0;
+            let joint_value = 62.0 + hash(37, v as i32, u as i32) * 14.0;
             let value = face + (joint_value - face) * cover;
             let offset = (v * size + u) * 4;
             // Cool neutral grey: concrete bricks never run warm.
@@ -1113,7 +1113,7 @@ mod tests {
 
     #[test]
     fn paving_joints_are_darker_than_the_slab_face() {
-        let texture = paving_texture(64);
+        let texture = paving_texture(256);
         // Sampled as a distribution, not at fixed coordinates: a running-bond
         // pattern means any single pixel is either joint or face depending on
         // where it lands, and a fixed probe is a flaky test.

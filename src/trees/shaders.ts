@@ -465,6 +465,18 @@ if (vTreeKind > 0.5) {
     vec3 soil = vec3(0.060, 0.043, 0.030);
     col = mix(col, col * 0.45 + soil * 0.9, clamp(splash * 0.9 + foot * 0.7, 0.0, 0.95));
     col *= mix(0.40, 1.0, smoothstep(0.0, 1.8, vAbove));
+    // Lime whitewash (刷白): every street and park tree in a north-Chinese city has its
+    // trunk painted white to about 1.1 m against borers and sunscald. It is the brightest
+    // thing at the foot of a street and half of what makes the trunks read in a photograph.
+    // Trunk only (a limb is thinner), a ragged top edge, worn and splashed at the foot,
+    // and the bark's own furrows still showing through.
+    float washTop = 1.05 + 0.10 * tNoise(vec3(vBarkAR.x * 2.0, 0.0, 7.0)) + 0.05 * sin(vBarkAR.x * 5.0);
+    float wash = (1.0 - smoothstep(washTop - 0.02, washTop + 0.02, vAbove)) * smoothstep(-0.05, 0.05, vAbove)
+      * smoothstep(0.07, 0.10, R);
+    vec3 lime = vec3(0.60, 0.60, 0.565) * (0.86 + 0.14 * tNoise(q * 9.0));
+    lime = mix(lime, lime * 0.62 + soil * 1.5, splash * 0.55);
+    lime = mix(lime, creviceCol * 3.0, furrow * fissured * 0.45);
+    col = mix(col, lime, wash);
     col = mix(col, woodCol, wornMask);
     // Lichen and damp in patches, on the shaded faces.
     float lichen = smoothstep(0.66, 0.84, tNoise(q * 4.5 + 9.0));

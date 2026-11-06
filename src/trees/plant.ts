@@ -22,6 +22,31 @@ export interface Planting {
   sets: TreeInstanceSet[];
 }
 
+/**
+ * City species the grower has no row for, mapped to the grown species nearest in
+ * habit and season. Without this every one of them fell back to the camphor, so a
+ * street of crape myrtle or poplar stood as black-green evergreen domes.
+ */
+const SPECIES_ALIAS: Record<string, string> = {
+  "long-bai": "sha-shu",
+  "zi-wei": "ying-hua",
+  "bai-hua": "yang-shu",
+  "hu-yang": "yang-shu",
+  "sha-zao": "liu-shu",
+};
+
+/**
+ * The day of the year the city's trees are grown at, 0..1. Late October: ginkgo
+ * gold, ash and scholar trees half turned, the evergreens still green, which is
+ * the Beijing street of the reference photographs. `?season=0.5` in the page
+ * address grows them in midsummer instead.
+ */
+export const CITY_TREE_SEASON = (() => {
+  const raw = typeof location !== "undefined" ? new URLSearchParams(location.search).get("season") : null;
+  const value = raw === null ? Number.NaN : Number(raw);
+  return Number.isFinite(value) ? Math.min(Math.max(value, 0), 1) : 0.81;
+})();
+
 function unit(a: number, b: number): number {
   return ((Math.sin(a * 12.9898 + b * 78.233) * 43758.5453) % 1 + 1) % 1;
 }
@@ -57,7 +82,8 @@ export function plantFromInstances(sets: TreeInstanceSet[], grower: TreeGrower, 
     if (read.has(set.key)) continue;
     read.add(set.key);
     const name = set.key.split("/")[1];
-    const index = grower.speciesIndex(name);
+    const found = grower.speciesIndex(name);
+    const index = found >= 0 ? found : grower.speciesIndex(SPECIES_ALIAS[name] ?? name);
     const species = index >= 0 ? index : Math.max(0, grower.speciesIndex("xiang-zhang"));
     const base = heights.get(set.key) || 10;
     const m = set.matrices;
@@ -106,7 +132,7 @@ export function installUniqueTrees(handles: CityHandles, scene: CityScene): Uniq
     }));
   const planting = plantFromInstances(sets, grower, scene.seed);
   if (planting.trees.length === 0) return null;
-  const forest = new UniqueForest(grower, planting.trees, {}, treePoolOrNull());
+  const forest = new UniqueForest(grower, planting.trees, { season: CITY_TREE_SEASON }, treePoolOrNull());
   for (const mesh of planting.replaced) mesh.removeFromParent();
   const gone = new Set(planting.sets);
   handles.lodSets = handles.lodSets.filter((set) => !gone.has(set));
