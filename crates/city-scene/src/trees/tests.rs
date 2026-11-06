@@ -1162,14 +1162,18 @@ fn bark_comes_from_the_species_record() {
             total += linear;
             count += 1.0;
         }
-        let bark = super::cards::luma(prototype.species.bark.colour);
+        let bark = super::cards::luma(prototype.species.bark.colour) * super::grow::BARK_LIFT;
         let mean = total / count.max(1.0);
         assert!(
             mean > bark * 0.85 && mean < bark * 1.05,
             "{}'s bark averages {mean:.3} against its own {bark:.3}",
             prototype.key
         );
-        assert!(peak < 0.34, "{}'s bark peaks at {peak:.3}", prototype.key);
+        assert!(
+            peak < 0.34 * super::grow::BARK_LIFT,
+            "{}'s bark peaks at {peak:.3}",
+            prototype.key
+        );
         // And the trunk is fluted, not a smooth prism: a cylinder of `sides`
         // quads would have a perimeter that is a straight line between
         // vertices, and a fluted one does not.

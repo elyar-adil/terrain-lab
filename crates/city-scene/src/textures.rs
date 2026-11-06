@@ -134,8 +134,7 @@ pub fn roof_texture(size: usize) -> BakedTexture {
 /// binder oxidised and its aggregate exposed and dusted, reflects 10 - 18 %. A
 /// city street is almost all the second kind: in street photographs of Beijing
 /// the carriageway reads as light as the stone and render beside it, and a warm
-/// grey, not a blue-black. The mean is pinned at about 13 % (sRGB ~100), dust
-/// keeps it a shade warm, and the variation comes from what is really there:
+/// grey, not a blue-black. The mean is pinned at about 13 % (sRGB ~92), a neutral grey, and the variation comes from what is really there:
 ///
 /// * **oxidation and bleaching** — broad, slow patches;
 /// * **screed passes** — the paving machine's bands;
@@ -169,11 +168,11 @@ pub fn asphalt_texture(size: usize) -> BakedTexture {
             let speck = if hash(127, ix, iy) < 0.06 { -24.0 } else { 0.0 };
 
             // 100 is ~13 % linear reflectance: an aged wearing course.
-            let value = 100.0 + oxidation + screed + clump + grain + chip + speck;
+            let value = 92.0 + oxidation + screed + clump + grain + chip + speck;
             let offset = (y * size + x) * 4;
-            rgba[offset] = (value * 1.02).clamp(0.0, 255.0) as u8;
+            rgba[offset] = (value * 1.005).clamp(0.0, 255.0) as u8;
             rgba[offset + 1] = value.clamp(0.0, 255.0) as u8;
-            rgba[offset + 2] = (value * 0.96).clamp(0.0, 255.0) as u8;
+            rgba[offset + 2] = (value * 0.985).clamp(0.0, 255.0) as u8;
             rgba[offset + 3] = 255;
         }
     }
@@ -188,59 +187,124 @@ pub fn asphalt_texture(size: usize) -> BakedTexture {
     }
 }
 
-/// Running-bond footway paving, 0.25 x 0.5 m, with recessed dirty joints.
+/// Footway paving: small grey concrete bricks, 0.1 x 0.2 m, in running bond.
 ///
-/// The long side of a paver runs along `V`, which on a footway is along the
-/// street (`Uvs::Frame`): slabs are laid in courses parallel to the kerb.
+/// This is the surface a Chinese street footway really has (the 透水砖 /
+/// 广场砖 of every city's sidewalk): a mid-grey brick about 100 x 200 mm, laid
+/// in courses parallel to the kerb, with narrow dark, gritty joints.  The
+/// previous bake drew 250 x 500 mm slabs at 60 % brightness, which read as a
+/// pale tiled floor; the real thing is darker, finer and far more mottled.
 ///
-/// Concrete paving is **25-35% reflectance** — nearly three times asphalt — and
-/// that contrast is one of the strongest cues that a viewer is looking at a
-/// street rather than at a plane.  The bake therefore keeps the slab face in
-/// the 145-170 band and drops the joints to ~90, with the dirt that collects in
-/// them.  Individual slabs vary, and a few are markedly darker: replaced or
-/// oil-stained units are what stop a running bond reading as wallpaper.
+/// The long side of a brick runs along `V`, which on a footway is along the
+/// street (`Uvs::Frame`).
+///
+/// * **Value** — brick face about 21-27 % linear (sRGB 125-145), a cool neutral
+///   grey, joints about 8 % (sRGB ~62).
+/// * **Brick to brick** — every unit is a slightly different batch: a wide tone
+///   spread, a few clearly darker (wet or oil-stained) and a few paler ones.
+/// * **Face** — pressed-in grit, a lighter worn arris and a darker lower edge,
+///   so each brick reads as a raised unit and not as a painted rectangle.
+/// * **Litter** — a sparse scatter of fallen leaves, ginkgo-yellow and
+///   plane-brown, which is what an autumn footway looks like and breaks the
+///   brick grid up.
 pub fn paving_texture(size: usize) -> BakedTexture {
     let mut rgba = vec![0_u8; size * size * 4];
-    // A joint is about 1.5 cm wide regardless of bake resolution; at 4 m per
-    // tile that is a fraction of a texel at low sizes and exactly one texel at
-    // 256.  A fixed pixel width would swallow the slab face entirely.
-    let joint_px = (size / 256).max(1);
-    let paver_w = (size / 8).max(1);
-    let paver_h = (size / 16).max(1);
+    // 4 m per tile: 0.2 m bricks along V (20 per tile), 0.1 m across U (40).
+    let brick_len = size as f32 / 20.0;
+    let brick_wid = size as f32 / 40.0;
+    // A joint is about 6 mm wide, a fraction of a texel at any bake size, so it
+    // is drawn as coverage (a darker texel on the brick edge) and never as a
+    // whole-texel line that would swallow a tenth-metre brick.
+    let joint = (size as f32 * 0.0015).max(0.45);
     for v in 0..size {
         for u in 0..size {
             // Courses run along `V`: the bond is drawn with the axes swapped.
-            let (x, y) = (v, u);
-            // One tile is 4 m, so a 0.5 m paver is an eighth of the texture.
-            let row = y / paver_h;
-            let stagger = if row.is_multiple_of(2) { 0 } else { paver_w };
-            let column = (x + stagger) / paver_w;
-            let local_x = (x + stagger) % paver_w;
-            let local_y = y % paver_h;
-            let joint = local_x < joint_px || local_y < joint_px;
-            // The worn arris: the first few millimetres of each slab face are
-            // lighter where feet have polished the chamfer off.
-            let chamfer = !joint && (local_x < joint_px * 3 || local_y < joint_px * 3);
-            let roll = hash(23, column as i32, row as i32);
-            // Two lattices that *wrap* on the slab grid, so a 4 m tile does not
-            // show a seam every four pavers.
-            let slab = signed_noise(0x6b21, (column % 8) as f32, (row % 16) as f32, 8.0) * 6.0;
-            let dirt = signed_noise(0x33b7, x as f32 / 24.0, y as f32 / 24.0, 64.0) * 7.0;
-            // A tenth of the units are replacements or oil-stained and read
-            // several shades darker than their neighbours.
-            let stained = if roll < 0.10 { -24.0 } else { 0.0 };
-            let value = if joint {
-                92.0 - local_y as f32 * 0.4
-            } else if chamfer {
-                168.0 + slab
+            let (x, y) = (v as f32, u as f32);
+            let row = (y / brick_wid).floor();
+            let stagger = if (row as i32) % 2 == 0 {
+                0.0
             } else {
-                152.0 + slab * 1.4 + dirt + stained
+                brick_len * 0.5
             };
+            let shifted = x + stagger;
+            let column = (shifted / brick_len).floor();
+            let local_x = shifted - column * brick_len;
+            let local_y = y - row * brick_wid;
+            let (cx, cy) = (column.rem_euclid(20.0) as i32, row.rem_euclid(40.0) as i32);
+            let edge = (local_x + 0.5).min(local_y + 0.5);
+            let cover = (joint + 0.5 - edge).clamp(0.0, 1.0);
+            let roll = hash(23, cx, cy);
+            let batch = hash(29, cx, cy) - 0.5;
+            // Wrapping, so the 4 m tile has no seam.
+            let dirt = signed_noise(0x33b7, x / 18.0, y / 18.0, size as f32 / 18.0) * 6.0;
+            let grit = (hash(31, v as i32, u as i32) - 0.5) * 16.0;
+            let stained = if roll < 0.08 {
+                -26.0
+            } else if roll > 0.94 {
+                14.0
+            } else {
+                0.0
+            };
+            let face = {
+                // Lit upper edge, darker lower edge: a pressed unit has relief.
+                let edge_x = (local_x - joint).min(brick_len - local_x);
+                let edge_y = (local_y - joint).min(brick_wid - local_y);
+                let arris = if edge_x < 1.2 || edge_y < 1.2 {
+                    7.0
+                } else {
+                    0.0
+                };
+                let shade = if local_y > brick_wid * 0.8 { -6.0 } else { 0.0 };
+                150.0 + batch * 30.0 + dirt + grit + stained + arris + shade
+            };
+            // Dirt and sand in the joint, darker than anything on the face.
+            let joint_value = 70.0 + hash(37, v as i32, u as i32) * 14.0;
+            let value = face + (joint_value - face) * cover;
             let offset = (v * size + u) * 4;
-            rgba[offset] = value.clamp(0.0, 255.0) as u8;
+            // Cool neutral grey: concrete bricks never run warm.
+            rgba[offset] = (value * 0.985).clamp(0.0, 255.0) as u8;
             rgba[offset + 1] = value.clamp(0.0, 255.0) as u8;
-            rgba[offset + 2] = (value * 0.965).clamp(0.0, 255.0) as u8;
+            rgba[offset + 2] = (value * 1.02).clamp(0.0, 255.0) as u8;
             rgba[offset + 3] = 255;
+        }
+    }
+    // Leaf litter: tiny pointed ellipses on top of the bricks.
+    let count = ((size * size) as f32 / 1400.0) as usize;
+    let mut rng = Rng::new(0x1eaf_5a11);
+    for _ in 0..count {
+        let cx = rng.range(0.0, size as f32);
+        let cy = rng.range(0.0, size as f32);
+        let angle = rng.unit() * std::f32::consts::PI;
+        let half_len = rng.range(0.012, 0.022) * size as f32;
+        let half_wid = half_len * rng.range(0.35, 0.6);
+        // Ginkgo-yellow most of the time, a few brown plane / ash leaves.
+        let pick = rng.unit();
+        let (lr, lg, lb) = if pick < 0.62 {
+            (206.0, 170.0, 42.0)
+        } else if pick < 0.86 {
+            (176.0, 138.0, 48.0)
+        } else {
+            (128.0, 88.0, 46.0)
+        };
+        let shade = rng.range(0.82, 1.1);
+        let (sin, cos) = angle.sin_cos();
+        let bound = half_len.ceil() as i32 + 1;
+        for dy in -bound..=bound {
+            for dx in -bound..=bound {
+                let a = (dx as f32 * cos + dy as f32 * sin) / half_len;
+                let b = (-dx as f32 * sin + dy as f32 * cos) / half_wid;
+                if a * a + b * b > 1.0 {
+                    continue;
+                }
+                let px = (cx as i32 + dx).rem_euclid(size as i32) as usize;
+                let py = (cy as i32 + dy).rem_euclid(size as i32) as usize;
+                // Midrib: a slightly darker line down the leaf.
+                let rib = if b.abs() < 0.12 { 0.88 } else { 1.0 };
+                let offset = (py * size + px) * 4;
+                rgba[offset] = (lr * shade * rib).clamp(0.0, 255.0) as u8;
+                rgba[offset + 1] = (lg * shade * rib).clamp(0.0, 255.0) as u8;
+                rgba[offset + 2] = (lb * shade * rib).clamp(0.0, 255.0) as u8;
+            }
         }
     }
     BakedTexture {
@@ -510,7 +574,8 @@ pub fn grass_texture_in(size: usize, lush: f32) -> BakedTexture {
             // Patches of dry turf at a scale of a metre or two, yellower where
             // the sprinklers miss.
             let straw_share = (dry_amount * 0.85
-                + 0.30 * (signed_noise(47, u * 7.0, v * 7.0, 7.0) + 0.5).clamp(0.0, 1.0)
+                + 0.30
+                    * (signed_noise(47, u * 7.0, v * 7.0, 7.0) + 0.5).clamp(0.0, 1.0)
                     * (0.25 + dry_amount))
                 .clamp(0.0, 0.95);
             let base = [

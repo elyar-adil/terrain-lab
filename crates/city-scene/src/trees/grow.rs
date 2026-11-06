@@ -8,7 +8,11 @@
 //! banyan's aerial roots — are fields on the form record interpreted here, so
 //! adding a form never means editing the grower.
 
-use super::cards::{CARD_WINDOW, card_tile_m, luma, target_coverage};
+/// Trunks in shade read black beside a lit crown; real bark under a canopy is a
+/// mid grey-brown, so the table colour is lifted by two thirds and warmed.
+pub(crate) const BARK_LIFT: f32 = 1.7;
+
+use super::cards::{CARD_WINDOW, card_tile_m, luma, mass_colour, target_coverage};
 use super::forms::{self, Architecture, Layout};
 use super::{MAX_CARDS, MIN_CARDS, PRESENTED_FRACTION, TAU, TreePrototype};
 use crate::math::{Rng, Vec2, Vec3};
@@ -224,7 +228,7 @@ impl<'a, 'b> Grower<'a, 'b> {
         let base = self.plan.base + (self.plan.top - self.plan.base) * 0.04;
         let top = self.plan.top - 0.005;
         let phase = self.plan.phase;
-        let f = self.species.foliage;
+        let f = mass_colour(self.species);
         let noise = |a: f32, y: f32| -> f32 {
             0.4 * (a * 4.0 + y * 11.0 + phase).sin()
                 + 0.3 * (a * 7.0 - y * 17.0 + phase * 1.7).sin()
@@ -362,9 +366,9 @@ impl<'a, 'b> Grower<'a, 'b> {
         // goes, and the table says how far this species has gone.
         let toward = self.species.bark.weathering * 0.45;
         [
-            (base[0] + (grey - base[0]) * toward) * facet,
-            (base[1] + (grey - base[1]) * toward) * facet,
-            (base[2] + (grey - base[2]) * toward) * facet,
+            (base[0] + (grey - base[0]) * toward) * facet * BARK_LIFT * 1.10,
+            (base[1] + (grey - base[1]) * toward) * facet * BARK_LIFT,
+            (base[2] + (grey - base[2]) * toward) * facet * BARK_LIFT * 0.85,
         ]
     }
 

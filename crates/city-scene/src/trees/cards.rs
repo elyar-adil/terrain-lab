@@ -450,16 +450,51 @@ fn scaled(colour: [f32; 3], value: f32) -> [f32; 3] {
 fn leaf_colour(species: &Species, roll: f32) -> [f32; 3] {
     let base = species.foliage;
     let value = 0.84 + 0.16 * roll;
+    if let Some(autumn) = species.autumn {
+        // A deciduous street tree in late October is not green: the crown is
+        // yellow-green going to gold, with the greenest leaves low and inside.
+        // The photographs this is calibrated on (Beijing, ash and pagoda tree
+        // lining a street) read as a bright olive-yellow mass, roughly twice the
+        // luminance of the midsummer table colour, so the card blends from a
+        // lifted, yellowed green to the species' autumn colour by roll.
+        let green = [base[0] * 1.55, base[1] * 1.42, base[2] * 0.85];
+        let turn = ramp(roll, 0.30, 0.85) * 0.82;
+        let mix = |g: f32, a: f32| g + (a - g) * turn;
+        let value = 0.88 + 0.14 * (1.0 - (roll - 0.5).abs());
+        return [
+            mix(green[0], autumn[0]) * value,
+            mix(green[1], autumn[1]) * value,
+            mix(green[2], autumn[2]) * value,
+        ];
+    }
     if roll > 0.86 {
         // Old leaf: chlorophyll partly gone.  Toward yellow, not toward white.
         [
-            base[0] * value * 1.14,
-            base[1] * value * 1.02,
-            base[2] * value * 0.68,
+            base[0] * value * 1.55,
+            base[1] * value * 1.40,
+            base[2] * value * 0.80,
         ]
     } else {
-        scaled(base, value)
+        // Evergreens too: a camphor in city light is a mid green, not the
+        // black-green the table's raw reflectance renders to under a sky that is
+        // mostly blue.  Lifted, hue unchanged.
+        scaled(base, value * 1.30)
     }
+}
+
+/// The mean colour of a canopy's leaves: the inner shell that sits behind the
+/// cards is this colour, so the mass and the cards read as one crown instead of
+/// a dark core with bright flecks on it.
+pub fn mass_colour(species: &Species) -> [f32; 3] {
+    let n = 9;
+    let mut sum = [0.0_f32; 3];
+    for i in 0..n {
+        let c = leaf_colour(species, (i as f32 + 0.5) / n as f32);
+        for k in 0..3 {
+            sum[k] += c[k] / n as f32;
+        }
+    }
+    sum
 }
 
 /// `0 -> 1` ramp between two points, because `worldgen_core::smootherstep` is
@@ -1039,7 +1074,9 @@ mod tests {
         for species in SPECIES {
             let texture = card_for(species.key);
             let (mean, peak) = opaque_albedo(&texture);
-            let leaf = luma(species.foliage);
+            // The card is the species' mean leaf: its table colour lifted for city
+            // light and, for a deciduous tree, turned toward its autumn colour.
+            let leaf = luma(mass_colour(species));
             let petal = species.bloom.colour.map(luma).unwrap_or(leaf);
             let density = if species.bloom.colour.is_some() {
                 species.bloom.density
@@ -1064,7 +1101,7 @@ mod tests {
             // carries them.
             let ceiling = match species.bloom.colour {
                 Some(petal) if species.bloom.density > 0.05 => luma(petal) * 1.12,
-                _ => leaf * 1.25,
+                _ => leaf * 1.65,
             };
             assert!(
                 peak <= ceiling,
@@ -1378,7 +1415,9 @@ mod tests {
     fn blossom_moves_the_card_by_its_density() {
         for species in SPECIES {
             let mean = mean_albedo_rgb(&card_for(species.key));
-            let leaf = luma(species.foliage);
+            // The card is the species' mean leaf: its table colour lifted for city
+            // light and, for a deciduous tree, turned toward its autumn colour.
+            let leaf = luma(mass_colour(species));
             let petal = species.bloom.colour.map(luma).unwrap_or(leaf);
             let density = if species.bloom.colour.is_some() {
                 species.bloom.density
@@ -1420,7 +1459,7 @@ mod tests {
                     }
                 }
                 None => assert!(
-                    colour_distance(mean, species.foliage) < 0.10,
+                    colour_distance(mean, mass_colour(species)) < 0.10,
                     "{} does not flower, yet its card is a different colour from its \
                      own foliage",
                     species.key

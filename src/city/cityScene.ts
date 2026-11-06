@@ -966,7 +966,7 @@ roughnessFactor = clamp(roughnessFactor + smoothstep(60.0, 700.0, waterDist) * 0
         metalness: 0.0,
         // Leaves are thin and translucent: a little transmission is what
         // separates a lit canopy from a painted green sphere.
-        emissive: 0x16240f, // sky-through-leaf lift so a canopy never renders black
+        emissive: 0x2a3912, // light through the leaf: a sunlit canopy glows olive-yellow, never black
       }),
     ) as THREE.MeshStandardMaterial;
   };
@@ -1039,7 +1039,7 @@ roughnessFactor = clamp(roughnessFactor + smoothstep(60.0, 700.0, waterDist) * 0
               roughness: 1,
               metalness: 0,
               vertexColors: true,
-              emissive: 0x16240f,
+              emissive: 0x24320f,
               emissiveIntensity: 0.5,
               // Far-LOD shell only: dithered cross-fade driven by
               // cityLayer.update (opacity 0 close up, 1 beyond ~300 m).
