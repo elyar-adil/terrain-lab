@@ -454,7 +454,7 @@ export function createMaterials(
   // painted bays and parked cars. They take the world pattern, not the footway map.
   applyGroundKind(standard("parcel.yard", { roughness: 0.93 }, 0x8c877c), GROUND_KIND.yard);
   applyGroundKind(standard("parcel.lot", { roughness: 0.9 }, 0x62605c), GROUND_KIND.asphaltLot);
-  applyGroundKind(standard("parcel.parking", { roughness: 0.9 }, 0x6f6d69), GROUND_KIND.parking);
+  applyGroundKind(standard("parcel.parking", { roughness: 0.9 }, 0x6f6d69), GROUND_KIND.carParkBase);
   // Kerb concrete: 25-35% reflectance, and a shade warmer than the asphalt it
   // sits beside, which is what makes a kerb line read at distance.
   // Kerb tops and dropped-kerb ramps lie a few millimetres over the footway

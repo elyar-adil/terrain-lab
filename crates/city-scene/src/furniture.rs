@@ -1806,6 +1806,15 @@ pub fn park_cars(network: &Network, builder: &mut MeshBuilder, seed: u32) -> usi
     count
 }
 
+/// One parked car: body, glass and wheels as three instances of the shared
+/// car prototypes, nose along local `+X`, standing on `y`.
+pub(crate) fn add_parked_car(builder: &mut MeshBuilder, point: Vec2, y: f32, yaw: f32, rng: &mut Rng) {
+    let colour = car_paint(rng);
+    builder.add_instance("car/body", Instance::new(point.x, y, point.y, yaw, 1.0, colour));
+    builder.add_instance("car/glass", Instance::new(point.x, y, point.y, yaw, 1.0, [0.6, 0.7, 0.78]));
+    builder.add_instance("car/wheel", Instance::new(point.x, y, point.y, yaw, 1.0, [0.15, 0.15, 0.16]));
+}
+
 /// A polyline helper the wire pass and the traffic model both need.
 pub fn polyline(points: Vec<Vec2>) -> Path {
     Path::flat(points)
@@ -1822,7 +1831,7 @@ impl Vec3 {
 /// Car body colour as an instance tint.  Chinese roads are mostly white, black,
 /// silver and grey, with a minority of red, blue and dark green — never a
 /// uniform white fleet, which reads as a row of paper cut-outs.
-fn car_paint(rng: &mut Rng) -> [f32; 3] {
+pub(crate) fn car_paint(rng: &mut Rng) -> [f32; 3] {
     let pick = rng.unit();
     let shade = 0.9 + rng.unit() * 0.2;
     let base = if pick < 0.28 {

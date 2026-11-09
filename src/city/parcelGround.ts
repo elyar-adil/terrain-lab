@@ -29,6 +29,8 @@ export const GROUND_KIND = {
   asphaltLot: 6,
   plaza: 7,
   lawn: 8,
+  /** Car-park asphalt with no painted bays or cars: the detail scene lays those as geometry. */
+  carParkBase: 9,
 } as const;
 
 export const GROUND_GLSL = /* glsl */ `
@@ -99,6 +101,7 @@ vec3 groundSurface(float kind, vec3 base, vec2 p, float fw, float seed) {
       c = mix(meanC, mix(c, box3, inside), showBoxes);
     }
   } else if (kind < 5.5) {
+    // (Far form only: the metre-scale scene uses carParkBase.)
     // Car park: 16.6 m double-loaded module along z, 2.5 m bays along x.
     float v = mod(q.y, 16.6);
     float inStall = 1.0 - step(5.3, v) * (1.0 - step(11.3, v));
@@ -148,6 +151,16 @@ vec3 groundSurface(float kind, vec3 base, vec2 p, float fw, float seed) {
     float bed = step(gHash(block + seed * 3.0), 0.30) * gBox(local, vec2(6.0, 9.0), vec2(26.0, 14.0));
     vec3 green = vec3(0.17, 0.27, 0.11) * (0.8 + 0.4 * gNoise(q / 0.7));
     c = mix(c, green, bed);
+  } else if (kind > 8.5) {
+    // Car-park base: worn asphalt, tyre-polished aisles and oil stains. Bays and
+    // cars are real geometry (buildings/parking.rs), so none are painted here.
+    float aisle = smoothstep(0.55, 0.8, gNoise(vec2(q.x / 40.0, q.y / 3.0) + 5.0));
+    c *= 1.0 - 0.07 * aisle * (1.0 - smoothstep(0.5, 3.0, fw));
+    float oil = smoothstep(0.62, 0.9, gNoise(q / 2.2 + 17.0)) * (0.6 + 0.4 * gNoise(q / 0.5));
+    c *= 1.0 - 0.18 * oil * (1.0 - smoothstep(0.8, 4.0, fw));
+    vec2 pc = floor(q / 9.0);
+    float repair = step(gHash(pc + 23.0), 0.10) * gBox(fract(q / 9.0), vec2(0.2, 0.2), vec2(0.8, 0.75));
+    c *= 1.0 - 0.12 * repair;
   } else {
     // Lawn: mown bands and patchiness.
     float band = step(0.5, fract(q.x / 6.0));

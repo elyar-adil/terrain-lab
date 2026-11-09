@@ -52,6 +52,7 @@ pub mod far;
 pub(crate) mod house;
 pub mod plan;
 mod industrial;
+mod parking;
 pub(crate) mod roofscape;
 mod shell;
 
@@ -771,8 +772,20 @@ pub fn build_among(
         };
         // Cut however little it crosses: a sliver over the footway 4 mm under
         // the paving flickers through it.
-        for piece in cut_away(ring, &cuts).iter().flat_map(|p| normalise(p)) {
-            builder.ground_uv(material, &piece, level::PARCEL, None);
+        let pieces: Vec<Vec<Vec2>> = cut_away(ring, &cuts)
+            .iter()
+            .flat_map(|p| normalise(p))
+            .collect();
+        for piece in &pieces {
+            builder.ground_uv(material, piece, level::PARCEL, None);
+        }
+        if material == "parcel.parking" {
+            // Painted bays and real cars, laid out to the lot's own edges.
+            let rings: Vec<Vec<Vec2>> = standing
+                .iter()
+                .map(|b| ring_of(&b.footprint, frame))
+                .collect();
+            parking::lay(&pieces, &rings, parcel.id, builder);
         }
     }
     for field in fields {
