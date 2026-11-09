@@ -98,7 +98,7 @@ pub(super) struct Layout {
     /// blocks the ramp reaches its deck node by a short taper edge from here;
     /// once they are cut, the taper is dropped and the ramp meets the deck node
     /// itself, its line still starting beside the deck.
-    tapers: Vec<usize>,
+    tapers: Vec<(usize, usize)>,
     /// System interchanges: where a second expressway flies over this one.
     systems: Vec<system::SystemSite>,
     /// Ground the interchanges take whole (the corners between ramps and
@@ -364,12 +364,13 @@ impl Graph {
         from: usize,
         to: usize,
         line: &[V],
-        tapers: &mut Vec<usize>,
+        tapers: &mut Vec<(usize, usize)>,
     ) -> Vec<usize> {
         // Where the line does not start (or end) at its node, which is a deck
         // node on the expressway's axis, the ramp's deck begins beside the main
         // deck: a node there, and a taper edge to the deck node.
         let (mut from, mut to) = (from, to);
+        let (deck_from, deck_to) = (from, to);
         let n = line.len();
         if len(sub(line[0], self.pts[from])) > 1.0 {
             let start = self.node(line[0], "ramp-deck");
@@ -381,7 +382,7 @@ impl Graph {
                 oneway: true,
                 line: vec![self.pts[from], line[0]],
             });
-            tapers.push(start);
+            tapers.push((start, deck_from));
             from = start;
         }
         if len(sub(line[n - 1], self.pts[to])) > 1.0 {
@@ -394,7 +395,7 @@ impl Graph {
                 oneway: true,
                 line: vec![line[n - 1], self.pts[to]],
             });
-            tapers.push(end);
+            tapers.push((end, deck_to));
             to = end;
         }
         let total = polyline_len(line);
@@ -2114,17 +2115,22 @@ fn ease_corner(
 /// layout: the ramp piece that met the taper meets the deck node instead, its
 /// line still starting beside the deck. Roads are renumbered (nothing else
 /// refers to them by id yet), and their lane ids with them.
-fn drop_tapers(sd: &mut Vec<SdRoad>, hd: &mut Vec<HdRoad>, tapers: &[usize]) {
+fn drop_tapers(sd: &mut Vec<SdRoad>, hd: &mut Vec<HdRoad>, tapers: &[(usize, usize)]) {
     if tapers.is_empty() {
         return;
     }
     let mut drop = vec![false; sd.len()];
-    for &t in tapers {
+    for &(t, deck_node) in tapers {
         let at: Vec<usize> = (0..sd.len())
             .filter(|&i| !drop[i] && (sd[i].from as usize == t || sd[i].to as usize == t))
             .collect();
-        // The taper is the piece with a two-point line; the ramp is the other.
-        let Some(&taper) = at.iter().find(|&&i| hd[i].centreline.len() == 2) else {
+        // The taper is the two-point piece from the ramp's deck end to its
+        // deck node: not a short ramp piece beside it, which a street the ramp
+        // crosses close to its end can leave as a two-point piece too.
+        let Some(&taper) = at.iter().find(|&&i| {
+            hd[i].centreline.len() == 2
+                && (sd[i].from as usize == deck_node || sd[i].to as usize == deck_node)
+        }) else {
             continue;
         };
         let Some(&ramp) = at.iter().find(|&&i| i != taper) else {
