@@ -43,6 +43,8 @@ const LOOP_MIN_LEN_M: f32 = 250.0;
 /// keeps from the outer ramp round it.
 const BEND_MIN_M: f32 = 45.0;
 const LOOP_GAP_M: f32 = 28.0;
+/// A street crosses a ramp no nearer than this to either end.
+const RAMP_END_CLEAR_M: f32 = 40.0;
 /// Nearest a deck node comes to the crossing, and the shortest taper a loop's
 /// ends have: the loop forks from its deck over the taper, so its own end
 /// stands that far (at least) beyond the node.
@@ -607,8 +609,12 @@ fn build(graph: &mut Graph, node: usize, m_dir: V, plan: SystemPlan, layout: &mu
         wanted.push((1, end));
     }
     let (cd_back, cd_ahead) = (-plan.cd_end[0], plan.cd_end[1]);
+    // The collector-distributor roads fork from the deck at `cd_back` and
+    // merge into it at `cd_ahead`: the deck nodes lie a taper beyond, so the
+    // roads open out of the deck's edge and do not start square against it.
+    let (cd_deck_back, cd_deck_ahead) = (cd_back - TAPER_M, cd_ahead + TAPER_M);
     if plan.cd {
-        wanted.extend([(0, cd_back), (0, cd_ahead)]);
+        wanted.extend([(0, cd_deck_back), (0, cd_deck_ahead)]);
     }
     for r in &plan.ramps {
         for end in [false, true] {
@@ -669,8 +675,8 @@ fn build(graph: &mut Graph, node: usize, m_dir: V, plan: SystemPlan, layout: &mu
                 .filter(|((a, _), _)| *a == axis)
                 .map(|((_, k), n)| (*k as f32 / 4.0, *n))
                 .collect();
-            stops.push((cd_back, nodes[&key(0, cd_back)]));
-            stops.push((cd_ahead, nodes[&key(0, cd_ahead)]));
+            stops.push((cd_back, nodes[&key(0, cd_deck_back)]));
+            stops.push((cd_ahead, nodes[&key(0, cd_deck_ahead)]));
             stops.sort_by(|a, b| (sign * a.0).total_cmp(&(sign * b.0)));
             for w in stops.windows(2) {
                 let ((x0, from), (x1, to)) = (w[0], w[1]);
@@ -773,6 +779,20 @@ pub(super) fn lay(
             let Some(plan) = plan_system(&trial, node, (m_dir, x_dir), half_deck, &sh) else {
                 continue;
             };
+            // A ramp that crosses a street close to either end would be cut
+            // there into a piece too short to fork or merge by.
+            let mut trial = trial;
+            let clear = plan.ramps.iter().all(|r| {
+                let line: Vec<V> = r.line.iter().map(|q| add(p, *q)).collect();
+                let total = polyline_len(&line);
+                trial
+                    .cross(&line, |road| road.class != ModernRoadClass::Expressway)
+                    .iter()
+                    .all(|&(at, _)| at > RAMP_END_CLEAR_M && at < total - RAMP_END_CLEAR_M)
+            });
+            if !clear {
+                continue;
+            }
             // Real now: laid into the graph itself, the same way.
             insert_corridor(graph, &x_line);
             let node = cross_at(graph, p)?;
