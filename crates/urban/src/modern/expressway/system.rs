@@ -554,6 +554,38 @@ fn deck_node(
     cut_chain(graph, &chain, station, role)
 }
 
+/// The deck node a ramp's end joins: the end's own station, moved along the
+/// deck so the ramp forks from it (or merges into it) over `TAPER_M` rather
+/// than starting square against the deck's edge. A diverging end's node lies
+/// back up the traffic, a merging end's on down it; both stop short of the
+/// crossing. Collector-distributor ends are where the ramp is.
+fn deck_end(ramp: &SysRamp, end: bool, axes: [V; 2]) -> (usize, f32) {
+    let (axis, station) = if end { ramp.to } else { ramp.from };
+    if axis >= 2 || ramp.line.len() < 2 {
+        return (axis, station);
+    }
+    let n = ramp.line.len();
+    let tangent = if end {
+        sub(ramp.line[n - 1], ramp.line[n - 2])
+    } else {
+        sub(ramp.line[1], ramp.line[0])
+    };
+    let travel = if dot(tangent, axes[axis]) >= 0.0 { 1.0 } else { -1.0 };
+    let moved = if end {
+        station + travel * TAPER_M
+    } else {
+        station - travel * TAPER_M
+    };
+    // Never across the crossing, nor within a box of it.
+    let near = 15.0_f32;
+    let moved = if moved.signum() != station.signum() || moved.abs() < near {
+        station.signum() * near.min(station.abs())
+    } else {
+        moved
+    };
+    (axis, moved)
+}
+
 /// Build a planned system interchange into the graph.
 fn build(graph: &mut Graph, node: usize, m_dir: V, plan: SystemPlan, layout: &mut Layout) -> bool {
     let centre = graph.pts[node];
@@ -574,7 +606,8 @@ fn build(graph: &mut Graph, node: usize, m_dir: V, plan: SystemPlan, layout: &mu
         wanted.extend([(0, cd_back), (0, cd_ahead)]);
     }
     for r in &plan.ramps {
-        for (axis, station) in [r.from, r.to] {
+        for end in [false, true] {
+            let (axis, station) = deck_end(r, end, axes);
             if axis < 2 {
                 wanted.push((axis, station));
             }
@@ -599,7 +632,8 @@ fn build(graph: &mut Graph, node: usize, m_dir: V, plan: SystemPlan, layout: &mu
     }
     // The collector-distributor roads' own nodes, where ramps join them.
     for r in &plan.ramps {
-        for (end, (axis, station)) in [(0, r.from), (1, r.to)] {
+        for (end, (axis, station)) in [(0, deck_end(r, false, axes)), (1, deck_end(r, true, axes))]
+        {
             if axis < 2 || nodes.contains_key(&key(axis, station)) {
                 continue;
             }
@@ -648,9 +682,10 @@ fn build(graph: &mut Graph, node: usize, m_dir: V, plan: SystemPlan, layout: &mu
         }
     }
     for r in &plan.ramps {
+        let (from_end, to_end) = (deck_end(r, false, axes), deck_end(r, true, axes));
         let (Some(&from), Some(&to)) = (
-            nodes.get(&key(r.from.0, r.from.1)),
-            nodes.get(&key(r.to.0, r.to.1)),
+            nodes.get(&key(from_end.0, from_end.1)),
+            nodes.get(&key(to_end.0, to_end.1)),
         ) else {
             continue;
         };
