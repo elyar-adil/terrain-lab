@@ -148,6 +148,8 @@ function woodBase(sides: number): THREE.InstancedBufferGeometry {
 function leafBase(lod: number): THREE.InstancedBufferGeometry {
   const rows = lod === 0 ? 2 : lod === 1 ? 1 : 1;
   const cols = lod === 0 ? 2 : lod === 1 ? 2 : 1;
+  // Level 3 draws cards (kind 3): one quad that the shader fills with a clump of leaves.
+  const leafKind = lod >= 3 ? 3 : 2;
   const position: number[] = [];
   const normal: number[] = [];
   const kind: number[] = [];
@@ -155,7 +157,7 @@ function leafBase(lod: number): THREE.InstancedBufferGeometry {
     for (let column = 0; column <= cols; column += 1) {
       position.push((column / cols) * 2 - 1, row / rows, 0);
       normal.push(0, 0, 1);
-      kind.push(2);
+      kind.push(leafKind);
     }
   }
   const index: number[] = [];

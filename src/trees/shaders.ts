@@ -122,6 +122,7 @@ void treeShape(out vec3 pos, out vec3 nor) {
     float x = position.x;
     float y = position.y;
     float curl = (sh.w - 0.5) * 2.0;
+    if (aTreeKind > 2.5) { hw = 0.55; curl = 0.0; }
     pos = aLeafPos.xyz + d * (len * y) + sd * (len * hw * x);
     pos += n * len * (curl * 0.30 * y * y + 0.16 * hw * x * x * (1.0 - 0.5 * y));
     pos -= d * len * abs(curl) * 0.08 * y * y;
@@ -375,8 +376,44 @@ float leafOutline(vec2 q, float form, float hw, vec4 sh, out float vein) {
   return d;
 }
 
+// A leaf card: a clump of many small leaves inside a ragged round envelope, the way far
+// foliage is drawn in games. uv is the card's [-1,1]^2.
+vec3 cardHash(vec2 c) {
+  vec3 p = fract(vec3(c.xyx) * vec3(0.1031, 0.1030, 0.0973));
+  p += dot(p, p.yzx + 33.33);
+  return fract((p.xxy + p.yzz) * p.zyx);
+}
+
+float cardCoverage(vec2 uv, float seed, out float vein, out float inner) {
+  vec2 g = uv * 3.6 + seed;
+  vec2 base = floor(g);
+  float dmin = 1e3;
+  float shade = 0.5;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 cell = base + vec2(float(i), float(j));
+      vec3 h = cardHash(cell);
+      vec2 c = cell + 0.5 + (h.xy - 0.5) * 0.9;
+      float a = h.z * 6.2832;
+      vec2 l = g - c;
+      l = vec2(cos(a) * l.x + sin(a) * l.y, -sin(a) * l.x + cos(a) * l.y);
+      float d = length(l / vec2(0.42, 0.85)) - 1.0;
+      if (d < dmin) { dmin = d; shade = h.x; }
+    }
+  }
+  float r = length(uv * vec2(1.0, 0.92));
+  float wob = 0.12 * (cardHash(floor(uv * 4.0 + seed)).x - 0.5);
+  float env = 1.0 - r + wob;
+  float aa = max(fwidth(dmin), 1e-4);
+  float cover = clamp(0.5 - dmin / aa, 0.0, 1.0) * clamp(env / 0.12, 0.0, 1.0);
+  vein = 0.5 * shade;
+  inner = clamp(-dmin / 0.6, 0.0, 1.0) * clamp(env * 2.0, 0.0, 1.0);
+  return cover;
+}
+
 // Coverage of the blade at this fragment, 0 outside the outline and 1 inside.
 float treeLeafCoverage(out float vein, out float inner) {
+  if (vTreeKind > 2.5) return cardCoverage(vTreeB.xy / vec2(max(vTreeB.w, 0.2), 0.5) - vec2(0.0, 1.0), vTreeA.x * 37.0, vein, inner);
   float d = leafOutline(vTreeB.xy, vTreeB.z, vTreeB.w, vTreeA, vein);
   float aa = max(fwidth(d), 1e-5);
   inner = clamp(-d / 0.08, 0.0, 1.0);

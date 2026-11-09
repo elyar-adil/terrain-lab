@@ -9,6 +9,7 @@
  *   season=0.5                   day of the year, 0..1
  *   cam=x,y,z,tx,ty,tz           camera and target
  *   fov=45  post=0|1  shadows=0|1
+ *   lodm=22,60,160               distances of the level changes (0.1,0.2,0.3 forces the farthest)
  */
 
 import * as THREE from "three";
@@ -105,7 +106,7 @@ async function main() {
   camera.lookAt(target);
   lighting.focus(target, Math.max(60, height * 6 + columns * spacing));
 
-  const forest = new UniqueForest(grower, trees, { season: num("season", 0.5), farM: 5000 });
+  const forest = new UniqueForest(grower, trees, { season: num("season", 0.5), farM: 5000, ...(params.get("lodm") ? { lodDistancesM: params.get("lodm")!.split(",").map(Number) as [number, number, number] } : {}) });
   world.add(forest.group);
 
   const post = params.get("post") === "1" ? createPost(renderer, world, { camera }) : null;

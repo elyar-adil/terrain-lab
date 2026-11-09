@@ -102,8 +102,8 @@ pub struct Tree {
     pub bloom: f32,
 }
 
-/// How many leaves each level of detail draws, at most.
-pub const LEAF_BUDGET: [usize; 4] = [30_000, 15_000, 8_000, 4_000];
+/// How many leaves each level of detail draws, at most (level 3 draws leaf cards instead).
+pub const LEAF_BUDGET: [usize; 4] = [30_000, 12_000, 4_000, 320];
 /// The deepest level of wood each level of detail draws.
 pub const WOOD_LEVEL: [u8; 4] = [3, 2, 2, 1];
 
@@ -848,6 +848,9 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
     let budget =
         (LEAF_BUDGET[lod as usize] as f32 * (0.35 + 0.65 * sp.leaf_cover.min(5.0) / 5.0)).max(40.0);
     let n_target = budget * cover * keep_twigs;
+    // The farthest level draws leaf cards, not leaves: each `Leaf` is then a card about a metre
+    // or two across that the shader fills with a cluster of many small leaves.
+    let cards = lod >= 3;
     if n_target >= 1.0 {
         // Light decides where leaves are worth growing: the outer shell of the crown is lit,
         // the interior is shaded, and a tree does not feed leaves that earn less than they
@@ -888,9 +891,15 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
         let stretch = (LEAF_BUDGET[0] as f32 / LEAF_BUDGET[lod as usize] as f32)
             .sqrt()
             .min(3.0);
-        let size = (area_total / (n_target * k))
-            .sqrt()
-            .clamp(sp.leaf_len_m * 0.6, sp.leaf_len_m * 5.0 * stretch);
+        let size = if cards {
+            // Cards tile the crown's skin (about 4 pi r^2 with overlap), not its leaf area.
+            let r = grower.crown.radius.max(0.8);
+            (4.0 * std::f32::consts::PI * r * r * 2.6 / n_target).sqrt().clamp(0.8, 4.0)
+        } else {
+            (area_total / (n_target * k))
+                .sqrt()
+                .clamp(sp.leaf_len_m * 0.6, sp.leaf_len_m * 5.0 * stretch)
+        };
         let crown_centre = v3(0.0, 0.5 * (grower.crown.z0 + h), 0.0);
         for (ti, &(a, b, _, _, tseed)) in grower.twigs.iter().enumerate() {
             let mut lr = R::of(Seed::new(tseed).derive("leaves"));
