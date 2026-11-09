@@ -102,8 +102,8 @@ pub struct Tree {
     pub bloom: f32,
 }
 
-/// How many leaves each level of detail draws, at most (level 3 draws leaf cards instead).
-pub const LEAF_BUDGET: [usize; 4] = [30_000, 12_000, 4_000, 320];
+/// How many leaves each level of detail draws, at most (levels 2 and 3 draw leaf cards instead).
+pub const LEAF_BUDGET: [usize; 4] = [30_000, 12_000, 1_200, 320];
 /// The deepest level of wood each level of detail draws.
 pub const WOOD_LEVEL: [u8; 4] = [3, 2, 2, 1];
 
@@ -848,9 +848,9 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
     let budget =
         (LEAF_BUDGET[lod as usize] as f32 * (0.35 + 0.65 * sp.leaf_cover.min(5.0) / 5.0)).max(40.0);
     let n_target = budget * cover * keep_twigs;
-    // The farthest level draws leaf cards, not leaves: each `Leaf` is then a card about a metre
+    // The two farthest levels draw leaf cards, not leaves: each `Leaf` is then a card about a metre
     // or two across that the shader fills with a cluster of many small leaves.
-    let cards = lod >= 3;
+    let cards = lod >= 2;
     if n_target >= 1.0 {
         // Light decides where leaves are worth growing: the outer shell of the crown is lit,
         // the interior is shaded, and a tree does not feed leaves that earn less than they

@@ -148,8 +148,8 @@ function woodBase(sides: number): THREE.InstancedBufferGeometry {
 function leafBase(lod: number): THREE.InstancedBufferGeometry {
   const rows = lod === 0 ? 2 : lod === 1 ? 1 : 1;
   const cols = lod === 0 ? 2 : lod === 1 ? 2 : 1;
-  // Level 3 draws cards (kind 3): one quad that the shader fills with a clump of leaves.
-  const leafKind = lod >= 3 ? 3 : 2;
+  // Levels 2 and 3 draw cards (kind 3): one quad that the shader fills with a clump of leaves.
+  const leafKind = lod >= 2 ? 3 : 2;
   const position: number[] = [];
   const normal: number[] = [];
   const kind: number[] = [];
@@ -199,7 +199,7 @@ export class UniqueForest {
     private readonly pool: TreePool | null = null,
   ) {
     this.trees = trees;
-    this.lodDistances = options.lodDistancesM ?? [22, 60, 160];
+    this.lodDistances = options.lodDistancesM ?? [22, 45, 160];
     this.farM = options.farM ?? 1500;
     this.season = options.season ?? 0.5;
     this.rowBase = treeTable.allocate(trees.length);
