@@ -43,6 +43,11 @@ const LOOP_MIN_LEN_M: f32 = 250.0;
 /// keeps from the outer ramp round it.
 const BEND_MIN_M: f32 = 45.0;
 const LOOP_GAP_M: f32 = 28.0;
+/// Nearest a deck node comes to the crossing, and the shortest taper a loop's
+/// ends have: the loop forks from its deck over the taper, so its own end
+/// stands that far (at least) beyond the node.
+const NODE_MIN_M: f32 = 22.0;
+const LOOP_END_MIN_M: f32 = NODE_MIN_M + 30.0;
 
 /// What the second pass needs of a system interchange.
 #[derive(Debug, Clone)]
@@ -159,8 +164,8 @@ impl Shape {
         let mut bulge = [0.0; 4];
         for k in 0..4 {
             radius[k] = (big * r.range(0.9, 1.08)).clamp(60.0, 95.0);
-            lead[k] = r.range(25.0, 50.0);
-            pre[k] = r.range(15.0, 40.0);
+            lead[k] = r.range(6.0, 16.0);
+            pre[k] = r.range(6.0, 16.0);
             bulge[k] = r.range(0.85, 1.15);
         }
         // Whole, or a partial cloverleaf with one loop or two left out.
@@ -196,8 +201,8 @@ impl Shape {
             angle: 90.0,
             outer: [400.0; 4],
             radius: [60.0; 4],
-            lead: [30.0; 4],
-            pre: [20.0; 4],
+            lead: [10.0; 4],
+            pre: [10.0; 4],
             bulge: [1.0; 4],
             loops: [true; 4],
             cd: false,
@@ -344,7 +349,7 @@ fn quadrant(
         line.push(finish);
         let (s_b, s_a) = (dot(start, e_b), dot(finish, e_a));
         let length = polyline_len(&line);
-        if s_b < 22.0 || s_a < 22.0 || length < LOOP_MIN_LEN_M {
+        if s_b < LOOP_END_MIN_M || s_a < LOOP_END_MIN_M || length < LOOP_MIN_LEN_M {
             return None;
         }
         Some((
@@ -576,10 +581,10 @@ fn deck_end(ramp: &SysRamp, end: bool, axes: [V; 2]) -> (usize, f32) {
     } else {
         station - travel * TAPER_M
     };
-    // Never across the crossing, nor within a box of it.
-    let near = 15.0_f32;
-    let moved = if moved.signum() != station.signum() || moved.abs() < near {
-        station.signum() * near.min(station.abs())
+    // Never across the crossing, nor within a box of it: a loop's end, which
+    // stands near the crossing, gets the taper that is left.
+    let moved = if moved.signum() != station.signum() || moved.abs() < NODE_MIN_M {
+        station.signum() * NODE_MIN_M.min(station.abs())
     } else {
         moved
     };
@@ -863,6 +868,18 @@ mod tests {
                         polyline_len(&ramp.line)
                     );
                     assert!(tightest_bend(&ramp.line) >= BEND_MIN_M - 1.0);
+                    // Each end forks from (or merges into) its deck over a
+                    // taper of 30 m at the least, not square against it.
+                    for (end_flag, end) in [(false, ramp.from), (true, ramp.to)] {
+                        let (axis, node) = deck_end(ramp, end_flag, axes);
+                        assert_eq!(axis, end.0);
+                        assert!(
+                            (node - end.1).abs() >= 30.0 - 0.01,
+                            "angle {angle}: taper {:.0} m",
+                            (node - end.1).abs()
+                        );
+                        assert!(node.abs() >= NODE_MIN_M - 0.01);
+                    }
                 }
                 loops += corner.ramps.len() - 1;
                 // The loop is bare grass inside: the ground reserved holds its
