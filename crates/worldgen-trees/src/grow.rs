@@ -103,7 +103,7 @@ pub struct Tree {
 }
 
 /// How many leaves each level of detail draws, at most.
-pub const LEAF_BUDGET: [usize; 4] = [30_000, 6_500, 1_100, 170];
+pub const LEAF_BUDGET: [usize; 4] = [30_000, 15_000, 8_000, 4_000];
 /// The deepest level of wood each level of detail draws.
 pub const WOOD_LEVEL: [u8; 4] = [3, 2, 2, 1];
 
@@ -883,9 +883,11 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
             2.6 * sp.leaf_cover * cover * keep_twigs * (0.55 + 0.45 * spec.openness) * crown_area;
         let k = 0.70 * sp.leaf_aspect.min(1.1);
         let opposite = matches!(sp.key, "feng-shu" | "gui-hua");
-        // A farther level draws fewer, bigger leaves; the ceiling on their size rises with
-        // how many fewer, so the crown keeps its mass.
-        let stretch = (LEAF_BUDGET[0] as f32 / LEAF_BUDGET[lod as usize] as f32).sqrt();
+        // A farther level draws fewer, bigger leaves, but only modestly bigger: past about three
+        // times the true size a leaf reads as a giant frond, so the crown thins instead.
+        let stretch = (LEAF_BUDGET[0] as f32 / LEAF_BUDGET[lod as usize] as f32)
+            .sqrt()
+            .min(3.0);
         let size = (area_total / (n_target * k))
             .sqrt()
             .clamp(sp.leaf_len_m * 0.6, sp.leaf_len_m * 5.0 * stretch);
