@@ -427,6 +427,9 @@ float treeLeafCoverage(out float vein, out float inner) {
 
 const FRAGMENT_SURFACE = /* glsl */ `
 float tBark = 0.0;
+// PBR channels for bark, applied after the albedo: cavity occlusion and roughness.
+float tBarkAO = 1.0;
+float tBarkRough = 1.0;
 if (vTreeKind > 0.5) {
   if (vTreeKind < 1.5) {
     vec3 axis = normalize(vTreeA.xyz);
@@ -434,6 +437,12 @@ if (vTreeKind > 0.5) {
     float vert = smoothstep(0.5, 0.9, abs(axis.y));
     vec3 q = vTreeB.xyz;
     float R = max(vBarkAR.y, 0.004);
+    // Metres of bark per pixel. Furrows and pits are a centimetre or less across, so
+    // from a few metres away they are sub-pixel; drawn at full contrast they alias into
+    // black dots that crawl as the camera moves. Fade them out as they stop resolving,
+    // leaving the soft plate-scale tone that a real trunk shows from a distance.
+    float barkPx = length(fwidth(q));
+    float detail = 1.0 - smoothstep(0.004, 0.022, barkPx);
     // Plates about ten centimetres across the grain and several times that along it.
     vec3 sq = vec3(1.0, 1.0, 1.0);
     vec3 qa = q * 10.0;
@@ -461,24 +470,24 @@ if (vTreeKind > 0.5) {
     // Plates that have flaked off show bare wood.
     float flake = smoothstep(0.88, 0.95, plateId) * smoothstep(0.30, 0.55, tNoise(q * 5.0));
     float wornMask = 0.0;
-    tBark = h * smoothstep(0.025, 0.07, R);
+    tBark = h * smoothstep(0.025, 0.07, R) * (0.35 + 0.65 * detail) * 0.6;
     float woodGrain = 0.55 + 0.45 * sin(q.x * 90.0 + q.z * 90.0 + 9.0 * tNoise(q * vec3(18.0, 4.0, 18.0)));
     vec3 woodCol = mix(vec3(0.30, 0.13, 0.045), vec3(0.78, 0.43, 0.15), woodGrain) * (0.8 + 0.4 * fine);
     // Bark itself: warm grey-brown, each plate its own tone, silvered on the high ones, near-black in the furrows.
     // Colour by age of the wood: thin young twigs are warm tan-brown, old thick limbs
     // dark brown. Only smooth-barked species (plane, ginkgo) stay pale, and mottled.
     float thick = smoothstep(0.015, 0.14, R);
-    vec3 youngC = vec3(0.42, 0.27, 0.165);
-    vec3 oldC = vec3(0.30, 0.200, 0.130);
+    vec3 youngC = vec3(0.30, 0.235, 0.175);
+    vec3 oldC = vec3(0.215, 0.170, 0.130);
     vec3 woody = mix(youngC, oldC, thick);
     float smoothBark = 1.0 - smoothstep(0.18, 0.40, fissure);
     // London plane: cream-grey, with the pale inner bark showing where the outer plates
     // have flaked away. The species colour only tints it; the old warm multiplier made
     // every plane trunk read orange-brown.
-    vec3 paleC = mix(vec3(0.50, 0.465, 0.38), vTreeColour.rgb * vec3(1.15, 1.10, 0.95), 0.25);
+    vec3 paleC = mix(vec3(0.52, 0.46, 0.34), vTreeColour.rgb * vec3(1.15, 1.10, 0.95), 0.2);
     vec3 base = mix(woody, mix(paleC, woody, 0.15 * thick), smoothBark);
     base *= mix(vec3(1.0), vTreeColour.rgb / max(dot(vTreeColour.rgb, vec3(0.33)), 0.02) * 0.9, 0.18);
-    vec3 plateCol = base * (0.90 + 0.16 * plate) * (0.93 + 0.14 * grain) * (0.94 + 0.12 * dome);
+    vec3 plateCol = base * (0.94 + 0.10 * plate) * (1.0 + (grain - 0.5) * 0.14 * detail) * (0.96 + 0.08 * dome);
     // Mottling on smooth bark: flaked patches of olive-grey and cream.
     float mott = tNoise(q * 6.0 + 21.0);
     plateCol = mix(plateCol, plateCol * vec3(0.92, 0.95, 0.88), smoothBark * smoothstep(0.5, 0.75, mott) * 0.25);
@@ -488,26 +497,33 @@ if (vTreeKind > 0.5) {
     // camouflage or zebra stripes.
     float mottBig = tNoise(q * 3.0 + 41.0);
     float mottMid = tNoise(q * 7.0 + 63.0);
-    float mPatch = smoothstep(0.42, 0.78, mottBig * 0.75 + mottMid * 0.25);
+    float mPatch = smoothstep(0.34, 0.68, mottBig * 0.75 + mottMid * 0.25);
     float mDark = smoothstep(0.55, 0.90, tNoise(q * 4.5 + 87.0));
-    plateCol = mix(plateCol, plateCol * vec3(0.80, 0.82, 0.68), smoothBark * mPatch * 0.55);
+    plateCol = mix(plateCol, plateCol * vec3(0.70, 0.74, 0.56), smoothBark * mPatch * 0.75);
     plateCol = mix(plateCol, plateCol * vec3(0.72, 0.64, 0.52), smoothBark * mDark * 0.30);
-    vec3 creviceCol = vec3(0.045, 0.030, 0.021);
+    vec3 creviceCol = vec3(0.105, 0.082, 0.062);
     // Real bark is matte and low in saturation, and varies a great deal in value over a
     // metre: weathering, damp, where rain runs down it. Plastic is uniform and clean.
     float lum0 = dot(plateCol, vec3(0.30, 0.59, 0.11));
-    plateCol = mix(vec3(lum0), plateCol, mix(1.28, 1.0, smoothBark));
+    plateCol = mix(vec3(lum0), plateCol, mix(1.0, 0.9, smoothBark));
     float weather = tNoise(q * vec3(1.6, 0.35, 1.6) + 5.0);
     float streak = tNoise(vec3(q.x * 9.0 + q.z * 9.0, q.y * 0.8, 3.0));
     plateCol *= mix(0.95 + 0.55 * weather, 0.90 + 0.20 * weather, smoothBark);
     plateCol *= mix(0.88 + 0.24 * streak, 0.96 + 0.08 * streak, smoothBark);
     // Fine pitting and a dusting of grit, so no surface is perfectly clean.
-    plateCol *= 0.92 + 0.16 * tNoise(q * 320.0);
+    plateCol *= 1.0 - detail * 0.08 + detail * 0.08 * tNoise(q * 320.0);
     // Young wood is smooth: bark only fissures into plates once a limb is a few
     // centimetres thick. On a twig a centimetre across, plates ten centimetres wide
     // put its whole surface in a furrow, and every twig drew near-black.
     float fissured = smoothstep(0.025, 0.07, R) * (1.0 - 0.9 * smoothBark);
-    vec3 col = mix(plateCol, creviceCol, clamp((furrow * 0.90 + crack * 0.30) * fissured, 0.0, 1.0));
+    vec3 col = mix(plateCol, creviceCol, clamp((furrow * 0.60 + crack * 0.15) * fissured * detail, 0.0, 1.0));
+    // Cavity occlusion is its own channel, applied to ambient light only: a furrow is
+    // dark because little sky reaches into it, not because its albedo is black. Doing it
+    // in albedo is what made bark a field of black dots.
+    float cavity = clamp(furrow * 0.9 + crack * 0.3, 0.0, 1.0) * fissured;
+    tBarkAO = 1.0 - 0.6 * cavity * mix(0.5, 1.0, detail);
+    // Dry bark is rough everywhere; plate faces polished by weather are a little less so.
+    tBarkRough = 0.97 - 0.07 * (1.0 - cavity) * smoothstep(0.3, 0.9, plateId);
     // Planted in the ground: soil splashed up the foot, damp and dark where the wood meets
     // the earth, and less light reaching a surface so close to it.
     float foot = 1.0 - smoothstep(-0.2, 0.9, vAbove);
@@ -690,6 +706,8 @@ export function patchTreeMaterial(material: THREE.Material, mode: "lit" | "depth
     if (mode === "lit") {
       fragment = fragment.replace("#include <color_fragment>", `#include <color_fragment>\n${FRAGMENT_SURFACE}`);
       fragment = fragment.replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>\n${FRAGMENT_BUMP}`);
+      fragment = fragment.replace("#include <roughnessmap_fragment>", `#include <roughnessmap_fragment>\nif (vTreeKind > 0.5 && vTreeKind < 1.5) roughnessFactor = tBarkRough;`);
+      fragment = fragment.replace("#include <aomap_fragment>", `#include <aomap_fragment>\nif (vTreeKind > 0.5 && vTreeKind < 1.5) { reflectedLight.indirectDiffuse *= tBarkAO; reflectedLight.indirectSpecular *= tBarkAO; }`);
       fragment = fragment.replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>\n${FRAGMENT_TRANSLUCENCY}`);
     } else if (mode === "depth") {
       fragment = fragment.replace(
