@@ -19,6 +19,7 @@ import { GrassShells } from "./grassFur";
 import { preloadTreeGrower } from "../trees";
 import { installUniqueTrees } from "../trees/plant";
 import { perfTiming } from "./perf";
+import { cityQuality } from "./quality";
 import {
   type CityBuild,
   type CityHandles,
@@ -200,7 +201,7 @@ function finishLayer(
   if (forest) group.add(forest.group);
 
   const lawns = handles.statics.filter((m) => /^(parcel\.green|block\.ground)$/.test(m.name));
-  const shells = lawns.length > 0 ? new GrassShells(lawns, materials.get("parcel.green") as THREE.MeshStandardMaterial) : null;
+  const shells = cityQuality.grassShells && lawns.length > 0 ? new GrassShells(lawns, materials.get("parcel.green") as THREE.MeshStandardMaterial) : null;
   const lod = new CityLod(handles);
   const inverse = new THREE.Matrix4();
   const viewProjection = new THREE.Matrix4();

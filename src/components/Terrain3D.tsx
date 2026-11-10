@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { isConstrainedDevice, isSafeMode, markMountFinished, markMountStarted } from "../platform";
 import * as THREE from "three";
+import { cityQuality } from "../city/quality";
 import { beginCityLayer, type CityLayer, type CityLayerBuild } from "../city/cityLayer";
 import { CityTileStreamer, tileDebug } from "../city/cityTiles";
 import { loadCityTile } from "../api";
@@ -1952,7 +1953,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     tileDebug.log = tileLog;
     // Milliseconds of tile building per frame. `?tilebudget=<ms>` raises it for the
     // software renderer in the audit, where a frame takes seconds anyway.
-    const tileBudgetMs = Number(new URLSearchParams(window.location.search).get("tilebudget")) || (shotRef.current?.tileBudgetMs ?? 6);
+    const tileBudgetMs = Number(new URLSearchParams(window.location.search).get("tilebudget")) || (shotRef.current?.tileBudgetMs ?? cityQuality.tileBudgetMs);
     const streamCityTiles = (seconds: number) => {
       (result.modernCities ?? []).forEach((plan, index) => {
         const origin = plan.frame.origin;

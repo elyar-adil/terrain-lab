@@ -1,3 +1,4 @@
+import { cityQuality } from "../city/quality";
 import * as THREE from "three";
 
 import type { CityHandles, CityScene } from "../city/cityScene";
@@ -106,7 +107,7 @@ export function installUniqueTrees(handles: CityHandles, scene: CityScene): Uniq
     }));
   const planting = plantFromInstances(sets, grower, scene.seed);
   if (planting.trees.length === 0) return null;
-  const forest = new UniqueForest(grower, planting.trees, {}, treePoolOrNull());
+  const forest = new UniqueForest(grower, planting.trees, { lodDistancesM: cityQuality.treeLodM, farM: cityQuality.treeFarM }, treePoolOrNull());
   for (const mesh of planting.replaced) mesh.removeFromParent();
   const gone = new Set(planting.sets);
   handles.lodSets = handles.lodSets.filter((set) => !gone.has(set));

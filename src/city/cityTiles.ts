@@ -13,11 +13,12 @@ import * as THREE from "three";
 import { type CityLayer, type CityLayerBuild, beginCityLayer } from "./cityLayer";
 import type { CityScene } from "./cityScene";
 import { offerFoliageMask } from "./post";
+import { cityQuality } from "./quality";
 
 /** Side of one tile, city-local metres. */
 export const CITY_TILE_M = 500;
 /** Tiles any part of which is within this of the camera are built and kept. */
-export const TILE_LOAD_M = 600;
+export const TILE_LOAD_M = cityQuality.tileLoadM;
 /** Beyond the load range by this much a tile is dropped, so the edge never flickers. */
 const TILE_UNLOAD_SLACK_M = 300;
 /** Requests in flight at once. */
@@ -114,14 +115,20 @@ export class CityTileStreamer {
         }
       }
     }
-    for (const tile of this.tiles.values()) {
-      const distance = tileDistance(tile.column, tile.row, camera);
+    // Nearest first, so the budget and the tile cap go to what is under the camera.
+    const ordered = [...this.tiles.values()].map((tile) => ({ tile, distance: tileDistance(tile.column, tile.row, camera) }));
+    ordered.sort((a, b) => a.distance - b.distance);
+    let live = 0;
+    for (const { tile } of ordered) if (tile.state === "fetching" || tile.state === "ready" || tile.state === "building" || tile.state === "mounted") live += 1;
+    for (const { tile, distance } of ordered) {
       if (distance > this.loadM + TILE_UNLOAD_SLACK_M) {
+        if (tile.state !== "idle" && tile.state !== "empty" && tile.state !== "failed") live -= 1;
         this.drop(tile);
         continue;
       }
-      if (tile.state === "idle" && distance <= this.loadM && this.fetching < MAX_FETCHES) {
+      if (tile.state === "idle" && distance <= this.loadM && this.fetching < MAX_FETCHES && live < cityQuality.maxTiles) {
         this.fetch(tile);
+        live += 1;
       }
       if (tile.state === "ready") {
         const t0 = performance.now();

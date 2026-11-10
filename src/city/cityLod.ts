@@ -25,6 +25,7 @@
 import * as THREE from "three";
 
 import type { CityHandles, LodInstanceSet } from "./cityScene";
+import { cityQuality } from "./quality";
 
 /** Distances are city-local metres. */
 export const LOD = {
@@ -58,24 +59,40 @@ export const LOD = {
   shadowAll: 2200,
 } as const;
 
+/** `LOD` with the device's distance scale applied; shadow spans are view-based and unscaled. */
+const D = (() => {
+  const k = cityQuality.lodScale;
+  return {
+    treeDetail: LOD.treeDetail * k,
+    treeCoreNear: LOD.treeCoreNear * k,
+    treeCoreFar: LOD.treeCoreFar * k,
+    hedge: LOD.hedge * k,
+    tuft: LOD.tuft * k,
+    tallProp: LOD.tallProp * k,
+    lowProp: LOD.lowProp * k,
+    fineStatic: LOD.fineStatic * k,
+    flatStatic: LOD.flatStatic * k,
+  };
+})();
+
 const FINE = /^(trim\.|wire|sign\/|signal\.|awning|balcony)/;
 const FLAT = /^(kerb|marking\.|barrier|median)/;
 
 function instanceRadius(set: LodInstanceSet): number {
   const { key, part } = set;
   if (key.startsWith("tree/")) return Number.POSITIVE_INFINITY; // handled by part
-  if (key === "hedge") return LOD.hedge;
-  if (key === "tuft") return LOD.tuft;
+  if (key === "hedge") return D.hedge;
+  if (key === "tuft") return D.tuft;
   if (key.startsWith("furniture/")) {
-    return /lamp|pole|gantry|sign\.guide|shelter/.test(key) ? LOD.tallProp : LOD.lowProp;
+    return /lamp|pole|gantry|sign\.guide|shelter/.test(key) ? D.tallProp : D.lowProp;
   }
   void part;
   return Number.POSITIVE_INFINITY;
 }
 
 function staticRadius(name: string): number {
-  if (FINE.test(name)) return LOD.fineStatic;
-  if (FLAT.test(name)) return LOD.flatStatic;
+  if (FINE.test(name)) return D.fineStatic;
+  if (FLAT.test(name)) return D.flatStatic;
   return Number.POSITIVE_INFINITY;
 }
 
@@ -189,9 +206,9 @@ export class CityLod {
         let toFar = false;
         if (isTree) {
           if (isCore) {
-            if (d < LOD.treeCoreNear) continue;
-            toFar = d >= LOD.treeCoreFar;
-          } else if (d >= LOD.treeDetail) {
+            if (d < D.treeCoreNear) continue;
+            toFar = d >= D.treeCoreFar;
+          } else if (d >= D.treeDetail) {
             continue;
           }
         } else if (d >= limit) {

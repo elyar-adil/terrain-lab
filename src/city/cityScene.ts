@@ -26,6 +26,7 @@ import { patchCorrugation } from "./corrugated";
 import { patchWeathering } from "./weathering";
 import { applyGrassFur } from "./grassFur";
 import { buildSignTextures } from "./signs";
+import { cityQuality } from "./quality";
 
 /** One vertex buffer group from the payload. */
 export interface SceneMesh {
@@ -236,6 +237,26 @@ const TREE_LEAF_PREFIX = "leaf/";
  * what the previous renderer got wrong: it emitted UVs in scene units, so every
  * wall sampled a single near-uniform texel and came out as a vertical streak.
  */
+/**
+ * Textures shared by every tile of a city.
+ *
+ * Each streamed tile ships the same baked texture set. Building it per tile means
+ * decoding, uploading and mip-mapping a few dozen textures (and deriving their
+ * normal maps) once per tile, then holding all of them in GPU memory at once: the
+ * stall on a desktop and the out-of-memory kill on a phone. Textures with the same
+ * name, size and content are one GPU object, released when the last tile using it
+ * is dropped.
+ */
+const sharedTextures = new Map<string, { texture: THREE.DataTexture; refs: number }>();
+
+function textureFingerprint(source: SceneTexture): string {
+  const bytes = base64ToBytes(source.data);
+  let hash = 2166136261;
+  const stride = Math.max(1, Math.floor(bytes.length / 257));
+  for (let i = 0; i < bytes.length; i += stride) hash = Math.imul(hash ^ bytes[i], 16777619);
+  return `${source.name}|${source.width}x${source.height}|${bytes.length}|${(hash >>> 0).toString(36)}`;
+}
+
 export function createMaterials(
   textures: SceneTexture[],
   signalLampCapacity = 64,
@@ -245,6 +266,9 @@ export function createMaterials(
 
   const built: THREE.Material[] = [];
   const builtTextures: THREE.DataTexture[] = [];
+  /** Keys of the shared textures this catalogue holds a reference to. */
+  const held: string[] = [];
+  const keyOf = new Map<string, string>();
   const cache = new Map<string, THREE.DataTexture>();
   const missing = new Set<string>();
   /** Materials whose UV buffer is short; see `geometryFor`. */
@@ -256,6 +280,15 @@ export function createMaterials(
     if (cached) return cached;
     const source = sources.get(name);
     if (!source) return null;
+    const sharedKey = textureFingerprint(source);
+    const shared = sharedTextures.get(sharedKey);
+    if (shared) {
+      shared.refs += 1;
+      held.push(sharedKey);
+      keyOf.set(name, sharedKey);
+      cache.set(name, shared.texture);
+      return shared.texture;
+    }
     const texture = new THREE.DataTexture(
       base64ToBytes(source.data),
       source.width,
@@ -266,7 +299,7 @@ export function createMaterials(
     texture.wrapT = THREE.RepeatWrapping;
     // A road marking seen at a grazing angle is the worst case for aliasing in
     // the whole scene, so anisotropy is not optional.
-    texture.anisotropy = 16;
+    texture.anisotropy = cityQuality.anisotropy;
     texture.magFilter = THREE.LinearFilter;
     texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.generateMipmaps = true;
@@ -295,7 +328,9 @@ export function createMaterials(
     texture.repeat.set(1 / source.tileWidthM, vInTiles ? 1 : 1 / source.tileHeightM);
     texture.needsUpdate = true;
     cache.set(name, texture);
-    builtTextures.push(texture);
+    sharedTextures.set(sharedKey, { texture, refs: 1 });
+    held.push(sharedKey);
+    keyOf.set(name, sharedKey);
     return texture;
   };
 
@@ -329,6 +364,14 @@ export function createMaterials(
     if (cached) return cached;
     const albedo = textureFor(name);
     if (!albedo) return null;
+    const normalKey = `${keyOf.get(name)}#normal#${strength}`;
+    const sharedNormal = sharedTextures.get(normalKey);
+    if (sharedNormal) {
+      sharedNormal.refs += 1;
+      held.push(normalKey);
+      cache.set(key, sharedNormal.texture);
+      return sharedNormal.texture;
+    }
     const { width, height } = source;
     const normal = new Uint8Array(width * height * 4);
     for (let index = 0; index < normal.length; index += 4) {
@@ -341,13 +384,14 @@ export function createMaterials(
     map.wrapS = THREE.RepeatWrapping;
     map.wrapT = THREE.RepeatWrapping;
     map.flipY = false;
-    map.anisotropy = 8;
+    map.anisotropy = cityQuality.anisotropy;
     map.minFilter = THREE.LinearMipmapLinearFilter;
     map.generateMipmaps = true;
     map.repeat.copy(albedo.repeat);
     map.needsUpdate = true;
     cache.set(key, map);
-    builtTextures.push(map);
+    sharedTextures.set(normalKey, { texture: map, refs: 1 });
+    held.push(normalKey);
     // Three small jobs' worth per texture: the height field, then row bands.
     let field: Float32Array | null = null;
     pending.push(() => {
@@ -1081,6 +1125,16 @@ roughnessFactor = clamp(roughnessFactor + smoothstep(60.0, 700.0, waterDist) * 0
     dispose() {
       for (const material of built) material.dispose();
       for (const texture of builtTextures) texture.dispose();
+      for (const key of held) {
+        const entry = sharedTextures.get(key);
+        if (!entry) continue;
+        entry.refs -= 1;
+        if (entry.refs <= 0) {
+          entry.texture.dispose();
+          sharedTextures.delete(key);
+        }
+      }
+      held.length = 0;
       for (const lamp of lamps) lamp.geometry.dispose();
     },
   };
