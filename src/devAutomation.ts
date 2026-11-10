@@ -40,7 +40,15 @@ export interface Automation {
   exitAfterReadyMs?: number;
 }
 
+/**
+ * The browser build has no Rust side to ask: a test page sets these two globals
+ * before the app loads (Playwright `addInitScript`), see scripts/web-auto-shot.mjs.
+ */
+type BrowserHook = { __terrainLabAutomation?: Automation; __terrainLabEvent?: (event: string, detail: unknown) => void };
+const browserHook = (): BrowserHook => (typeof window === "undefined" ? {} : (window as unknown as BrowserHook));
+
 export async function loadAutomation(): Promise<Automation | null> {
+  if (browserHook().__terrainLabAutomation) return browserHook().__terrainLabAutomation ?? null;
   try {
     return (await invoke<Automation | null>("automation_spec")) ?? null;
   } catch (error) {
@@ -52,6 +60,11 @@ export async function loadAutomation(): Promise<Automation | null> {
 }
 
 export function reportAutomation(event: string, detail: unknown = {}): void {
+  const hook = browserHook().__terrainLabEvent;
+  if (hook) {
+    hook(event, detail);
+    return;
+  }
   invoke("automation_event", { event, detail }).catch(() => undefined);
 }
 

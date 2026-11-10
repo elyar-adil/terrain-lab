@@ -19,6 +19,8 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { offerFoliageMask, patchOcclusionFoliage, sanitizePass, skipFlaggedInOcclusion } from "../city/post";
 import { patchTreeMaterial } from "../trees";
 import { bakeSkyEnvironment } from "../city/sky";
+import { createHorizonLand, extendRim } from "./horizonLand";
+import { createAtmosphereFog, createAtmosphereSky, installAtmosphere } from "./atmosphere";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { buildFarTreeSet } from "./farTrees";
 import { createGroundCover } from "./groundCover";
@@ -105,64 +107,6 @@ const cloudFragmentShader = `
 // About 31 degrees up: low enough that every spur and gully throws a readable
 // shadow, high enough that a street is still lit.
 const SUN_DIR = new THREE.Vector3(-0.55, 0.52, -0.66).normalize();
-const SKY_FOG = 0xc4d4e4;
-const skyVertShader = `
-  varying vec3 vDir;
-  void main() {
-    vDir = position;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-const skyFragShader = `
-  varying vec3 vDir;
-  uniform vec3 uSunDir;
-  uniform float uTime;
-
-  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-  float vnoise(vec2 p) {
-    vec2 i = floor(p), f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
-               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
-  }
-  float fbm(vec2 p) {
-    float v = 0.0, a = 0.5;
-    for (int i = 0; i < 6; i++) { v += a * vnoise(p); p = p * 2.07 + vec2(19.7, 7.3); a *= 0.5; }
-    return v;
-  }
-
-  void main() {
-    vec3 d = normalize(vDir);
-    float y = d.y;
-    vec3 zenith = vec3(0.070, 0.225, 0.565);
-    vec3 horizon = vec3(0.46, 0.60, 0.76);
-    vec3 col = mix(horizon, zenith, pow(clamp(y, 0.0, 1.0), 0.52));
-
-    float s = max(dot(d, uSunDir), 0.0);
-    col += vec3(1.0, 0.86, 0.62) * pow(s, 6.0) * 0.14;
-    col += vec3(1.0, 0.94, 0.82) * pow(s, 220.0) * 2.6;
-
-    if (y > 0.012) {
-      vec2 uv = d.xz / (y + 0.14) * 4.5;
-      vec2 drift = vec2(uTime * 0.0022, uTime * 0.0009);
-      float warp = fbm(uv * 0.18 + drift);
-      float c = fbm(uv * 0.34 + (warp - 0.5) * 2.4 + drift * 1.7);
-      float cover = smoothstep(0.50, 0.76, c + 0.14 * pow(1.0 - y, 2.0));
-      float fade = smoothstep(0.012, 0.10, y);
-      float lit = smoothstep(0.42, 0.92, c);
-      vec3 cloud = mix(vec3(0.56, 0.60, 0.68), vec3(0.98, 0.99, 1.03), lit);
-      cloud += vec3(0.30, 0.24, 0.14) * pow(s, 3.0);
-      col = mix(col, cloud, cover * fade * 0.94);
-    }
-
-    col = mix(col, horizon * vec3(1.04, 1.02, 0.99), smoothstep(0.045, -0.10, y));
-
-    gl_FragColor = vec4(col, 1.0);
-    #include <tonemapping_fragment>
-    #include <colorspace_fragment>
-  }
-`;
-
 const waterVertexShader = `
   precision highp float;
   varying vec2 vUv;
@@ -172,6 +116,7 @@ const waterVertexShader = `
   uniform vec2 uWind;
   uniform sampler2D uHydrologyMap;
   uniform sampler2D uFlowMap;
+  #include <fog_pars_vertex>
 
   float vertexHash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -215,7 +160,9 @@ const waterVertexShader = `
     displaced.z += water * uMetresToScene * (ocean * oceanWave + lake * lakeWave + river * riverWave);
     vec4 world = modelMatrix * vec4(displaced, 1.0);
     vWorldPosition = world.xyz;
-    gl_Position = projectionMatrix * viewMatrix * world;
+    vec4 mvPosition = viewMatrix * world;
+    gl_Position = projectionMatrix * mvPosition;
+    #include <fog_vertex>
   }
 `;
 
@@ -228,6 +175,7 @@ const waterFragmentShader = `
   uniform vec3 uSunDirection;
   uniform sampler2D uHydrologyMap;
   uniform sampler2D uFlowMap;
+  #include <fog_pars_fragment>
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -286,25 +234,37 @@ const waterFragmentShader = `
     float normalStrength = ocean * 0.00165 + lake * 0.0012 + river * (0.0009 + flowStrength * 0.0011);
     vec2 gradient = vec2(sampleX - centre, sampleY - centre) / footprint * normalStrength;
     vec3 normal = normalize(vec3(-gradient.x, 1.0, -gradient.y));
-    vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
-    float fresnel = pow(1.0 - max(dot(normal, viewDirection), 0.0), 4.0);
+    vec3 viewDirection = isOrthographic ? vec3(0.0, 1.0, 0.0) : normalize(cameraPosition - vWorldPosition);
+    // Water is a dark body under a mirror: what it shows is the sky in the
+    // mirrored direction, more of it the more grazing the view (Fresnel), plus
+    // the sun's glitter path. The sky comes from the same atmosphere as the dome.
+    float facing = max(dot(normal, viewDirection), 0.0);
+    float fresnel = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
+    vec3 mirrored = reflect(-viewDirection, normal);
+    mirrored.y = abs(mirrored.y) + 0.02;
+    #if defined( USE_FOG ) && ! defined( FOG_EXP2 )
+      vec3 skyMirror = atmSky(normalize(mirrored), max(cameraPosition.y * fogNear, 2.0), fogFar);
+      vec3 sunTint = atmSunTransmittance(fogFar);
+    #else
+      vec3 skyMirror = vec3(0.39, 0.53, 0.56);
+      vec3 sunTint = vec3(1.0, 0.91, 0.72);
+    #endif
     vec3 reflectedSun = reflect(-normalize(uSunDirection), normal);
-    float specular = pow(max(dot(reflectedSun, viewDirection), 0.0), 38.0);
-    float glint = pow(max(dot(reflectedSun, viewDirection), 0.0), 120.0);
-    vec3 base = vec3(0.018, 0.105, 0.135) * ocean
+    float sunFacing = max(dot(reflectedSun, viewDirection), 0.0);
+    // Unresolved ripples spread the sun's image into a path; the far, grazing
+    // part of it is the brightest thing in a landscape.
+    float glitter = pow(sunFacing, 90.0) * 0.35 + pow(sunFacing, 900.0) * 6.0;
+    vec3 body = vec3(0.018, 0.105, 0.135) * ocean
       + vec3(0.035, 0.145, 0.155) * lake
       + vec3(0.075, 0.175, 0.155) * river;
-    base = mix(base, vec3(0.39, 0.53, 0.56), fresnel * 0.56);
-    base += vec3(1.0, 0.91, 0.72) * specular * 0.10 + vec3(1.0) * glint * 0.13;
+    vec3 base = body * (1.0 - fresnel) + skyMirror * fresnel * 0.92 + sunTint * glitter * (0.3 + 0.7 * fresnel);
     float edgeFoam = smoothstep(0.16, 0.42, water) * (1.0 - smoothstep(0.42, 0.72, water));
     float streamFoam = river * flowStrength * smoothstep(0.73, 0.92, centre);
     base = mix(base, vec3(0.72, 0.79, 0.75), edgeFoam * ocean * 0.38 + streamFoam * 0.14);
-    // A river is opaque enough to read from kilometres off: sky on the surface,
-    // not the bed's green through a veil.
-    base = mix(base, vec3(0.30, 0.42, 0.46), river * (0.12 + 0.30 * fresnel));
     float alpha = mix(mix(0.52, 0.86, river * smoothstep(0.2, 0.5, water)), 0.82, ocean) * smoothstep(0.12, 0.58, water);
     alpha = max(alpha, river * 0.9 * smoothstep(0.16, 0.42, water));
     gl_FragColor = vec4(base, alpha);
+    #include <fog_fragment>
   }
 `;
 
@@ -333,10 +293,10 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
   const [mountError, setMountError] = useState<string | null>(null);
   const mountTerrain = (host: HTMLDivElement): (() => void) => {
     const scene = new THREE.Scene();
-    const baseFogDensity = 0.085 + config.haze * 0.006;
-    // 路口工坊移植:线性雾贴穹顶地平线色,距离随视野自适应(在 animate 中更新)。
-    scene.fog = new THREE.Fog(SKY_FOG, 0.01, 1.0);
-    void baseFogDensity;
+    // Sky and distance share one atmosphere (see atmosphere.ts): the fog chunks
+    // become aerial perspective, and this Fog only carries its two parameters.
+    installAtmosphere(SUN_DIR);
+    scene.fog = createAtmosphereFog(result.worldSizeKm * 1000 / 3.2, config.haze);
 
     const camera = cameraMode === "satellite"
       ? new THREE.OrthographicCamera(-1.7, 1.7, 1.7, -1.7, 0.000005, 30)
@@ -377,16 +337,7 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
 
     // 路口工坊移植:写实天空穹顶(同一份材质烘成 PMREM 环境贴图,玻璃与
     // 水面反射真实天色),跟随相机的巨大球壳,renderOrder 最先绘制。
-    const skyUniforms = { uSunDir: { value: SUN_DIR.clone() }, uTime: { value: 0 } };
-    const skyMaterial = new THREE.ShaderMaterial({
-      vertexShader: skyVertShader,
-      fragmentShader: skyFragShader,
-      uniforms: skyUniforms,
-      side: THREE.BackSide,
-      depthWrite: false,
-      depthTest: false,
-      fog: false,
-    });
+    const { material: skyMaterial, uniforms: skyUniforms } = createAtmosphereSky(SUN_DIR, config.haze, config.cloudCoverage / 100);
     const skyDome = new THREE.Mesh(new THREE.SphereGeometry(9000, 48, 28), skyMaterial);
     skyDome.frustumCulled = false;
     skyDome.renderOrder = -100;
@@ -406,8 +357,12 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     // day gives 4 - 6 (skylight 15 - 25 % of the total); every frame looked hazy,
     // its darkest twentieth at 30-35 of 255 where photographs reach 20 - 40 and the
     // reference render 2. These bring the ratio to about 3.3.
-    scene.environmentIntensity = 0.40;
-    renderer.toneMappingExposure = 1.05;
+    // The sky is now in the same units as the sun (atmosphere.ts), so the baked
+    // environment is the skylight itself and needs no scaling down; the exposure
+    // is a camera's for a sunlit landscape: white walls just under clipping.
+    // The satellite sheet keeps the exposure its image was balanced at.
+    scene.environmentIntensity = 1.0;
+    renderer.toneMappingExposure = cameraMode === "satellite" ? 1.05 : 1.3;
 
     // 冷色补光:阴影面不全是黑的,带一点天光蓝。
     const fillLight = new THREE.DirectionalLight(0xd4def0, 0.1);
@@ -501,9 +456,23 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
       controls.maxPolarAngle = Math.PI * 0.495;
     }
 
-    const heights = decodeHeights(result.heightDataBase64);
+    // The generator's outermost row is its drainage outlet, not ground: see extendRim.
+    const heights = extendRim(decodeHeights(result.heightDataBase64), result.meshSize);
     const geometry = new THREE.PlaneGeometry(3.2, 3.2, result.meshSize - 1, result.meshSize - 1);
     const positions = geometry.attributes.position as THREE.BufferAttribute;
+    {
+      // The baked image carries the outlet row as a line of sea: the outer two
+      // rings of vertices take the image from the ring inside them.
+      const uv = geometry.attributes.uv as THREE.BufferAttribute;
+      const size = result.meshSize;
+      const inward = (i: number) => Math.min(size - 3, Math.max(2, i));
+      for (let y = 0; y < size; y += 1) {
+        for (let x = 0; x < size; x += 1) {
+          if (x >= 2 && x < size - 2 && y >= 2 && y < size - 2) continue;
+          uv.setXY(y * size + x, inward(x) / (size - 1), 1 - inward(y) / (size - 1));
+        }
+      }
+    }
     const metresToScene = 3.2 / (result.worldSizeKm * 1000);
     const sceneToMetres = 1 / metresToScene;
     const terrainHalfExtent = 1.6;
@@ -551,7 +520,8 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     heightTexture.needsUpdate = true;
     // Ground cover (forest, grass, snow, naturalness) the shader builds materials
     // from. Without it (older payloads) nothing is natural and the baked image rules.
-    const materialBytes = result.materialDataBase64 ? decodeBytes(result.materialDataBase64) : new Uint8Array(result.meshSize * result.meshSize * 4);
+    // Five cells deep here: the cliff down to the outlet made the cells above it "bare rock".
+    const materialBytes = extendRim(result.materialDataBase64 ? decodeBytes(result.materialDataBase64) : new Uint8Array(result.meshSize * result.meshSize * 4), result.meshSize, 4, 5);
     const materialTexture = new THREE.DataTexture(materialBytes, result.meshSize, result.meshSize, THREE.RGBAFormat, THREE.UnsignedByteType);
     materialTexture.minFilter = THREE.LinearFilter;
     materialTexture.magFilter = THREE.LinearFilter;
@@ -782,8 +752,11 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       float altStep = fwidth(altM);
       float bandA = 1.0 - smoothstep(38.0 * 0.06, 38.0 * 0.28, altStep);
       float bandB = 1.0 - smoothstep(7.5 * 0.06, 7.5 * 0.28, altStep);
-      float strata = mix(0.5, 0.5 + 0.5 * sin(altM / 38.0 * 6.2832 + 4.0 * warpS), bandA);
-      float strataF = mix(0.5, 0.5 + 0.5 * sin(altM / 7.5 * 6.2832 + 6.0 * dFbm(pm / 40.0)), bandB);
+      // Beds of uneven thickness, dipping a few degrees and gently folded: evenly
+      // spaced level bands read as scan lines, not as rock.
+      float bedM = altM + dot(pm, vec2(0.052, 0.031)) + 60.0 * warpS;
+      float strata = mix(0.5, dNoise(vec2(bedM / 30.0, 0.37)), bandA);
+      float strataF = mix(0.5, dNoise(vec2(bedM / 5.0 + 3.0 * dFbm(pm / 40.0), 7.1)), bandB);
       float cr = abs(dNoise(pm / 7.0) - 0.5);
       float cracks = (1.0 - smoothstep(0.0, 0.05, cr)) * a1;
       float rockLum = 0.115 + 0.075 * strata * (0.4 + 0.6 * a3) + 0.040 * strataF * a2
@@ -810,7 +783,10 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       float screeW = smoothstep(0.08, 0.15, sf) * (1.0 - smoothstep(0.24, 0.36, sf)) * (1.0 - 0.5 * hn) * (1.0 - ctrl.r);
       // Snow is a layer of varying depth, not a tint: it thins over ridges and
       // steep ground until rock shows through, in ragged islands and tongues.
-      float depthNoise = dFbm(pm / 130.0) * 0.8 + dFbm(pm / 17.0) * 0.25 * a2;
+      // From far enough that a pixel spans the patches, the snow line is an
+      // average, not a scatter of white pixels.
+      float a4 = 1.0 - smoothstep(25.0, 110.0, foot);
+      float depthNoise = mix(dFbm(pm / 520.0), dFbm(pm / 130.0), a4) * 0.8 + dFbm(pm / 17.0) * 0.25 * a2;
       float depth = ctrl.b * (0.55 + depthNoise) + 0.30 * (1.0 - hnm) - 0.30;
       float snowW = smoothstep(0.26, 0.40, depth) * (1.0 - smoothstep(0.20, 0.46, sf));
       vec3 c = soil;
@@ -882,6 +858,8 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     terrain.renderOrder = RIVER_GROUND_ORDER; // draws before the city river clears depth in its valley
     terrain.rotation.x = -Math.PI / 2;
     scene.add(terrain);
+    // The country beyond the tile, out to the horizon (3D only: the satellite
+    // view is a map sheet and ends where the data ends).
 
     const forestValues = decodeBytes(result.forestDataBase64);
     const vegetationExclusion = decodeBytes(result.vegetationExclusionDataBase64);
@@ -3598,11 +3576,11 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     scene.add(sun.target);
 
     const windAngle = THREE.MathUtils.degToRad(config.windDirection);
-    const waterHeights = decodeHeights(result.waterHeightDataBase64);
-    const waterMask = decodeBytes(result.waterMaskBase64);
-    const waterKind = decodeBytes(result.waterKindBase64);
-    const flowDirection = new Int8Array(decodeBytes(result.flowDirectionBase64).buffer);
-    const flowStrength = decodeBytes(result.flowStrengthBase64);
+    const waterHeights = extendRim(decodeHeights(result.waterHeightDataBase64), result.meshSize);
+    const waterMask = extendRim(decodeBytes(result.waterMaskBase64), result.waterDataSize);
+    const waterKind = extendRim(decodeBytes(result.waterKindBase64), result.waterDataSize);
+    const flowDirection = extendRim(new Int8Array(decodeBytes(result.flowDirectionBase64).buffer), result.waterDataSize, 2);
+    const flowStrength = extendRim(decodeBytes(result.flowStrengthBase64), result.waterDataSize);
 
     // Near-field ground cover (3D grass tufts, shrubs, wildflowers) on open land.
     const groundCover = createGroundCover(metresToScene, {
@@ -3631,6 +3609,14 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
         / Math.max(1, result.stats.maxElevation - result.stats.minElevation),
     });
     scene.add(groundCover.group);
+    // The country beyond the tile, out to the horizon (3D only: the satellite
+    // view is a map sheet and ends where the data ends).
+    if (cameraMode === "3d") {
+      scene.add(createHorizonLand({
+        heights, meshSize: result.meshSize, minElevation: result.stats.minElevation, metresToScene, map: texture,
+        waterHeights, waterMask, waterMaskSize: result.waterDataSize,
+      }));
+    }
     const waterGeometry = new THREE.PlaneGeometry(3.2, 3.2, result.meshSize - 1, result.meshSize - 1);
     const waterPositions = waterGeometry.attributes.position as THREE.BufferAttribute;
     for (let index = 0; index < waterHeights.length; index += 1) {
@@ -3693,6 +3679,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     flowTexture.flipY = true;
     flowTexture.needsUpdate = true;
     const waterUniforms = {
+      ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
       uTime: { value: 0 },
       uMetresToScene: { value: metresToScene },
       uWind: { value: new THREE.Vector2(Math.cos(windAngle), Math.sin(windAngle)) },
@@ -3704,6 +3691,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       vertexShader: waterVertexShader,
       fragmentShader: waterFragmentShader,
       uniforms: waterUniforms,
+      fog: true,
       transparent: true,
       depthWrite: false,
       polygonOffset: true,
@@ -3824,8 +3812,8 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
         Math.cos(liveAzimuth) * Math.cos(liveElevation) * 5,
       );
       sun.intensity = 3.4 * (1.0 - liveCoverage * 0.28);
-      waterUniforms.uSunDirection.value.copy(sun.position).normalize();
-      (scene.fog as THREE.FogExp2).density = baseFogDensity * (1.0 + Math.max(0, weatherFront) * 0.32);
+      // The sun that lights the scene and fills the sky, not the configured one.
+      waterUniforms.uSunDirection.value.copy(SUN_DIR);
       // City-focus jumps: reposition the orbit target and set the viewing
       // distance so the requested span fills the frame.  Handled before
       // controls.update() so the orbit math adopts the new target at once.
@@ -3937,12 +3925,9 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
           0.05 * metresToScene,
           40 * metresToScene,
         );
-        const reliefScene = Math.max(0, result.stats.maxElevation - result.stats.minElevation) * metresToScene;
-        const wantedFar = THREE.MathUtils.clamp(
-          distance * 8 + reliefScene * 2,
-          2_000 * metresToScene,
-          30,
-        );
+        // The far plane is the horizon, always: the atmosphere ends the view, not
+        // the frustum (depth precision is set by the near plane alone).
+        const wantedFar = 30;
         if (
           Math.abs(camera.near - wantedNear) / wantedNear > 0.12
           || Math.abs(camera.far - wantedFar) / wantedFar > 0.12
@@ -4094,8 +4079,8 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       // The dome must sit inside the far plane or the frustum clips it away and
       // the sky renders as black.
       skyDome.scale.setScalar(Math.max(1e-6, camera.far * 0.9 / 9000));
-      (scene.fog as THREE.Fog).near = Math.max(500 * metresToScene, viewSpanScene * 1.5);
-      (scene.fog as THREE.Fog).far = Math.max(4000 * metresToScene, viewSpanScene * 6.0);
+      skyUniforms.uCameraHeight.value = Math.max(2, camera.position.y * sceneToMetres);
+      skyUniforms.uCoverage.value = liveCoverage;
       const shadowSpan = THREE.MathUtils.clamp(viewSpanScene * 0.85, 40 * metresToScene, 1.5);
       sun.target.position.copy(controls.target);
       sun.position.copy(controls.target).addScaledVector(SUN_DIR, shadowSpan * 2.5 + 0.05);

@@ -27,6 +27,7 @@ vite.web.config.ts    base './', only index.html, only the two wasm files as pub
 scripts/build-web.mjs `npm run build:web` -> dist-web/
 scripts/serve-web.mjs serves dist-web under /terrain-lab/ like GitHub Pages
 scripts/web-shot.mjs  headless Chromium run of the real UI (screenshots, timings)
+scripts/web-auto-shot.mjs  one screenshot at an exact view, from an automation spec (below)
 scripts/web-smoke.mjs the wasm module in Node (timings, payload sizes)
 ```
 
@@ -134,6 +135,19 @@ npm run build:web        # cargo (wasm32) + vite -> dist-web/ (+ .nojekyll)
 node scripts/serve-web.mjs 4173 /terrain-lab/
 node scripts/web-shot.mjs --url http://localhost:4173/terrain-lab/ --out /tmp/shots
 ```
+
+One exact view, without clicking: the browser build reads the same automation spec as
+the desktop app (`docs/real-app-verification.md`) from `window.__terrainLabAutomation`,
+which `scripts/web-auto-shot.mjs` sets before the page loads, and waits for its "ready"
+event. Nothing changes in a normal page load, where that global does not exist.
+
+```
+node scripts/web-auto-shot.mjs --out /tmp/shots --name valley \
+  --spec '{"settleFrames":3,"camera":{"pos":[20,300,60],"target":[40,1500,40],"mode":"fly"}}'
+```
+
+Set `CHROMIUM_PATH` if Playwright's own browser is not installed. Under software GL a
+terrain view takes about three minutes, a city view five to ten.
 
 `dist-web/` is deployed to the `gh-pages` branch root. Build output is never committed
 to `main`.
