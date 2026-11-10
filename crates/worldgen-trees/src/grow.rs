@@ -370,7 +370,9 @@ impl Grower {
             }
             rad[k] = r;
         }
-        // The trunk goes on below the ground: it is planted, not stood on.
+        // The trunk goes on below the ground: it is planted, not stood on. (The shader does
+        // not draw this tube's usual overlap past its top end, which would stand out of the
+        // ground as a ring wider than the trunk above it.)
         self.segments.push(Segment {
             a: v3(0.0, -0.45, 0.0),
             b: pts[0],
@@ -378,7 +380,36 @@ impl Grower {
             rb: rad[0],
             level: 0,
         });
-        for i in 1..pts.len() {
+        // The root collar is a curve that falls away over the first half metre, and the first
+        // segment is as long as a trunk section (0.3 - 0.8 m): drawn as one straight cone it
+        // leaves a hard-edged skirt at the ground. Cut it at the heights where the curve bends
+        // and size each cut from the same formula as the trunk.
+        let collar_radius = |y: f32| -> f32 {
+            let rel = (y / h).clamp(0.0, 1.0);
+            let base = r_dbh * ((1.0 - rel) / norm).max(0.0).powf(self.arch.trunk_taper);
+            (base * (1.0 + flare * 0.42 * (-y / 0.28).exp())).max(0.012)
+        };
+        let top_y = pts[1].y - pts[0].y;
+        let mut cuts: Vec<(V3, f32)> = vec![(pts[0], rad[0])];
+        if top_y > 0.05 {
+            for y in [0.06_f32, 0.14, 0.26, 0.42] {
+                if y < top_y - 0.05 {
+                    let t = y / top_y;
+                    cuts.push((pts[0] + (pts[1] - pts[0]) * t, collar_radius(y)));
+                }
+            }
+        }
+        cuts.push((pts[1], rad[1]));
+        for pair in cuts.windows(2) {
+            self.segments.push(Segment {
+                a: pair[0].0,
+                b: pair[1].0,
+                ra: pair[0].1,
+                rb: pair[1].1,
+                level: 0,
+            });
+        }
+        for i in 2..pts.len() {
             self.segments.push(Segment {
                 a: pts[i - 1],
                 b: pts[i],

@@ -71,7 +71,10 @@ void treeShape(out vec3 pos, out vec3 nor) {
     // Each tube runs a little past both ends, so where a branch bends the joint is
     // overlapped wood and not a crack.
     float ext = min(0.8 * max(aSegA.w, aSegB.w), 0.35 * len) / len;
-    float tt = mix(-ext, 1.0 + ext, position.y);
+    // A tube that lies wholly below the ground (the planted foot of a trunk) is not
+    // extended past its top: the overlap would stand out of the ground as a ring.
+    float extTop = (aSegB.y < 0.001 && aSegA.y < -0.1) ? 0.0 : ext;
+    float tt = mix(-ext, 1.0 + extTop, position.y);
     // The taper carries on through the extension, so it meets the next tube's surface.
     float r = max(mix(aSegA.w, aSegB.w, tt), 0.002);
     // Bark is not a cylinder: ridges and furrows run along it and shift the surface.
@@ -445,20 +448,26 @@ if (vTreeKind > 0.5) {
     float detail = 1.0 - smoothstep(0.004, 0.022, barkPx);
     // Plates about ten centimetres across the grain and several times that along it.
     vec3 sq = vec3(1.0, 1.0, 1.0);
-    vec3 qa = q * 10.0;
-    vec3 qb = q * 20.0;
+    // Plate size by species: a deeply fissured trunk has plates a hand across, a lightly
+    // ridged one a thumb across.
+    float plateK = mix(20.0, 10.0, clamp(fissure, 0.0, 1.0));
+    vec3 qa = q * plateK;
+    vec3 qb = q * plateK * 2.0;
     float vv = vert;
-    qa.y = mix(qa.y, qa.y * 0.13, vv);
-    qb.y = mix(qb.y, qb.y * 0.38, vv);
+    qa.y = mix(qa.y, qa.y * 0.07, vv);
+    qb.y = mix(qb.y, qb.y * 0.22, vv);
     vec3 wv = vec3(tNoise(qa * 0.35), tNoise(qa * 0.35 + 7.0), tNoise(qa * 0.35 + 17.0)) - 0.5;
     qa += wv * 1.6;
     vec3 wa = tWorley(qa);
     // Ragged edges: the furrow wanders, and pinches shut in places.
     float edge = wa.y - wa.x + (tNoise(qa * 2.3 + 3.0) - 0.5) * 0.22 + (tNoise(qa * 7.0) - 0.5) * 0.08;
-    float furrow = 1.0 - smoothstep(0.0, 0.045 + 0.06 * fissure, edge);
+    // The furrow's soft edge is never narrower than a pixel: a hard threshold on a
+    // sub-pixel feature steps in blocks, and the height-derived normal steps with it.
+    float pxA = barkPx * plateK * 1.4;
+    float furrow = 1.0 - smoothstep(0.0, 0.045 + 0.06 * fissure + pxA, edge);
     float rounding = smoothstep(0.0, 0.42, edge);
     vec3 wb = tWorley(qb + wv * 1.5);
-    float crack = (1.0 - smoothstep(0.0, 0.05, wb.y - wb.x + (tNoise(qb * 1.5) - 0.5) * 0.12)) * (1.0 - furrow) * 0.6;
+    float crack = (1.0 - smoothstep(0.0, 0.05 + pxA * 2.0, wb.y - wb.x + (tNoise(qb * 1.5) - 0.5) * 0.12)) * (1.0 - furrow) * 0.6;
     float grain = tNoise(vec3(q.x * 40.0 + q.z * 40.0, q.y * 6.0, 0.5));
     float fine = tNoise(q * 200.0);
     float along = q.y;
@@ -477,8 +486,8 @@ if (vTreeKind > 0.5) {
     // Colour by age of the wood: thin young twigs are warm tan-brown, old thick limbs
     // dark brown. Only smooth-barked species (plane, ginkgo) stay pale, and mottled.
     float thick = smoothstep(0.015, 0.14, R);
-    vec3 youngC = vec3(0.30, 0.235, 0.175);
-    vec3 oldC = vec3(0.215, 0.170, 0.130);
+    vec3 youngC = vec3(0.34, 0.26, 0.185);
+    vec3 oldC = vec3(0.285, 0.215, 0.155);
     vec3 woody = mix(youngC, oldC, thick);
     float smoothBark = 1.0 - smoothstep(0.18, 0.40, fissure);
     // London plane: cream-grey, with the pale inner bark showing where the outer plates
@@ -501,7 +510,7 @@ if (vTreeKind > 0.5) {
     float mDark = smoothstep(0.55, 0.90, tNoise(q * 4.5 + 87.0));
     plateCol = mix(plateCol, plateCol * vec3(0.70, 0.74, 0.56), smoothBark * mPatch * 0.75);
     plateCol = mix(plateCol, plateCol * vec3(0.72, 0.64, 0.52), smoothBark * mDark * 0.30);
-    vec3 creviceCol = vec3(0.105, 0.082, 0.062);
+    vec3 creviceCol = vec3(0.135, 0.100, 0.072);
     // Real bark is matte and low in saturation, and varies a great deal in value over a
     // metre: weathering, damp, where rain runs down it. Plastic is uniform and clean.
     float lum0 = dot(plateCol, vec3(0.30, 0.59, 0.11));
@@ -521,7 +530,7 @@ if (vTreeKind > 0.5) {
     // dark because little sky reaches into it, not because its albedo is black. Doing it
     // in albedo is what made bark a field of black dots.
     float cavity = clamp(furrow * 0.9 + crack * 0.3, 0.0, 1.0) * fissured;
-    tBarkAO = 1.0 - 0.6 * cavity * mix(0.5, 1.0, detail);
+    tBarkAO = 1.0 - 0.45 * cavity * mix(0.5, 1.0, detail);
     // Dry bark is rough everywhere; plate faces polished by weather are a little less so.
     tBarkRough = 0.97 - 0.07 * (1.0 - cavity) * smoothstep(0.3, 0.9, plateId);
     // Planted in the ground: soil splashed up the foot, damp and dark where the wood meets
@@ -564,7 +573,12 @@ if (vTreeKind > 0.5 && vTreeKind < 1.5 && !${NOBUMP}) {
   vec3 r2 = cross(normal, sx);
   float det = dot(sx, r1);
   vec3 grad = sign(det) * (hx * r1 + hy * r2);
-  normal = normalize(abs(det) * normal - grad);
+  // The tilt is bounded: derivatives are per 2x2 pixel quad, so an unbounded one flips
+  // the normal in blocks wherever the height jumps, and those blocks go black.
+  vec3 tilt = grad / max(abs(det), 1e-12);
+  float tl = length(tilt);
+  tilt *= min(1.0, 0.35 / max(tl, 1e-6));
+  normal = normalize(normal - tilt);
 }
 `;
 
