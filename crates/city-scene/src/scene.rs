@@ -51,6 +51,11 @@ pub struct SceneBudget {
     pub facade_texture_size: usize,
     /// Ground texture bake resolution.
     pub ground_texture_size: usize,
+    /// Bake the standard texture set into the scene. A streamed tile leaves it
+    /// out: the set is the same for every tile of a city (about 50 MB of pixels),
+    /// so the host asks for it once (`standard_textures`) and reuses it.
+    #[serde(skip)]
+    pub standard_textures: bool,
     /// Vehicle count.
     pub vehicles: usize,
     /// Rooftop plant, balconies and signage are only worth generating for
@@ -65,6 +70,7 @@ impl Default for SceneBudget {
             max_trees: trees::TREE_BUDGET,
             facade_texture_size: 256,
             ground_texture_size: 256,
+            standard_textures: true,
             // A Chinese arterial at midday carries wall-to-wall traffic in the
             // reference photographs; a fleet that renders as forty scattered
             // cars reads as an empty city. Poses cost ten floats each, so the
@@ -244,6 +250,11 @@ fn encode_geometry(geometry: SceneGeometry) -> (Vec<EncodedMesh>, Vec<EncodedIns
         });
     }
     (meshes, instances)
+}
+
+/// The texture set every scene of a city shares, baked for its climate.
+pub fn standard_textures(climate: &urban::SiteClimate, budget: &SceneBudget) -> Vec<BakedTexture> {
+    crate::bake::standard_set_in(budget.facade_texture_size, budget.ground_texture_size, climate)
 }
 
 fn encode_textures(textures: &[BakedTexture]) -> Vec<EncodedTexture> {
@@ -479,12 +490,11 @@ fn build_scene(
         .sum();
     let draw_calls = geometry.meshes.len();
     let (meshes, instances) = encode_geometry(geometry);
-    let mut texture_set =
-        crate::bake::standard_set_in(
-            budget.facade_texture_size,
-            budget.ground_texture_size,
-            &city.climate,
-        );
+    let mut texture_set = if budget.standard_textures {
+        standard_textures(&city.climate, &budget)
+    } else {
+        Vec::new()
+    };
     // The procedural facade's elevation table, which only exists once the
     // buildings have drawn their designs.
     texture_set.push(facade_table.bake());
@@ -685,6 +695,13 @@ fn decode_b64(text: &str) -> Result<Vec<u8>, String> {
 
 /// Serialise a scene into the binary container described above.
 pub fn encode_binary(scene: &CityScene) -> Result<Vec<u8>, String> {
+    encode_binary_with(scene, &[])
+}
+
+/// [`encode_binary`] with `extra` textures appended, written straight from their
+/// pixels (no base64 round trip), for a tile that is the first to ask for the
+/// city's shared set.
+pub fn encode_binary_with(scene: &CityScene, extra: &[BakedTexture]) -> Result<Vec<u8>, String> {
     use serde_json::{Value, json};
 
     let mut blobs = BlobWriter { data: Vec::new() };
@@ -742,6 +759,17 @@ pub fn encode_binary(scene: &CityScene) -> Result<Vec<u8>, String> {
             "tileHeightM": texture.tile_height_m,
             "hasNormalSource": texture.has_normal_source,
             "data": blobs.push(&decode_b64(&texture.data)?),
+        }));
+    }
+    for texture in extra {
+        textures.push(json!({
+            "name": texture.name,
+            "width": texture.width,
+            "height": texture.height,
+            "tileWidthM": texture.tile_width_m,
+            "tileHeightM": texture.tile_height_m,
+            "hasNormalSource": texture.has_normal_source,
+            "data": blobs.push(&texture.rgba),
         }));
     }
     let to_value =

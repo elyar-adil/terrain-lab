@@ -1178,13 +1178,10 @@ pub fn ensure_city_tile(
     let min = [column as f32 * CITY_TILE_M, row as f32 * CITY_TILE_M];
     let max = [min[0] + CITY_TILE_M, min[1] + CITY_TILE_M];
     let network = network.get_or_init(|| city_scene::derive_city(&city));
-    let scene = std::sync::Arc::new(city_scene::build_city_scene_tile(
-        &city,
-        network,
-        min,
-        max,
-        infrastructure::scene_budget(class),
-    ));
+    let mut budget = infrastructure::scene_budget(class);
+    // The shared texture set is not part of a tile (see `city_tile_bytes`).
+    budget.standard_textures = false;
+    let scene = std::sync::Arc::new(city_scene::build_city_scene_tile(&city, network, min, max, budget));
     if KEEP_BUILT_GEOMETRY {
         let mut guard = CITY_WORLD
             .lock()
@@ -1201,9 +1198,23 @@ pub fn ensure_city_tile(
 }
 
 /// One tile of a city's detail in the binary container.
-pub fn city_tile_bytes(index: usize, column: i32, row: i32) -> Result<Vec<u8>, String> {
+///
+/// A tile carries its own textures only (the facade table); the standard set, about
+/// 50 MB of pixels identical for every tile of a city, is attached when
+/// `with_textures` is set, which the host does once per city and then reuses.
+pub fn city_tile_bytes(index: usize, column: i32, row: i32, with_textures: bool) -> Result<Vec<u8>, String> {
     let scene = ensure_city_tile(index, column, row)?;
-    city_scene::scene::encode_binary(&scene)
+    if !with_textures {
+        return city_scene::scene::encode_binary(&scene);
+    }
+    let (class, city) = {
+        let guard = CITY_WORLD.lock().map_err(|_| "the city cache is poisoned")?;
+        let world = guard.as_ref().ok_or_else(|| "no cities: generate the world first".to_owned())?;
+        let (class, city) = world.plans.get(index).ok_or_else(|| format!("city {index} does not exist"))?;
+        (*class, city.clone())
+    };
+    let textures = city_scene::scene::standard_textures(&city.climate, &infrastructure::scene_budget(class));
+    city_scene::scene::encode_binary_with(&scene, &textures)
 }
 
 /// Generate a world and install what the later calls read: the traffic slots and

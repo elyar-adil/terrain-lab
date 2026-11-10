@@ -49,18 +49,47 @@ async function moveAnalysisPreviewsToBlobs(result: GenerationResult): Promise<vo
  * One square tile of a city's detail. The desktop shell builds it on request; in the
  * web harness the tile is read from `/city-tiles/<index>-<column>-<row>.json`.
  */
+/**
+ * The textures every tile of a city shares (about 50 MB of pixels). The first tile
+ * of a city is asked for them; the rest are asked without, and get them from here.
+ * Copied out of the first tile's buffer so that buffer can be freed.
+ */
+const sharedCityTextures = new Map<number, Promise<CityScene["textures"]>>();
+
 export async function loadCityTile(index: number, column: number, row: number): Promise<CityScene> {
-  try {
-    const { decodeCityBinary } = await import("./city/cityLoader");
-    const raw = await invoke<ArrayBuffer | number[]>("city_tile_bin", { index, column, row });
-    const buffer = raw instanceof ArrayBuffer ? raw : new Uint8Array(raw).buffer;
-    return decodeCityBinary(buffer);
-  } catch (error) {
-    const response = await fetch(`/city-tiles/${index}-${column}-${row}.json`);
-    if (!response.ok) throw error;
-    const [scene] = (await response.json()) as CityScene[];
+  const { decodeCityBinary } = await import("./city/cityLoader");
+  const request = async (withTextures: boolean): Promise<CityScene> => {
+    try {
+      const raw = await invoke<ArrayBuffer | number[]>("city_tile_bin", { index, column, row, withTextures });
+      return decodeCityBinary(raw instanceof ArrayBuffer ? raw : new Uint8Array(raw).buffer);
+    } catch (error) {
+      const response = await fetch(`/city-tiles/${index}-${column}-${row}.json`);
+      if (!response.ok) throw error;
+      const [scene] = (await response.json()) as CityScene[];
+      return scene;
+    }
+  };
+  const known = sharedCityTextures.get(index);
+  if (known) {
+    const shared = await known;
+    const scene = await request(false);
+    // The tile's own textures (its facade table) win over a shared one of the same name.
+    const own = new Set(scene.textures.map((texture) => texture.name));
+    scene.textures = [...shared.filter((texture) => !own.has(texture.name)), ...scene.textures];
     return scene;
   }
+  const first = (async () => {
+    const scene = await request(true);
+    return scene;
+  })();
+  const shared = first.then((scene) =>
+    scene.textures
+      .filter((texture) => texture.name !== "cnfacade/table" && typeof texture.data !== "string")
+      .map((texture) => ({ ...texture, data: (texture.data as Uint8Array).slice() })),
+  );
+  sharedCityTextures.set(index, shared);
+  shared.catch(() => sharedCityTextures.delete(index));
+  return first;
 }
 
 export async function fetchCityScene(index: number): Promise<CityScene> {

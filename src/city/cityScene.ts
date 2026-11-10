@@ -274,6 +274,8 @@ export function createMaterials(
   /** Materials whose UV buffer is short; see `geometryFor`. */
   const uvMismatch = new Set<string>();
   const table = new Map<string, THREE.Material>();
+  /** Materials built the first time something asks for them. */
+  const lazy = new Map<string, () => void>();
 
   const textureFor = (name: string): THREE.DataTexture | null => {
     const cached = cache.get(name);
@@ -739,15 +741,21 @@ roughnessFactor = clamp(roughnessFactor + smoothstep(60.0, 700.0, waterDist) * 0
     roofMap ? 0xffffff : 0x6a6862,
   );
   // Farmland: every crop in its three looks, and the earth bund round a plot.
+  // They are made on first use: most tiles have no fields, and a crop material
+  // means three 512x512 textures and their normal maps held in memory.
   for (const crop of ["wheat", "rice", "rapeseed", "corn", "vegetables", "fallow", "orchard"]) {
     for (let variant = 0; variant < 3; variant += 1) {
       const key = `field/${crop}.${variant}`;
-      const map = textureFor(key);
-      standard(
-        key,
-        { map: map ?? undefined, normalMap: normalFor(key, 1.6) ?? undefined, roughness: 0.96 },
-        map ? 0xffffff : 0x6b6a3a,
-      );
+      lazy.set(key, () => {
+        const map = textureFor(key);
+        standard(
+          key,
+          { map: map ?? undefined, normalMap: normalFor(key, 1.6) ?? undefined, roughness: 0.96 },
+          map ? 0xffffff : 0x6b6a3a,
+        );
+        // Made after the build's relief jobs were queued, so run its own now.
+        while (pending.length > 0) (pending.shift() as () => void)();
+      });
     }
   }
   standard("field.ridge", { roughness: 1 }, 0x6b5a3f);
@@ -1054,6 +1062,11 @@ roughnessFactor = clamp(roughnessFactor + smoothstep(60.0, 700.0, waterDist) * 0
 
   return {
     get(key: string): THREE.Material {
+      const make = lazy.get(key);
+      if (make && !table.has(key)) {
+        lazy.delete(key);
+        make();
+      }
       const found = table.get(key);
       if (found) return found;
 

@@ -96,6 +96,8 @@ struct TileRequest {
     index: usize,
     column: i32,
     row: i32,
+    #[serde(default, rename = "withTextures")]
+    with_textures: bool,
 }
 
 #[derive(Deserialize)]
@@ -132,7 +134,7 @@ fn dispatch(command: u32, input: &[u8]) -> Result<Vec<u8>, String> {
         }
         CITY_TILE_BIN => {
             let tile: TileRequest = parse(input)?;
-            app_backend::city_tile_bytes(tile.index, tile.column, tile.row)
+            app_backend::city_tile_bytes(tile.index, tile.column, tile.row, tile.with_textures)
         }
         TRAFFIC_STEP => {
             let step: StepRequest = parse(input)?;

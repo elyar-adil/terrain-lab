@@ -63,9 +63,10 @@ async fn city_tile_bin(
     index: usize,
     column: i32,
     row: i32,
+    with_textures: bool,
 ) -> Result<tauri::ipc::Response, String> {
     let bytes = tauri::async_runtime::spawn_blocking(move || {
-        app_backend::city_tile_bytes(index, column, row)
+        app_backend::city_tile_bytes(index, column, row, with_textures)
     })
     .await
     .map_err(|error| format!("building the city tile failed: {error}"))??;
