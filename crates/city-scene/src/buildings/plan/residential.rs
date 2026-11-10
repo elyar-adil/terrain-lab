@@ -18,42 +18,16 @@ struct Builder {
 
 impl Builder {
     fn new() -> Self {
-        Builder {
-            rooms: Vec::new(),
-            doors: Vec::new(),
-            openings: Vec::new(),
-            units: Vec::new(),
-        }
+        Builder { rooms: Vec::new(), doors: Vec::new(), openings: Vec::new(), units: Vec::new() }
     }
 
     fn room(&mut self, func: Func, rect: Rect, dark: bool) -> usize {
-        self.rooms.push(Room {
-            func,
-            rect,
-            unit: None,
-            dark,
-            enclosed: false,
-        });
+        self.rooms.push(Room { func, rect, unit: None, dark, enclosed: false });
         self.rooms.len() - 1
     }
 
-    fn door(
-        &mut self,
-        a: usize,
-        b: usize,
-        at: [f32; 2],
-        width: f32,
-        vertical_wall: bool,
-        kind: DoorKind,
-    ) -> usize {
-        self.doors.push(Door {
-            a,
-            b,
-            at,
-            width,
-            vertical_wall,
-            kind,
-        });
+    fn door(&mut self, a: usize, b: usize, at: [f32; 2], width: f32, vertical_wall: bool, kind: DoorKind) -> usize {
+        self.doors.push(Door { a, b, at, width, vertical_wall, kind });
         self.doors.len() - 1
     }
 
@@ -80,11 +54,7 @@ impl Builder {
         let mut entry = 0;
         for d in &layout.doors {
             let b = if d.b == NONE { lobby } else { base + d.b };
-            let vertical = if xf.swaps_axes() {
-                !d.vertical_wall
-            } else {
-                d.vertical_wall
-            };
+            let vertical = if xf.swaps_axes() { !d.vertical_wall } else { d.vertical_wall };
             let idx = self.door(base + d.a, b, xf.point(d.at), d.width, vertical, d.kind);
             if d.kind == DoorKind::Entry {
                 entry = idx;
@@ -93,11 +63,7 @@ impl Builder {
         for o in &layout.openings {
             let p = xf.point(o.at);
             let side = Side::from_normal(xf.dir(o.normal));
-            let along = if matches!(side, Side::South | Side::North) {
-                p[0]
-            } else {
-                p[1]
-            };
+            let along = if matches!(side, Side::South | Side::North) { p[0] } else { p[1] };
             self.openings.push(Opening {
                 side,
                 along,
@@ -108,12 +74,7 @@ impl Builder {
                 room: base + o.room,
             });
         }
-        self.units.push(UnitInfo {
-            bedrooms,
-            use_area,
-            rooms: mine,
-            entry_door: entry,
-        });
+        self.units.push(UnitInfo { bedrooms, use_area, rooms: mine, entry_door: entry });
     }
 }
 
@@ -167,22 +128,12 @@ fn depth_range(era: PlanEra) -> (f32, f32) {
 pub(super) fn slab(spec: PlanSpec, climate: Climate, rng: &mut Rng) -> Option<Plan> {
     let er = era_rules(spec.era);
     let walk = spec.typology == Typology::WalkUp;
-    let lifts = if walk {
-        0
-    } else if spec.storeys >= 12 {
-        2
-    } else {
-        1
-    };
+    let lifts = if walk { 0 } else if spec.storeys >= 12 { 2 } else { 1 };
     let d = grid({
         let (lo, hi) = depth_range(spec.era);
         rng.range(lo, hi)
     });
-    let stair_w = if spec.era == PlanEra::Soviet {
-        3.0
-    } else {
-        2.7
-    };
+    let stair_w = if spec.era == PlanEra::Soviet { 3.0 } else { 2.7 };
     let lift_w = 2.1;
     let wc = stair_w + lift_w * lifts as f32;
     let dst = pick(rng, &[(4.8f32, 0.5), (5.1, 0.35), (5.4, 0.15)]);
@@ -197,11 +148,7 @@ pub(super) fn slab(spec: PlanSpec, climate: Climate, rng: &mut Rng) -> Option<Pl
     }
     let (nb_a, nb_b) = {
         let a = bedroom_count(rng, spec.era);
-        let b = if rng.unit() < 0.7 {
-            a
-        } else {
-            bedroom_count(rng, spec.era)
-        };
+        let b = if rng.unit() < 0.7 { a } else { bedroom_count(rng, spec.era) };
         (a, b)
     };
     let wa = unit_width(rng, spec.era, nb_a);
@@ -215,29 +162,13 @@ pub(super) fn slab(spec: PlanSpec, climate: Climate, rng: &mut Rng) -> Option<Pl
         rng,
         &er,
         climate,
-        &unit::Through {
-            bedrooms: nb_a,
-            ws: wa + hc,
-            wn: wa,
-            d,
-            ds,
-            hall,
-            west_gable: true,
-        },
+        &unit::Through { bedrooms: nb_a, ws: wa + hc, wn: wa, d, ds, hall, west_gable: true },
     )?;
     let lb = unit::through_unit(
         rng,
         &er,
         climate,
-        &unit::Through {
-            bedrooms: nb_b,
-            ws: wb + hc,
-            wn: wb,
-            d,
-            ds,
-            hall,
-            west_gable: true,
-        },
+        &unit::Through { bedrooms: nb_b, ws: wb + hc, wn: wb, d, ds, hall, west_gable: true },
     )?;
 
     let mut b = Builder::new();
@@ -246,22 +177,11 @@ pub(super) fn slab(spec: PlanSpec, climate: Climate, rng: &mut Rng) -> Option<Pl
     let stair = b.room(Func::Stair, Rect::new(wa, yl1, wa + stair_w, d), true);
     let stair_door = [wa + stair_w * 0.5, yl1];
     b.door(stair, lobby, stair_door, 1.0, false, DoorKind::Core);
-    let mut core = CoreInfo {
-        stairs: vec![b.rooms[stair].rect],
-        lifts: Vec::new(),
-        stair_doors: vec![stair_door],
-    };
+    let mut core = CoreInfo { stairs: vec![b.rooms[stair].rect], lifts: Vec::new(), stair_doors: vec![stair_door] };
     for k in 0..lifts {
         let x = wa + stair_w + lift_w * k as f32;
         let car = b.room(Func::Lift, Rect::new(x, yl1, x + lift_w, yl1 + 2.4), true);
-        b.door(
-            car,
-            lobby,
-            [x + lift_w * 0.5, yl1],
-            1.1,
-            false,
-            DoorKind::Core,
-        );
+        b.door(car, lobby, [x + lift_w * 0.5, yl1], 1.1, false, DoorKind::Core);
         core.lifts.push(b.rooms[car].rect);
         if dst - 2.4 > 0.3 {
             b.room(Func::Shaft, Rect::new(x, yl1 + 2.4, x + lift_w, d), true);
@@ -311,11 +231,7 @@ fn azimuth(rng: &mut Rng, climate: Climate) -> f32 {
 }
 
 pub(super) fn tower(spec: PlanSpec, climate: Climate, rng: &mut Rng) -> Option<Plan> {
-    let era = if matches!(spec.era, PlanEra::Soviet | PlanEra::Estate) {
-        PlanEra::Millennium
-    } else {
-        spec.era
-    };
+    let era = if matches!(spec.era, PlanEra::Soviet | PlanEra::Estate) { PlanEra::Millennium } else { spec.era };
     let er = era_rules(era);
     let c = 7.2;
     let s = grid(rng.range(21.6, 25.8));
@@ -331,11 +247,7 @@ pub(super) fn tower(spec: PlanSpec, climate: Climate, rng: &mut Rng) -> Option<P
     let gross = q * p;
     let same = rng.unit() < 0.75;
     let mut nbs = [0u8; 4];
-    let first = if gross > 125.0 {
-        pick(rng, &[(3u8, 0.85), (2, 0.15)])
-    } else {
-        pick(rng, &[(2u8, 0.7), (3, 0.3)])
-    };
+    let first = if gross > 125.0 { pick(rng, &[(3u8, 0.85), (2, 0.15)]) } else { pick(rng, &[(2u8, 0.7), (3, 0.3)]) };
     for n in &mut nbs {
         *n = if same {
             first
@@ -352,24 +264,12 @@ pub(super) fn tower(spec: PlanSpec, climate: Climate, rng: &mut Rng) -> Option<P
     let lobby = b.room(Func::Lobby, Rect::new(p, p, q, q), true);
     // Core contents are placed inside the lobby envelope; their rectangles are
     // annotations (the cluster is not partitioned).
-    let flip = |r: Rect| {
-        if mirror {
-            Xf::mirror_x(s * 0.5).rect(&r)
-        } else {
-            r
-        }
-    };
+    let flip = |r: Rect| if mirror { Xf::mirror_x(s * 0.5).rect(&r) } else { r };
     let stair_w = if tall { 3.0 } else { 2.7 };
     let stair = Rect::new(p, q - 5.1, p + stair_w, q);
     let mut core = CoreInfo::default();
     core.stairs.push(flip(stair));
-    let sd = |pt: [f32; 2]| {
-        if mirror {
-            Xf::mirror_x(s * 0.5).point(pt)
-        } else {
-            pt
-        }
-    };
+    let sd = |pt: [f32; 2]| if mirror { Xf::mirror_x(s * 0.5).point(pt) } else { pt };
     core.stair_doors.push(sd([p + stair_w * 0.5, q - 5.1]));
     if tall {
         // A scissor pair: two stairs interleaved in one shaft.
@@ -387,13 +287,7 @@ pub(super) fn tower(spec: PlanSpec, climate: Climate, rng: &mut Rng) -> Option<P
             rng,
             &er,
             climate,
-            &unit::Corner {
-                bedrooms: nb,
-                w: q,
-                d: p,
-                ds,
-                entry_u: s * 0.5,
-            },
+            &unit::Corner { bedrooms: nb, w: q, d: p, ds, entry_u: s * 0.5 },
         )?;
         let mut xf = Xf::quarter_turns(centre, k as u32);
         if mirror {

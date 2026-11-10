@@ -892,9 +892,7 @@ fn face_spans(
     use crate::buildings::plan::OpeningKind;
     let mut ops: Vec<_> = plan
         .openings_on(side)
-        .filter(|o| {
-            o.along >= lo - 1e-3 && o.along <= hi + 1e-3 && o.kind != OpeningKind::StairWindow
-        })
+        .filter(|o| o.along >= lo - 1e-3 && o.along <= hi + 1e-3 && o.kind != OpeningKind::StairWindow)
         .collect();
     ops.sort_by(|a, b| a.along.total_cmp(&b.along));
     let stair = plan
@@ -923,21 +921,13 @@ fn face_spans(
         let w = x1 - x0;
         let part = match o.kind {
             OpeningKind::BalconyDoor => Part::Balcony { rail },
-            OpeningKind::Bay => Part::Bay {
-                panes: 3,
-                sash: pick(rng, voc.sashes),
-            },
+            OpeningKind::Bay => Part::Bay { panes: 3, sash: pick(rng, voc.sashes) },
             OpeningKind::AcLedge => Part::AcNiche,
             _ => match window(rng, voc, storey, w) {
                 Part::Window { panes, sash, .. } => {
                     let sill = r5(o.sill.clamp(0.3, 1.6));
                     let head = r5(o.head.min(storey - 0.4).max(sill + 0.6));
-                    Part::Window {
-                        sill,
-                        head,
-                        panes,
-                        sash,
-                    }
+                    Part::Window { sill, head, panes, sash }
                 }
                 other => other,
             },
@@ -985,13 +975,7 @@ fn plan_elevations(
     // The latitude of the demonstration world sits in the hot-summer,
     // cold-winter zone; the climate class only moves window caps and balcony
     // glazing.
-    let spec = PlanSpec {
-        typology,
-        era: plan_era,
-        latitude: 31.0,
-        storeys: floors,
-        seed,
-    };
+    let spec = PlanSpec { typology, era: plan_era, latitude: 31.0, storeys: floors, seed };
     let Ok(plan) = Plan::try_generate(spec) else {
         return (front, back, gable);
     };
@@ -1013,43 +997,15 @@ fn plan_elevations(
     let (tile_w, tile_d) = (bx1 - bx0, by1 - by0);
     let mut rng = Rng::new(seed ^ 0x7a1e_0b3d);
     let strip = era != Era::Euro;
-    let f = face_spans(
-        &plan,
-        PSide::South,
-        (bx0, bx1),
-        &mut rng,
-        voc,
-        storey,
-        strip,
-    );
+    let f = face_spans(&plan, PSide::South, (bx0, bx1), &mut rng, voc, storey, strip);
     let b = if tower {
-        face_spans(
-            &plan,
-            PSide::South,
-            (bx0, bx1),
-            &mut rng,
-            voc,
-            storey,
-            strip,
-        )
+        face_spans(&plan, PSide::South, (bx0, bx1), &mut rng, voc, storey, strip)
     } else {
-        face_spans(
-            &plan,
-            PSide::North,
-            (bx0, bx1),
-            &mut rng,
-            voc,
-            storey,
-            strip,
-        )
+        face_spans(&plan, PSide::North, (bx0, bx1), &mut rng, voc, storey, strip)
     };
     let gable_side = if bx0 < 0.01 { PSide::West } else { PSide::East };
     let g = face_spans(&plan, gable_side, (by0, by1), &mut rng, voc, storey, false);
-    for (e, spans, w) in [
-        (&mut front, f, tile_w),
-        (&mut back, b, tile_w),
-        (&mut gable, g, tile_d),
-    ] {
+    for (e, spans, w) in [(&mut front, f, tile_w), (&mut back, b, tile_w), (&mut gable, g, tile_d)] {
         if !spans.is_empty() {
             e.width = w;
             e.spans = spans;

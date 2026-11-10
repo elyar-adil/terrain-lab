@@ -13,8 +13,7 @@ pub use crate::facades::{
 pub use crate::leaf_cards::{leaf_card_textures, plant_card_textures, tuft_texture};
 pub use crate::textures::{
     GROUND_TILE_M, asphalt_texture, crosswalk_texture, dashed_line_texture, flower_texture,
-    grass_texture, grass_texture_in, hedge_texture, paving_texture, signage_texture,
-    tactile_texture,
+    grass_texture, grass_texture_in, hedge_texture, paving_texture, signage_texture, tactile_texture,
 };
 
 use crate::textures::BakedTexture;

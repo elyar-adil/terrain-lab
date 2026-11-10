@@ -8,9 +8,7 @@
 //! air-conditioner ledges grey, doors brown; each room is labelled with its
 //! function and use area.
 
-use city_scene::buildings::plan::{
-    Func, OpeningKind, Plan, PlanEra, PlanSpec, Rect, Side, Typology,
-};
+use city_scene::buildings::plan::{Func, OpeningKind, Plan, PlanEra, PlanSpec, Rect, Side, Typology};
 use std::fmt::Write;
 
 fn flag(name: &str) -> Option<String> {
@@ -75,13 +73,7 @@ fn draw(out: &mut String, plan: &Plan, ox: f32, oy: f32, s: f32) {
         );
     };
     for r in plan.rooms.iter().filter(|r| r.func.is_balcony()) {
-        rect(
-            out,
-            &r.rect,
-            if r.enclosed { "#dff0f7" } else { "#fafafc" },
-            "#8a8a99",
-            1.0,
-        );
+        rect(out, &r.rect, if r.enclosed { "#dff0f7" } else { "#fafafc" }, "#8a8a99", 1.0);
     }
     for r in plan.rooms.iter().filter(|r| !r.func.is_balcony()) {
         rect(out, &r.rect, fill(r.func), "#555", 1.4);
@@ -99,9 +91,7 @@ fn draw(out: &mut String, plan: &Plan, ox: f32, oy: f32, s: f32) {
             px(c[0]),
             py(c[1]) - 1.0
         );
-        if !r.func.is_balcony()
-            && !matches!(r.func, Func::Open | Func::Lobby | Func::Stair | Func::Lift)
-        {
+        if !r.func.is_balcony() && !matches!(r.func, Func::Open | Func::Lobby | Func::Stair | Func::Lift) {
             let _ = write!(
                 out,
                 r##"<text x="{:.1}" y="{:.1}" font-size="{:.1}" text-anchor="middle" fill="#666">{:.1}</text>"##,
@@ -124,25 +114,11 @@ fn draw(out: &mut String, plan: &Plan, ox: f32, oy: f32, s: f32) {
     for d in &plan.doors {
         let w = d.width * s;
         let (x, y) = (px(d.at[0]), py(d.at[1]));
-        let colour = if d.kind == city_scene::buildings::plan::DoorKind::Entry {
-            "#b00020"
-        } else {
-            "#8d5a2b"
-        };
+        let colour = if d.kind == city_scene::buildings::plan::DoorKind::Entry { "#b00020" } else { "#8d5a2b" };
         if d.vertical_wall {
-            let _ = write!(
-                out,
-                r#"<line x1="{x:.1}" y1="{:.1}" x2="{x:.1}" y2="{:.1}" stroke="{colour}" stroke-width="3"/>"#,
-                y - w / 2.0,
-                y + w / 2.0
-            );
+            let _ = write!(out, r#"<line x1="{x:.1}" y1="{:.1}" x2="{x:.1}" y2="{:.1}" stroke="{colour}" stroke-width="3"/>"#, y - w / 2.0, y + w / 2.0);
         } else {
-            let _ = write!(
-                out,
-                r#"<line x1="{:.1}" y1="{y:.1}" x2="{:.1}" y2="{y:.1}" stroke="{colour}" stroke-width="3"/>"#,
-                x - w / 2.0,
-                x + w / 2.0
-            );
+            let _ = write!(out, r#"<line x1="{:.1}" y1="{y:.1}" x2="{:.1}" y2="{y:.1}" stroke="{colour}" stroke-width="3"/>"#, x - w / 2.0, x + w / 2.0);
         }
     }
     // Openings, drawn on the face.
@@ -163,40 +139,19 @@ fn draw(out: &mut String, plan: &Plan, ox: f32, oy: f32, s: f32) {
             OpeningKind::Curtain { .. } => ("#4fc3f7", 4.0),
         };
         if horizontal {
-            let _ = write!(
-                out,
-                r#"<line x1="{:.1}" y1="{y:.1}" x2="{:.1}" y2="{y:.1}" stroke="{colour}" stroke-width="{thick}"/>"#,
-                x - w / 2.0,
-                x + w / 2.0
-            );
+            let _ = write!(out, r#"<line x1="{:.1}" y1="{y:.1}" x2="{:.1}" y2="{y:.1}" stroke="{colour}" stroke-width="{thick}"/>"#, x - w / 2.0, x + w / 2.0);
         } else {
-            let _ = write!(
-                out,
-                r#"<line x1="{x:.1}" y1="{:.1}" x2="{x:.1}" y2="{:.1}" stroke="{colour}" stroke-width="{thick}"/>"#,
-                y - w / 2.0,
-                y + w / 2.0
-            );
+            let _ = write!(out, r#"<line x1="{x:.1}" y1="{:.1}" x2="{x:.1}" y2="{:.1}" stroke="{colour}" stroke-width="{thick}"/>"#, y - w / 2.0, y + w / 2.0);
         }
     }
     // Office column grid.
     if plan.spec.typology == Typology::Office {
-        let g = if (plan.plate.w() / 9.0).fract().abs() < 0.01
-            || (plan.plate.w() / 9.0).fract() > 0.99
-        {
-            9.0
-        } else {
-            8.4
-        };
+        let g = if (plan.plate.w() / 9.0).fract().abs() < 0.01 || (plan.plate.w() / 9.0).fract() > 0.99 { 9.0 } else { 8.4 };
         let mut x = 0.0;
         while x <= plan.plate.w() + 0.01 {
             let mut y = 0.0;
             while y <= plan.plate.d() + 0.01 {
-                let _ = write!(
-                    out,
-                    r##"<rect x="{:.1}" y="{:.1}" width="4" height="4" fill="#222"/>"##,
-                    px(x) - 2.0,
-                    py(y) - 2.0
-                );
+                let _ = write!(out, r##"<rect x="{:.1}" y="{:.1}" width="4" height="4" fill="#222"/>"##, px(x) - 2.0, py(y) - 2.0);
                 y += g;
             }
             x += g;
@@ -224,25 +179,13 @@ fn main() {
     let path = flag("--out").unwrap_or_else(|| "plans.svg".to_string());
 
     let plans: Vec<Plan> = (first..first + count)
-        .map(|seed| {
-            Plan::generate(PlanSpec {
-                typology,
-                era,
-                latitude,
-                storeys,
-                seed,
-            })
-        })
+        .map(|seed| Plan::generate(PlanSpec { typology, era, latitude, storeys, seed }))
         .collect();
     let widest = plans.iter().map(|p| p.plate.w()).fold(0.0, f32::max) + 6.0;
     let deepest = plans.iter().map(|p| p.plate.d()).fold(0.0, f32::max) + 9.0;
     let cols = if widest < 30.0 { 2 } else { 1 };
     let rows = (plans.len() as u32).div_ceil(cols);
-    let s = if typology == Typology::Office {
-        9.0
-    } else {
-        20.0
-    };
+    let s = if typology == Typology::Office { 9.0 } else { 20.0 };
     let (cw, ch) = (widest * s, deepest * s);
     let mut svg = String::new();
     let _ = write!(
@@ -256,34 +199,11 @@ fn main() {
         let (ox, oy) = (c as f32 * cw + 3.0 * s, r as f32 * ch + 5.0 * s);
         let title = format!(
             "{:?} {:?} seed {}  {:.1} x {:.1} m  floor {:.1} m  azimuth {:+.1}  redraws {}",
-            p.spec.typology,
-            p.spec.era,
-            p.spec.seed,
-            p.plate.w(),
-            p.plate.d(),
-            p.floor_height,
-            p.azimuth_deg,
-            p.attempts
+            p.spec.typology, p.spec.era, p.spec.seed, p.plate.w(), p.plate.d(), p.floor_height, p.azimuth_deg, p.attempts
         );
-        let _ = write!(
-            svg,
-            r##"<text x="{ox:.0}" y="{:.0}" font-size="13" fill="#111">{title}</text>"##,
-            oy - 2.2 * s
-        );
-        let units: Vec<String> = p
-            .units
-            .iter()
-            .map(|u| format!("{}b {:.0}m2", u.bedrooms, u.use_area))
-            .collect();
-        let _ = write!(
-            svg,
-            r##"<text x="{ox:.0}" y="{:.0}" font-size="11" fill="#444">units: {}   evac {:.1} m   WWR S {:.2} N {:.2}   (N up)</text>"##,
-            oy - 0.8 * s,
-            units.join(", "),
-            p.evac_max,
-            p.wwr(Side::South),
-            p.wwr(Side::North)
-        );
+        let _ = write!(svg, r##"<text x="{ox:.0}" y="{:.0}" font-size="13" fill="#111">{title}</text>"##, oy - 2.2 * s);
+        let units: Vec<String> = p.units.iter().map(|u| format!("{}b {:.0}m2", u.bedrooms, u.use_area)).collect();
+        let _ = write!(svg, r##"<text x="{ox:.0}" y="{:.0}" font-size="11" fill="#444">units: {}   evac {:.1} m   WWR S {:.2} N {:.2}   (N up)</text>"##, oy - 0.8 * s, units.join(", "), p.evac_max, p.wwr(Side::South), p.wwr(Side::North));
         draw(&mut svg, p, ox, oy, s);
     }
     svg.push_str("</svg>");

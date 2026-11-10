@@ -89,10 +89,7 @@ impl Rect {
     }
 
     pub fn contains_rect(&self, o: &Rect) -> bool {
-        o.x0 >= self.x0 - EPS
-            && o.x1 <= self.x1 + EPS
-            && o.y0 >= self.y0 - EPS
-            && o.y1 <= self.y1 + EPS
+        o.x0 >= self.x0 - EPS && o.x1 <= self.x1 + EPS && o.y0 >= self.y0 - EPS && o.y1 <= self.y1 + EPS
     }
 
     /// The wall the two rectangles share, if it is longer than a hair.
@@ -102,30 +99,12 @@ impl Rect {
         let xlo = self.x0.max(o.x0);
         let xhi = self.x1.min(o.x1);
         if yhi - ylo > EPS && ((self.x1 - o.x0).abs() < EPS || (self.x0 - o.x1).abs() < EPS) {
-            let at = if (self.x1 - o.x0).abs() < EPS {
-                self.x1
-            } else {
-                self.x0
-            };
-            return Some(Shared {
-                vertical: true,
-                at,
-                lo: ylo,
-                hi: yhi,
-            });
+            let at = if (self.x1 - o.x0).abs() < EPS { self.x1 } else { self.x0 };
+            return Some(Shared { vertical: true, at, lo: ylo, hi: yhi });
         }
         if xhi - xlo > EPS && ((self.y1 - o.y0).abs() < EPS || (self.y0 - o.y1).abs() < EPS) {
-            let at = if (self.y1 - o.y0).abs() < EPS {
-                self.y1
-            } else {
-                self.y0
-            };
-            return Some(Shared {
-                vertical: false,
-                at,
-                lo: xlo,
-                hi: xhi,
-            });
+            let at = if (self.y1 - o.y0).abs() < EPS { self.y1 } else { self.y0 };
+            return Some(Shared { vertical: false, at, lo: xlo, hi: xhi });
         }
         None
     }
@@ -141,18 +120,12 @@ pub struct Xf {
 
 impl Xf {
     pub fn identity() -> Xf {
-        Xf {
-            m: [1.0, 0.0, 0.0, 1.0],
-            t: [0.0, 0.0],
-        }
+        Xf { m: [1.0, 0.0, 0.0, 1.0], t: [0.0, 0.0] }
     }
 
     /// Mirror about the vertical line `x = cx`.
     pub fn mirror_x(cx: f32) -> Xf {
-        Xf {
-            m: [-1.0, 0.0, 0.0, 1.0],
-            t: [2.0 * cx, 0.0],
-        }
+        Xf { m: [-1.0, 0.0, 0.0, 1.0], t: [2.0 * cx, 0.0] }
     }
 
     /// A quarter turn counter-clockwise about `c`, `k` times.
@@ -195,10 +168,7 @@ impl Xf {
 
     /// A direction (no translation).
     pub fn dir(&self, v: [f32; 2]) -> [f32; 2] {
-        [
-            self.m[0] * v[0] + self.m[1] * v[1],
-            self.m[2] * v[0] + self.m[3] * v[1],
-        ]
+        [self.m[0] * v[0] + self.m[1] * v[1], self.m[2] * v[0] + self.m[3] * v[1]]
     }
 
     pub fn rect(&self, r: &Rect) -> Rect {

@@ -181,12 +181,7 @@ fn profile(r: &Reach, depth: f32, room: f32, n: f32, cap: f32) -> Vec<Pt> {
             let o_w = (o_toe - bar).max(-cap);
             pts.push(pt(o_w, bed_y - 0.05, false, r.sand));
             pts.push(pt(o_toe, bed_y + 0.1, false, mix(r.sand, p.wet, 0.5)));
-            pts.push(pt(
-                o_toe + run * 0.25,
-                bed_y + 0.1 + fall * 0.25,
-                true,
-                mix(p.wet, p.stone, 0.45),
-            ));
+            pts.push(pt(o_toe + run * 0.25, bed_y + 0.1 + fall * 0.25, true, mix(p.wet, p.stone, 0.45)));
             pts.push(pt(top, PROM, true, p.stone));
             promenade(&mut pts, top, PROM);
         }
@@ -200,37 +195,15 @@ fn profile(r: &Reach, depth: f32, room: f32, n: f32, cap: f32) -> Vec<Pt> {
             let run = (r.ratio * wobble * fall).min(rim + cap - bar).max(1.0);
             let o_toe = rim - run;
             let o_w = (o_toe - bar).max(-cap);
-            let low = if gravel {
-                r.cobble
-            } else {
-                mix(r.sand, [0.30, 0.27, 0.19], 0.35)
-            };
-            let mid = if gravel {
-                mix(r.cobble, r.grass, 0.25)
-            } else {
-                mix(r.grass, [0.30, 0.27, 0.19], 0.4)
-            };
-            let top = if gravel {
-                mix(r.cobble, r.grass, 0.55)
-            } else {
-                r.grass
-            };
+            let low = if gravel { r.cobble } else { mix(r.sand, [0.30, 0.27, 0.19], 0.35) };
+            let mid = if gravel { mix(r.cobble, r.grass, 0.25) } else { mix(r.grass, [0.30, 0.27, 0.19], 0.4) };
+            let top = if gravel { mix(r.cobble, r.grass, 0.55) } else { r.grass };
             let berm_y = bed_y + 0.28;
             pts.push(pt(o_w, bed_y - 0.05, false, mix(r.sand, low, 0.3)));
-            pts.push(pt(
-                o_w + (o_toe - o_w) * 0.6,
-                bed_y + 0.12 + 0.05 * n,
-                false,
-                r.sand,
-            ));
+            pts.push(pt(o_w + (o_toe - o_w) * 0.6, bed_y + 0.12 + 0.05 * n, false, r.sand));
             pts.push(pt(o_toe, berm_y, false, low));
             pts.push(pt(o_toe + run * 0.35, berm_y + fall * 0.33, false, mid));
-            pts.push(pt(
-                o_toe + run * 0.7,
-                berm_y + fall * 0.7 + 0.08 * n,
-                false,
-                mix(mid, top, 0.5),
-            ));
+            pts.push(pt(o_toe + run * 0.7, berm_y + fall * 0.7 + 0.08 * n, false, mix(mid, top, 0.5)));
             pts.push(pt(rim, GROUND, false, top));
             pts.push(pt(rim + 1.2, GROUND, false, top));
         }
@@ -352,8 +325,9 @@ pub fn build_water(
         normal[i] = Vec2::new(-dz / len, dx / len);
     }
     // Offset `off` to the left (+) of the centre line at station `i`.
-    let at =
-        |i: usize, off: f32| Vec2::new(pos[i].x + normal[i].x * off, pos[i].y + normal[i].y * off);
+    let at = |i: usize, off: f32| {
+        Vec2::new(pos[i].x + normal[i].x * off, pos[i].y + normal[i].y * off)
+    };
     let to3 = |i: usize, sg: f32, o: f32, y: f32| Vec3::from_plan(at(i, sg * (half + o)), y);
 
     // ---- the terrain's account of this river --------------------------------
@@ -361,27 +335,14 @@ pub fn build_water(
     let discharge = setting.discharge.clamp(0.0, 1.0);
     let low_flow = (1.0 - 0.75 * discharge - 0.35 * moisture).clamp(0.0, 1.0);
     let gravel_p = ((0.62 - moisture) * 2.2 + (setting.slope - 0.0015) * 250.0).clamp(0.0, 0.92);
-    let reed_amount =
-        ((moisture - 0.35) * 2.0).clamp(0.0, 1.0) * (1.0 - (setting.slope * 140.0).clamp(0.0, 0.8));
+    let reed_amount = ((moisture - 0.35) * 2.0).clamp(0.0, 1.0) * (1.0 - (setting.slope * 140.0).clamp(0.0, 0.8));
     let steep = (setting.slope / 0.004).clamp(0.0, 1.0);
     let turb = (0.3 + 1.2 * setting.sediment + 0.25 * (1.0 - moisture)).clamp(0.0, 1.0);
     // Banks: dry climates and fast water leave pale sand and cobble; wet ones
     // dark silt and green grass.
-    let sand = mix(
-        [0.40, 0.37, 0.28],
-        [0.66, 0.58, 0.42],
-        (1.0 - moisture) * 0.8 + setting.sediment * 0.3,
-    );
-    let grass = mix(
-        [0.17, 0.30, 0.10],
-        [0.42, 0.40, 0.21],
-        ((1.0 - moisture) * 1.3 - 0.1).clamp(0.0, 1.0),
-    );
-    let cobble = mix(
-        [0.40, 0.38, 0.34],
-        [0.58, 0.53, 0.45],
-        (1.0 - moisture) * 0.7,
-    );
+    let sand = mix([0.40, 0.37, 0.28], [0.66, 0.58, 0.42], (1.0 - moisture) * 0.8 + setting.sediment * 0.3);
+    let grass = mix([0.17, 0.30, 0.10], [0.42, 0.40, 0.21], ((1.0 - moisture) * 1.3 - 0.1).clamp(0.0, 1.0));
+    let cobble = mix([0.40, 0.38, 0.34], [0.58, 0.53, 0.45], (1.0 - moisture) * 0.7);
 
     // ---- room before the next street, per station and side ------------------
     let (mut lo, mut hi) = (Vec2::new(f32::MAX, f32::MAX), Vec2::new(f32::MIN, f32::MIN));
@@ -416,11 +377,7 @@ pub fn build_water(
         }
         4.6
     };
-    let near_crossing = |p: Vec2| {
-        crossings
-            .iter()
-            .any(|(c, r)| (p.x - c.x).hypot(p.y - c.y) < *r)
-    };
+    let near_crossing = |p: Vec2| crossings.iter().any(|(c, r)| (p.x - c.x).hypot(p.y - c.y) < *r);
 
     // ---- reaches ------------------------------------------------------------
     let cells = (n - 1).div_ceil(REACH);
@@ -446,8 +403,7 @@ pub fn build_water(
                 .filter(|b| (b.x - probe.x).hypot(b.y - probe.y) < 150.0)
                 .count() as f32;
             let urban = (near / 10.0).clamp(0.0, 1.0);
-            let crossing =
-                (i0..=i1).any(|i| near_crossing(at(i, sg * half)) || near_crossing(pos[i]));
+            let crossing = (i0..=i1).any(|i| near_crossing(at(i, sg * half)) || near_crossing(pos[i]));
             let u = cell01(0xA11, cell as i32, side_id, 7);
             let u2 = cell01(0xA12, cell as i32, side_id, 9);
             let kind = if crossing {
@@ -528,11 +484,7 @@ pub fn build_water(
             let t_local = (turb + (patch - 0.5) * 0.25).clamp(0.0, 1.0);
             let body = mix(clear, muddy, t_local);
             let channel = mix(body, scale(body, 0.62), smooth01(c * 1.2));
-            let shallow = mix(
-                channel,
-                silt,
-                (1.0 - smooth01(c * 5.0)) * (0.55 + 0.4 * t_local),
-            );
+            let shallow = mix(channel, silt, (1.0 - smooth01(c * 5.0)) * (0.55 + 0.4 * t_local));
             mix(shallow, mix(deep, body, 0.3), 0.0)
         };
         for i in i0..i1 {
@@ -543,12 +495,7 @@ pub fn build_water(
                     let r = wl(1, k - i0);
                     at(k, l + (r - l) * t)
                 };
-                let mut quad = vec![
-                    lat(i, w[0]),
-                    lat(i + 1, w[0]),
-                    lat(i + 1, w[1]),
-                    lat(i, w[1]),
-                ];
+                let mut quad = vec![lat(i, w[0]), lat(i + 1, w[0]), lat(i + 1, w[1]), lat(i, w[1])];
                 if signed_area(&quad) < 0.0 {
                     quad.reverse();
                 }
@@ -586,10 +533,7 @@ pub fn build_water(
                 }
             }
             // A closing cheek where the next reach is different.
-            for (i, nb) in [
-                (i0, cell.checked_sub(1)),
-                (i1, (cell + 1 < cells).then_some(cell + 1)),
-            ] {
+            for (i, nb) in [(i0, cell.checked_sub(1)), (i1, (cell + 1 < cells).then_some(cell + 1))] {
                 let Some(nb) = nb else { continue };
                 if banks[nb][side].is_empty() {
                     continue;
@@ -674,10 +618,7 @@ pub fn build_water(
                     bollard_acc -= seg_len;
                     if bollard_acc <= 0.0 && kinds[side] == Kind::Terrace {
                         // Mooring bollards on the lower walkway.
-                        let o = prof
-                            .iter()
-                            .find(|q| q.y > y_w + 1.0)
-                            .map_or(-1.0, |q| q.o + 0.5);
+                        let o = prof.iter().find(|q| q.y > y_w + 1.0).map_or(-1.0, |q| q.o + 0.5);
                         let c = at(i, sg * (half + o));
                         let y = height_at(prof, o);
                         let dark = [0.08, 0.09, 0.10];
@@ -713,19 +654,13 @@ pub fn build_water(
                         let along = r1 * SPACING;
                         let c0 = at(i, sg * (half + o));
                         let c1 = at(i + 1, sg * (half + o));
-                        let (x, z) = (
-                            c0.x + (c1.x - c0.x) * along / SPACING,
-                            c0.y + (c1.y - c0.y) * along / SPACING,
-                        );
+                        let (x, z) = (c0.x + (c1.x - c0.x) * along / SPACING, c0.y + (c1.y - c0.y) * along / SPACING);
                         // A clump of blades: narrow tapering leaves leaning outward,
                         // straw at the tip, olive at the root.
                         let n_blades = 5 + (r1 * 4.0) as usize;
                         for k in 0..n_blades {
-                            let h =
-                                cell01(0xD46, i as i32 * 31 + c as i32 * 7 + k as i32, side_id, 3);
-                            let a =
-                                cell01(0xD47, i as i32 * 31 + c as i32 * 7 + k as i32, side_id, 4)
-                                    * 6.283;
+                            let h = cell01(0xD46, i as i32 * 31 + c as i32 * 7 + k as i32, side_id, 3);
+                            let a = cell01(0xD47, i as i32 * 31 + c as i32 * 7 + k as i32, side_id, 4) * 6.283;
                             let height = 1.1 + 1.1 * h;
                             let lean = Vec2::new(a.cos(), a.sin()) * (0.25 + 0.35 * h);
                             let root = Vec2::new(x + a.cos() * 0.12, z + a.sin() * 0.12);
@@ -733,48 +668,14 @@ pub fn build_water(
                             let tip = Vec3::from_plan(root + lean, y + height);
                             let base_l = Vec3::from_plan(root - w, y - 0.04);
                             let base_r = Vec3::from_plan(root + w, y - 0.04);
-                            let mid_l =
-                                Vec3::from_plan(root + lean * 0.35 - w * 0.7, y + height * 0.55);
-                            let mid_r =
-                                Vec3::from_plan(root + lean * 0.35 + w * 0.7, y + height * 0.55);
+                            let mid_l = Vec3::from_plan(root + lean * 0.35 - w * 0.7, y + height * 0.55);
+                            let mid_r = Vec3::from_plan(root + lean * 0.35 + w * 0.7, y + height * 0.55);
                             let root_col = [0.22 * (0.8 + 0.4 * h), 0.30, 0.10];
                             let tip_col = [0.52, 0.50, 0.24];
-                            builder.quad_uv(
-                                BANK,
-                                base_l,
-                                base_r,
-                                mid_r,
-                                mid_l,
-                                [(0.0, 0.0); 4],
-                                Some(root_col),
-                            );
-                            builder.quad_uv(
-                                BANK,
-                                mid_l,
-                                mid_r,
-                                tip,
-                                tip,
-                                [(0.0, 0.0); 4],
-                                Some(tip_col),
-                            );
-                            builder.quad_uv(
-                                BANK,
-                                base_r,
-                                base_l,
-                                mid_l,
-                                mid_r,
-                                [(0.0, 0.0); 4],
-                                Some(root_col),
-                            );
-                            builder.quad_uv(
-                                BANK,
-                                mid_r,
-                                mid_l,
-                                tip,
-                                tip,
-                                [(0.0, 0.0); 4],
-                                Some(tip_col),
-                            );
+                            builder.quad_uv(BANK, base_l, base_r, mid_r, mid_l, [(0.0, 0.0); 4], Some(root_col));
+                            builder.quad_uv(BANK, mid_l, mid_r, tip, tip, [(0.0, 0.0); 4], Some(tip_col));
+                            builder.quad_uv(BANK, base_r, base_l, mid_l, mid_r, [(0.0, 0.0); 4], Some(root_col));
+                            builder.quad_uv(BANK, mid_r, mid_l, tip, tip, [(0.0, 0.0); 4], Some(tip_col));
                         }
                     }
                 }

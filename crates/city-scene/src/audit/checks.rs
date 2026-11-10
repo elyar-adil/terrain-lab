@@ -179,17 +179,9 @@ impl<'a> Context<'a> {
             vehicles: scene.map_or(0, |s| s.traffic.agents.len()),
             fields: city.fields.len(),
             compounds: city.compounds.len(),
-            bridges: network
-                .roads
-                .iter()
-                .filter(|r| r.bridge || r.layer > 0)
-                .count(),
+            bridges: network.roads.iter().filter(|r| r.bridge || r.layer > 0).count(),
             ramps: network.roads.iter().filter(|r| r.oneway).count(),
-            signalised: network
-                .junctions
-                .iter()
-                .filter(|j| j.kind == JunctionKind::Signalized)
-                .count(),
+            signalised: network.junctions.iter().filter(|j| j.kind == JunctionKind::Signalized).count(),
             rivers: cx.channels.len(),
             scene_checked: scene.is_some(),
             terrain_checked: terrain.is_some(),
@@ -215,9 +207,7 @@ impl<'a> Context<'a> {
             } else {
                 continue;
             };
-            let Ok(bytes) = STANDARD.decode(&list.data) else {
-                continue;
-            };
+            let Ok(bytes) = STANDARD.decode(&list.data) else { continue };
             for chunk in bytes.chunks_exact(40) {
                 let f: Vec<f32> = chunk
                     .chunks_exact(4)
@@ -236,14 +226,7 @@ impl<'a> Context<'a> {
 
     // ---- reporting -------------------------------------------------------
 
-    fn push(
-        &mut self,
-        id: &'static str,
-        at: Vec2,
-        ids: Vec<String>,
-        magnitude: f32,
-        detail: String,
-    ) {
+    fn push(&mut self, id: &'static str, at: Vec2, ids: Vec<String>, magnitude: f32, detail: String) {
         let index = CHECKS.iter().position(|c| c.id == id).expect("known check");
         self.counts[index] += 1;
         if self.found[index].len() < STORE_CAP {
@@ -327,9 +310,7 @@ impl<'a> Context<'a> {
     /// The junction whose paved box holds `p`; the island at the middle of a
     /// roundabout is not pavement.
     fn junction_pavement(&self, p: Vec2) -> Option<&'a crate::network::Junction> {
-        self.junctions
-            .containing(p)
-            .filter(|j| !(j.roundabout && p.distance(j.centre) < j.island + 0.5))
+        self.junctions.containing(p).filter(|j| !(j.roundabout && p.distance(j.centre) < j.island + 0.5))
     }
 
     fn building_at(&self, p: Vec2) -> Option<&Bld> {
@@ -426,11 +407,7 @@ impl<'a> Context<'a> {
             }
         }
         for fi in 0..self.city.fields.len() {
-            let ring: Vec<Vec2> = self.city.fields[fi]
-                .ring
-                .iter()
-                .map(|p| self.local(p))
-                .collect();
+            let ring: Vec<Vec2> = self.city.fields[fi].ring.iter().map(|p| self.local(p)).collect();
             let mut depth = f32::MIN;
             let mut at = centroid(&ring);
             for p in ring_samples(&ring, 6.0) {
@@ -459,11 +436,7 @@ impl<'a> Context<'a> {
             let d = self.channel_depth(inst.p);
             if d > 0.5 {
                 let (p, key) = (inst.p, inst.key.clone());
-                let id = if inst.kind == Kind::Tree {
-                    "water.tree"
-                } else {
-                    "water.furniture"
-                };
+                let id = if inst.kind == Kind::Tree { "water.tree" } else { "water.furniture" };
                 self.push(id, p, vec![key], d, format!("{d:.1} m inside the channel"));
             }
         }
@@ -538,22 +511,13 @@ impl<'a> Context<'a> {
             let tag = format!("building:{id}");
             // degenerate
             if area < 12.0 || self.blds[i].ring.len() < 3 {
-                self.push(
-                    "bldg.degenerate",
-                    centre,
-                    vec![tag.clone()],
-                    12.0 - area,
-                    format!("footprint {area:.1} m2"),
-                );
+                self.push("bldg.degenerate", centre, vec![tag.clone()], 12.0 - area, format!("footprint {area:.1} m2"));
             }
             // storey height
             if floors > 0 {
                 let ftf = height / floors as f32;
                 let (lo, hi) = match use_type {
-                    ParcelUse::Residential
-                    | ParcelUse::Villa
-                    | ParcelUse::Village
-                    | ParcelUse::Farmstead => (2.7, 4.5),
+                    ParcelUse::Residential | ParcelUse::Villa | ParcelUse::Village | ParcelUse::Farmstead => (2.7, 4.5),
                     ParcelUse::MixedUse | ParcelUse::Commercial | ParcelUse::Civic => (3.0, 6.5),
                     ParcelUse::Industrial => (3.0, 12.0),
                     ParcelUse::Park => (2.4, 12.0),
@@ -587,13 +551,8 @@ impl<'a> Context<'a> {
                     "bldg.height_use",
                     centre,
                     vec![tag.clone()],
-                    (height - max_h)
-                        .max(floors as f32 - max_floors as f32)
-                        .max(1.0),
-                    format!(
-                        "{} {height:.0} m, {floors} floors, {from_centre:.0} m from the centre",
-                        prefix(use_type)
-                    ),
+                    (height - max_h).max(floors as f32 - max_floors as f32).max(1.0),
+                    format!("{} {height:.0} m, {floors} floors, {from_centre:.0} m from the centre", prefix(use_type)),
                 );
             }
             // street access: some road or footway close enough to reach
@@ -621,11 +580,7 @@ impl<'a> Context<'a> {
                     centre,
                     vec![tag.clone()],
                     gap - reach,
-                    format!(
-                        "{} {:.0} m from the nearest street",
-                        prefix(use_type),
-                        gap.max(0.0)
-                    ),
+                    format!("{} {:.0} m from the nearest street", prefix(use_type), gap.max(0.0)),
                 );
             }
             // pairs
@@ -645,62 +600,31 @@ impl<'a> Context<'a> {
                         && a.hi.x >= b.lo.x
                         && a.lo.y <= b.hi.y
                         && a.hi.y >= b.lo.y;
-                    let overlap = if boxes_touch {
-                        overlap_area(&a.ring, &b.ring)
-                    } else {
-                        0.0
-                    };
+                    let overlap = if boxes_touch { overlap_area(&a.ring, &b.ring) } else { 0.0 };
                     let mid = (a.centre + b.centre) * 0.5;
                     let ids = vec![format!("building:{}", a.id), format!("building:{}", b.id)];
                     // A tower standing on a lower, larger building (a shop podium)
                     // is one building in two parts, not an overlap.
                     let (low, high) = if a.height <= b.height { (a, b) } else { (b, a) };
-                    let on_podium = (overlap >= 0.8 * high.area
-                        && low.area >= high.area * 0.95
-                        && high.height > low.height + 3.0)
+                    let on_podium = (overlap >= 0.8 * high.area && low.area >= high.area * 0.95 && high.height > low.height + 3.0)
                         || self.podiums[i].is_some()
                         || self.podiums[j].is_some();
                     let stacked = on_podium;
                     if overlap > 1.0 && overlap > 0.03 * a.area.min(b.area) {
                         let detail = format!(
                             "{} {:.0} m and {} {:.0} m share {overlap:.0} m2",
-                            prefix(a.use_type),
-                            a.height,
-                            prefix(b.use_type),
-                            b.height
+                            prefix(a.use_type), a.height, prefix(b.use_type), b.height
                         );
-                        (
-                            if stacked {
-                                None
-                            } else {
-                                Some(("overlap.building_building", overlap))
-                            },
-                            mid,
-                            ids,
-                            detail,
-                        )
+                        (if stacked { None } else { Some(("overlap.building_building", overlap)) }, mid, ids, detail)
                     } else if overlap > 0.0 || stacked {
                         (None, mid, ids, String::new())
                     } else {
                         let gap = ring_gap(&a.ring, &b.ring);
                         if a.height > 24.0 && b.height > 24.0 && gap < 13.0 && gap >= 1.0 {
-                            let detail = format!(
-                                "{:.0} m and {:.0} m towers {gap:.1} m apart",
-                                a.height, b.height
-                            );
-                            (
-                                Some(("bldg.spacing_highrise", 13.0 - gap)),
-                                mid,
-                                ids,
-                                detail,
-                            )
+                            let detail = format!("{:.0} m and {:.0} m towers {gap:.1} m apart", a.height, b.height);
+                            (Some(("bldg.spacing_highrise", 13.0 - gap)), mid, ids, detail)
                         } else if gap > 0.3 && gap < 4.0 && a.area > 30.0 && b.area > 30.0 {
-                            (
-                                Some(("bldg.sliver", 4.0 - gap)),
-                                mid,
-                                ids,
-                                format!("{gap:.1} m between two buildings"),
-                            )
+                            (Some(("bldg.sliver", 4.0 - gap)), mid, ids, format!("{gap:.1} m between two buildings"))
                         } else {
                             (None, mid, ids, String::new())
                         }
@@ -724,12 +648,8 @@ impl<'a> Context<'a> {
                         continue;
                     }
                     match o.use_type {
-                        ParcelUse::Residential | ParcelUse::MixedUse if o.height >= 18.0 => {
-                            dense += 1
-                        }
-                        ParcelUse::Industrial | ParcelUse::Farmstead | ParcelUse::Park => {
-                            other += 1
-                        }
+                        ParcelUse::Residential | ParcelUse::MixedUse if o.height >= 18.0 => dense += 1,
+                        ParcelUse::Industrial | ParcelUse::Farmstead | ParcelUse::Park => other += 1,
                         _ => other += 1,
                     }
                 }
@@ -739,31 +659,20 @@ impl<'a> Context<'a> {
                         centre,
                         vec![tag.clone()],
                         dense as f32,
-                        format!(
-                            "{dense} residential towers and {other} other buildings within 90 m"
-                        ),
+                        format!("{dense} residential towers and {other} other buildings within 90 m"),
                     );
                 }
             }
             // slope
             if let Some(t) = self.terrain {
                 let s = t.slope(centre.x, centre.y, 120.0);
-                if s > 0.15
-                    && !matches!(
-                        use_type,
-                        ParcelUse::Village | ParcelUse::Farmstead | ParcelUse::Villa
-                    )
-                {
+                if s > 0.15 && !matches!(use_type, ParcelUse::Village | ParcelUse::Farmstead | ParcelUse::Villa) {
                     self.push(
                         "ground.slope_building",
                         centre,
                         vec![tag.clone()],
                         s,
-                        format!(
-                            "{} on {:.0} percent slope (terrain sampled over 240 m)",
-                            prefix(use_type),
-                            s * 100.0
-                        ),
+                        format!("{} on {:.0} percent slope (terrain sampled over 240 m)", prefix(use_type), s * 100.0),
                     );
                 }
             }
@@ -776,10 +685,7 @@ impl<'a> Context<'a> {
                 if b.use_type != ParcelUse::Village {
                     continue;
                 }
-                let cell = (
-                    (b.centre.x / 400.0).floor() as i32,
-                    (b.centre.y / 400.0).floor() as i32,
-                );
+                let cell = ((b.centre.x / 400.0).floor() as i32, (b.centre.y / 400.0).floor() as i32);
                 if !seen.insert(cell) {
                     continue;
                 }
@@ -849,12 +755,7 @@ impl<'a> Context<'a> {
                 let (a, b) = (Vec2::new(w[0].x, w[0].z), Vec2::new(w[1].x, w[1].z));
                 for t in [0.0, 0.5] {
                     let p = a.lerp(b, t);
-                    if p.x >= lo.x
-                        && p.x <= hi.x
-                        && p.y >= lo.y
-                        && p.y <= hi.y
-                        && point_in_ring(p, &ring)
-                    {
+                    if p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y && point_in_ring(p, &ring) {
                         let depth = road.half_width() + 1.0;
                         if worst.is_none_or(|w| depth > w.0) {
                             worst = Some((depth, p, road.id, false));
@@ -868,25 +769,9 @@ impl<'a> Context<'a> {
             if road != 0 {
                 ids.push(format!("road:{road}"));
             }
-            let what = if deck {
-                "under a viaduct with too little headroom"
-            } else {
-                "into the carriageway"
-            };
-            let class = if road == 0 {
-                String::new()
-            } else {
-                self.network.road(road).map_or(String::new(), |r| {
-                    format!(" ({:?}, layer {})", r.class, r.layer)
-                })
-            };
-            self.push(
-                "overlap.building_road",
-                p,
-                ids,
-                depth,
-                format!("{height:.0} m building {depth:.1} m {what}{class}"),
-            );
+            let what = if deck { "under a viaduct with too little headroom" } else { "into the carriageway" };
+            let class = if road == 0 { String::new() } else { self.network.road(road).map_or(String::new(), |r| format!(" ({:?}, layer {})", r.class, r.layer)) };
+            self.push("overlap.building_road", p, ids, depth, format!("{height:.0} m building {depth:.1} m {what}{class}"));
         }
         // fields
         for fi in 0..self.city.fields.len() {
@@ -923,29 +808,16 @@ impl<'a> Context<'a> {
         let allowed: HashSet<&str> = {
             let env = crate::trees::zones::environment_for(&self.city.climate);
             let pl = &env.zone.planting;
-            [
-                pl.street,
-                pl.motorway,
-                pl.median,
-                pl.park,
-                pl.compound,
-                pl.waterfront,
-                pl.farm,
-                pl.orchard,
-                pl.island,
-            ]
-            .iter()
-            .flat_map(|share| share.iter().map(|(k, _)| *k))
-            .collect()
+            [pl.street, pl.motorway, pl.median, pl.park, pl.compound, pl.waterfront, pl.farm, pl.orchard, pl.island]
+                .iter()
+                .flat_map(|share| share.iter().map(|(k, _)| *k))
+                .collect()
         };
-        let zone = crate::trees::zones::environment_for(&self.city.climate)
-            .zone
-            .key;
+        let zone = crate::trees::zones::environment_for(&self.city.climate).zone.key;
         let mut off_zone: HashMap<String, (usize, Vec2)> = HashMap::new();
         for i in 0..self.insts.len() {
             let inst = &self.insts[i];
-            let (p, key, y, kind, scale) =
-                (inst.p, inst.key.clone(), inst.y, inst.kind, inst.scale);
+            let (p, key, y, kind, scale) = (inst.p, inst.key.clone(), inst.y, inst.kind, inst.scale);
             let trunk = match kind {
                 Kind::Tree => prototypes.get(&key).map_or(0.2, |&(h, _, t)| t / h * scale),
                 Kind::Post(_) => 0.1,
@@ -957,13 +829,7 @@ impl<'a> Context<'a> {
                     Kind::Tree => ("overlap.tree_building", "trunk inside"),
                     Kind::Post(_) => ("overlap.furniture_building", "stands inside"),
                 };
-                self.push(
-                    id,
-                    p,
-                    vec![key.clone(), format!("building:{bid}")],
-                    1.0,
-                    format!("{what} a {bh:.0} m building"),
-                );
+                self.push(id, p, vec![key.clone(), format!("building:{bid}")], 1.0, format!("{what} a {bh:.0} m building"));
                 continue;
             }
             // in a motor lane or a junction box, on the surface the object stands on
@@ -989,18 +855,8 @@ impl<'a> Context<'a> {
                 hit = Some((distance_to_ring(p, &j.ring), format!("junction:{}", j.node)));
             }
             if let Some((depth, road)) = hit {
-                let id = if kind == Kind::Tree {
-                    "overlap.tree_road"
-                } else {
-                    "overlap.furniture_lane"
-                };
-                self.push(
-                    id,
-                    p,
-                    vec![key.clone(), road],
-                    depth,
-                    format!("{depth:.1} m into the carriageway"),
-                );
+                let id = if kind == Kind::Tree { "overlap.tree_road" } else { "overlap.furniture_lane" };
+                self.push(id, p, vec![key.clone(), road], depth, format!("{depth:.1} m into the carriageway"));
             }
             if kind == Kind::Tree {
                 let species = key.split('/').nth(1).unwrap_or("");
@@ -1029,19 +885,14 @@ impl<'a> Context<'a> {
             }
         }
         for (species, (count, at)) in off_zone {
-            let index = CHECKS
-                .iter()
-                .position(|c| c.id == "veg.species_climate")
-                .unwrap();
+            let index = CHECKS.iter().position(|c| c.id == "veg.species_climate").unwrap();
             self.counts[index] += count - 1;
             self.push(
                 "veg.species_climate",
                 at,
                 vec![format!("species:{species}")],
                 count as f32,
-                format!(
-                    "{count} trees of {species} where the site climate selects the {zone} zone"
-                ),
+                format!("{count} trees of {species} where the site climate selects the {zone} zone"),
             );
         }
     }
@@ -1052,13 +903,7 @@ impl<'a> Context<'a> {
             let p = Vec2::new(agent.x, agent.z);
             if let Some(b) = self.building_at(p) {
                 let bid = b.id;
-                self.push(
-                    "overlap.vehicle_building",
-                    p,
-                    vec![format!("vehicle:{n}"), format!("building:{bid}")],
-                    1.0,
-                    "vehicle inside a building".into(),
-                );
+                self.push("overlap.vehicle_building", p, vec![format!("vehicle:{n}"), format!("building:{bid}")], 1.0, "vehicle inside a building".into());
                 continue;
             }
             let on_road = self
@@ -1067,13 +912,7 @@ impl<'a> Context<'a> {
                 .iter()
                 .any(|o| o.distance <= self.network.roads[o.road].half_width() + 1.0);
             if !on_road && self.junctions.containing(p).is_none() {
-                self.push(
-                    "overlap.vehicle_offroad",
-                    p,
-                    vec![format!("vehicle:{n}")],
-                    1.0,
-                    "vehicle outside every carriageway and junction".into(),
-                );
+                self.push("overlap.vehicle_offroad", p, vec![format!("vehicle:{n}")], 1.0, "vehicle outside every carriageway and junction".into());
             }
         }
     }
@@ -1178,10 +1017,7 @@ impl<'a> Context<'a> {
             let pts = r.carriageway.points();
             let (a3, b3) = (pts[si], pts[si + 1]);
             let (a, b) = (Vec2::new(a3.x, a3.z), Vec2::new(b3.x, b3.z));
-            for other in grid.query(
-                Vec2::new(a.x.min(b.x), a.y.min(b.y)),
-                Vec2::new(a.x.max(b.x), a.y.max(b.y)),
-            ) {
+            for other in grid.query(Vec2::new(a.x.min(b.x), a.y.min(b.y)), Vec2::new(a.x.max(b.x), a.y.max(b.y))) {
                 if other as usize <= id {
                     continue;
                 }
@@ -1190,19 +1026,13 @@ impl<'a> Context<'a> {
                     continue;
                 }
                 let q = &self.network.roads[rj];
-                if r.from_node == q.from_node
-                    || r.from_node == q.to_node
-                    || r.to_node == q.from_node
-                    || r.to_node == q.to_node
-                {
+                if r.from_node == q.from_node || r.from_node == q.to_node || r.to_node == q.from_node || r.to_node == q.to_node {
                     continue;
                 }
                 let qp = q.carriageway.points();
                 let (c3, d3) = (qp[sj], qp[sj + 1]);
                 let (c, d) = (Vec2::new(c3.x, c3.z), Vec2::new(d3.x, d3.z));
-                let Some((t, u)) = segment_intersection(a, b, c, d) else {
-                    continue;
-                };
+                let Some((t, u)) = segment_intersection(a, b, c, d) else { continue };
                 if !seen.insert((ri.min(rj), ri.max(rj))) {
                     continue;
                 }
@@ -1217,10 +1047,7 @@ impl<'a> Context<'a> {
                         at,
                         ids,
                         1.0 - dy,
-                        format!(
-                            "{:?} and {:?} cross at {y1:.1} m and {y2:.1} m with no junction",
-                            r.class, q.class
-                        ),
+                        format!("{:?} and {:?} cross at {y1:.1} m and {y2:.1} m with no junction", r.class, q.class),
                     );
                 } else {
                     let upper = if y1 > y2 { r } else { q };
@@ -1231,9 +1058,7 @@ impl<'a> Context<'a> {
                             at,
                             ids,
                             4.5 - clear,
-                            format!(
-                                "headroom {clear:.2} m under a deck {dy:.2} m above the road below"
-                            ),
+                            format!("headroom {clear:.2} m under a deck {dy:.2} m above the road below"),
                         );
                     }
                 }
@@ -1250,14 +1075,8 @@ impl<'a> Context<'a> {
             let at = j.centre;
             // ends meet the junction in plan and in height
             for port in &j.ports {
-                let Some(road) = self.network.road(port.road) else {
-                    continue;
-                };
-                let end = if port.at_start {
-                    road.centreline.start()
-                } else {
-                    road.centreline.end()
-                };
+                let Some(road) = self.network.road(port.road) else { continue };
+                let end = if port.at_start { road.centreline.start() } else { road.centreline.end() };
                 let step = (end.y - j.y).abs();
                 if step > 0.2 {
                     self.push(
@@ -1275,27 +1094,17 @@ impl<'a> Context<'a> {
                         at,
                         vec![format!("road:{}", road.id), format!("junction:{}", j.node)],
                         gap - j.radius,
-                        format!(
-                            "road end {gap:.1} m from the junction centre (box radius {:.1})",
-                            j.radius
-                        ),
+                        format!("road end {gap:.1} m from the junction centre (box radius {:.1})", j.radius),
                     );
                 }
             }
             if j.ports.len() < 3 || j.roundabout || self.network.is_air(j.node) {
                 continue;
             }
-            let ramp_arm = j
-                .ports
-                .iter()
-                .any(|p| self.network.road(p.road).is_some_and(|r| r.oneway));
+            let ramp_arm = j.ports.iter().any(|p| self.network.road(p.road).is_some_and(|r| r.oneway));
             // arms closer than 30 degrees
             if !ramp_arm && j.kind != JunctionKind::GradeSeparated {
-                let mut angles: Vec<f32> = j
-                    .ports
-                    .iter()
-                    .map(|p| p.dir.y.atan2(p.dir.x).to_degrees())
-                    .collect();
+                let mut angles: Vec<f32> = j.ports.iter().map(|p| p.dir.y.atan2(p.dir.x).to_degrees()).collect();
                 angles.sort_by(|a, b| a.total_cmp(b));
                 let mut min = f32::MAX;
                 for k in 0..angles.len() {
@@ -1323,38 +1132,15 @@ impl<'a> Context<'a> {
                     .ports
                     .iter()
                     .filter_map(|p| self.network.road(p.road))
-                    .filter(|r| {
-                        matches!(
-                            r.class,
-                            ModernRoadClass::Arterial | ModernRoadClass::Expressway
-                        )
-                    })
+                    .filter(|r| matches!(r.class, ModernRoadClass::Arterial | ModernRoadClass::Expressway))
                     .count();
                 let id = format!("junction:{}", j.node);
                 if j.kind == JunctionKind::Signalized && !has_rig {
-                    self.push(
-                        "net.junction_control",
-                        at,
-                        vec![id.clone()],
-                        1.0,
-                        "signalised junction with no signal heads".into(),
-                    );
+                    self.push("net.junction_control", at, vec![id.clone()], 1.0, "signalised junction with no signal heads".into());
                 } else if j.kind != JunctionKind::Signalized && has_rig {
-                    self.push(
-                        "net.junction_control",
-                        at,
-                        vec![id.clone()],
-                        1.0,
-                        format!("{:?} junction carrying signal heads", j.kind),
-                    );
+                    self.push("net.junction_control", at, vec![id.clone()], 1.0, format!("{:?} junction carrying signal heads", j.kind));
                 } else if major >= 3 && j.kind == JunctionKind::Priority {
-                    self.push(
-                        "net.junction_control",
-                        at,
-                        vec![id.clone()],
-                        2.0,
-                        format!("{major} arterial arms meeting under priority control"),
-                    );
+                    self.push("net.junction_control", at, vec![id.clone()], 2.0, format!("{major} arterial arms meeting under priority control"));
                 }
             }
             let footway_arms: Vec<_> = j
@@ -1364,44 +1150,24 @@ impl<'a> Context<'a> {
                 .filter(|(r, _)| r.layer == 0 && !r.oneway && r.section.sidewalk_metres >= 1.0)
                 .collect();
             if footway_arms.len() >= 3
-                && !matches!(
-                    j.kind,
-                    JunctionKind::RightInRightOut | JunctionKind::GradeSeparated
-                )
-                && !footway_arms
-                    .iter()
-                    .any(|(r, start)| if *start { r.walk_start } else { r.walk_end })
+                && !matches!(j.kind, JunctionKind::RightInRightOut | JunctionKind::GradeSeparated)
+                && !footway_arms.iter().any(|(r, start)| if *start { r.walk_start } else { r.walk_end })
             {
                 self.push(
                     "net.junction_control",
                     at,
                     vec![format!("junction:{}", j.node)],
                     1.0,
-                    format!(
-                        "{} footway arms and no pedestrian crossing",
-                        footway_arms.len()
-                    ),
+                    format!("{} footway arms and no pedestrian crossing", footway_arms.len()),
                 );
             }
         }
         for w in &self.network.warnings {
-            self.push(
-                "network.warning",
-                Vec2::new(0.0, 0.0),
-                vec![w.chars().take(60).collect()],
-                1.0,
-                w.clone(),
-            );
+            self.push("network.warning", Vec2::new(0.0, 0.0), vec![w.chars().take(60).collect()], 1.0, w.clone());
         }
         if let Some(s) = self.scene {
             for w in s.stats.warnings.iter().skip(self.network.warnings.len()) {
-                self.push(
-                    "network.warning",
-                    Vec2::new(0.0, 0.0),
-                    vec!["scene".into()],
-                    1.0,
-                    w.clone(),
-                );
+                self.push("network.warning", Vec2::new(0.0, 0.0), vec!["scene".into()], 1.0, w.clone());
             }
         }
     }
@@ -1423,10 +1189,7 @@ impl<'a> Context<'a> {
                     mid,
                     vec![format!("road:{id}")],
                     (s.motor_lane_width - 3.375).abs(),
-                    format!(
-                        "{:?} lane {:.2} m wide (3.0-3.75)",
-                        road.class, s.motor_lane_width
-                    ),
+                    format!("{:?} lane {:.2} m wide (3.0-3.75)", road.class, s.motor_lane_width),
                 );
             } else if road.has_sidewalk() && s.sidewalk_metres < 1.5 {
                 self.push(
@@ -1434,54 +1197,27 @@ impl<'a> Context<'a> {
                     mid,
                     vec![format!("road:{id}")],
                     1.5 - s.sidewalk_metres,
-                    format!(
-                        "{:?} footway {:.2} m wide (at least 1.5)",
-                        road.class, s.sidewalk_metres
-                    ),
+                    format!("{:?} footway {:.2} m wide (at least 1.5)", road.class, s.sidewalk_metres),
                 );
             }
             let grade = road.max_grade;
             if road.oneway {
                 if grade > 0.052 {
-                    self.push(
-                        "ramp.grade",
-                        mid,
-                        vec![format!("road:{id}")],
-                        grade,
-                        format!("ramp reaches {:.1} percent", grade * 100.0),
-                    );
+                    self.push("ramp.grade", mid, vec![format!("road:{id}")], grade, format!("ramp reaches {:.1} percent", grade * 100.0));
                 }
                 let ends = [road.from_node, road.to_node];
-                if ends
-                    .iter()
-                    .any(|n| self.network.incident_roads(*n).len() < 2)
-                {
-                    self.push(
-                        "ramp.continuity",
-                        mid,
-                        vec![format!("road:{id}")],
-                        1.0,
-                        "a ramp end joins no other road".into(),
-                    );
+                if ends.iter().any(|n| self.network.incident_roads(*n).len() < 2) {
+                    self.push("ramp.continuity", mid, vec![format!("road:{id}")], 1.0, "a ramp end joins no other road".into());
                 }
             } else {
-                let limit = if road.class == ModernRoadClass::Expressway {
-                    0.05
-                } else {
-                    0.06
-                };
+                let limit = if road.class == ModernRoadClass::Expressway { 0.05 } else { 0.06 };
                 if grade > limit + 0.002 {
                     self.push(
                         "bridge.grade",
                         mid,
                         vec![format!("road:{id}")],
                         grade,
-                        format!(
-                            "{:?} reaches {:.1} percent (limit {:.0})",
-                            road.class,
-                            grade * 100.0,
-                            limit * 100.0
-                        ),
+                        format!("{:?} reaches {:.1} percent (limit {:.0})", road.class, grade * 100.0, limit * 100.0),
                     );
                 }
             }
@@ -1502,18 +1238,11 @@ impl<'a> Context<'a> {
             }
             x
         }
-        let index: HashMap<u32, usize> = city
-            .nodes
-            .iter()
-            .enumerate()
-            .map(|(i, nd)| (nd.id, i))
-            .collect();
+        let index: HashMap<u32, usize> = city.nodes.iter().enumerate().map(|(i, nd)| (nd.id, i)).collect();
         let mut degree = vec![0usize; n];
         let mut sole: Vec<Option<u32>> = vec![None; n];
         for r in &city.sd_roads {
-            let (Some(&a), Some(&b)) = (index.get(&r.from), index.get(&r.to)) else {
-                continue;
-            };
+            let (Some(&a), Some(&b)) = (index.get(&r.from), index.get(&r.to)) else { continue };
             let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
             parent[ra] = rb;
             if a != b {
@@ -1549,21 +1278,15 @@ impl<'a> Context<'a> {
                 );
             }
         }
-        let by_id: HashMap<u32, &urban::HdRoad> =
-            city.hd_roads.iter().map(|h| (h.sd_road, h)).collect();
+        let by_id: HashMap<u32, &urban::HdRoad> = city.hd_roads.iter().map(|h| (h.sd_road, h)).collect();
         for i in 0..n {
             if degree[i] != 1 || city.nodes[i].role == "regional-gateway" {
                 continue;
             }
             let Some(rid) = sole[i] else { continue };
-            let Some(sd) = city.sd_roads.iter().find(|r| r.id == rid) else {
-                continue;
-            };
+            let Some(sd) = city.sd_roads.iter().find(|r| r.id == rid) else { continue };
             let len = by_id.get(&rid).map_or(0.0, |h| {
-                h.centreline
-                    .windows(2)
-                    .map(|w| self.local(&w[0]).distance(self.local(&w[1])))
-                    .sum::<f32>()
+                h.centreline.windows(2).map(|w| self.local(&w[0]).distance(self.local(&w[1]))).sum::<f32>()
             });
             let plausible = match sd.class {
                 ModernRoadClass::Local => len <= 320.0,
@@ -1592,25 +1315,16 @@ impl<'a> Context<'a> {
                 Vec2::new(0.0, 0.0),
                 vec!["scene".into()],
                 drop as f32,
-                format!(
-                    "{} of {} buildings have a far form but no detail",
-                    drop,
-                    self.city.buildings.len()
-                ),
+                format!("{} of {} buildings have a far form but no detail", drop, self.city.buildings.len()),
             );
         }
         for (i, b) in self.city.buildings.iter().enumerate() {
-            let Some(look) =
-                crate::buildings::far::far_look(b, self.podiums.get(i).copied().flatten())
-            else {
+            let Some(look) = crate::buildings::far::far_look(b, self.podiums.get(i).copied().flatten()) else {
                 continue;
             };
             let diff = (look.roof_m - b.height_metres).abs();
             if diff > 1.0 {
-                let c = b
-                    .footprint
-                    .first()
-                    .map_or(Vec2::new(0.0, 0.0), |p| self.local(p));
+                let c = b.footprint.first().map_or(Vec2::new(0.0, 0.0), |p| self.local(p));
                 let (id, use_type) = (b.id, b.use_type);
                 let height = b.height_metres;
                 self.push(
@@ -1618,11 +1332,7 @@ impl<'a> Context<'a> {
                     c,
                     vec![format!("building:{id}")],
                     diff,
-                    format!(
-                        "{} plan height {height:.1} m, detail roof {:.1} m",
-                        prefix(use_type),
-                        look.roof_m
-                    ),
+                    format!("{} plan height {height:.1} m, detail roof {:.1} m", prefix(use_type), look.roof_m),
                 );
             }
         }
