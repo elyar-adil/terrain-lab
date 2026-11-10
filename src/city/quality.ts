@@ -1,5 +1,5 @@
 /**
- * How much metre-scale city detail this device is asked to carry.
+ * Per-device settings for the streamed city.
  *
  * A streamed city is the heaviest thing the page draws: every tile brings a full
  * set of textures, grown trees, grass shells and thousands of instances. A phone
@@ -29,10 +29,15 @@ export interface CityQuality {
   tileBudgetMs: number;
 }
 
+/**
+ * Visual quality is the same on every device: performance comes from sharing and
+ * streaming work, never from drawing less. Only how much tile-building work is
+ * done per frame differs, which changes how fast detail arrives, not how it looks.
+ */
 const FULL: CityQuality = {
   tileLoadM: 600,
   maxTiles: 9,
-  anisotropy: 8,
+  anisotropy: 16,
   lodScale: 1,
   grassShells: true,
   treeLodM: [22, 45, 160],
@@ -40,15 +45,6 @@ const FULL: CityQuality = {
   tileBudgetMs: 6,
 };
 
-const LIGHT: CityQuality = {
-  tileLoadM: 300,
-  maxTiles: 4,
-  anisotropy: 2,
-  lodScale: 0.55,
-  grassShells: false,
-  treeLodM: [10, 24, 70],
-  treeFarM: 420,
-  tileBudgetMs: 3,
-};
+const LIGHT: CityQuality = { ...FULL, tileBudgetMs: 3 };
 
 export const cityQuality: CityQuality = isConstrainedDevice ? LIGHT : FULL;
