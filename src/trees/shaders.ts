@@ -497,6 +497,17 @@ if (vTreeKind > 0.5) {
     vec3 base = mix(woody, mix(paleC, woody, 0.15 * thick), smoothBark);
     base *= mix(vec3(1.0), vTreeColour.rgb / max(dot(vTreeColour.rgb, vec3(0.33)), 0.02) * 0.9, 0.18);
     vec3 plateCol = base * (0.94 + 0.10 * plate) * (1.0 + (grain - 0.5) * 0.14 * detail) * (0.96 + 0.08 * dome);
+    // Wood, not stone: bark is fibrous, long streaks of lighter and darker fibre running
+    // with the grain (the axis is vertical, so the noise is stretched along y), ridge
+    // crowns lighter than the grooves between them, and hue that wanders between warm
+    // red-brown and olive-grey from one plate to the next. Stone is uniform in hue and
+    // is cut by closed polygonal cracks.
+    float fibre = tNoise(vec3(q.x * 70.0 + q.z * 70.0, q.y * 3.0, 0.7));
+    float fibre2 = tNoise(vec3(q.x * 180.0 + q.z * 180.0, q.y * 9.0, 3.1));
+    float woodiness = 1.0 - 0.6 * smoothBark;
+    plateCol *= 1.0 + woodiness * detail * (0.40 * (fibre - 0.5) + 0.22 * (fibre2 - 0.5));
+    plateCol *= mix(0.78 + 0.44 * rounding, 1.0, smoothBark);
+    plateCol *= mix(vec3(1.0), vec3(1.14, 0.96, 0.78), tNoise(q * vec3(5.0, 1.2, 5.0) + 13.0) * woodiness);
     // Mottling on smooth bark: flaked patches of olive-grey and cream.
     float mott = tNoise(q * 6.0 + 21.0);
     plateCol = mix(plateCol, plateCol * vec3(0.92, 0.95, 0.88), smoothBark * smoothstep(0.5, 0.75, mott) * 0.25);
@@ -525,7 +536,7 @@ if (vTreeKind > 0.5) {
     // centimetres thick. On a twig a centimetre across, plates ten centimetres wide
     // put its whole surface in a furrow, and every twig drew near-black.
     float fissured = smoothstep(0.025, 0.07, R) * (1.0 - 0.9 * smoothBark);
-    vec3 col = mix(plateCol, creviceCol, clamp((furrow * 0.60 + crack * 0.15) * fissured * detail, 0.0, 1.0));
+    vec3 col = mix(plateCol, creviceCol, clamp((furrow * 0.45 + crack * 0.12) * fissured * detail, 0.0, 1.0));
     // Cavity occlusion is its own channel, applied to ambient light only: a furrow is
     // dark because little sky reaches into it, not because its albedo is black. Doing it
     // in albedo is what made bark a field of black dots.
@@ -721,7 +732,7 @@ export function patchTreeMaterial(material: THREE.Material, mode: "lit" | "depth
       fragment = fragment.replace("#include <color_fragment>", `#include <color_fragment>\n${FRAGMENT_SURFACE}`);
       fragment = fragment.replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>\n${FRAGMENT_BUMP}`);
       fragment = fragment.replace("#include <roughnessmap_fragment>", `#include <roughnessmap_fragment>\nif (vTreeKind > 0.5 && vTreeKind < 1.5) roughnessFactor = tBarkRough;`);
-      fragment = fragment.replace("#include <aomap_fragment>", `#include <aomap_fragment>\nif (vTreeKind > 0.5 && vTreeKind < 1.5) { reflectedLight.indirectDiffuse *= tBarkAO; reflectedLight.indirectSpecular *= tBarkAO; }`);
+      fragment = fragment.replace("#include <aomap_fragment>", `#include <aomap_fragment>\nif (vTreeKind > 0.5 && vTreeKind < 1.5) { reflectedLight.indirectDiffuse *= tBarkAO * vec3(1.12, 0.96, 0.78); reflectedLight.indirectSpecular *= tBarkAO; }`);
       fragment = fragment.replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>\n${FRAGMENT_TRANSLUCENCY}`);
     } else if (mode === "depth") {
       fragment = fragment.replace(
