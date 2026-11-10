@@ -472,13 +472,24 @@ if (vTreeKind > 0.5) {
     vec3 oldC = vec3(0.30, 0.200, 0.130);
     vec3 woody = mix(youngC, oldC, thick);
     float smoothBark = 1.0 - smoothstep(0.18, 0.40, fissure);
-    vec3 paleC = mix(vTreeColour.rgb, vec3(0.30, 0.22, 0.15), 0.35) * vec3(1.25, 1.0, 0.72);
+    // London plane: cream-grey, with the pale inner bark showing where the outer plates
+    // have flaked away. The species colour only tints it; the old warm multiplier made
+    // every plane trunk read orange-brown.
+    vec3 paleC = mix(vec3(0.50, 0.465, 0.38), vTreeColour.rgb * vec3(1.15, 1.10, 0.95), 0.25);
     vec3 base = mix(woody, mix(paleC, woody, 0.15 * thick), smoothBark);
     base *= mix(vec3(1.0), vTreeColour.rgb / max(dot(vTreeColour.rgb, vec3(0.33)), 0.02) * 0.9, 0.18);
     vec3 plateCol = base * (0.90 + 0.16 * plate) * (0.93 + 0.14 * grain) * (0.94 + 0.12 * dome);
     // Mottling on smooth bark: flaked patches of olive-grey and cream.
     float mott = tNoise(q * 6.0 + 21.0);
     plateCol = mix(plateCol, plateCol * vec3(0.92, 0.95, 0.88), smoothBark * smoothstep(0.5, 0.75, mott) * 0.25);
+    // Mottling of a plane trunk: irregular olive-grey and dull brown patches over cream,
+    // each a hand's width or more, with soft edges.
+    float mottBig = tNoise(q * vec3(3.2, 1.6, 3.2) + 41.0);
+    float mottMid = tNoise(q * vec3(8.0, 4.0, 8.0) + 63.0);
+    float mPatch = smoothstep(0.50, 0.66, mottBig * 0.7 + mottMid * 0.3);
+    float patchB = smoothstep(0.62, 0.78, tNoise(q * vec3(5.0, 2.5, 5.0) + 87.0));
+    plateCol = mix(plateCol, plateCol * vec3(0.62, 0.66, 0.50), smoothBark * mPatch * 0.85);
+    plateCol = mix(plateCol, vec3(0.20, 0.155, 0.11), smoothBark * patchB * 0.55);
     vec3 creviceCol = vec3(0.045, 0.030, 0.021);
     // Real bark is matte and low in saturation, and varies a great deal in value over a
     // metre: weathering, damp, where rain runs down it. Plastic is uniform and clean.
@@ -487,13 +498,13 @@ if (vTreeKind > 0.5) {
     float weather = tNoise(q * vec3(1.6, 0.35, 1.6) + 5.0);
     float streak = tNoise(vec3(q.x * 9.0 + q.z * 9.0, q.y * 0.8, 3.0));
     plateCol *= 0.95 + 0.55 * weather;
-    plateCol *= 0.88 + 0.24 * streak;
+    plateCol *= mix(0.88 + 0.24 * streak, 0.96 + 0.08 * streak, smoothBark);
     // Fine pitting and a dusting of grit, so no surface is perfectly clean.
     plateCol *= 0.92 + 0.16 * tNoise(q * 320.0);
     // Young wood is smooth: bark only fissures into plates once a limb is a few
     // centimetres thick. On a twig a centimetre across, plates ten centimetres wide
     // put its whole surface in a furrow, and every twig drew near-black.
-    float fissured = smoothstep(0.025, 0.07, R);
+    float fissured = smoothstep(0.025, 0.07, R) * (1.0 - 0.9 * smoothBark);
     vec3 col = mix(plateCol, creviceCol, clamp((furrow * 0.90 + crack * 0.30) * fissured, 0.0, 1.0));
     // Planted in the ground: soil splashed up the foot, damp and dark where the wood meets
     // the earth, and less light reaching a surface so close to it.
@@ -511,7 +522,9 @@ if (vTreeKind > 0.5) {
     float vein;
     float inner;
     float cover = treeLeafCoverage(vein, inner);
-    vec3 col = vTreeColour.rgb;
+    // Sunlit plane and broadleaf canopy is yellow-green and lighter than the species
+    // reflectance suggests once the shade between leaves is handled by the lights.
+    vec3 col = vTreeColour.rgb * vec3(1.20, 1.14, 0.86);
     col = mix(col, col * 1.32 + vec3(0.035, 0.045, 0.0), vein * 0.6);
     col *= 0.88 + 0.12 * inner;
     diffuseColor.rgb = col;
@@ -679,7 +692,17 @@ export function patchTreeMaterial(material: THREE.Material, mode: "lit" | "depth
     } else if (mode === "depth") {
       fragment = fragment.replace(
         "#include <alphamap_fragment>",
-        `#include <alphamap_fragment>\nif (vTreeKind > 1.5) { float tv; float ti; diffuseColor.a = treeLeafCoverage(tv, ti); }`,
+        `#include <alphamap_fragment>
+if (vTreeKind > 1.5) {
+  float tv; float ti;
+  diffuseColor.a = treeLeafCoverage(tv, ti);
+  // A crown is not opaque: sun reaches the ground through gaps between leaf clumps.
+  // Hash the shadow-map texel in 2x2 blocks and let a share of leaves cast nothing, so
+  // the ground gets dappled light and not one solid shadow.
+  vec2 gp = floor(gl_FragCoord.xy * 0.5);
+  float gh = fract(sin(dot(gp, vec2(12.9898, 78.233))) * 43758.5453);
+  if (gh < 0.34) diffuseColor.a = 0.0;
+}`,
       );
     } else {
       fragment = fragment.replace(
@@ -705,8 +728,10 @@ export function createTreeMaterials(): TreeMaterials {
   patchTreeMaterial(wood, "lit");
   const leaf = new THREE.MeshStandardMaterial({
     color: 0xffffff,
-    roughness: 0.62,
+    // Leaves are matte at street distance; 0.62 put white glints on every facing leaf.
+    roughness: 0.88,
     metalness: 0,
+    envMapIntensity: 0.6,
     side: THREE.DoubleSide,
     alphaTest: 0.5,
     // (Alpha-to-coverage needs multisampling; without it it turns into a random dot pattern.)

@@ -405,7 +405,7 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     // day gives 4 - 6 (skylight 15 - 25 % of the total); every frame looked hazy,
     // its darkest twentieth at 30-35 of 255 where photographs reach 20 - 40 and the
     // reference render 2. These bring the ratio to about 3.3.
-    scene.environmentIntensity = 0.32;
+    scene.environmentIntensity = 0.40;
     renderer.toneMappingExposure = 1.05;
 
     // 冷色补光:阴影面不全是黑的,带一点天光蓝。
@@ -3581,7 +3581,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     // In a city the shaded side of a wall sees as much of the street and of the
     // facades opposite as of the sky, so its fill is a warm grey bounce, not the
     // sky's blue alone; the dark green ground colour made every shaded wall navy.
-    const ambient = new THREE.HemisphereLight(0xd6e0ea, 0x8a8174, 0.24);
+    const ambient = new THREE.HemisphereLight(0xdde2e6, 0x8f8878, 0.32);
     scene.add(ambient);
     const azimuth = THREE.MathUtils.degToRad(config.sunAzimuth);
     const elevation = THREE.MathUtils.degToRad(config.sunElevation);

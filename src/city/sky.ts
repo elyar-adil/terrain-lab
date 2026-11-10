@@ -83,8 +83,8 @@ const SKY_FRAGMENT = /* glsl */ `
 
     // Zenith to horizon. The exponent shapes how fast the blue gives way near the
     // horizon, which is where a real sky is palest.
-    vec3 zenith  = vec3(0.085, 0.170, 0.360);
-    vec3 horizon = vec3(0.420, 0.545, 0.700);
+    vec3 zenith  = vec3(0.045, 0.135, 0.380);
+    vec3 horizon = vec3(0.360, 0.520, 0.740);
     vec3 col = mix(horizon, zenith, pow(clamp(y, 0.0, 1.0), 0.48));
 
     float s = max(dot(d, uSunDir), 0.0);
@@ -98,7 +98,7 @@ const SKY_FRAGMENT = /* glsl */ `
       vec2 drift = vec2(uTime * 0.0022, uTime * 0.0009);
       float warp = fbm(uv * 0.18 + drift);
       float c = fbm(uv * 0.34 + (warp - 0.5) * 2.4 + drift * 1.7);
-      float cover = smoothstep(0.50, 0.78, c + 0.12 * pow(1.0 - y, 2.0));
+      float cover = smoothstep(0.55, 0.80, c + 0.12 * pow(1.0 - y, 2.0));
       float fade = smoothstep(0.010, 0.09, y);
       float lit = smoothstep(0.42, 0.92, c);
       vec3 cloud = mix(vec3(0.50, 0.54, 0.61), vec3(0.97, 0.98, 1.02), lit);

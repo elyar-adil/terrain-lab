@@ -159,7 +159,11 @@ pub fn asphalt_texture(size: usize) -> BakedTexture {
             let oxidation = signed_noise(0x51d3, u * 2.0, v * 2.0, 2.0) * 8.0;
             let screed = signed_noise(0x2a71, u * 6.0, v * 2.0, 6.0) * 5.0;
             let clump = signed_noise(0x77b1, u * 16.0, v * 16.0, 16.0) * 10.0;
-            let grain = (hash(17, ix, iy) - 0.5) * 30.0;
+            // Two scales of aggregate: sand-sized grain, and stones two to three
+            // texels across. Real wearing course is rough at both; a single
+            // fine grain averages out to a smooth, flat grey at street distance.
+            let grain = (hash(17, ix, iy) - 0.5) * 40.0
+                + (hash(19, ix / 2, iy / 2) - 0.5) * 22.0;
             let chip = if hash(109, ix, iy) < 0.032 {
                 22.0 + hash(113, ix, iy) * 26.0
             } else {
