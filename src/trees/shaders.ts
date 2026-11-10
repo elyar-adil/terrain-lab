@@ -482,22 +482,24 @@ if (vTreeKind > 0.5) {
     // Mottling on smooth bark: flaked patches of olive-grey and cream.
     float mott = tNoise(q * 6.0 + 21.0);
     plateCol = mix(plateCol, plateCol * vec3(0.92, 0.95, 0.88), smoothBark * smoothstep(0.5, 0.75, mott) * 0.25);
-    // Mottling of a plane trunk: irregular olive-grey and dull brown patches over cream,
-    // each a hand's width or more, with soft edges.
-    float mottBig = tNoise(q * vec3(3.2, 1.6, 3.2) + 41.0);
-    float mottMid = tNoise(q * vec3(8.0, 4.0, 8.0) + 63.0);
-    float mPatch = smoothstep(0.50, 0.66, mottBig * 0.7 + mottMid * 0.3);
-    float patchB = smoothstep(0.62, 0.78, tNoise(q * vec3(5.0, 2.5, 5.0) + 87.0));
-    plateCol = mix(plateCol, plateCol * vec3(0.62, 0.66, 0.50), smoothBark * mPatch * 0.85);
-    plateCol = mix(plateCol, vec3(0.20, 0.155, 0.11), smoothBark * patchB * 0.55);
+    // Mottling of a plane trunk: broad, soft, low-contrast patches of olive-grey and
+    // greyer cream, a hand's width or more across, equally wide and tall. Real trunks
+    // are pale with gentle tonal variation; hard, tall, high-contrast patches read as
+    // camouflage or zebra stripes.
+    float mottBig = tNoise(q * 3.0 + 41.0);
+    float mottMid = tNoise(q * 7.0 + 63.0);
+    float mPatch = smoothstep(0.42, 0.78, mottBig * 0.75 + mottMid * 0.25);
+    float mDark = smoothstep(0.55, 0.90, tNoise(q * 4.5 + 87.0));
+    plateCol = mix(plateCol, plateCol * vec3(0.80, 0.82, 0.68), smoothBark * mPatch * 0.55);
+    plateCol = mix(plateCol, plateCol * vec3(0.72, 0.64, 0.52), smoothBark * mDark * 0.30);
     vec3 creviceCol = vec3(0.045, 0.030, 0.021);
     // Real bark is matte and low in saturation, and varies a great deal in value over a
     // metre: weathering, damp, where rain runs down it. Plastic is uniform and clean.
     float lum0 = dot(plateCol, vec3(0.30, 0.59, 0.11));
-    plateCol = mix(vec3(lum0), plateCol, 1.28);
+    plateCol = mix(vec3(lum0), plateCol, mix(1.28, 1.0, smoothBark));
     float weather = tNoise(q * vec3(1.6, 0.35, 1.6) + 5.0);
     float streak = tNoise(vec3(q.x * 9.0 + q.z * 9.0, q.y * 0.8, 3.0));
-    plateCol *= 0.95 + 0.55 * weather;
+    plateCol *= mix(0.95 + 0.55 * weather, 0.90 + 0.20 * weather, smoothBark);
     plateCol *= mix(0.88 + 0.24 * streak, 0.96 + 0.08 * streak, smoothBark);
     // Fine pitting and a dusting of grit, so no surface is perfectly clean.
     plateCol *= 0.92 + 0.16 * tNoise(q * 320.0);
