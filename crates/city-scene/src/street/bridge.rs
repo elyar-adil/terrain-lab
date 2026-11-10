@@ -462,7 +462,11 @@ fn river_bridge(road: &Road, surface: &Carriageway, length: f32, builder: &mut M
                 );
                 if st > length * 0.3 && st < length * 0.7 {
                     // Soft foam where the current splits on the cutwater.
-                    for (grow, y) in [(0.6_f32, water + 0.02), (1.5, water + 0.025), (2.8, water + 0.03)] {
+                    for (grow, y) in [
+                        (0.6_f32, water + 0.02),
+                        (1.5, water + 0.025),
+                        (2.8, water + 0.03),
+                    ] {
                         let (l, w) = (
                             (half * 0.85 + 1.6 + grow * 2.0) * 0.5,
                             (3.6 + grow * 2.0) * 0.5,

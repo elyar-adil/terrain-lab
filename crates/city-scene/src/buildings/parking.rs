@@ -134,7 +134,9 @@ fn lay_free(ring: &[Vec2], builder: &mut MeshBuilder, rng: &mut Rng) {
             (u0, (a + b) * 0.5),
             (u0 + BAY_W, (a + b) * 0.5),
         ];
-        samples.iter().all(|&(su, sv)| point_in_ring(at(su, sv), &ring))
+        samples
+            .iter()
+            .all(|&(su, sv)| point_in_ring(at(su, sv), &ring))
     };
 
     let mut bays: Vec<Bay> = Vec::new();

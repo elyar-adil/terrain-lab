@@ -199,7 +199,11 @@ impl<'a> RoadIndex<'a> {
             if distance > reach {
                 continue;
             }
-            let side = if ab.cross(point - a) >= 0.0 { 1.0 } else { -1.0 };
+            let side = if ab.cross(point - a) >= 0.0 {
+                1.0
+            } else {
+                -1.0
+            };
             let entry = OnRoad {
                 road: ri as usize,
                 distance,

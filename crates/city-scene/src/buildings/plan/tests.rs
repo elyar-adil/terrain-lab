@@ -19,7 +19,15 @@ fn specs() -> Vec<(Typology, PlanEra, u16, f32)> {
 
 fn plans(t: Typology, era: PlanEra, storeys: u16, lat: f32, n: u32) -> Vec<Plan> {
     (0..n)
-        .map(|seed| Plan::generate(PlanSpec { typology: t, era, latitude: lat, storeys, seed }))
+        .map(|seed| {
+            Plan::generate(PlanSpec {
+                typology: t,
+                era,
+                latitude: lat,
+                storeys,
+                seed,
+            })
+        })
         .collect()
 }
 
@@ -27,8 +35,18 @@ fn plans(t: Typology, era: PlanEra, storeys: u16, lat: f32, n: u32) -> Vec<Plan>
 fn generation_is_deterministic() {
     for (t, e, s, lat) in specs() {
         for seed in 0..20 {
-            let spec = PlanSpec { typology: t, era: e, latitude: lat, storeys: s, seed };
-            assert_eq!(Plan::generate(spec).signature(), Plan::generate(spec).signature(), "{t:?} {seed}");
+            let spec = PlanSpec {
+                typology: t,
+                era: e,
+                latitude: lat,
+                storeys: s,
+                seed,
+            };
+            assert_eq!(
+                Plan::generate(spec).signature(),
+                Plan::generate(spec).signature(),
+                "{t:?} {seed}"
+            );
         }
     }
 }
@@ -53,7 +71,12 @@ fn unit_areas_fall_in_the_era_ranges_and_cover_the_room_mix() {
         for p in plans(t, e, s, lat, 200) {
             for u in &p.units {
                 let (lo, hi) = unit_area_range(e, u.bedrooms);
-                assert!(u.use_area >= lo && u.use_area <= hi, "{t:?} {e:?} {} bed {}", u.bedrooms, u.use_area);
+                assert!(
+                    u.use_area >= lo && u.use_area <= hi,
+                    "{t:?} {e:?} {} bed {}",
+                    u.bedrooms,
+                    u.use_area
+                );
                 for &i in &u.rooms {
                     let r = &p.rooms[i];
                     if r.func.is_balcony() {
@@ -76,8 +99,16 @@ fn unit_areas_fall_in_the_era_ranges_and_cover_the_room_mix() {
         );
         // Section 5 of the design doc: 25-30 % and 38-45 % are medians of real
         // plans; the generator is accepted within a wider band.
-        assert!((0.15..0.40).contains(&(living / total)), "living share {}", living / total);
-        assert!((0.28..0.55).contains(&(bedrooms / total)), "bedroom share {}", bedrooms / total);
+        assert!(
+            (0.15..0.40).contains(&(living / total)),
+            "living share {}",
+            living / total
+        );
+        assert!(
+            (0.28..0.55).contains(&(bedrooms / total)),
+            "bedroom share {}",
+            bedrooms / total
+        );
     }
 }
 
@@ -85,15 +116,30 @@ fn unit_areas_fall_in_the_era_ranges_and_cover_the_room_mix() {
 fn every_habitable_room_has_daylight() {
     for (t, e, s, lat) in specs().into_iter().filter(|x| x.0 != Typology::Office) {
         for p in plans(t, e, s, lat, 100) {
-            for (i, r) in p.rooms.iter().enumerate().filter(|(_, r)| r.func.needs_daylight()) {
+            for (i, r) in p
+                .rooms
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.func.needs_daylight())
+            {
                 let glass: f32 = p
                     .openings
                     .iter()
                     .filter(|o| o.room == i)
-                    .filter(|o| matches!(o.kind, OpeningKind::Window | OpeningKind::BalconyDoor | OpeningKind::Bay))
+                    .filter(|o| {
+                        matches!(
+                            o.kind,
+                            OpeningKind::Window | OpeningKind::BalconyDoor | OpeningKind::Bay
+                        )
+                    })
                     .map(Opening::glazed_area)
                     .sum();
-                assert!(glass >= r.net_area() / 7.0 - 1e-3, "{t:?} seed {} room {i} {:?}", p.spec.seed, r.func);
+                assert!(
+                    glass >= r.net_area() / 7.0 - 1e-3,
+                    "{t:?} seed {} room {i} {:?}",
+                    p.spec.seed,
+                    r.func
+                );
             }
         }
     }
@@ -146,7 +192,11 @@ fn plans_are_unique_across_seeds() {
             redraws as f32 / SEEDS as f32
         );
         let need = if t == Typology::Office { 0.5 } else { 0.99 };
-        assert!(sigs.len() as f32 >= SEEDS as f32 * need, "{t:?} {e:?} only {} distinct", sigs.len());
+        assert!(
+            sigs.len() as f32 >= SEEDS as f32 * need,
+            "{t:?} {e:?} only {} distinct",
+            sigs.len()
+        );
     }
 }
 
@@ -170,7 +220,11 @@ fn typologies_have_the_units_per_core_they_name() {
                 }
             }
             if t == Typology::SlabTwoUnit {
-                assert!((10.5..=13.5).contains(&p.plate.d()), "slab depth {}", p.plate.d());
+                assert!(
+                    (10.5..=13.5).contains(&p.plate.d()),
+                    "slab depth {}",
+                    p.plate.d()
+                );
             }
         }
     }
@@ -180,12 +234,23 @@ fn typologies_have_the_units_per_core_they_name() {
 fn every_facade_combination_can_be_drawn() {
     // The residential facade reads plans for these combinations (cn_grammar).
     let eras = [PlanEra::Estate, PlanEra::Millennium, PlanEra::Contemporary];
-    let kinds = [(Typology::WalkUp, 7u16), (Typology::SlabTwoUnit, 14), (Typology::TowerFourUnit, 26)];
+    let kinds = [
+        (Typology::WalkUp, 7u16),
+        (Typology::SlabTwoUnit, 14),
+        (Typology::TowerFourUnit, 26),
+    ];
     for era in eras {
         for (typology, storeys) in kinds {
             let failed = (0..200u32)
                 .filter(|&seed| {
-                    Plan::try_generate(PlanSpec { typology, era, latitude: 31.0, storeys, seed }).is_err()
+                    Plan::try_generate(PlanSpec {
+                        typology,
+                        era,
+                        latitude: 31.0,
+                        storeys,
+                        seed,
+                    })
+                    .is_err()
                 })
                 .count();
             println!("{typology:?} {era:?}: {failed} of 200 seeds without a valid plan");

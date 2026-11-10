@@ -435,8 +435,14 @@ fn build_scene(
             .iter()
             .filter_map(|b| {
                 let n = b.footprint.len().max(1) as f32;
-                let (x, y) = b.footprint.iter().fold((0.0, 0.0), |a, p| (a.0 + p.x_km, a.1 + p.y_km));
-                let local = city.frame.to_local(urban::Point { x_km: x / n, y_km: y / n });
+                let (x, y) = b
+                    .footprint
+                    .iter()
+                    .fold((0.0, 0.0), |a, p| (a.0 + p.x_km, a.1 + p.y_km));
+                let local = city.frame.to_local(urban::Point {
+                    x_km: x / n,
+                    y_km: y / n,
+                });
                 (!b.footprint.is_empty()).then(|| crate::math::Vec2::new(local[0], local[1]))
             })
             .collect();
@@ -479,12 +485,11 @@ fn build_scene(
         .sum();
     let draw_calls = geometry.meshes.len();
     let (meshes, instances) = encode_geometry(geometry);
-    let mut texture_set =
-        crate::bake::standard_set_in(
-            budget.facade_texture_size,
-            budget.ground_texture_size,
-            &city.climate,
-        );
+    let mut texture_set = crate::bake::standard_set_in(
+        budget.facade_texture_size,
+        budget.ground_texture_size,
+        &city.climate,
+    );
     // The procedural facade's elevation table, which only exists once the
     // buildings have drawn their designs.
     texture_set.push(facade_table.bake());
@@ -622,7 +627,8 @@ fn drop_inside_buildings(
         }
     }
     builder.retain_keyed_instances_since(mark, |key, instance| {
-        if !(key.starts_with("tree/") || key.starts_with("furniture/")) || key.ends_with("railing") {
+        if !(key.starts_with("tree/") || key.starts_with("furniture/")) || key.ends_with("railing")
+        {
             return true;
         }
         let p = Vec2::new(instance.x, instance.z);

@@ -18,8 +18,8 @@
 //! * **Cushion** — a low dome of leaf cards.
 
 use super::TAU;
-use super::cards::{CARD_WINDOW, card_tile_m};
 use super::TreePrototype;
+use super::cards::{CARD_WINDOW, card_tile_m};
 use crate::math::{Rng, Vec3};
 use crate::mesh::MeshBuilder;
 use crate::species::{Canopy, Species};
@@ -166,7 +166,8 @@ impl Plant<'_> {
         let value = self.rng.range(0.82, 1.0);
         let warm = self.rng.range(-0.05, 0.05);
         let tint = [value * (1.0 + warm), value, value * (1.0 - warm)];
-        let point = |t: f32| top + dir * (length * t) + up() * (length * (rise * t - droop * t * t));
+        let point =
+            |t: f32| top + dir * (length * t) + up() * (length * (rise * t - droop * t * t));
         for i in 0..segments {
             let (t0, t1) = (i as f32 / segments as f32, (i + 1) as f32 / segments as f32);
             let (p0, p1) = (point(t0), point(t1));
@@ -224,7 +225,9 @@ impl Plant<'_> {
             let t0 = i as f32 / steps as f32;
             let t1 = (i + 1) as f32 / steps as f32;
             let radius = |t: f32| {
-                tr * (1.0 + 0.8 * (1.0 - t * 5.0).max(0.0) + swell * (std::f32::consts::PI * t).sin())
+                tr * (1.0
+                    + 0.8 * (1.0 - t * 5.0).max(0.0)
+                    + swell * (std::f32::consts::PI * t).sin())
                     * (1.0 - 0.18 * t)
             };
             let colour = self.bark_colour(0.9 + 0.1 * ((i * 3) as f32).sin());
@@ -241,8 +244,15 @@ impl Plant<'_> {
         // Crownshaft / leaf bases: a short fat collar under the fronds.
         let collar_top = top + up() * 0.035;
         let collar = self.bark_colour(0.85);
-        self.builder
-            .tube(self.bark, top, collar_top, tr * 1.1, tr * 1.5, sides, Some(collar));
+        self.builder.tube(
+            self.bark,
+            top,
+            collar_top,
+            tr * 1.1,
+            tr * 1.5,
+            sides,
+            Some(collar),
+        );
         let length = if fan { crown_r * 0.58 } else { crown_r * 0.60 };
         let width = if fan { length * 0.55 } else { length * 0.36 };
         let spin = self.rng.range(0.0, TAU);
@@ -252,7 +262,14 @@ impl Plant<'_> {
             let age = (k % 3) as f32 / 2.0;
             let l = length * self.rng.range(0.85, 1.12);
             let climb = rise * (1.15 - 0.6 * age) + self.rng.range(-0.05, 0.05);
-            self.frond(collar_top, heading, l, width, climb, droop * (0.7 + 0.5 * age));
+            self.frond(
+                collar_top,
+                heading,
+                l,
+                width,
+                climb,
+                droop * (0.7 + 0.5 * age),
+            );
         }
     }
 
@@ -331,7 +348,10 @@ impl Plant<'_> {
             let value = self.rng.range(value_lo, 1.0);
             let warm = self.rng.range(-0.06, 0.10);
             let tint = [value * (1.0 + warm), value, value * (1.0 - warm * 1.6)];
-            let (ou, ov) = (self.rng.range(0.0, tile * 0.2), self.rng.range(0.0, tile * 0.2));
+            let (ou, ov) = (
+                self.rng.range(0.0, tile * 0.2),
+                self.rng.range(0.0, tile * 0.2),
+            );
             let p = |t: f32| base + dir * (lean * t * t) + up() * (h * (t - 0.12 * t * t * t));
             for i in 0..segs {
                 let (t0, t1) = (i as f32 / segs as f32, (i + 1) as f32 / segs as f32);
@@ -386,14 +406,19 @@ impl Plant<'_> {
             for i in 0..=5 {
                 let t = i as f32 / 5.0;
                 let mid = base + (top - base) * t;
-                pts.push(Vec3::new(mid.x, mid.y * (0.25 + 0.75 * t) + lift * t.min(0.2), mid.z));
+                pts.push(Vec3::new(
+                    mid.x,
+                    mid.y * (0.25 + 0.75 * t) + lift * t.min(0.2),
+                    mid.z,
+                ));
             }
             pts[0] = base + up() * lift;
             self.limb(&pts, r0, r0 * 0.35, 5, 1.0);
             let shoot = (pts[5] - pts[3]).normalized_or_up();
             for j in 0..cards_per_stem {
                 let t = 0.35 + 0.65 * (j as f32 / cards_per_stem as f32);
-                let at = pts[0] + (pts[5] - pts[0]) * t
+                let at = pts[0]
+                    + (pts[5] - pts[0]) * t
                     + Vec3::new(
                         self.rng.range(-1.0, 1.0),
                         self.rng.range(-0.4, 0.6),
@@ -411,7 +436,8 @@ impl Plant<'_> {
                 let angle = self.rng.range(0.0, TAU);
                 let from = Vec3::new(angle.cos(), 0.0, angle.sin()) * (spread * 0.1)
                     + up() * (0.30 + self.rng.range(0.0, 0.2));
-                let to = Vec3::new(angle.cos(), 0.0, angle.sin()) * (spread * self.rng.range(0.5, 0.9));
+                let to =
+                    Vec3::new(angle.cos(), 0.0, angle.sin()) * (spread * self.rng.range(0.5, 0.9));
                 let mid = (from + to) * 0.5 + up() * 0.06;
                 self.limb(&[from, mid, to], r0 * 0.5, r0 * 0.3, 4, 0.9);
             }

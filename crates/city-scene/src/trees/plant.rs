@@ -922,7 +922,8 @@ fn plant_with(
                     scale_y: 0.55 + rng.unit() * 0.5,
                     scale_z: 0.55 + rng.unit() * 0.5,
                     // Dry sites: the blades are straw, not green.
-                    tint_r: (green * (0.96 + 0.30 * env.dry - if env.alpine { 0.10 } else { 0.0 })).min(1.0),
+                    tint_r: (green * (0.96 + 0.30 * env.dry - if env.alpine { 0.10 } else { 0.0 }))
+                        .min(1.0),
                     tint_g: green * (1.0 - 0.10 * env.dry),
                     tint_b: green * (0.90 - 0.30 * env.dry + if env.alpine { 0.14 } else { 0.0 }),
                 },

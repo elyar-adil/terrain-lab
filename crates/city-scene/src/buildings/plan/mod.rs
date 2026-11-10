@@ -98,7 +98,10 @@ pub enum Func {
 impl Func {
     /// Rooms the code requires direct daylight for (GB 50096 7.1.3).
     pub fn needs_daylight(self) -> bool {
-        matches!(self, Func::Living | Func::MasterBed | Func::Bed | Func::Study | Func::Kitchen)
+        matches!(
+            self,
+            Func::Living | Func::MasterBed | Func::Bed | Func::Study | Func::Kitchen
+        )
     }
 
     pub fn is_bedroom(self) -> bool {
@@ -169,7 +172,9 @@ pub enum OpeningKind {
     /// A louvred air-conditioner platform (空调位) beside a window.
     AcLedge,
     /// A curtain-wall bay of `module`-wide panes.
-    Curtain { module: f32 },
+    Curtain {
+        module: f32,
+    },
     /// A strip window between spandrels.
     Ribbon,
 }
@@ -198,7 +203,10 @@ impl Opening {
     }
 
     fn counts_for_daylight(&self) -> bool {
-        matches!(self.kind, OpeningKind::Window | OpeningKind::BalconyDoor | OpeningKind::Bay)
+        matches!(
+            self.kind,
+            OpeningKind::Window | OpeningKind::BalconyDoor | OpeningKind::Bay
+        )
     }
 }
 
@@ -334,7 +342,9 @@ impl Plan {
             let mut rng = Rng::new(spec.seed);
             rng.fork(0x51ab_0000 ^ attempt.wrapping_mul(0x9e37));
             let drawn = match spec.typology {
-                Typology::SlabTwoUnit | Typology::WalkUp => residential::slab(spec, climate, &mut rng),
+                Typology::SlabTwoUnit | Typology::WalkUp => {
+                    residential::slab(spec, climate, &mut rng)
+                }
                 Typology::TowerFourUnit => residential::tower(spec, climate, &mut rng),
                 Typology::Office => office::office(spec, climate, &mut rng),
             };
@@ -436,7 +446,10 @@ impl Plan {
             }
             for (j, b) in self.rooms.iter().enumerate().skip(i + 1) {
                 if a.rect.overlap_area(&b.rect) > 0.01 {
-                    bad.push(format!("rooms {i} {:?} and {j} {:?} overlap", a.func, b.func));
+                    bad.push(format!(
+                        "rooms {i} {:?} and {j} {:?} overlap",
+                        a.func, b.func
+                    ));
                 }
             }
         }
@@ -498,7 +511,10 @@ impl Plan {
             rules.max_evac_unit_door
         };
         if self.evac_max > limit {
-            bad.push(format!("evacuation distance {:.1} m over {limit}", self.evac_max));
+            bad.push(format!(
+                "evacuation distance {:.1} m over {limit}",
+                self.evac_max
+            ));
         }
         // Stair.
         for s in &self.core.stairs {
@@ -518,7 +534,10 @@ impl Plan {
         for (n, side) in Side::ALL.iter().enumerate() {
             let w = self.wwr(*side);
             if self.spec.typology != Typology::Office && w > rules.wwr_cap[n] {
-                bad.push(format!("{side:?} window-to-wall ratio {w:.2} over {}", rules.wwr_cap[n]));
+                bad.push(format!(
+                    "{side:?} window-to-wall ratio {w:.2} over {}",
+                    rules.wwr_cap[n]
+                ));
             }
         }
         // Openings stay on their face.
@@ -528,8 +547,13 @@ impl Plan {
                 Side::South | Side::North => self.plate.x0,
                 _ => self.plate.y0,
             };
-            if o.along - o.width * 0.5 < origin - 1e-3 || o.along + o.width * 0.5 > origin + len + 1e-3 {
-                bad.push(format!("opening {:?} runs off the {:?} face", o.kind, o.side));
+            if o.along - o.width * 0.5 < origin - 1e-3
+                || o.along + o.width * 0.5 > origin + len + 1e-3
+            {
+                bad.push(format!(
+                    "opening {:?} runs off the {:?} face",
+                    o.kind, o.side
+                ));
             }
         }
         bad

@@ -700,17 +700,22 @@ pub fn derive(
     let (radius, trims) = trim_all(&widen);
 
     // The main line's decks, for laying ramps flush against them.
-    let decks: Vec<Vec<Vec2>> = hd_roads
+    // Each with its level: a ramp lies against the deck it joins, not against
+    // the other expressway that crosses over or under it at a system interchange.
+    let decks: Vec<(_, Vec<Vec2>)> = hd_roads
         .iter()
         .filter(|road| road.class == ModernRoadClass::Expressway && !road.oneway && road.layer != 0)
         .map(|road| {
-            road.centreline
-                .iter()
-                .map(|point| {
-                    let [x, z] = frame.to_local(*point);
-                    Vec2::new(x, z)
-                })
-                .collect()
+            (
+                road.layer,
+                road.centreline
+                    .iter()
+                    .map(|point| {
+                        let [x, z] = frame.to_local(*point);
+                        Vec2::new(x, z)
+                    })
+                    .collect(),
+            )
         })
         .collect();
 
@@ -784,14 +789,24 @@ pub fn derive(
                             })
                             .collect();
                         let half = kerb_half(&road.cross_section());
-                        (crate::math::distance_to_polyline(start, &plan), plan, half)
+                        (
+                            crate::math::distance_to_polyline(start, &plan),
+                            plan,
+                            half,
+                            road.layer,
+                        )
                     })
                     .min_by(|a, b| a.0.total_cmp(&b.0));
-                if let Some((_, _, half_main)) = beside {
+                if let Some((_, _, half_main, level)) = beside {
+                    let same_level: Vec<Vec<Vec2>> = decks
+                        .iter()
+                        .filter(|(layer, _)| *layer == level)
+                        .map(|(_, deck)| deck.clone())
+                        .collect();
                     if !at_start {
                         line.reverse();
                     }
-                    merge_ramp(&mut line, &decks, half_main, kerb_half(&section));
+                    merge_ramp(&mut line, &same_level, half_main, kerb_half(&section));
                     if !at_start {
                         line.reverse();
                     }
