@@ -3593,7 +3593,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     // sky's blue alone; the dark green ground colour made every shaded wall navy.
     // It also stands in for light bounced off sunlit walls and paving, which no
     // other term provides and which is most of what lights a shaded street.
-    const ambient = new THREE.HemisphereLight(0xe2e4e6, 0x9a9282, 0.55);
+    const ambient = new THREE.HemisphereLight(0xe2e4e6, 0x9a9282, 0.40);
     scene.add(ambient);
     const azimuth = THREE.MathUtils.degToRad(config.sunAzimuth);
     const elevation = THREE.MathUtils.degToRad(config.sunElevation);

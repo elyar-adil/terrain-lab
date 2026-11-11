@@ -73,6 +73,12 @@ const FRAGMENT_COLOUR = /* glsl */ `
   col = mix(col, col * uFurDry, smoothstep(0.35, 0.8, macro) * 0.55 * fMacro);
   // Sun-bleached tips where the blade is tall.
   col = mix(col, col * uFurTip, smoothstep(0.55, 1.0, fine) * 0.5);
+  // Worn and thin ground in broad drifts that survive distance: a lawn that is
+  // one green from kerb to kerb is a carpet. And turf is a dull, dark green.
+  float worn = furNoise(p * 0.19 + 23.0) * 0.65 + furNoise(p * 0.043 + 7.0) * 0.35;
+  col = mix(col, col * vec3(1.12, 0.98, 0.74), smoothstep(0.45, 0.75, worn) * 0.5);
+  col *= 0.82 + 0.30 * furNoise(p * 0.11 + 51.0);
+  col = mix(vec3(dot(col, vec3(0.30, 0.59, 0.11))), col, 0.82) * 0.86;
   diffuseColor.rgb = col;
 }
 `;
@@ -101,8 +107,14 @@ const FRAGMENT_EMISSIVE = /* glsl */ `
   float rim = pow(1.0 - ndv, 3.0);
   // ...and glows when the sun is behind it.
   float back = pow(max(dot(-V, L), 0.0), 3.0) * 0.5 + 0.25;
-  vec3 pile = diffuseColor.rgb * directionalLights[0].color;
-  totalEmissiveRadiance += pile * (rim * 0.55 * back + 0.05);
+  // The pile's glow is sunlight: none of it in shadow, and diffuse (1/pi).
+  // Unshadowed and without that factor a lawn in shade was as bright as one in sun.
+  float sunShade = 1.0;
+  #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+    if ( receiveShadow ) sunShade = getShadow( directionalShadowMap[ 0 ], directionalLightShadows[ 0 ].shadowMapSize, directionalLightShadows[ 0 ].shadowIntensity, directionalLightShadows[ 0 ].shadowBias, directionalLightShadows[ 0 ].shadowRadius, vDirectionalShadowCoord[ 0 ] );
+  #endif
+  vec3 pile = diffuseColor.rgb * directionalLights[0].color * RECIPROCAL_PI * sunShade;
+  totalEmissiveRadiance += pile * (rim * 1.2 * back + 0.10);
 }
 #endif
 `;

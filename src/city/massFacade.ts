@@ -234,7 +234,8 @@ if (vBld > -0.5 && wallness > 0.01) {
     float gv = clamp((ml - 0.9) / max(storeyM - 0.9, 0.5), 0.0, 1.0);
     inside = mix(mWindowInside(cell, gu, gv, 1.0, pix, roomMean), mWindowMean(1.0, roomMean), smoothstep(0.15, 0.6, pix));
     // Pane to pane the coating reads a little differently: a tilt, a sky patch.
-    massTone = mix(0.80 + 0.40 * mHash(vec3(cell, 13.0)), 1.0, smoothstep(0.15, 0.6, pix));
+    // A few per cent: at a fifth, a tower's glass was a patchwork and its grid was lost in it.
+    massTone = mix(0.94 + 0.12 * mHash(vec3(cell, 13.0)), 1.0, smoothstep(0.15, 0.6, pix));
     // Upper floors take more sky.
     massTone *= mix(0.9, 1.12, smoothstep(0.0, 60.0, hM));
   } else {
@@ -250,7 +251,7 @@ if (vBld > -0.5 && wallness > 0.01) {
     float pix = fw / max(t3.z - t3.y, 0.3);
     vec2 cell = vec2(k, fl) + t0.a * 31.0;
     inside = mix(mWindowInside(cell, gu, gv, office ? 1.0 : 0.0, pix, roomMean), mWindowMean(office ? 1.0 : 0.0, roomMean), smoothstep(0.15, 0.6, pix));
-    massTone = mix(0.85 + 0.30 * mHash(vec3(cell, 13.0)), 1.0, smoothstep(0.15, 0.6, pix));
+    massTone = mix(0.92 + 0.16 * mHash(vec3(cell, 13.0)), 1.0, smoothstep(0.15, 0.6, pix));
     // Moulded surround and the shadowed head reveal.
     if (surround) {
       float ring = mBoxP(x, t3.y - 0.14, t3.z + 0.14, fw, unitW) * mBoxP(ml, sill - 0.16, head + 0.18, fh, storeyM);

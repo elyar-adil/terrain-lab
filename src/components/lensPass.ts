@@ -46,6 +46,13 @@ export function createLensPass(): LensPass {
           texture2D(tDiffuse, vUv).g,
           texture2D(tDiffuse, vUv - spread).b
         );
+        // The print: a film's shoulder and toe on top of the tone curve (deeper
+        // shadows, highlights that keep rolling), and a little more colour.
+        colour = clamp(colour, 0.0, 1.0);
+        vec3 curved = colour * colour * (3.0 - 2.0 * colour);
+        colour = mix(colour, curved, 0.26);
+        float grey = dot(colour, vec3(0.2126, 0.7152, 0.0722));
+        colour = mix(vec3(grey), colour, 1.10);
         // Natural vignetting, under half a stop at the corners.
         colour *= mix(1.0, 0.74, smoothstep(0.08, 0.62, r2));
         // Grain, re-drawn each frame; least in the highlights.

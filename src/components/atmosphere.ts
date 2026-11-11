@@ -49,7 +49,7 @@ const float ATM_HR = 8000.0;
 const float ATM_HM = 1300.0;
 // Sun irradiance in scene radiance units, set so a clear horizon sits where a
 // photograph exposed for the land puts it.
-const float ATM_E = 4.5;
+const float ATM_E = 5.8;
 
 // Relative optical air mass (Kasten and Young): 1 overhead, about 38 at the horizon.
 float atmAirmass(float y) {
@@ -78,7 +78,8 @@ vec3 atmSource(vec3 d, float betaM) {
   vec3 sun = pow(atmSunTransmittance(betaM), vec3(0.10 + 0.55 * pow(max(c, 0.0), 1.5)));
   vec3 single = (tR * pR + tM * pM) / (tR + tM);
   // Light scattered more than once: isotropic, the colour of the open sky.
-  vec3 multiple = vec3(0.006, 0.011, 0.019) * (0.6 + 0.4 * ATM_SUN.y);
+  // Generous: it is most of what makes a clear sky luminous overhead instead of navy.
+  vec3 multiple = vec3(0.011, 0.028, 0.052) * (0.6 + 0.4 * ATM_SUN.y);
   return ATM_E * sun * (single + multiple);
 }
 // Optical depth (Rayleigh rgb, Mie a) of the segment from height h0 (m) along a
@@ -273,7 +274,8 @@ const skyFragment = (sun: THREE.Vector3) => /* glsl */ `
     // is not the sun: itself, but also what the ground and every sunlit surface
     // send back up, which is not blue. A single-scattering sky alone lit every
     // shadow a saturated blue.
-    col = mix(col, vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), 0.5 * uAmbientBake);
+    col = mix(col, vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))) * 0.78, 0.5 * uAmbientBake);
+    col *= mix(1.0, 0.70, uAmbientBake);
     gl_FragColor = vec4(col, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>

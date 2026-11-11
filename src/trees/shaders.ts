@@ -552,6 +552,9 @@ if (vTreeKind > 0.5) {
     col = mix(col, col * 0.45 + soil * 0.9, clamp(splash * 0.9 + foot * 0.7, 0.0, 0.95));
     col *= mix(0.40, 1.0, smoothstep(0.0, 1.8, vAbove));
     col = mix(col, woodCol, wornMask);
+    // Bark is among the darkest things in a street (5 - 15 % reflectance) and
+    // grey-brown: at twice that and warmer, trunks read as terracotta.
+    col = mix(vec3(dot(col, vec3(0.30, 0.59, 0.11))), col, 0.72) * 0.56;
     // Lichen and damp in patches, on the shaded faces.
     float lichen = smoothstep(0.66, 0.84, tNoise(q * 4.5 + 9.0));
     col = mix(col, col * vec3(0.78, 1.18, 0.62) + vec3(0.01, 0.02, 0.0), lichen * 0.0);
@@ -562,8 +565,10 @@ if (vTreeKind > 0.5) {
     float cover = treeLeafCoverage(vein, inner);
     // Sunlit plane and broadleaf canopy is yellow-green and lighter than the species
     // reflectance suggests once the shade between leaves is handled by the lights.
-    vec3 col = vTreeColour.rgb * vec3(1.20, 1.14, 0.86);
-    col = mix(col, col * 1.32 + vec3(0.035, 0.045, 0.0), vein * 0.6);
+    // A leaf's own reflectance: mid green, not lime. The brightness of a sunlit
+    // crown comes from the sun and from light through the leaf, not from albedo.
+    vec3 col = vTreeColour.rgb * vec3(1.02, 1.04, 0.76);
+    col = mix(col, col * 1.22 + vec3(0.02, 0.025, 0.0), vein * 0.6);
     col *= 0.88 + 0.12 * inner;
     diffuseColor.rgb = col;
     diffuseColor.a = cover;
@@ -617,7 +622,18 @@ if (vTreeKind > 1.5) {
   // A leaf transmits about what it reflects in the green (5 - 10 %), and a
   // quarter of that in the blue; at twice that, every back-lit leaf glowed lime.
   vec3 through = pow(hue, vec3(0.80, 0.42, 1.6)) * vec3(0.85, 1.0, 0.5);
-  totalEmissiveRadiance += through * (m * 0.9 + 0.006) * directionalLights[0].color * t * seen;
+  // Transmitted light is sunlight like any other: it needs the sun to reach the
+  // leaf (the shadow map says whether it does), and it leaves the leaf diffusely,
+  // so it carries the same 1/pi as reflected light. Without either, every leaf
+  // in a crown glowed lime whether or not it was lit, at twice the brightness
+  // of a leaf in full sun, and a canopy seen from below had no dark in it.
+  // Looked up a clump's depth toward the sun: a leaf lit from behind must not be
+  // shadowed by itself, and light does carry through a few leaves.
+  float sunShade = 1.0;
+  #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+    if ( receiveShadow ) sunShade = getShadow( directionalShadowMap[ 0 ], directionalLightShadows[ 0 ].shadowMapSize, directionalLightShadows[ 0 ].shadowIntensity, directionalLightShadows[ 0 ].shadowBias * 5.0, directionalLightShadows[ 0 ].shadowRadius, vDirectionalShadowCoord[ 0 ] );
+  #endif
+  totalEmissiveRadiance += through * (m * 0.9 + 0.006) * directionalLights[0].color * (t * 2.2 * RECIPROCAL_PI) * seen * sunShade;
 }
 #endif
 `;
@@ -732,7 +748,9 @@ export function patchTreeMaterial(material: THREE.Material, mode: "lit" | "depth
       fragment = fragment.replace("#include <color_fragment>", `#include <color_fragment>\n${FRAGMENT_SURFACE}`);
       fragment = fragment.replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>\n${FRAGMENT_BUMP}`);
       fragment = fragment.replace("#include <roughnessmap_fragment>", `#include <roughnessmap_fragment>\nif (vTreeKind > 0.5 && vTreeKind < 1.5) roughnessFactor = tBarkRough;`);
-      fragment = fragment.replace("#include <aomap_fragment>", `#include <aomap_fragment>\nif (vTreeKind > 0.5 && vTreeKind < 1.5) { reflectedLight.indirectDiffuse *= tBarkAO * vec3(1.12, 0.96, 0.78); reflectedLight.indirectSpecular *= tBarkAO; }`);
+      fragment = fragment.replace("#include <aomap_fragment>", `#include <aomap_fragment>\nif (vTreeKind > 0.5 && vTreeKind < 1.5) { reflectedLight.indirectDiffuse *= tBarkAO * vec3(1.12, 0.96, 0.78); reflectedLight.indirectSpecular *= tBarkAO; }
+// Sky reaches the skin of a crown and little of its inside: the leaf's depth in the crown occludes its ambient light.
+if (vTreeKind > 1.5) { float crownAO = mix(0.40, 1.0, smoothstep(0.05, 0.70, vTreeColour.a)); reflectedLight.indirectDiffuse *= crownAO; reflectedLight.indirectSpecular *= crownAO; }`);
       fragment = fragment.replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>\n${FRAGMENT_TRANSLUCENCY}`);
     } else if (mode === "depth") {
       fragment = fragment.replace(
