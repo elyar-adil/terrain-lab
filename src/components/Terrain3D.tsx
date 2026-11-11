@@ -20,7 +20,8 @@ import { offerFoliageMask, patchOcclusionFoliage, sanitizePass, skipFlaggedInOcc
 import { patchTreeMaterial } from "../trees";
 import { bakeSkyEnvironment } from "../city/sky";
 import { createHorizonLand, extendRim } from "./horizonLand";
-import { createAtmosphereFog, createAtmosphereSky, installAtmosphere } from "./atmosphere";
+import { createAtmosphereFog, createAtmosphereSky, hazeCoefficient, installAtmosphere } from "./atmosphere";
+import { createLensPass } from "./lensPass";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { buildFarTreeSet } from "./farTrees";
 import { createGroundCover } from "./groundCover";
@@ -106,7 +107,9 @@ const cloudFragmentShader = `
 // ---- 路口工坊天空移植:物理感穹顶 + 太阳圆盘 + FBM 漂移积云 ----
 // About 31 degrees up: low enough that every spur and gully throws a readable
 // shadow, high enough that a street is still lit.
-const SUN_DIR = new THREE.Vector3(-0.55, 0.52, -0.66).normalize();
+// The sun the app starts with (azimuth 220, elevation 31; see DEFAULT_CONFIG).
+// The scene's own sun comes from the configuration, inside mountTerrain.
+const REFERENCE_SUN_ELEVATION = 31;
 const waterVertexShader = `
   precision highp float;
   varying vec2 vUv;
@@ -295,6 +298,27 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     const scene = new THREE.Scene();
     // Sky and distance share one atmosphere (see atmosphere.ts): the fog chunks
     // become aerial perspective, and this Fog only carries its two parameters.
+    // One sun for sky, air, shadows, water and light: the configured one. A low
+    // sun is a different place: long shadows, warm light, and the haze toward it
+    // lit gold (the atmosphere reddens it by the air it has crossed).
+    const sunAzimuthRad = THREE.MathUtils.degToRad(config.sunAzimuth);
+    const sunElevationRad = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(config.sunElevation, 3, 85));
+    const SUN_DIR = new THREE.Vector3(
+      Math.sin(sunAzimuthRad) * Math.cos(sunElevationRad),
+      Math.sin(sunElevationRad),
+      Math.cos(sunAzimuthRad) * Math.cos(sunElevationRad),
+    ).normalize();
+    // Direct sunlight relative to the reference sun the light was balanced at.
+    const sunThrough = (elevationRad: number) => {
+      const y = Math.sin(elevationRad);
+      const airmass = 1 / (y + 0.50572 * Math.pow(96.07995 - THREE.MathUtils.radToDeg(Math.acos(y)), -1.6364));
+      const betaM = hazeCoefficient(config.haze);
+      return [5.8e-6, 13.5e-6, 33.1e-6].map((betaR) => Math.exp(-(betaR * 8000 + betaM * 1300) * airmass));
+    };
+    const sunNow = sunThrough(sunElevationRad);
+    const sunReference = sunThrough(THREE.MathUtils.degToRad(REFERENCE_SUN_ELEVATION));
+    const sunRelative = sunNow.map((value, index) => value / sunReference[index]);
+    const sunStrength = Math.max(...sunRelative);
     installAtmosphere(SUN_DIR);
     scene.fog = createAtmosphereFog(result.worldSizeKm * 1000 / 3.2, config.haze);
 
@@ -376,6 +400,7 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     // 的阴影不是模型自带的,少了它所有物体都像悬浮。
     let composer: THREE.WebGLRenderer | { render: () => void } | null = null;
     let gtaoPassRef: { enabled: boolean } | null = null;
+    let lens: ReturnType<typeof createLensPass> | null = null;
     // Objects the occlusion pass does not see. A forest crown is a mass of
     // interpenetrating leaf clumps, which GTAO reads as deep occlusion and
     // turned every tree black; left out of its G-buffer, a crown takes the
@@ -421,12 +446,16 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
           });
         };
       }
-      const bloomPass = new UnrealBloomPass(new THREE.Vector2(960, 540), 0.14, 0.5, 1.05);
+      const bloomPass = new UnrealBloomPass(new THREE.Vector2(960, 540), 0.20, 0.6, 1.05);
       post.addPass(renderPass);
       post.addPass(gtaoPass);
       post.addPass(sanitizePass());
       post.addPass(bloomPass);
       post.addPass(new OutputPass());
+      if (new URLSearchParams(window.location.search).get("lens") !== "0") {
+        lens = createLensPass();
+        post.addPass(lens.pass);
+      }
       post.setSize(host.clientWidth || 2, host.clientHeight || 2);
       composer = post as unknown as THREE.WebGLRenderer;
       gtaoPassRef = gtaoPass;
@@ -3569,6 +3598,9 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     const azimuth = THREE.MathUtils.degToRad(config.sunAzimuth);
     const elevation = THREE.MathUtils.degToRad(config.sunElevation);
     const sun = new THREE.DirectionalLight(0xfff1d6, 1.95);
+    sun.color.r *= sunRelative[0] / sunStrength;
+    sun.color.g *= sunRelative[1] / sunStrength;
+    sun.color.b *= sunRelative[2] / sunStrength;
     sun.position.set(Math.sin(azimuth) * Math.cos(elevation) * 5, Math.sin(elevation) * 5, Math.cos(azimuth) * Math.cos(elevation) * 5);
     sun.castShadow = true;
     // `?shadowmap=N` overrides the size, for software-GL runs where 4096 is minutes a frame.
@@ -3821,7 +3853,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
         Math.sin(liveElevation) * 5,
         Math.cos(liveAzimuth) * Math.cos(liveElevation) * 5,
       );
-      sun.intensity = 3.4 * (1.0 - liveCoverage * 0.28);
+      sun.intensity = 3.4 * sunStrength * (1.0 - liveCoverage * 0.28);
       // The sun that lights the scene and fills the sky, not the configured one.
       waterUniforms.uSunDirection.value.copy(SUN_DIR);
       // City-focus jumps: reposition the orbit target and set the viewing
@@ -4058,6 +4090,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       // 路口工坊移植:天空穹顶跟随相机并推进云漂移;雾距随视野缩放,远景
       // 融进天穹地平线色;太阳阴影相机贴着轨道目标,低频刷新投影。
       skyUniforms.uTime.value = worldTime;
+      lens?.update(worldTime);
       if (cityLayer?.update(worldTime, camera.position.distanceTo(controls.target) * sceneToMetres, camera)) {
         // City shadow casters changed tier: redraw the shadow map now rather
         // than waiting for the periodic refresh.

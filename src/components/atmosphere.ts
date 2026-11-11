@@ -73,7 +73,9 @@ vec3 atmSource(vec3 d, float betaM) {
   vec3 tM = vec3(betaM * ATM_HM);
   // The sun reaches the scattering air already reddened; multiple scattering puts
   // most of the blue back, so only part of that tint is applied.
-  vec3 sun = pow(atmSunTransmittance(betaM), vec3(0.3));
+  // Strongly toward the sun (the glow of a low sun is the colour of the sun),
+  // hardly at all across the sky from it.
+  vec3 sun = pow(atmSunTransmittance(betaM), vec3(0.10 + 0.55 * pow(max(c, 0.0), 1.5)));
   vec3 single = (tR * pR + tM * pM) / (tR + tM);
   // Light scattered more than once: isotropic, the colour of the open sky.
   vec3 multiple = vec3(0.006, 0.011, 0.019) * (0.6 + 0.4 * ATM_SUN.y);
