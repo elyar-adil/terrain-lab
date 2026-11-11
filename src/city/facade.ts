@@ -407,7 +407,8 @@ vec2 fTilt = vec2(0.0);
     }
     // Splash zone: the bottom 0.6 m of the lowest storey.
     float splash = (s < 0.5 ? 1.0 - smoothstep(0.1, 0.6, ml) : 0.0);
-    float dirt = (0.10 + 0.20 * weather) * rain + (0.15 + 0.20 * weather) * tear + 0.18 * splash;
+    // Read against photographs of twenty-year-old render: half as strong again as it was.
+    float dirt = (0.16 + 0.28 * weather) * rain + (0.24 + 0.30 * weather) * tear + 0.20 * splash;
     // Grime is brown-grey, so it takes more blue than red off the wall.
     colour *= vec3(1.0) - vec3(0.85, 0.92, 1.0) * clamp(dirt, 0.0, 0.6) * wall;
     // Repainted patches: a maintenance crew rolls a new coat on a rectangle of

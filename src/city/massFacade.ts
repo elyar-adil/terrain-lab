@@ -258,6 +258,33 @@ if (vBld > -0.5 && wallness > 0.01) {
       colour = mix(colour, trimC, clamp(ring - glassCov, 0.0, 1.0) * (1.0 - 0.4 * fadeAny));
     }
     colour *= 1.0 - 0.30 * mBoxP(x, t3.y, t3.z, fw, unitW) * mBoxP(ml, head, head + 0.1, fh, storeyM);
+    // What makes one flat not the next: the tear of dirt under each sill, as
+    // strong as that household's window is old, and on a block of flats the
+    // air-conditioner hung beside the window by whoever lives there, or not,
+    // with its own rust run. A wall of identical clean openings is a drawing.
+    float life = mHash(vec3(cell, 71.0));
+    float drop = sill - ml;
+    float tearRun = smoothstep(0.0, 0.06, drop) * (1.0 - smoothstep(0.0, max(sill, 0.3), drop));
+    float tear = mBoxP(x, t3.y - 0.04, t3.z + 0.04, fw, unitW) * tearRun * (0.35 + 0.65 * life);
+    colour *= 1.0 - vec3(0.85, 0.92, 1.0) * (0.14 + 0.26 * weather) * tear * (1.0 - 0.7 * fadeAny);
+    if (!office) {
+      float acX0 = t3.z + 0.14;
+      float room = step(acX0 + 0.86, unitW);
+      float has = step(0.42, mHash(vec3(cell, 53.0))) * room;
+      float acY0 = sill - 0.62 + 0.10 * life;
+      float box = mBoxP(x, acX0, acX0 + 0.78, fw, unitW) * mBoxP(ml, acY0, acY0 + 0.54, fh, storeyM) * has;
+      float under = mBoxP(x, acX0 - 0.03, acX0 + 0.81, fw, unitW) * mBoxP(ml, acY0 - 0.16, acY0, fh, storeyM) * has;
+      float rust = mBoxP(x, acX0 + 0.10, acX0 + 0.34, fw, unitW) * has
+        * smoothstep(0.0, 0.05, acY0 - 0.16 - ml) * (1.0 - smoothstep(0.0, 1.4, acY0 - 0.16 - ml));
+      float seen = 1.0 - smoothstep(0.25, 0.8, fadeAny);
+      vec3 casing = vec3(0.62, 0.62, 0.59) * (0.82 + 0.3 * life);
+      // The fan grille: a dark disc on the casing.
+      float fan = 1.0 - smoothstep(0.17, 0.21, length(vec2(x - acX0 - 0.30, ml - acY0 - 0.27)));
+      casing = mix(casing, casing * 0.45, fan * (1.0 - smoothstep(0.1, 0.4, fw / 0.4)));
+      colour = mix(colour, casing, box * seen * (1.0 - glassCov));
+      colour *= 1.0 - 0.45 * under * seen * (1.0 - box);
+      colour *= 1.0 - vec3(0.55, 0.75, 0.95) * 0.30 * rust * seen * (0.5 + weather);
+    }
     // A balcony or loggia door in the flat.
     if (t4.w > 0.1) {
       float bx0 = t4.z + 0.3;
@@ -302,7 +329,7 @@ if (vBld > -0.5 && wallness > 0.01) {
   float runR = fract(sin(column * 4.13 + floor(hM / 9.0) * 7.71 + t3.x * 3.3) * 43758.5453);
   float streak = smoothstep(0.55, 0.95, columnR) * (0.55 + 0.45 * runR);
   streak = mix(streak, 0.13, smoothstep(0.1, 0.6, fw));
-  colour *= 1.0 - vec3(0.85, 0.92, 1.0) * (0.10 + 0.20 * weather) * streak * (1.0 - glassCov);
+  colour *= 1.0 - vec3(0.85, 0.92, 1.0) * (0.16 + 0.30 * weather) * streak * (1.0 - glassCov);
   // A foot that is darker where the street's dirt and the neighbour's shade meet it.
   float foot = 1.0 - smoothstep(0.0, 6.0, hM);
   if (lookKind != 4) colour *= 1.0 - 0.22 * foot * (1.0 - glassCov * 0.5);
