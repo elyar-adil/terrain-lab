@@ -90,7 +90,10 @@ vec3 elevEmit = vec3(0.0);
   float n11 = elevHash(seed + (gi.x + 1.0) * 3.1 + (gi.y + 1.0) * 7.7);
   float n = mix(mix(n00, n10, gf.x), mix(n01, n11, gf.x), gf.y);
   // Goods seen through glass are mostly neutral: grey and warm, not a rainbow.
-  vec3 goods = vec3(0.42 + 0.28 * n, 0.41 + 0.27 * n, 0.38 + 0.26 * n);
+  // A second, slower noise gives each run of shelves its own cast.
+  float shelfHue = elevHash(seed + floor(cellW * 0.25) * 5.3 + gi.y * 1.9);
+  vec3 goods = vec3(0.20 + 0.50 * n, 0.19 + 0.47 * n, 0.17 + 0.42 * n)
+    * mix(vec3(1.0), 0.75 + 0.5 * vec3(shelfHue, fract(shelfHue * 7.3), fract(shelfHue * 13.7)), 0.45);
   float edgeM = min(fract(cellW), 1.0 - fract(cellW));
   goods *= 1.0 - 0.35 * (1.0 - smoothstep(0.067 - fu, 0.067 + fu, edgeM));
   vec3 backWall = mix(vec3(0.55, 0.52, 0.46), vec3(0.62, 0.62, 0.60), h3);
@@ -100,8 +103,14 @@ vec3 elevEmit = vec3(0.0);
   vec3 inside = mix(backWall * 0.7, goods, shelf);
   inside = mix(inside, vec3(0.85), step(0.92, v) * step(fract(u * widthM / 1.5 + h4), 0.32));
   float lit = step(0.12, h1);
-  inside = mix(vec3(0.52, 0.50, 0.46), inside, detail);
-  elevEmit = inside * 0.42 * mix(0.88, lit, detail);
+  // Shelving is 45 cm cells: it stays readable until a pixel spans about that,
+  // far beyond where a curtain fold has gone. Past it the window settles to
+  // the dim average of a shop seen through glass, not to a pale board.
+  float shopDetail = 1.0 - smoothstep(0.08, 0.30, mpp);
+  inside = mix(vec3(0.27, 0.26, 0.24), inside, shopDetail);
+  // Its own light, well under the daylight outside: at 0.42 every shopfront
+  // was the brightest surface in the street and read as a blank white board.
+  elevEmit = inside * 0.20 * mix(0.88, lit, shopDetail);
   inside = inside * 0.10 + vec3(0.008);
 #elif defined( ELEV_OFFICE )
   // An office floor: a dark plate under a ceiling of lit panels, half the

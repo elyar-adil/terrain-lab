@@ -346,7 +346,9 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
     // own lower half every shaded wall was lit from below by blue sky.
     try {
       if (!halfFloatTargets && lightRender) throw new Error("no half-float render targets");
+      skyUniforms.uAmbientBake.value = 1;
       scene.environment = bakeSkyEnvironment(renderer, skyMaterial);
+      skyUniforms.uAmbientBake.value = 0;
     } catch (error) {
       // Without the baked sky the lights alone shade the scene.
       console.warn("[terrain3d] sky environment skipped", error);
@@ -3560,14 +3562,18 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
     // In a city the shaded side of a wall sees as much of the street and of the
     // facades opposite as of the sky, so its fill is a warm grey bounce, not the
     // sky's blue alone; the dark green ground colour made every shaded wall navy.
-    const ambient = new THREE.HemisphereLight(0xdde2e6, 0x8f8878, 0.32);
+    // It also stands in for light bounced off sunlit walls and paving, which no
+    // other term provides and which is most of what lights a shaded street.
+    const ambient = new THREE.HemisphereLight(0xe2e4e6, 0x9a9282, 0.55);
     scene.add(ambient);
     const azimuth = THREE.MathUtils.degToRad(config.sunAzimuth);
     const elevation = THREE.MathUtils.degToRad(config.sunElevation);
     const sun = new THREE.DirectionalLight(0xfff1d6, 1.95);
     sun.position.set(Math.sin(azimuth) * Math.cos(elevation) * 5, Math.sin(elevation) * 5, Math.cos(azimuth) * Math.cos(elevation) * 5);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(isConstrainedDevice ? 1024 : 2048, isConstrainedDevice ? 1024 : 2048);
+    // `?shadowmap=N` overrides the size, for software-GL runs where 4096 is minutes a frame.
+    const shadowMapSize = Number(new URLSearchParams(window.location.search).get("shadowmap")) || (isConstrainedDevice ? 1024 : 4096);
+    sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
     sun.shadow.camera.near = 0.001;
     sun.shadow.camera.far = 12;
     sun.shadow.bias = -0.0003;
@@ -3783,6 +3789,10 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
 
     const clock = new THREE.Clock();
     const cameraDirection = new THREE.Vector3();
+    const shadowCentre = new THREE.Vector3();
+    const shadowForward = new THREE.Vector3();
+    const shadowRight = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), SUN_DIR).normalize();
+    const shadowUp = new THREE.Vector3().crossVectors(SUN_DIR, shadowRight).normalize();
     let worldTime = 0;
     let frame = 0;
     let handledFocusNonce = 0;
@@ -4081,20 +4091,53 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       skyDome.scale.setScalar(Math.max(1e-6, camera.far * 0.9 / 9000));
       skyUniforms.uCameraHeight.value = Math.max(2, camera.position.y * sceneToMetres);
       skyUniforms.uCoverage.value = liveCoverage;
-      const shadowSpan = THREE.MathUtils.clamp(viewSpanScene * 0.85, 40 * metresToScene, 1.5);
-      sun.target.position.copy(controls.target);
-      sun.position.copy(controls.target).addScaledVector(SUN_DIR, shadowSpan * 2.5 + 0.05);
+      let shadowSpan = THREE.MathUtils.clamp(viewSpanScene * 0.85, 40 * metresToScene, 1.5);
+      shadowCentre.copy(controls.target);
+      if (roam?.active) {
+        // On foot or flying low, the point the view ray meets the ground is far
+        // down the street, and a shadow map fitted round it spends its texels on
+        // a district: the tree overhead and the kerb underfoot got a smear, or
+        // nothing. Fit it to the ground in front of the eye instead, wider with
+        // height, so a walker gets centimetre texels where they are looking.
+        const eyeAboveGround = Math.max(0, camera.position.y - terrainHeightAt(camera.position.x, camera.position.z));
+        const nearSpan = Math.max(90 * metresToScene, eyeAboveGround * 3);
+        if (nearSpan < shadowSpan) {
+          shadowSpan = nearSpan;
+          shadowForward.set(cameraDirection.x, 0, cameraDirection.z);
+          if (shadowForward.lengthSq() > 1e-8) shadowForward.normalize();
+          shadowCentre.copy(camera.position).addScaledVector(shadowForward, shadowSpan * 0.62);
+          shadowCentre.y = terrainHeightAt(shadowCentre.x, shadowCentre.z);
+        }
+      }
+      {
+        // Move the map in whole texels, or every edge crawls as the eye moves.
+        const texel = (shadowSpan * 2) / sun.shadow.mapSize.x;
+        const along = shadowCentre.dot(SUN_DIR);
+        const right = Math.round(shadowCentre.dot(shadowRight) / texel) * texel;
+        const up = Math.round(shadowCentre.dot(shadowUp) / texel) * texel;
+        shadowCentre.set(0, 0, 0).addScaledVector(SUN_DIR, along).addScaledVector(shadowRight, right).addScaledVector(shadowUp, up);
+        // Enough offset along the normal to clear two texels of acne, and no
+        // more: half a metre lifted every shadow off the thing that cast it.
+        sun.shadow.normalBias = Math.max(0.03 * metresToScene, texel * 2.2);
+      }
+      sun.target.position.copy(shadowCentre);
+      sun.position.copy(shadowCentre).addScaledVector(SUN_DIR, shadowSpan * 2.5 + 0.05);
       sun.shadow.camera.left = -shadowSpan;
       sun.shadow.camera.right = shadowSpan;
       sun.shadow.camera.top = shadowSpan;
       sun.shadow.camera.bottom = -shadowSpan;
       sun.shadow.camera.near = 0.0001;
       sun.shadow.camera.far = shadowSpan * 6 + 0.2;
+      // The depth bias is a fraction of the depth range, which is kilometres (the
+      // light stands far back to catch every tower): a fixed fraction was over a
+      // metre, and nothing touched its own shadow. Two texels of depth instead.
+      sun.shadow.bias = -((shadowSpan * 2) / sun.shadow.mapSize.x) * 2 / sun.shadow.camera.far;
       sun.shadow.camera.updateProjectionMatrix();
       terrainShadowUniforms.uSunViewDir.value.copy(SUN_DIR).transformDirection(camera.matrixWorldInverse);
       requestNearbyCity();
       frameCounter += 1;
-      if (frameCounter % 45 === 1) renderer.shadowMap.needsUpdate = true;
+      // Redrawn at intervals, not per frame; oftener while the eye itself moves.
+      if (frameCounter % (roam?.active ? 10 : 45) === 1) renderer.shadowMap.needsUpdate = true;
       framePerf.begin();
       if (composer && cameraMode === "3d") {
         (composer as unknown as { render: () => void }).render();

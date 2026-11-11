@@ -47,8 +47,8 @@ const result = await Promise.race([
 await page.waitForTimeout(Number(arg("wait", 4)) * 1000);
 // The canvas alone: the panels around it are not what is being judged.
 const canvas = page.locator("canvas").first();
-if (process.argv.includes("--page") || !(await canvas.count())) await page.screenshot({ path: `${out}/${name}.png`, timeout: 10 * 60_000 });
-else await canvas.screenshot({ path: `${out}/${name}.png`, timeout: 10 * 60_000 });
+if (process.argv.includes("--page") || !(await canvas.count())) await page.screenshot({ path: `${out}/${name}.png`, timeout: 30 * 60_000 });
+else await canvas.screenshot({ path: `${out}/${name}.png`, timeout: 30 * 60_000 });
 writeFileSync(`${out}/${name}.json`, JSON.stringify({ result, log }, null, 2));
 console.log(`${name}: ${result.event} after ${((Date.now() - started) / 1000).toFixed(0)} s`);
 await browser.close();

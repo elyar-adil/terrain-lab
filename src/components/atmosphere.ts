@@ -205,6 +205,7 @@ const skyFragment = (sun: THREE.Vector3) => /* glsl */ `
   uniform float uBetaM;
   uniform float uCameraHeight;
   uniform float uCoverage;
+  uniform float uAmbientBake;
   ${atmosphereGlsl(sun)}
 
   float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -266,6 +267,11 @@ const skyFragment = (sun: THREE.Vector3) => /* glsl */ `
       }
     }
 
+    // Baked as the scene's ambient light, the sky stands for all the light that
+    // is not the sun: itself, but also what the ground and every sunlit surface
+    // send back up, which is not blue. A single-scattering sky alone lit every
+    // shadow a saturated blue.
+    col = mix(col, vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), 0.5 * uAmbientBake);
     gl_FragColor = vec4(col, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
@@ -279,6 +285,8 @@ export interface AtmosphereSky {
     uBetaM: { value: number };
     uCameraHeight: { value: number };
     uCoverage: { value: number };
+    /** 1 while the dome is being baked into the environment map, else 0. */
+    uAmbientBake: { value: number };
   };
 }
 
@@ -288,6 +296,7 @@ export function createAtmosphereSky(sun: THREE.Vector3, haze: number, coverage: 
     uBetaM: { value: hazeCoefficient(haze) },
     uCameraHeight: { value: 2 },
     uCoverage: { value: coverage },
+    uAmbientBake: { value: 0 },
   };
   const material = new THREE.ShaderMaterial({
     vertexShader: SKY_VERTEX,
