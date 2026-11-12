@@ -994,9 +994,9 @@ mod tests {
             // the eleven plants (palms, bamboo, reed, bushes, cushion) make 139.
             // These are groups emitted per prototype whether or not this city
             // plants it; a list with no instances has count 0 and draws nothing.
-            // Six car designs of twelve parts each (nine of the full model,
-            // three of the far one), where one design had three, make 208.
-            instanced < 215,
+            // Six car designs of thirteen parts each (ten of the full model,
+            // three of the far one), where one design had three, make 214.
+            instanced < 220,
             "the city needs {instanced} instanced draw calls"
         );
     }

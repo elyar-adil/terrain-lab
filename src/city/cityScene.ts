@@ -1009,6 +1009,8 @@ roughnessFactor = clamp(roughnessFactor + smoothstep(60.0, 700.0, waterDist) * 0
   register("car/lamp.rear", new THREE.MeshPhysicalMaterial({ color: 0x8a0d0d, roughness: 0.15, clearcoat: 1.0, emissive: 0x200000 }));
   standard("car/interior", { roughness: 0.95, side: THREE.DoubleSide }, 0xffffff);
   standard("car/plate", { roughness: 0.5 }, 0x1b3f9c);
+  // The wheel wells: seen from the road through the arch, so drawn from inside.
+  standard("car/well", { roughness: 0.95, side: THREE.DoubleSide }, 0x0c0c0d);
   // The far model (beyond `CAR_NEAR_M`): plain paint, glass as a dark solid.
   standard("car/far.body", { roughness: 0.3, metalness: 0.35, envMapIntensity: 1.0 }, 0xffffff);
   standard("car/far.glass", { roughness: 0.12, metalness: 0.5, envMapIntensity: 1.1 }, 0x1c2429);

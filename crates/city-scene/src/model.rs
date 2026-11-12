@@ -297,3 +297,39 @@ pub(crate) fn torus_arc(
     }
     skin(builder, key, &rings);
 }
+
+/// `soft_box` with its three half-axes given outright, for a part that sits at
+/// an angle: a lamp round a corner, a mirror on its stalk.
+pub(crate) fn soft_block(
+    builder: &mut MeshBuilder,
+    key: &str,
+    centre: Vec3,
+    along: Vec3,
+    up: Vec3,
+    across: Vec3,
+    squareness: f32,
+) {
+    let levels = 9;
+    let around = 20;
+    let mut rings: Vec<Vec<Vec3>> = Vec::with_capacity(levels + 3);
+    rings.push(vec![centre - up; around]);
+    for level in 0..=levels {
+        let t = level as f32 / levels as f32 * 2.0 - 1.0;
+        let inset = (1.0 - t.abs().powf(squareness))
+            .max(0.0)
+            .powf(1.0 / squareness)
+            .max(0.18);
+        let ring = (0..around)
+            .map(|k| {
+                let angle = (k as f32 + 0.5) / around as f32 * std::f32::consts::TAU;
+                let (c, s) = (angle.cos(), angle.sin());
+                let a = c.signum() * c.abs().powf(2.0 / squareness) * inset;
+                let b = s.signum() * s.abs().powf(2.0 / squareness) * inset;
+                centre + along * a + across * b + up * t
+            })
+            .collect();
+        rings.push(ring);
+    }
+    rings.push(vec![centre + up; around]);
+    skin(builder, key, &rings);
+}
