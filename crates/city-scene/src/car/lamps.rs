@@ -77,6 +77,8 @@ pub(super) struct Grille {
     pub r: f32,
     pub kind: GrilleKind,
     pub bright: bool,
+    /// Parted down the middle into two openings.
+    pub twin: bool,
 }
 
 /// A lamp's outline placed on a particular car.
@@ -150,11 +152,17 @@ fn tail_shape(form: &Form) -> Shape {
 fn opening(grille: &Grille, half: f32, base: f32, p: (f32, f32)) -> f32 {
     let (low, high) = (base + grille.y.0, base + grille.y.1);
     let (top, bottom) = (grille.half.0 * half, grille.half.1 * half);
-    sd_convex(
+    let whole = sd_convex(
         &[(-bottom, low), (bottom, low), (top, high), (-top, high)],
         p,
         grille.r,
-    )
+    );
+    if grille.twin {
+        // A bar of bodywork down the middle leaves two openings.
+        super::parts::round_and(&[whole, 0.032 - p.0.abs()], grille.r.min(0.03))
+    } else {
+        whole
+    }
 }
 
 /// The grille as it fits this car: never lower than the bar over the intake.
@@ -747,7 +755,13 @@ pub(super) fn build(
             (None, true) => form.face_top(true) - 0.02,
             (_, false) => form.face_top(false) - 0.035,
         };
-        if let Some((at, normal)) = on_centre(soup, form, front, y, front && grille.is_some()) {
+        if let Some((at, normal)) = on_centre(
+            soup,
+            form,
+            front,
+            y,
+            front && grille.is_some_and(|g| !g.twin),
+        ) {
             lathe(
                 builder,
                 &key("chrome"),

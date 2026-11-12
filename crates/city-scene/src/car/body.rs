@@ -113,6 +113,17 @@ pub(super) fn build(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -
     };
     soup.cut(&side_glass, &body, label::GLASS);
     soup.cut(&|p| side_glass(p) - 0.013, &body, label::SURROUND);
+    // A roof in black over the body's colour: everything above the glass's head.
+    if spec.black_roof {
+        soup.cut(
+            &|p| {
+                let (_, (_, head)) = form.glass(p.x);
+                (head - 0.012 - p.y).max(0.3 - form.cabin(p.x))
+            },
+            &body,
+            label::BLACK,
+        );
+    }
     // Pillars: black over the glass, as they are now.
     let glass = |l: u8| l == label::GLASS;
     soup.cut(

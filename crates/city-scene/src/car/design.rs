@@ -28,6 +28,74 @@ pub(super) enum Kind {
     Coupe,
     /// The city runabout, barely three metres long.
     Micro,
+    /// Low, wide and two-seated, its roof falling in one line to the tail.
+    Sports,
+}
+
+/// A maker: what every car of one make has in common whatever its kind. A
+/// make is known by its face before its badge is read: the shape of its
+/// grille, the look of its lamps, the signature of its tail.
+#[derive(Clone, Copy)]
+pub(super) struct Marque {
+    grille: Mouth,
+    grille_kind: GrilleKind,
+    bright: bool,
+    head: HeadStyle,
+    tail: TailStyle,
+    /// Round lamps, where its cars are low enough to carry them.
+    round_lamps: bool,
+    /// A roof and pillars in black over the body's colour.
+    black_roof: bool,
+    /// A light bar across the nose.
+    head_bar: bool,
+}
+
+/// The shape of a make's grille.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mouth {
+    /// A band between the lamps.
+    Band,
+    /// One frame from the bonnet's edge down to the bumper.
+    Frame,
+    /// Two openings side by side.
+    Twin,
+    /// None: a smooth nose.
+    Closed,
+}
+
+impl Marque {
+    pub fn new(seed: u64) -> Self {
+        let mut rng = Rng::new(seed ^ 0x6d61_7271_7565);
+        let (slats, bars) = (rng.count(2, 5), rng.count(7, 13));
+        Self {
+            grille: rng.pick(&[
+                (Mouth::Frame, 0.36),
+                (Mouth::Band, 0.24),
+                (Mouth::Twin, 0.20),
+                (Mouth::Closed, 0.20),
+            ]),
+            grille_kind: rng.pick(&[
+                (GrilleKind::Slats(slats), 0.40),
+                (GrilleKind::Mesh, 0.32),
+                (GrilleKind::Bars(bars), 0.28),
+            ]),
+            bright: rng.chance(0.5),
+            head: rng.pick(&[
+                (HeadStyle::Projector, 0.36),
+                (HeadStyle::Matrix, 0.34),
+                (HeadStyle::Slim, 0.22),
+                (HeadStyle::Halogen, 0.08),
+            ]),
+            tail: rng.pick(&[
+                (TailStyle::Cluster, 0.30),
+                (TailStyle::Guide, 0.38),
+                (TailStyle::Bar, 0.32),
+            ]),
+            round_lamps: rng.chance(0.2),
+            black_roof: rng.chance(0.3),
+            head_bar: rng.chance(0.25),
+        }
+    }
 }
 
 /// A small deterministic stream of numbers (splitmix64).
@@ -83,26 +151,27 @@ fn kind_of(rng: &mut Rng) -> Kind {
         (Kind::Van, 0.06),
         (Kind::Wagon, 0.04),
         (Kind::Coupe, 0.03),
-        (Kind::Micro, 0.07),
+        (Kind::Micro, 0.06),
+        (Kind::Sports, 0.03),
     ])
 }
 
 /// The design a seed stands for.
-pub(super) fn design(seed: u64) -> Spec {
+pub(super) fn design(seed: u64, marque: &Marque) -> Spec {
     let mut rng = Rng::new(seed);
     let kind = kind_of(&mut rng);
-    design_of(kind, &mut rng)
+    design_of(kind, &mut rng, marque)
 }
 
 /// A design of a given kind.
-pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
+pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
     use Kind::*;
     // An estate, a coupe and a runabout are each drawn from the kind nearest
     // to them and then changed where they differ.
     let shape = kind;
     let kind = match shape {
         Wagon => Saloon,
-        Coupe => Fastback,
+        Coupe | Sports => Fastback,
         Micro => Hatchback,
         other => other,
     };
@@ -114,7 +183,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Suv => 0.30,
         Mpv => 0.25,
         Van => 0.10,
-        Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
+        Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
     });
     // --- proportions -------------------------------------------------------
     let length = match kind {
@@ -125,11 +194,12 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Suv => rng.range(4.55, 4.98),
         Mpv => rng.range(4.60, 5.05),
         Van => rng.range(3.85, 4.40),
-        Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
+        Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
     };
     let length = match shape {
         Micro => rng.range(2.95, 3.55),
         Coupe => length - rng.range(0.15, 0.40),
+        Sports => rng.range(4.30, 4.62),
         _ => length,
     };
     let width = match kind {
@@ -140,7 +210,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Suv => rng.range(1.84, 1.96),
         Mpv => rng.range(1.80, 1.90),
         Van => rng.range(1.56, 1.68),
-        Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
+        Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
     };
     let width = if shape == Micro {
         rng.range(1.50, 1.62)
@@ -155,11 +225,12 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Suv => rng.range(1.66, 1.78),
         Mpv => rng.range(1.70, 1.82),
         Van => rng.range(1.80, 1.92),
-        Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
+        Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
     };
     let roof = match shape {
         Micro => rng.range(1.54, 1.66),
         Coupe => roof - rng.range(0.05, 0.10),
+        Sports => rng.range(1.25, 1.33),
         _ => roof,
     };
     let wheel_r = match kind {
@@ -170,7 +241,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Suv => rng.range(0.360, 0.395),
         Mpv => rng.range(0.330, 0.355),
         Van => rng.range(0.280, 0.300),
-        Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
+        Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
     };
     let wheel_r = if shape == Micro {
         rng.range(0.262, 0.290)
@@ -202,7 +273,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Crossover | Suv => rng.range(0.86, 1.02),
         Mpv => rng.range(0.92, 1.04),
         Van => rng.range(0.62, 0.76),
-        Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
+        Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
     } - if electric { 0.05 } else { 0.0 };
     let rear_overhang = if shape == Micro {
         rng.range(0.46, 0.54)
@@ -274,7 +345,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Crossover => tail + rng.range(0.08, 0.14),
         Suv | Mpv => tail + rng.range(0.07, 0.11),
         Van => tail + rng.range(0.04, 0.06),
-        Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
+        Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
     };
     let rear_head = rear_foot
         + match kind {
@@ -285,7 +356,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
             Suv => rng.range(0.26, 0.40),
             Mpv => rng.range(0.22, 0.32),
             Van => rng.range(0.07, 0.10),
-            Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
+            Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
         };
     // An estate's roof runs to an upright tailgate; a runabout's cabin is
     // most of the car.
@@ -293,6 +364,11 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Wagon => {
             let foot = tail + rng.range(0.07, 0.12);
             (front_head, foot, foot + rng.range(0.32, 0.58))
+        }
+        Sports => {
+            // The roof falls in one line from over the seats to the tail.
+            let foot = tail + rng.range(0.10, 0.20);
+            (front_head, foot, foot + rng.range(1.10, 1.35))
         }
         Micro => {
             let foot = tail + rng.range(0.05, 0.09);
@@ -305,7 +381,14 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         _ => (front_head, rear_foot, rear_head),
     };
     // Whatever the rakes, a roof is left between the screens.
-    let rear_head = rear_head.min(front_head - if shape == Micro { 0.75 } else { 1.25 });
+    let rear_head = rear_head.min(
+        front_head
+            - match shape {
+                Micro => 0.75,
+                Sports => 0.55,
+                _ => 1.25,
+            },
+    );
     let rear_foot = rear_foot.min(rear_head - 0.06);
     let top = vec![
         (tail, tail_top - 0.03),
@@ -319,7 +402,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         (nose - 0.20, nose_top + 0.035),
         (nose, nose_top),
     ];
-    let boot = matches!(kind, Saloon | Fastback) && shape != Wagon;
+    let boot = matches!(kind, Saloon | Fastback) && !matches!(shape, Wagon | Sports);
     let tall = matches!(kind, Suv | Crossover);
     let cladding = match kind {
         Suv => rng.chance(0.65),
@@ -328,26 +411,29 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
     };
 
     // --- lamps -------------------------------------------------------------
+    // A make's lamps are its own; a van's are what is cheapest.
     let head_style = if kind == Van {
         HeadStyle::Halogen
-    } else if electric {
-        rng.pick(&[
-            (HeadStyle::Slim, 0.5),
-            (HeadStyle::Matrix, 0.35),
-            (HeadStyle::Projector, 0.15),
-        ])
+    } else if electric && marque.head == HeadStyle::Halogen {
+        HeadStyle::Slim
     } else {
-        rng.pick(&[
-            (HeadStyle::Projector, 0.38),
-            (HeadStyle::Matrix, 0.30),
-            (
-                HeadStyle::Halogen,
-                if kind == Hatchback { 0.35 } else { 0.14 },
-            ),
-            (HeadStyle::Slim, 0.12),
-        ])
+        marque.head
     };
+    let round = marque.round_lamps
+        && matches!(shape, Sports | Coupe | Micro | Hatchback | Fastback)
+        || shape == Sports && rng.chance(0.5);
     let head = match head_style {
+        _ if round => {
+            // An oval lamp set into the wing, as a sports car carries them.
+            let h = rng.range(0.13, 0.17);
+            let y = -h * 0.5 - rng.range(0.0, 0.02);
+            Wing {
+                s: (rng.range(0.56, 0.66), rng.range(0.0, 0.05)),
+                y: (y, y + 0.01),
+                h: (h, h * 0.92),
+                r: h * 0.46,
+            }
+        }
         HeadStyle::Slim => {
             let h = rng.range(0.045, 0.062);
             Wing {
@@ -379,19 +465,15 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
             }
         }
     };
-    let head_bar = (head_style == HeadStyle::Slim && rng.chance(0.6)
-        || electric && rng.chance(0.25))
+    let head_bar = (!round
+        && (marque.head_bar && head_style != HeadStyle::Halogen || electric && rng.chance(0.25)))
     .then(|| (head.y.0, rng.range(0.016, 0.024)));
     let tail_style = if kind == Van || tall && rng.chance(0.18) || kind == Mpv && rng.chance(0.4) {
         TailStyle::Stack
-    } else if electric {
-        rng.pick(&[(TailStyle::Bar, 0.6), (TailStyle::Guide, 0.4)])
+    } else if shape == Sports {
+        TailStyle::Bar
     } else {
-        rng.pick(&[
-            (TailStyle::Cluster, 0.40),
-            (TailStyle::Guide, 0.38),
-            (TailStyle::Bar, 0.22),
-        ])
+        marque.tail
     };
     let face_h = tail_top - sill;
     let tail_lamp = match tail_style {
@@ -442,17 +524,16 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
 
     // --- grille and intake ---------------------------------------------------
     let lamp_low = head.y.0 - head.h.0 * 0.5;
-    let grille = if electric && rng.chance(0.8) {
+    let mouth = if electric && rng.chance(0.8) || shape == Sports {
+        Mouth::Closed
+    } else {
+        marque.grille
+    };
+    let grille = if mouth == Mouth::Closed {
         None
     } else {
-        let (slats, bars) = (rng.count(2, 5), rng.count(7, 13));
-        let kind_of = rng.pick(&[
-            (GrilleKind::Slats(slats), 0.40),
-            (GrilleKind::Mesh, 0.32),
-            (GrilleKind::Bars(bars), 0.28),
-        ]);
-        // Between the lamps, or (a big-mouthed one) dropping below them.
-        let deep = rng.chance(if tall { 0.85 } else { 0.7 });
+        let kind_of = marque.grille_kind;
+        let deep = mouth != Mouth::Band;
         // Its top edge is the lamps' top edge: one line across the face.
         let top = head.y.0 + head.h.0 * 0.5 - rng.range(0.0, 0.012);
         let bottom = if deep {
@@ -470,7 +551,8 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
             y: (bottom, top),
             r: rng.range(0.012, 0.035),
             kind: kind_of,
-            bright: rng.chance(0.5),
+            bright: marque.bright,
+            twin: mouth == Mouth::Twin,
         })
     };
     let intake = {
@@ -483,6 +565,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
             r: rng.range(0.015, 0.03),
             kind: rng.pick(&[(GrilleKind::Slats(slats), 0.6), (GrilleKind::Mesh, 0.4)]),
             bright: false,
+            twin: false,
         }
     };
 
@@ -502,7 +585,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
             Crossover => 0.225,
             Fastback => 0.245,
             Suv => 0.245,
-            Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
+            Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
         }) + rng.range(-0.01, 0.01),
         rim_r: wheel_r * rim_share,
         tread: match kind {
@@ -591,7 +674,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
     // Sharp-edged or soft, slab-sided or hipped, wedge or level: the same
     // freedoms whatever the kind, with a few leanings.
     let soft = rng.unit();
-    let sporty = matches!(shape, Fastback | Coupe) || rng.chance(0.25);
+    let sporty = matches!(shape, Fastback | Coupe | Sports) || rng.chance(0.25);
     let boxy = matches!(shape, Van | Micro | Suv | Mpv);
     let face_of = |rng: &mut Rng, front: bool| Face {
         sweep: rng.range(0.30, 0.72),
@@ -634,7 +717,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         tail: face_of(rng, false),
     };
     let four_doors = match shape {
-        Coupe => false,
+        Coupe | Sports => false,
         Micro => rng.chance(0.4),
         _ => true,
     };
@@ -674,6 +757,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         face,
         four_doors,
         style,
+        black_roof: marque.black_roof && !matches!(shape, Van | Micro) || tall && rng.chance(0.2),
         fog: kind != Van && rng.chance(0.6),
     }
 }

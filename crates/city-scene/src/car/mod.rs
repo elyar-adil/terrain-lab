@@ -93,14 +93,23 @@ fn registry(fleet: u64) -> f32 {
     (fleet.wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 40) as f32 / (1u64 << 24) as f32
 }
 
+/// How many makers a city's fleet is drawn from.
+const MAKERS: u64 = 3;
+
 /// The design of a variant of a fleet.
 fn fleet_design(fleet: u64, variant: usize) -> Spec {
     let seed = fleet
         .wrapping_mul(0x2545_f491_4f6c_dd1d)
         .wrapping_add(variant as u64 * 0x9e37_79b9);
+    // A city's cars come from a few makers, and each maker's are a family.
+    let marque = design::Marque::new(
+        fleet
+            .wrapping_mul(0x9e37_79b9)
+            .wrapping_add(variant as u64 % MAKERS),
+    );
     match FLEET[variant % CAR_VARIANTS].0 {
-        Some(kind) => design::design_of(kind, &mut design::Rng::new(seed)),
-        None => design::design(seed),
+        Some(kind) => design::design_of(kind, &mut design::Rng::new(seed), &marque),
+        None => design::design(seed, &marque),
     }
 }
 

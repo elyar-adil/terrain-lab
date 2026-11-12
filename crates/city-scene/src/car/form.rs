@@ -51,6 +51,8 @@ pub(super) struct Spec {
     pub face: (f32, f32),
     /// Two doors a side, or one.
     pub four_doors: bool,
+    /// The roof and pillars black over the body's colour.
+    pub black_roof: bool,
     pub style: Style,
 }
 

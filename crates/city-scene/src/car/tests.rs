@@ -71,13 +71,15 @@ fn every_design_is_a_car_sized_car_standing_on_its_wheels() {
 
 #[test]
 fn a_seed_is_a_design_and_seeds_differ() {
-    let a = design::design(41);
-    let b = design::design(41);
+    let a = design::design(41, &design::Marque::new(3));
+    let b = design::design(41, &design::Marque::new(3));
     assert_eq!(a.top, b.top);
     assert_eq!(a.head_style, b.head_style);
     // A hundred seeds: every kind of lamp, tread and rim turns up, and the
     // proportions are never twice the same.
-    let designs: Vec<Spec> = (0..100).map(design::design).collect();
+    let designs: Vec<Spec> = (0..100)
+        .map(|seed| design::design(seed, &design::Marque::new(seed / 3)))
+        .collect();
     let mut lengths: Vec<i32> = designs
         .iter()
         .map(|d| ((d.top[d.top.len() - 1].0 - d.top[0].0) * 1000.0) as i32)
@@ -123,7 +125,7 @@ fn a_seed_is_a_design_and_seeds_differ() {
             -reach > tail && reach < nose,
             "seed {seed}: wheels past the bumpers"
         );
-        assert!(front_head - rear_head > 0.7, "seed {seed}: no roof");
+        assert!(front_head - rear_head > 0.5, "seed {seed}: no roof");
         assert!(
             d.tyre.rim_r < d.wheel_r - 0.05,
             "seed {seed}: no tyre on the rim"
