@@ -13,7 +13,6 @@
  */
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
 import { carMaterials } from "./city/carMaterials";
 
@@ -39,6 +38,45 @@ const VIEWS: Record<string, { from: [number, number, number]; to: [number, numbe
   low: { from: [4.4, 0.35, 2.6], to: [0.4, 0.55, 0], fov: 35 },
 };
 
+/**
+ * A car studio as an environment map: a dark room with a long softbox over the
+ * car and a strip down each side. Paint shows what it reflects, and what a
+ * body's surface is worth shows in how those lights run along it.
+ */
+function studio(renderer: THREE.WebGLRenderer): THREE.Texture {
+  const room = new THREE.Scene();
+  const wall = new THREE.Mesh(
+    new THREE.BoxGeometry(40, 16, 40),
+    new THREE.MeshBasicMaterial({ color: 0x3a3d42, side: THREE.BackSide }),
+  );
+  wall.position.y = 7.5;
+  room.add(wall);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshBasicMaterial({ color: 0x8a8d91 }));
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -0.4;
+  room.add(floor);
+  const light = (width: number, depth: number, at: [number, number, number], tilt: [number, number, number], power: number) => {
+    const panel = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, depth),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(power, power, power), side: THREE.DoubleSide }),
+    );
+    panel.position.set(...at);
+    panel.rotation.set(...tilt);
+    room.add(panel);
+  };
+  // The overhead softbox, the length of the car and more.
+  light(11, 3.2, [0, 6.5, 0], [Math.PI / 2, 0, 0], 9);
+  // A strip down each side, and a fill behind the camera.
+  light(12, 1.6, [0, 2.6, 8], [0, Math.PI, 0], 5);
+  light(12, 1.6, [0, 2.6, -8], [0, 0, 0], 5);
+  light(5, 2.5, [10, 3.5, 0], [0, -Math.PI / 2, 0], 4);
+  light(5, 2.5, [-10, 3.5, 0], [0, Math.PI / 2, 0], 4);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const texture = pmrem.fromScene(room, 0.02).texture;
+  pmrem.dispose();
+  return texture;
+}
+
 async function main() {
   const params = new URLSearchParams(location.search);
   const variant = Number(params.get("variant") ?? 0);
@@ -52,27 +90,31 @@ async function main() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.8;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.VSMShadowMap;
   root.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xb9bcc0);
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.03).texture;
-  const sun = new THREE.DirectionalLight(0xfff4e2, 2.2);
-  sun.position.set(4, 9, 5);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(4096, 4096);
-  sun.shadow.camera.left = -4;
-  sun.shadow.camera.right = 4;
-  sun.shadow.camera.top = 4;
-  sun.shadow.camera.bottom = -4;
-  sun.shadow.bias = -0.0004;
-  sun.shadow.normalBias = 0.01;
-  scene.add(sun);
+  const backdrop = new THREE.Color(0xc4c7cb);
+  scene.background = backdrop;
+  // A seamless floor: it runs out into the backdrop's own colour, no horizon.
+  scene.fog = new THREE.Fog(backdrop, 14, 40);
+  scene.environment = studio(renderer);
+  const key = new THREE.DirectionalLight(0xffffff, 1.5);
+  key.position.set(3, 10, 4);
+  key.castShadow = true;
+  key.shadow.mapSize.set(4096, 4096);
+  key.shadow.camera.left = -4;
+  key.shadow.camera.right = 4;
+  key.shadow.camera.top = 4;
+  key.shadow.camera.bottom = -4;
+  key.shadow.radius = 12;
+  key.shadow.blurSamples = 24;
+  key.shadow.bias = -0.0004;
+  key.shadow.normalBias = 0.01;
+  scene.add(key);
   const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(30, 64),
-    new THREE.MeshStandardMaterial({ color: 0xb4b7bb, roughness: 0.9 }),
+    new THREE.CircleGeometry(60, 64),
+    new THREE.MeshStandardMaterial({ color: 0xb9bcc0, roughness: 0.55, metalness: 0.0, envMapIntensity: 0.5 }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;

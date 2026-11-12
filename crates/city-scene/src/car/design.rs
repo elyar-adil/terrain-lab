@@ -92,7 +92,7 @@ impl Marque {
                 (TailStyle::Bar, 0.32),
             ]),
             round_lamps: rng.chance(0.2),
-            black_roof: rng.chance(0.3),
+            black_roof: rng.chance(0.14),
             head_bar: rng.chance(0.25),
         }
     }
@@ -713,6 +713,18 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         crease: (1.0 - soft) * rng.range(0.006, 0.016) + 0.002,
         hollow: rng.range(0.0, 0.014),
         bonnet: rng.range(0.0, 0.010),
+        deck_crown: rng.range(0.035, 0.075),
+        barrel: rng.range(0.020, 0.055),
+        flare: if sporty {
+            rng.range(0.018, 0.034)
+        } else {
+            rng.range(0.008, 0.024)
+        },
+        arch_square: if boxy && rng.chance(0.6) {
+            rng.range(2.8, 4.2)
+        } else {
+            2.0
+        },
         nose: face_of(rng, true),
         tail: face_of(rng, false),
     };
@@ -757,7 +769,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         face,
         four_doors,
         style,
-        black_roof: marque.black_roof && !matches!(shape, Van | Micro) || tall && rng.chance(0.2),
+        black_roof: marque.black_roof && !matches!(shape, Van | Micro) || tall && rng.chance(0.1),
         fog: kind != Van && rng.chance(0.6),
     }
 }

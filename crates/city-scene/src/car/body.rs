@@ -69,8 +69,7 @@ pub(super) fn build(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -
 
     // --- wheel arches: true circles, through the flank and the floor beside it.
     let flank = |p: Vec3| (spec.width * 0.5 - 0.42) - p.z.abs();
-    let from_axle =
-        |p: Vec3, axle: f32| ((p.x - axle).powi(2) + (p.y - spec.wheel_r).powi(2)).sqrt();
+    let from_axle = |p: Vec3, axle: f32| form.from_axle(p.x, p.y, axle);
     let nearest_axle = |p: Vec3| from_axle(p, -half_base).min(from_axle(p, half_base));
     soup.cut(
         &|p| (nearest_axle(p) - arch).max(flank(p)),
@@ -165,7 +164,7 @@ pub(super) fn build(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -
         } else {
             (rear_foot, rear_head)
         };
-        let low = form.belt(foot_x) + 0.058;
+        let low = form.top(foot_x) + 0.040;
         let high = form.top(head_x) - 0.032;
         let corner = ((high - low) * 0.25).min(0.05);
         move |p: Vec3| {
@@ -463,8 +462,8 @@ fn sculpt(soup: &mut Soup, form: &Form) {
     // The hollow above the sill.
     let hollow = |p: Vec3| p.y - (form.floor(p.x) + 0.26);
     let from_axle = |p: Vec3| {
-        let d = |axle: f32| ((p.x - axle).powi(2) + (p.y - spec.wheel_r).powi(2)).sqrt();
-        d(-half_base).min(d(half_base))
+        form.from_axle(p.x, p.y, -half_base)
+            .min(form.from_axle(p.x, p.y, half_base))
     };
     let between = |p: Vec3| smoothstep(arch + 0.02, arch + 0.16, from_axle(p));
     // Bonnet creases, from the screen pillars in toward the grille.
@@ -477,17 +476,18 @@ fn sculpt(soup: &mut Soup, form: &Form) {
             * smoothstep(front_foot + 0.06, front_foot + 0.25, p.x)
             * smoothstep(form.nose - 0.10, form.nose - 0.32, p.x)
     };
-    let lip_wide = 0.045;
+    // The wing stands out round the arch and falls back into the door: a
+    // flare a hand wide, with the lip of the arch itself at its edge.
+    let lip_wide = 0.18;
     let relief = |p: Vec3| -> f32 {
         let side = flank(p);
         let mut h = 0.0;
         if side > 0.0 {
             h += ridge(shoulder(p), style.crease, 0.06) * side * ends(p, 0.30, 0.75) * between(p);
             h -= ridge(hollow(p), style.hollow, 0.10) * side * ends(p, 0.5, 0.9) * between(p);
-            if !spec.cladding {
-                let t = ((from_axle(p) - arch) / lip_wide).clamp(0.0, 1.0);
-                h += 0.0075 * (1.0 - t).powi(2) * side;
-            }
+            let t = ((from_axle(p) - arch) / lip_wide).clamp(0.0, 1.0);
+            let lip = (1.0 - (from_axle(p) - arch) / 0.035).clamp(0.0, 1.0);
+            h += (style.flare * (1.0 - t).powi(2) * (1.0 + 2.0 * t) + 0.005 * lip * lip) * side;
         }
         let top = on_bonnet(p);
         if top > 0.0 {
@@ -496,11 +496,12 @@ fn sculpt(soup: &mut Soup, form: &Form) {
         h
     };
     // Vertices along every line and across every slope of the relief.
-    let lines: [(&dyn Fn(Vec3) -> f32, f32); 4] = [
+    let lines: [(&dyn Fn(Vec3) -> f32, f32); 5] = [
         (&shoulder, 0.06),
         (&hollow, 0.10),
         (&bonnet_line, 0.06),
         (&|p| from_axle(p) - arch - lip_wide * 0.5, lip_wide * 0.5),
+        (&|p| from_axle(p) - arch - 0.035, 0.035),
     ];
     for (line, wide) in lines {
         for level in [-1.0, 0.0, 1.0] {

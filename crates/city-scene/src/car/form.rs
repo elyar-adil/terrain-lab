@@ -85,6 +85,14 @@ pub(super) struct Style {
     pub hollow: f32,
     /// The creases down the bonnet.
     pub bonnet: f32,
+    /// How far the middle of the bonnet and the boot stands above their edges.
+    pub deck_crown: f32,
+    /// How far the body's side bows out between the sill and the shoulder.
+    pub barrel: f32,
+    /// How far the wings stand out round the wheel arches.
+    pub flare: f32,
+    /// The arches' shape: 2 a circle, higher squared off.
+    pub arch_square: f32,
     pub nose: Face,
     pub tail: Face,
 }
@@ -162,10 +170,10 @@ pub(super) fn sample_line(line: &[(f32, f32)], x: f32) -> f32 {
 /// floor round to the middle of the roof. The count is the same at every
 /// station, so a feature of the section (the shoulder, the foot of the glass) is
 /// a line of the mesh from one end of the car to the other.
-pub(super) const STRETCHES: [usize; 9] = [2, 2, 6, 7, 4, 3, 7, 3, 5];
-pub(super) const SIDE_GLASS: usize = 6;
-pub(super) const ROOF_RAIL: usize = 7;
-pub(super) const ROOF: usize = 8;
+pub(super) const STRETCHES: [usize; 10] = [2, 2, 4, 5, 5, 4, 3, 7, 4, 6];
+pub(super) const SIDE_GLASS: usize = 7;
+pub(super) const ROOF_RAIL: usize = 8;
+pub(super) const ROOF: usize = 9;
 
 /// Where the doors, the bonnet and the boot shut.
 pub(super) struct Lines {
@@ -231,9 +239,9 @@ impl<'a> Form<'a> {
                     form.floor_exact(x),
                     form.half_width_exact(x),
                     form.top_exact(x),
-                    c[6].1,
-                    c[7].0,
                     c[7].1,
+                    c[8].0,
+                    c[8].1,
                 ]
             })
             .collect();
@@ -319,11 +327,26 @@ impl<'a> Form<'a> {
         let style = &self.spec.style;
         let crown =
             style.crown * ((1.0 - (2.0 * along - 1.0 - style.peak).abs().min(1.0).powi(2)) - 0.65);
-        deck + (self.spec.roof + crown - deck) * self.cabin(x)
+        // And the bonnet and the boot are not flat either: each rises from
+        // its edges to a crown along the middle of the car.
+        let g = self.cabin(x);
+        deck + self.deck_crown(x) * (1.0 - g) + (self.spec.roof + crown - deck) * g
+    }
+    /// How far the middle of the bonnet (or the boot) stands above its edges.
+    fn deck_crown(&self, x: f32) -> f32 {
+        let fade = (self.to_end(x) / 0.35).min(1.0);
+        self.spec.style.deck_crown * (0.35 + 0.65 * fade)
+    }
+    /// The distance of a point of the flank from an axle, measured the way
+    /// this design's wheel arches are drawn: round, or squared off.
+    pub fn from_axle(&self, x: f32, y: f32, axle: f32) -> f32 {
+        let n = self.spec.style.arch_square;
+        let (dx, dy) = ((x - axle).abs(), (y - self.spec.wheel_r).abs());
+        (dx.powf(n) + dy.powf(n)).powf(1.0 / n)
     }
     /// The section's control points at a station, as `(z, y)` from the middle
     /// of the floor, up the side and over to the middle of the roof.
-    fn controls(&self, x: f32) -> [(f32, f32); 10] {
+    fn controls(&self, x: f32) -> [(f32, f32); 11] {
         let (floor, belt, top, wide, g) = (
             self.floor_exact(x),
             self.belt_exact(x),
@@ -331,28 +354,46 @@ impl<'a> Form<'a> {
             self.half_width_exact(x),
             self.cabin(x),
         );
+        let style = &self.spec.style;
         let deck = belt + 0.012;
-        let roof_half = self.spec.width * 0.5 - self.spec.style.tumble;
+        let roof_half = self.spec.width * 0.5 - style.tumble;
         let lerp = |a: f32, b: f32| a + (b - a) * g;
-        let glass_head = (
-            lerp(wide - 0.22, roof_half.min(wide - 0.16)),
-            deck + (top - deck) * 0.90 + 0.004,
-        );
-        // The body is not a slab: it swells over each wheel and is drawn in
-        // between them, most of all along the sill.
+        let lerp2 = |a: (f32, f32), b: (f32, f32)| (lerp(a.0, b.0), lerp(a.1, b.1));
+        // The body is not a slab. Its side is a barrel: widest a little above
+        // its middle, leaning in to the shoulder above and under to the sill
+        // below. It swells further over each wheel and is drawn in between
+        // them, most of all along the sill.
         let hip = self.hip(x);
-        let waist = self.spec.style.waist * (1.0 - hip / self.spec.style.hip.max(1.0e-3));
+        let waist = style.waist * (1.0 - hip / style.hip.max(1.0e-3));
+        let high = belt - floor;
+        let barrel = style.barrel;
+        // Over the cabin the section goes up the glass to the roof; over the
+        // bonnet and the boot it turns in at the shoulder and rises to the
+        // crown along the middle of the car.
+        let crown = top - deck;
+        let glass_head = (roof_half.min(wide - 0.16), deck + crown * 0.90 + 0.004);
+        let shoulder = wide - style.shoulder - barrel * 0.5;
         [
             (0.0, floor),
-            (wide - 0.11 - waist, floor),
-            (wide - 0.018 - waist * 1.5, floor + 0.075),
-            (wide + hip - waist * 0.35, floor + (belt - floor) * 0.46),
-            (wide - 0.010 + hip * 0.55, belt - 0.11),
-            (wide - self.spec.style.shoulder, belt - 0.004),
-            (lerp(wide - 0.11, wide - 0.090), deck + 0.004 + 0.012 * g),
-            glass_head,
-            (glass_head.0 - 0.10, top + 0.004),
-            (0.0, top + 0.022),
+            (wide - 0.14 - waist, floor),
+            (wide - 0.040 - waist * 1.4 - barrel, floor + 0.070),
+            (
+                wide - barrel * 0.45 + hip * 0.6 - waist * 0.6,
+                floor + high * 0.30,
+            ),
+            (wide + hip, floor + high * 0.56),
+            (wide - barrel * 0.30 + hip * 0.5, belt - high * 0.17),
+            (shoulder, belt - 0.004),
+            lerp2(
+                (shoulder - 0.085, deck + crown * 0.16),
+                (shoulder - 0.045, deck + 0.016),
+            ),
+            lerp2((wide * 0.62, deck + crown * 0.66), glass_head),
+            lerp2(
+                (wide * 0.30, deck + crown * 0.93),
+                (glass_head.0 - 0.11, top - 0.006),
+            ),
+            (0.0, lerp(top, top + 0.018)),
         ]
     }
     /// The half-section at a station, as `(z, y)` from the middle of the floor,
@@ -377,7 +418,7 @@ impl<'a> Form<'a> {
                 // Mostly the curve, held a little toward the chord: panels are
                 // fair, but the shoulder and the glass foot stay edges.
                 let chord = |b: f32, c: f32| b + (c - b) * t;
-                let blend = 0.7;
+                let blend = 0.92;
                 out.push((
                     chord(p1.0, p2.0) * (1.0 - blend) + spline(p0.0, p1.0, p2.0, p3.0) * blend,
                     chord(p1.1, p2.1) * (1.0 - blend) + spline(p0.1, p1.1, p2.1, p3.1) * blend,

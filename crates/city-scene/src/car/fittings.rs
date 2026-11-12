@@ -169,12 +169,12 @@ pub(super) fn build(
                     (0..=32)
                         .map(|k| {
                             let angle = (-0.03 + 1.06 * k as f32 / 32.0) * std::f32::consts::PI;
-                            centre
-                                + Vec3::new(
-                                    angle.cos() * (arch + 0.004),
-                                    angle.sin() * (arch + 0.004),
-                                    side * z,
-                                )
+                            // The well follows the arch, round or squared off.
+                            let n = spec.style.arch_square;
+                            let reach = (arch + 0.004)
+                                / (angle.cos().abs().powf(n) + angle.sin().abs().powf(n))
+                                    .powf(1.0 / n);
+                            centre + Vec3::new(angle.cos() * reach, angle.sin() * reach, side * z)
                         })
                         .collect()
                 })

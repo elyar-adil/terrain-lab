@@ -129,7 +129,7 @@ export function carMaterials(): Array<[string, THREE.Material]> {
     // the draw-call counter is perfectly happy about it.
     // Paint is a metallic base under a clear coat: the lacquer is what gives a
     // car its second, sharper reflection.
-    ["car/body", new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.34, metalness: 0.4, clearcoat: 1.0, clearcoatRoughness: 0.06, envMapIntensity: 1.0 })],
+    ["car/body", new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.42, metalness: 0.55, clearcoat: 1.0, clearcoatRoughness: 0.035, envMapIntensity: 1.0 })],
     // Glazing you can see through: the seats and the wheel behind it are modelled.
     ["car/glass", new THREE.MeshPhysicalMaterial({
       color: 0x1a2428, roughness: 0.03, metalness: 0.0, transparent: true, opacity: 0.8,
