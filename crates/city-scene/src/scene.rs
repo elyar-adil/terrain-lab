@@ -254,7 +254,11 @@ fn encode_geometry(geometry: SceneGeometry) -> (Vec<EncodedMesh>, Vec<EncodedIns
 
 /// The texture set every scene of a city shares, baked for its climate.
 pub fn standard_textures(climate: &urban::SiteClimate, budget: &SceneBudget) -> Vec<BakedTexture> {
-    crate::bake::standard_set_in(budget.facade_texture_size, budget.ground_texture_size, climate)
+    crate::bake::standard_set_in(
+        budget.facade_texture_size,
+        budget.ground_texture_size,
+        climate,
+    )
 }
 
 fn encode_textures(textures: &[BakedTexture]) -> Vec<EncodedTexture> {
@@ -358,7 +362,7 @@ fn build_scene(
     trees::build_prototypes(&prototypes, &mut builder);
     trees::build_shrub_prototype(&mut builder);
     trees::build_tuft_prototype(&mut builder);
-    furniture::build_prototypes(&mut builder);
+    furniture::build_prototypes(&mut builder, city.seed as u64);
     // Everything from here to the buildings is drawn from the streets, and is
     // what a tile crops to its square.
     let street_mark = builder.mark();
@@ -446,8 +450,14 @@ fn build_scene(
             .iter()
             .filter_map(|b| {
                 let n = b.footprint.len().max(1) as f32;
-                let (x, y) = b.footprint.iter().fold((0.0, 0.0), |a, p| (a.0 + p.x_km, a.1 + p.y_km));
-                let local = city.frame.to_local(urban::Point { x_km: x / n, y_km: y / n });
+                let (x, y) = b
+                    .footprint
+                    .iter()
+                    .fold((0.0, 0.0), |a, p| (a.0 + p.x_km, a.1 + p.y_km));
+                let local = city.frame.to_local(urban::Point {
+                    x_km: x / n,
+                    y_km: y / n,
+                });
                 (!b.footprint.is_empty()).then(|| crate::math::Vec2::new(local[0], local[1]))
             })
             .collect();
@@ -652,7 +662,8 @@ fn drop_inside_buildings(
         }
     }
     builder.retain_keyed_instances_since(mark, |key, instance| {
-        if !(key.starts_with("tree/") || key.starts_with("furniture/")) || key.ends_with("railing") {
+        if !(key.starts_with("tree/") || key.starts_with("furniture/")) || key.ends_with("railing")
+        {
             return true;
         }
         let p = Vec2::new(instance.x, instance.z);
@@ -995,8 +1006,10 @@ mod tests {
             // These are groups emitted per prototype whether or not this city
             // plants it; a list with no instances has count 0 and draws nothing.
             // Six car designs of thirteen parts each (ten of the full model,
-            // three of the far one), where one design had three, make 214.
-            instanced < 220,
+            // three of the far one), where one design had three, made 214; a
+            // car's lenses, lit lamps and rims as parts of their own (seventeen
+            // parts a design) make 235.
+            instanced < 240,
             "the city needs {instanced} instanced draw calls"
         );
     }

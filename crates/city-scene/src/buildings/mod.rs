@@ -1931,7 +1931,9 @@ mod tests {
     /// junctions, and the blocks round them changed.
     /// And again when car parks gained real bays, paint and parked cars
     /// (`parking.rs`).
-    const WESTERN_MIXED_LAYER_HASH: u64 = 10_046_906_582_126_042_334;
+    /// And again when the cars became a fleet of generated designs, each with
+    /// more parts and its own share of the street (`car/`).
+    const WESTERN_MIXED_LAYER_HASH: u64 = 6_845_260_002_037_609_388;
 
     #[test]
     fn western_mixed_building_layer_is_bit_identical() {

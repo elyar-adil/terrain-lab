@@ -8,7 +8,7 @@ fn main() {
     let path = args.next().unwrap_or_else(|| "props.obj".to_owned());
     let prefixes: Vec<String> = args.collect();
     let mut builder = city_scene::MeshBuilder::new();
-    city_scene::furniture::build_prototypes(&mut builder);
+    city_scene::furniture::build_prototypes(&mut builder, 1);
     let scene = builder.build();
     let mut out = String::new();
     let mut base = 1_usize;

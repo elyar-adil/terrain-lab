@@ -44,6 +44,33 @@ pub(crate) fn skin_lifted(
         return;
     }
     let around = rings[0].len();
+    let normals = skin_normals(rings);
+    for i in 0..rings.len() - 1 {
+        for k in 0..around {
+            if !keep(i, k) {
+                continue;
+            }
+            let k1 = (k + 1) % around;
+            let at = |i: usize, k: usize| (rings[i][k] + normals[i][k] * lift, normals[i][k]);
+            let (a, b, c, d) = (at(i, k), at(i + 1, k), at(i + 1, k1), at(i, k1));
+            let face = (b.0 - a.0).cross(c.0 - a.0) + (c.0 - a.0).cross(d.0 - a.0);
+            if face.length() < 1.0e-12 {
+                continue;
+            }
+            let mean = a.1 + b.1 + c.1 + d.1;
+            if face.dot(mean) >= 0.0 {
+                builder.quad_shaded(key, a, b, c, d, None);
+            } else {
+                builder.quad_shaded(key, d, c, b, a, None);
+            }
+        }
+    }
+}
+
+/// The normal of a skin at every point of every ring: the surface's own, from
+/// its neighbours along and around, facing away from the rings' axis.
+pub(crate) fn skin_normals(rings: &[Vec<Vec3>]) -> Vec<Vec<Vec3>> {
+    let around = rings[0].len();
     let centre = |ring: &Vec<Vec3>| {
         ring.iter().fold(Vec3::new(0.0, 0.0, 0.0), |a, p| a + *p) / ring.len() as f32
     };
@@ -105,26 +132,7 @@ pub(crate) fn skin_lifted(
         }
         normals.push(out);
     }
-    for i in 0..rings.len() - 1 {
-        for k in 0..around {
-            if !keep(i, k) {
-                continue;
-            }
-            let k1 = (k + 1) % around;
-            let at = |i: usize, k: usize| (rings[i][k] + normals[i][k] * lift, normals[i][k]);
-            let (a, b, c, d) = (at(i, k), at(i + 1, k), at(i + 1, k1), at(i, k1));
-            let face = (b.0 - a.0).cross(c.0 - a.0) + (c.0 - a.0).cross(d.0 - a.0);
-            if face.length() < 1.0e-12 {
-                continue;
-            }
-            let mean = a.1 + b.1 + c.1 + d.1;
-            if face.dot(mean) >= 0.0 {
-                builder.quad_shaded(key, a, b, c, d, None);
-            } else {
-                builder.quad_shaded(key, d, c, b, a, None);
-            }
-        }
-    }
+    normals
 }
 
 /// A profile `(radius, distance along the axis)` turned about `axis` through

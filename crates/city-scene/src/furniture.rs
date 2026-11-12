@@ -926,7 +926,7 @@ pub fn footway_obstacles(road: &crate::network::Road) -> Vec<(f32, f32)> {
 }
 
 /// Every prototype, built once per generation.
-pub fn build_prototypes(builder: &mut MeshBuilder) {
+pub fn build_prototypes(builder: &mut MeshBuilder, fleet: u64) {
     street_lamp(builder, "furniture/lamp");
     median_lamp(builder, "furniture/lamp.double");
     deco_lamp(builder);
@@ -942,7 +942,7 @@ pub fn build_prototypes(builder: &mut MeshBuilder) {
     bus_shelter(builder, "furniture/shelter");
     rubbish_bin(builder, "furniture/bin");
     phone_kiosk(builder, "furniture/kiosk");
-    crate::car::build_prototypes(builder);
+    crate::car::build_prototypes(builder, fleet);
     for key in [
         "furniture/lamp",
         "furniture/lamp.double",
@@ -1651,7 +1651,13 @@ pub fn park_cars(network: &Network, builder: &mut MeshBuilder, seed: u32) -> usi
 
 /// One parked car: body, glass and wheels as three instances of the shared
 /// car prototypes, nose along local `+X`, standing on `y`.
-pub(crate) fn add_parked_car(builder: &mut MeshBuilder, point: Vec2, y: f32, yaw: f32, rng: &mut Rng) {
+pub(crate) fn add_parked_car(
+    builder: &mut MeshBuilder,
+    point: Vec2,
+    y: f32,
+    yaw: f32,
+    rng: &mut Rng,
+) {
     let colour = car_paint(rng);
     crate::car::add_car(builder, point.x, y, point.y, yaw, colour);
 }
@@ -1721,7 +1727,7 @@ mod tests {
     #[test]
     fn prototypes_are_bound_so_one_transform_list_places_a_whole_object() {
         let mut builder = MeshBuilder::new();
-        build_prototypes(&mut builder);
+        build_prototypes(&mut builder, 1);
         for _ in 0..5 {
             builder.add_instance(
                 "furniture/lamp",
@@ -1792,7 +1798,7 @@ mod tests {
     fn a_city_gets_lamps_poles_wires_and_bollards() {
         let (city, network) = city();
         let mut builder = MeshBuilder::new();
-        build_prototypes(&mut builder);
+        build_prototypes(&mut builder, 1);
         let output = place(&network, &mut builder, city.seed);
         assert!(output.lamps > 20, "only {} lamps", output.lamps);
         assert!(output.poles > 10, "only {} poles", output.poles);
@@ -1864,7 +1870,7 @@ mod tests {
     fn no_wire_crosses_the_carriageway_it_belongs_to() {
         let (city, network) = city();
         let mut builder = MeshBuilder::new();
-        build_prototypes(&mut builder);
+        build_prototypes(&mut builder, 1);
         place(&network, &mut builder, city.seed);
         let scene = builder.build();
         let wires = scene
@@ -1976,7 +1982,7 @@ mod tests {
     fn every_wire_ends_at_a_pole_arm() {
         let (city, network) = city();
         let mut builder = MeshBuilder::new();
-        build_prototypes(&mut builder);
+        build_prototypes(&mut builder, 1);
         place(&network, &mut builder, city.seed);
         let scene = builder.build();
         let wires = scene
@@ -2082,7 +2088,7 @@ mod tests {
     fn pole_cross_arms_cluster_per_street_rather_than_scattering_at_random() {
         let (city, network) = city();
         let mut builder = MeshBuilder::new();
-        build_prototypes(&mut builder);
+        build_prototypes(&mut builder, 1);
         place(&network, &mut builder, city.seed);
         let scene = builder.build();
         let poles = scene
@@ -2132,7 +2138,7 @@ mod tests {
     fn no_bollard_stands_in_a_carriageway() {
         let (city, network) = city();
         let mut builder = MeshBuilder::new();
-        build_prototypes(&mut builder);
+        build_prototypes(&mut builder, 1);
         place(&network, &mut builder, city.seed);
         let scene = builder.build();
         let bollards = scene
@@ -2175,7 +2181,7 @@ mod tests {
         // Placed with `yaw_along_x`, so the model's length must lie along +X:
         // authored along Z, every parked car stood across the road.
         let mut builder = MeshBuilder::new();
-        build_prototypes(&mut builder);
+        build_prototypes(&mut builder, 1);
         let scene = builder.build();
         let extent = |key: &str| {
             let g = scene.meshes.iter().find(|g| g.material == key).unwrap();
@@ -2192,9 +2198,9 @@ mod tests {
         let (lo, hi) = extent("car/body");
         // Its roof's height over the road its wheels stand on.
         let (length, width, height) = (hi[0] - lo[0], hi[2] - lo[2], hi[1]);
-        assert!((4.5..4.9).contains(&length), "a car {length:.2} m long");
+        assert!((4.4..5.1).contains(&length), "a car {length:.2} m long");
         assert!(
-            (1.7..2.1).contains(&width),
+            (1.7..2.35).contains(&width),
             "a car {width:.2} m wide over its mirrors"
         );
         assert!((1.35..1.6).contains(&height), "a car {height:.2} m high");
@@ -2205,13 +2211,13 @@ mod tests {
             wlo[1]
         );
         assert!(
-            whi[0] - wlo[0] > 3.0 && whi[2] - wlo[2] < 2.0,
+            whi[0] - wlo[0] > 2.9 && whi[2] - wlo[2] < 2.0,
             "axles across the car"
         );
         // A pole is scaled by its height alone; across it stays a pole.
         let (_, network) = city();
         let mut builder = MeshBuilder::new();
-        build_prototypes(&mut builder);
+        build_prototypes(&mut builder, 1);
         place(&network, &mut builder, 42);
         let scene = builder.build();
         let (plo, phi) = extent("furniture/pole");

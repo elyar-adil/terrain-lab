@@ -18,6 +18,8 @@
 import { applyGroundKind, GROUND_KIND } from "./parcelGround";
 import * as THREE from "three";
 
+import { carMaterials } from "./carMaterials";
+
 import { patchBark } from "./bark";
 import { applyAntiTiling } from "./antiTile";
 import { patchElevationMaterial } from "./elevation";
@@ -989,32 +991,8 @@ roughnessFactor = clamp(roughnessFactor + smoothstep(60.0, 700.0, waterDist) * 0
   // you read at 200 m.
   standard("furniture/gantry.steel", { roughness: 0.42, metalness: 0.7, envMapIntensity: 0.9 }, 0x9298a0);
   standard("furniture/gantry.board", { roughness: 0.4, metalness: 0.1 }, 0x0f4c96);
-  // `car/body` deliberately has no per-vertex colours: the car is one shared
-  // prototype instanced 250 times, and its colour is the *instance* tint. Asking
-  // for `vertexColors` with no `color` attribute makes WebGL supply the default
-  // generic attribute, which is (0,0,0,1) — so every car renders pure black, and
-  // the draw-call counter is perfectly happy about it.
-  // Paint is a metallic base under a clear coat: the lacquer is what gives a
-  // car its second, sharper reflection.
-  register("car/body", new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.34, metalness: 0.4, clearcoat: 1.0, clearcoatRoughness: 0.06, envMapIntensity: 1.0 }));
-  // Glazing you can see through: the seats and the wheel behind it are modelled.
-  register("car/glass", new THREE.MeshPhysicalMaterial({
-    color: 0x2a3a3f, roughness: 0.04, metalness: 0.0, transparent: true, opacity: 0.4,
-    side: THREE.DoubleSide, depthWrite: false, envMapIntensity: 1.3,
-  }));
-  standard("car/wheel", { roughness: 0.92 }, 0x6a6a70);
-  standard("car/trim", { roughness: 0.7 }, 0x18191a);
-  standard("car/chrome", { roughness: 0.22, metalness: 1.0, envMapIntensity: 1.1 }, 0xc9cdd1);
-  register("car/lamp.front", new THREE.MeshPhysicalMaterial({ color: 0xe9eef2, roughness: 0.08, metalness: 0.2, clearcoat: 1.0 }));
-  register("car/lamp.rear", new THREE.MeshPhysicalMaterial({ color: 0x8a0d0d, roughness: 0.15, clearcoat: 1.0, emissive: 0x200000 }));
-  standard("car/interior", { roughness: 0.95, side: THREE.DoubleSide }, 0xffffff);
-  standard("car/plate", { roughness: 0.5 }, 0x1b3f9c);
-  // The wheel wells: seen from the road through the arch, so drawn from inside.
-  standard("car/well", { roughness: 0.95, side: THREE.DoubleSide }, 0x0c0c0d);
-  // The far model (beyond `CAR_NEAR_M`): plain paint, glass as a dark solid.
-  standard("car/far.body", { roughness: 0.3, metalness: 0.35, envMapIntensity: 1.0 }, 0xffffff);
-  standard("car/far.glass", { roughness: 0.12, metalness: 0.5, envMapIntensity: 1.1 }, 0x1c2429);
-  standard("car/far.wheel", { roughness: 0.92 }, 0x6a6a70);
+  // The generated cars: their materials are shared with the car harness.
+  for (const [key, material] of carMaterials()) register(key, material);
   patchBark(standard("bark", { roughness: 0.95, vertexColors: true }, 0xffffff));
 
   // Foliage: alpha-cut, double-sided, tinted per instance and per vertex.

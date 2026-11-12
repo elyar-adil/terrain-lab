@@ -25,6 +25,7 @@ export default defineConfig({
         "render-harness": path.resolve(__dirname, "render-harness.html"),
         "city-harness": path.resolve(__dirname, "city-harness.html"),
         gallery: path.resolve(__dirname, "gallery.html"),
+        "car-harness": path.resolve(__dirname, "car-harness.html"),
         "tree-harness": path.resolve(__dirname, "tree-harness.html"),
         "lod-harness": path.resolve(__dirname, "lod-harness.html"),
         "tree-lod": path.resolve(__dirname, "tree-lod.html"),

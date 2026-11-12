@@ -402,6 +402,43 @@ impl MeshBuilder {
             })
     }
 
+    /// Append an indexed mesh whole: vertices as `(position, normal)` and
+    /// triangles as indices into them. For a surface that was welded before it
+    /// got here, so that it costs one vertex where its triangles meet.
+    pub fn indexed(&mut self, material: &str, vertices: &[(Vec3, Vec3)], indices: &[u32]) {
+        let buffers = self.buffers(material);
+        if buffers.with_colors || buffers.with_uvs {
+            return;
+        }
+        let base = (buffers.positions.len() / 3) as u32;
+        for (position, normal) in vertices {
+            buffers
+                .positions
+                .extend_from_slice(&[position.x, position.y, position.z]);
+            buffers
+                .normals
+                .extend_from_slice(&[normal.x, normal.y, normal.z]);
+        }
+        buffers
+            .indices
+            .extend(indices.iter().map(|index| base + index));
+    }
+
+    /// Append a finished mesh as it stands: flat position and normal buffers
+    /// and the indices into them.
+    pub fn append(&mut self, material: &str, positions: &[f32], normals: &[f32], indices: &[u32]) {
+        let buffers = self.buffers(material);
+        if buffers.with_colors || buffers.with_uvs || positions.len() != normals.len() {
+            return;
+        }
+        let base = (buffers.positions.len() / 3) as u32;
+        buffers.positions.extend_from_slice(positions);
+        buffers.normals.extend_from_slice(normals);
+        buffers
+            .indices
+            .extend(indices.iter().map(|index| base + index));
+    }
+
     /// Append a triangle with an explicit per-vertex normal.  Used for
     /// chamfered or sloping geometry where `compute_normal` would be wrong.
     pub fn triangle(
