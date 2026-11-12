@@ -69,7 +69,7 @@ pub(super) fn build(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -
 
     // --- wheel arches: true circles, through the flank and the floor beside it.
     let flank = |p: Vec3| (spec.width * 0.5 - 0.42) - p.z.abs();
-    let from_axle = |p: Vec3, axle: f32| form.from_axle(p.x, p.y, axle);
+    let from_axle = |p: Vec3, axle: f32| form.to_axle(p.x, p.y, axle);
     let nearest_axle = |p: Vec3| from_axle(p, -half_base).min(from_axle(p, half_base));
     soup.cut(
         &|p| (nearest_axle(p) - arch).max(flank(p)),
@@ -462,8 +462,8 @@ fn sculpt(soup: &mut Soup, form: &Form) {
     // The hollow above the sill.
     let hollow = |p: Vec3| p.y - (form.floor(p.x) + 0.26);
     let from_axle = |p: Vec3| {
-        form.from_axle(p.x, p.y, -half_base)
-            .min(form.from_axle(p.x, p.y, half_base))
+        form.to_axle(p.x, p.y, -half_base)
+            .min(form.to_axle(p.x, p.y, half_base))
     };
     let between = |p: Vec3| smoothstep(arch + 0.02, arch + 0.16, from_axle(p));
     // Bonnet creases, from the screen pillars in toward the grille.

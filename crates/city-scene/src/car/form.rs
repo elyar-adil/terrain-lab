@@ -339,7 +339,7 @@ impl<'a> Form<'a> {
     }
     /// The distance of a point of the flank from an axle, measured the way
     /// this design's wheel arches are drawn: round, or squared off.
-    pub fn from_axle(&self, x: f32, y: f32, axle: f32) -> f32 {
+    pub fn to_axle(&self, x: f32, y: f32, axle: f32) -> f32 {
         let n = self.spec.style.arch_square;
         let (dx, dy) = ((x - axle).abs(), (y - self.spec.wheel_r).abs());
         (dx.powf(n) + dy.powf(n)).powf(1.0 / n)
