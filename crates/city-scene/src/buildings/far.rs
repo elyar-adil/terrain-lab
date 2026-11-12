@@ -93,7 +93,11 @@ pub fn far_look(building: &ModernBuilding, podium: Option<(f32, u16)>) -> Option
     if cn_residential::applies(building) {
         Some(cn_residential::far_look(building, podium))
     } else if cn_commercial::applies(building) {
-        Some(cn_commercial::far_look(building, area_m2(&building.footprint), podium))
+        Some(cn_commercial::far_look(
+            building,
+            area_m2(&building.footprint),
+            podium,
+        ))
     } else {
         None
     }
@@ -116,7 +120,8 @@ fn inside(ring: &[urban::Point], x: f64, y: f64) -> bool {
     for i in 0..ring.len() {
         let (a, b) = (&ring[i], &ring[j]);
         if (a.y_km as f64 > y) != (b.y_km as f64 > y)
-            && x < (b.x_km as f64 - a.x_km as f64) * (y - a.y_km as f64) / (b.y_km as f64 - a.y_km as f64)
+            && x < (b.x_km as f64 - a.x_km as f64) * (y - a.y_km as f64)
+                / (b.y_km as f64 - a.y_km as f64)
                 + a.x_km as f64
         {
             inside = !inside;
@@ -154,8 +159,18 @@ pub fn podiums_of(buildings: &[ModernBuilding]) -> Vec<Option<(f32, u16)>> {
                 return None;
             }
             let n = building.footprint.len() as f64;
-            let cx = building.footprint.iter().map(|p| p.x_km as f64).sum::<f64>() / n;
-            let cy = building.footprint.iter().map(|p| p.y_km as f64).sum::<f64>() / n;
+            let cx = building
+                .footprint
+                .iter()
+                .map(|p| p.x_km as f64)
+                .sum::<f64>()
+                / n;
+            let cy = building
+                .footprint
+                .iter()
+                .map(|p| p.y_km as f64)
+                .sum::<f64>()
+                / n;
             let mut best: Option<(f32, u16)> = None;
             for (other, under) in buildings.iter().enumerate() {
                 let e = boxes[other];
@@ -198,7 +213,8 @@ pub fn attach_far_looks(payload: &mut serde_json::Value, cities: &[urban::Modern
         };
         let podiums = podiums_of(&city.buildings);
         for ((value, building), podium) in buildings.iter_mut().zip(&city.buildings).zip(podiums) {
-            let (Some(object), Some(look)) = (value.as_object_mut(), far_look(building, podium)) else {
+            let (Some(object), Some(look)) = (value.as_object_mut(), far_look(building, podium))
+            else {
                 continue;
             };
             if let Ok(look) = serde_json::to_value(look) {
@@ -210,7 +226,11 @@ pub fn attach_far_looks(payload: &mut serde_json::Value, cities: &[urban::Modern
 
 fn srgb_to_linear(byte: u8) -> f32 {
     let v = byte as f32 / 255.0;
-    if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    if v <= 0.04045 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 fn texture_mean(texture: &crate::textures::BakedTexture) -> [f32; 3] {
@@ -221,7 +241,11 @@ fn texture_mean(texture: &crate::textures::BakedTexture) -> [f32; 3] {
             sum[c] += srgb_to_linear(px[c]) as f64;
         }
     }
-    [(sum[0] / n) as f32, (sum[1] / n) as f32, (sum[2] / n) as f32]
+    [
+        (sum[0] / n) as f32,
+        (sum[1] / n) as f32,
+        (sum[2] / n) as f32,
+    ]
 }
 
 /// The mean colour of the roof covering the detail puts on a building: the flat
@@ -315,7 +339,12 @@ pub(crate) fn bay_of(elevation: &Elevation) -> Bay {
             Part::Curtain { module: m } => {
                 module = m;
                 kind = KIND_CURTAIN;
-                window = [span.x0, span.x1, crate::facades::cn_grammar::SPANDREL_M, elevation.storey_m];
+                window = [
+                    span.x0,
+                    span.x1,
+                    crate::facades::cn_grammar::SPANDREL_M,
+                    elevation.storey_m,
+                ];
             }
             Part::Pier => pier = pier.max(w),
             _ => {}
@@ -350,7 +379,10 @@ mod tests {
             id,
             parcel_id: id / 3,
             footprint: vec![
-                Point { x_km: 0.0, y_km: 0.0 },
+                Point {
+                    x_km: 0.0,
+                    y_km: 0.0,
+                },
                 Point { x_km: k, y_km: 0.0 },
                 Point { x_km: k, y_km: k },
                 Point { x_km: 0.0, y_km: k },
@@ -377,8 +409,14 @@ mod tests {
         for id in 0..60_u32 {
             let residential = building(id, ParcelUse::Residential, 6 + (id % 30) as u16, 60.0);
             let look = far_look(&residential, None).expect("residential has a look");
-            assert!((look.roof_m - cn_residential::roof_height(&residential, &mut table)).abs() < 1e-4);
-            assert!(look.storey_m >= 2.7 && look.storey_m <= 3.1, "storey {}", look.storey_m);
+            assert!(
+                (look.roof_m - cn_residential::roof_height(&residential, &mut table)).abs() < 1e-4
+            );
+            assert!(
+                look.storey_m >= 2.7 && look.storey_m <= 3.1,
+                "storey {}",
+                look.storey_m
+            );
             assert!(look.wall.iter().all(|c| (0.0..=1.0).contains(c)));
             assert!(look.unit_w > 2.0 && look.window[1] <= look.unit_w + 1e-3);
 
@@ -400,7 +438,10 @@ mod tests {
         podium.footprint = podium
             .footprint
             .iter()
-            .map(|p| Point { x_km: p.x_km - 0.02, y_km: p.y_km - 0.02 })
+            .map(|p| Point {
+                x_km: p.x_km - 0.02,
+                y_km: p.y_km - 0.02,
+            })
             .collect();
         let tower = building(2, ParcelUse::Residential, 30, 30.0);
         let found = podiums_of(&[podium.clone(), tower.clone()]);
@@ -420,7 +461,10 @@ mod tests {
         for seed in 0..40_u32 {
             let design = residential_design(seed * 977, Era::Modern, 18, false);
             let bay = bay_of(&design.front);
-            assert!(bay.window[1] > bay.window[0], "no window found for seed {seed}");
+            assert!(
+                bay.window[1] > bay.window[0],
+                "no window found for seed {seed}"
+            );
             assert!(bay.window[1] <= design.front.width + 1e-3);
             assert!(bay.window[3] > bay.window[2]);
             assert!(bay.window[3] <= design.front.storey_m + 1e-3);
@@ -433,14 +477,25 @@ mod tests {
         let lum = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
         for pitched in [None, Some(false), Some(true)] {
             let mean = roof_mean(pitched);
-            assert!(lum(mean) >= 0.08, "roof {pitched:?} luminance {}", lum(mean));
+            assert!(
+                lum(mean) >= 0.08,
+                "roof {pitched:?} luminance {}",
+                lum(mean)
+            );
             assert!(lum(mean) <= 0.5);
         }
         for id in 0..80_u32 {
-            for use_type in [ParcelUse::Residential, ParcelUse::Commercial, ParcelUse::Village] {
+            for use_type in [
+                ParcelUse::Residential,
+                ParcelUse::Commercial,
+                ParcelUse::Village,
+            ] {
                 let b = building(id, use_type, 3 + (id % 35) as u16, 55.0);
                 let look = far_look(&b, None).unwrap();
-                assert!(lum(look.roof) >= 0.08, "building {id} {use_type:?} roof is dark");
+                assert!(
+                    lum(look.roof) >= 0.08,
+                    "building {id} {use_type:?} roof is dark"
+                );
                 let expected = roof_mean(match (look.crown, b.floors >= 19) {
                     (2, false) if b.use_type != ParcelUse::Commercial => Some(look.terracotta),
                     (3, false) => Some(false),

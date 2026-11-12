@@ -107,12 +107,7 @@ pub enum Pin {
 /// `Free`; segments flagged `straight` give up at most half their length to
 /// the arcs at their ends. Returns `None` if a `Fixed` corner cannot be
 /// rounded to `r_min`.
-pub fn fillet(
-    vertices: &[(P, Pin)],
-    straight: &[bool],
-    r_min: f32,
-    r_pref: f32,
-) -> Option<Vec<P>> {
+pub fn fillet(vertices: &[(P, Pin)], straight: &[bool], r_min: f32, r_pref: f32) -> Option<Vec<P>> {
     let mut v: Vec<(P, Pin, bool)> = Vec::new(); // vertex, pin, segment-after-is-straight
     for (i, (p, pin)) in vertices.iter().enumerate() {
         v.push((*p, *pin, straight.get(i).copied().unwrap_or(false)));
@@ -143,7 +138,13 @@ pub fn fillet(
                 if std::env::var("RAIL_DEBUG").is_ok() {
                     eprintln!(
                         "  corner {i}/{n} {:?} theta {:.1} deg, tcap {:.0} m, r {:.0} m < {:.0}; seg {:.0}/{:.0}",
-                        v[i].1, theta.to_degrees(), t_cap, r, r_min, seg[i - 1], seg[i]
+                        v[i].1,
+                        theta.to_degrees(),
+                        t_cap,
+                        r,
+                        r_min,
+                        seg[i - 1],
+                        seg[i]
                     );
                 }
                 failing = Some(i);

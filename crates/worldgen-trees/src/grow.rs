@@ -925,7 +925,9 @@ pub fn grow(spec: &TreeSpec, lod: u8) -> Tree {
         let size = if cards {
             // Cards tile the crown's skin (about 4 pi r^2 with overlap), not its leaf area.
             let r = grower.crown.radius.max(0.8);
-            (4.0 * std::f32::consts::PI * r * r * 2.6 / n_target).sqrt().clamp(0.8, 4.0)
+            (4.0 * std::f32::consts::PI * r * r * 2.6 / n_target)
+                .sqrt()
+                .clamp(0.8, 4.0)
         } else {
             (area_total / (n_target * k))
                 .sqrt()

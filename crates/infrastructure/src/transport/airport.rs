@@ -1,9 +1,9 @@
 //! Airport siting and layout. See `docs/transport-infrastructure.md` section 3.
 
+use super::World;
 use super::geometry::{self as g, P, Pin};
 use super::rail::route_between;
 use super::wind::WindRose;
-use super::World;
 use crate::{SettlementClass, SettlementSite};
 use serde::{Deserialize, Serialize};
 use urban::{AerodromeCode, AirfieldPlan, Point};
@@ -99,10 +99,7 @@ pub fn plan_airport(
             if !(10.0..=40.0).contains(&d_km) {
                 continue;
             }
-            if settlements
-                .iter()
-                .any(|s| g::dist(c, to_m(s)) < 4000.0)
-            {
+            if settlements.iter().any(|s| g::dist(c, to_m(s)) < 4000.0) {
                 continue;
             }
             let toward = g::unit(g::sub(city_m, c));
@@ -110,7 +107,11 @@ pub fn plan_airport(
                 let axis = (k as f32 * 10.0).to_radians();
                 let a = [axis.cos(), axis.sin()];
                 let n0 = [-a[1], a[0]];
-                let sign = if n0[0] * toward[0] + n0[1] * toward[1] >= 0.0 { 1.0 } else { -1.0 };
+                let sign = if n0[0] * toward[0] + n0[1] * toward[1] >= 0.0 {
+                    1.0
+                } else {
+                    -1.0
+                };
                 let n = [n0[0] * sign, n0[1] * sign];
                 // Sample the platform: along +-(L/2+300), across -250..+700.
                 let (mut sum, mut cnt) = (0.0_f32, 0.0_f32);
@@ -186,7 +187,9 @@ pub fn plan_airport(
                         let ang = j as f32 / 16.0 * std::f32::consts::TAU;
                         let p = [c[0] + ang.cos() * 2500.0, c[1] + ang.sin() * 2500.0];
                         let i = idx(p);
-                        tr.wetland[i].max(tr.lake[i]).max(f32::from(tr.water[i] > 0.4))
+                        tr.wetland[i]
+                            .max(tr.lake[i])
+                            .max(f32::from(tr.water[i] > 0.4))
                     })
                     .sum::<f32>()
                     / 16.0;
@@ -225,7 +228,10 @@ pub fn plan_airport(
         fit.elevation,
     );
     // Access expressway: forecourt to the city by the cheapest ground.
-    let forecourt = plan.to_world(plan.car_park.x0 + (plan.car_park.x1 - plan.car_park.x0) * 0.5, plan.fence.z1 + 40.0);
+    let forecourt = plan.to_world(
+        plan.car_park.x0 + (plan.car_park.x1 - plan.car_park.x0) * 0.5,
+        plan.fence.z1 + 40.0,
+    );
     let from = [forecourt.x_km * 1000.0, forecourt.y_km * 1000.0];
     let access = route_between(world, urban_land, from, city_m)
         .map(|path| {
@@ -233,7 +239,16 @@ pub fn plan_airport(
             let verts: Vec<(P, Pin)> = simple
                 .iter()
                 .enumerate()
-                .map(|(i, p)| (*p, if i == 0 || i + 1 == simple.len() { Pin::Fixed } else { Pin::Free }))
+                .map(|(i, p)| {
+                    (
+                        *p,
+                        if i == 0 || i + 1 == simple.len() {
+                            Pin::Fixed
+                        } else {
+                            Pin::Free
+                        },
+                    )
+                })
                 .collect();
             let flags = vec![false; verts.len()];
             let curve = g::fillet(&verts, &flags, 450.0, 900.0).unwrap_or(simple);
@@ -249,7 +264,8 @@ pub fn plan_airport(
         distance_to_city_km: fit.distance_km,
         wind_usability: usability[(fit.axis.to_degrees() / 10.0).round() as usize % HEADINGS],
         wind_usability_13kt: strict[(fit.axis.to_degrees() / 10.0).round() as usize % HEADINGS],
-        perpendicular_usability_13kt: strict[((fit.axis.to_degrees() / 10.0).round() as usize + 9) % HEADINGS],
+        perpendicular_usability_13kt: strict
+            [((fit.axis.to_degrees() / 10.0).round() as usize + 9) % HEADINGS],
         relief_m: fit.relief,
         longitudinal_slope: fit.slope,
         wind: rose,
@@ -267,7 +283,11 @@ impl Airport {
         }
         let plan = &self.plan;
         let cell_km = world_size_km / (mesh_size - 1) as f32;
-        let r = plan.platform.x1.hypot(plan.platform.z1.abs().max(plan.platform.z0.abs())) + 400.0;
+        let r = plan
+            .platform
+            .x1
+            .hypot(plan.platform.z1.abs().max(plan.platform.z0.abs()))
+            + 400.0;
         let c = plan.centre;
         let span = (r / 1000.0 / cell_km).ceil() as isize + 1;
         let (cx, cy) = (

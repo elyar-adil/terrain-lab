@@ -126,11 +126,23 @@ pub(super) fn plan_plot(
             let crop = if near_town {
                 old
             } else if wet && s.temperature_c > 12.0 {
-                if pick < 0.7 { CropKind::Rice } else { CropKind::Vegetables }
+                if pick < 0.7 {
+                    CropKind::Rice
+                } else {
+                    CropKind::Vegetables
+                }
             } else if s.temperature_c < 8.0 {
-                if pick < 0.6 { CropKind::Wheat } else { CropKind::Rapeseed }
+                if pick < 0.6 {
+                    CropKind::Wheat
+                } else {
+                    CropKind::Rapeseed
+                }
             } else if s.moisture < 0.4 {
-                if pick < 0.6 { CropKind::Wheat } else { CropKind::Corn }
+                if pick < 0.6 {
+                    CropKind::Wheat
+                } else {
+                    CropKind::Corn
+                }
             } else if pick < 0.4 {
                 CropKind::Corn
             } else if pick < 0.7 {
@@ -202,11 +214,38 @@ mod tests {
     #[test]
     fn the_land_decides_what_is_farmed() {
         assert_eq!(classify(&sample()), Land::Plain);
-        assert_eq!(classify(&CountrySample { slope: 0.2, ..sample() }), Land::Terrace);
-        assert_eq!(classify(&CountrySample { slope: 0.5, ..sample() }), Land::Barren);
-        assert_eq!(classify(&CountrySample { moisture: 0.1, ..sample() }), Land::Arid);
-        assert_eq!(classify(&CountrySample { soil: 0.02, ..sample() }), Land::Barren);
+        assert_eq!(
+            classify(&CountrySample {
+                slope: 0.2,
+                ..sample()
+            }),
+            Land::Terrace
+        );
+        assert_eq!(
+            classify(&CountrySample {
+                slope: 0.5,
+                ..sample()
+            }),
+            Land::Barren
+        );
+        assert_eq!(
+            classify(&CountrySample {
+                moisture: 0.1,
+                ..sample()
+            }),
+            Land::Arid
+        );
+        assert_eq!(
+            classify(&CountrySample {
+                soil: 0.02,
+                ..sample()
+            }),
+            Land::Barren
+        );
         assert!(belts_here(&sample()));
-        assert!(!belts_here(&CountrySample { slope: 0.2, ..sample() }));
+        assert!(!belts_here(&CountrySample {
+            slope: 0.2,
+            ..sample()
+        }));
     }
 }

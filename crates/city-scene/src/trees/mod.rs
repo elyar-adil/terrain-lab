@@ -64,8 +64,7 @@ mod shrub;
 
 pub use cards::{
     CARD_WINDOW, card_tile_m, chromaticity, colour_distance, leaf_card_textures, luma,
-    plant_card_textures,
-    mean_albedo_rgb, opaque_albedo, target_coverage, tuft_texture,
+    mean_albedo_rgb, opaque_albedo, plant_card_textures, target_coverage, tuft_texture,
 };
 pub use far::{FAR_SPECIES, FarTree, FarTreePayload, far_tree_payload, far_tree_set};
 pub use plant::{TreeOutput, TreeRole, plant, plant_in_climate, plant_styled, species_for_parcel};

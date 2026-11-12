@@ -65,59 +65,419 @@ macro_rules! check {
 /// test suite; lower them as defects are fixed, never raise them.
 pub const CHECKS: &[CheckInfo] = &[
     // (a) ground and water
-    check!("water.building", "ground", "building footprint in the river channel", "urban parcels / buildings::river", 3, 3, 0),
-    check!("water.road", "ground", "road at grade through the river channel", "urban roads + network deck", 3, 3, 0),
-    check!("water.tree", "ground", "tree standing in the river channel", "trees::plant", 2, 2, 0),
-    check!("water.furniture", "ground", "lamp, pole or sign standing in the river channel", "furniture", 2, 2, 1),
-    check!("water.field", "ground", "field ring in the river channel", "urban landscape / crops", 2, 3, 0),
-    check!("ground.level", "ground", "object not on the surface under it (floating, or sunk into a deck)", "furniture / trees", 2, 2, 0),
-    check!("ground.slope_building", "ground", "building on slope steeper than 15 percent", "urban parcels", 2, 2, 0),
-    check!("ground.slope_field", "ground", "cultivated field on slope steeper than 25 degrees", "urban landscape", 2, 2, 0),
+    check!(
+        "water.building",
+        "ground",
+        "building footprint in the river channel",
+        "urban parcels / buildings::river",
+        3,
+        3,
+        0
+    ),
+    check!(
+        "water.road",
+        "ground",
+        "road at grade through the river channel",
+        "urban roads + network deck",
+        3,
+        3,
+        0
+    ),
+    check!(
+        "water.tree",
+        "ground",
+        "tree standing in the river channel",
+        "trees::plant",
+        2,
+        2,
+        0
+    ),
+    check!(
+        "water.furniture",
+        "ground",
+        "lamp, pole or sign standing in the river channel",
+        "furniture",
+        2,
+        2,
+        1
+    ),
+    check!(
+        "water.field",
+        "ground",
+        "field ring in the river channel",
+        "urban landscape / crops",
+        2,
+        3,
+        0
+    ),
+    check!(
+        "ground.level",
+        "ground",
+        "object not on the surface under it (floating, or sunk into a deck)",
+        "furniture / trees",
+        2,
+        2,
+        0
+    ),
+    check!(
+        "ground.slope_building",
+        "ground",
+        "building on slope steeper than 15 percent",
+        "urban parcels",
+        2,
+        2,
+        0
+    ),
+    check!(
+        "ground.slope_field",
+        "ground",
+        "cultivated field on slope steeper than 25 degrees",
+        "urban landscape",
+        2,
+        2,
+        0
+    ),
     // (b) overlaps
-    check!("overlap.building_building", "overlap", "two buildings overlapping", "urban parcels", 3, 3, 0),
-    check!("overlap.building_road", "overlap", "building inside a carriageway, junction or under a deck", "urban parcels vs network", 3, 3, 0),
-    check!("overlap.building_field", "overlap", "building inside a field", "urban landscape", 2, 2, 0),
-    check!("overlap.field_road", "overlap", "field ring crossing a carriageway", "urban landscape", 2, 2, 0),
-    check!("overlap.tree_road", "overlap", "tree trunk in a motor lane or junction", "trees::plant", 3, 2, 0),
-    check!("overlap.tree_building", "overlap", "tree trunk inside a building (on its roof)", "trees::plant", 3, 2, 0),
-    check!("overlap.furniture_lane", "overlap", "lamp, pole, sign, bin or shelter in a motor lane or junction", "furniture", 3, 2, 0),
-    check!("overlap.furniture_building", "overlap", "lamp, pole or sign inside a building", "furniture", 3, 2, 0),
-    check!("overlap.vehicle_building", "overlap", "vehicle inside a building", "traffic", 3, 2, 0),
-    check!("overlap.vehicle_offroad", "overlap", "vehicle not on any carriageway", "traffic", 3, 2, 0),
-    check!("overlap.fence_road", "overlap", "compound fence or gate on a carriageway", "urban parcels (compounds)", 2, 2, 0),
+    check!(
+        "overlap.building_building",
+        "overlap",
+        "two buildings overlapping",
+        "urban parcels",
+        3,
+        3,
+        0
+    ),
+    check!(
+        "overlap.building_road",
+        "overlap",
+        "building inside a carriageway, junction or under a deck",
+        "urban parcels vs network",
+        3,
+        3,
+        0
+    ),
+    check!(
+        "overlap.building_field",
+        "overlap",
+        "building inside a field",
+        "urban landscape",
+        2,
+        2,
+        0
+    ),
+    check!(
+        "overlap.field_road",
+        "overlap",
+        "field ring crossing a carriageway",
+        "urban landscape",
+        2,
+        2,
+        0
+    ),
+    check!(
+        "overlap.tree_road",
+        "overlap",
+        "tree trunk in a motor lane or junction",
+        "trees::plant",
+        3,
+        2,
+        0
+    ),
+    check!(
+        "overlap.tree_building",
+        "overlap",
+        "tree trunk inside a building (on its roof)",
+        "trees::plant",
+        3,
+        2,
+        0
+    ),
+    check!(
+        "overlap.furniture_lane",
+        "overlap",
+        "lamp, pole, sign, bin or shelter in a motor lane or junction",
+        "furniture",
+        3,
+        2,
+        0
+    ),
+    check!(
+        "overlap.furniture_building",
+        "overlap",
+        "lamp, pole or sign inside a building",
+        "furniture",
+        3,
+        2,
+        0
+    ),
+    check!(
+        "overlap.vehicle_building",
+        "overlap",
+        "vehicle inside a building",
+        "traffic",
+        3,
+        2,
+        0
+    ),
+    check!(
+        "overlap.vehicle_offroad",
+        "overlap",
+        "vehicle not on any carriageway",
+        "traffic",
+        3,
+        2,
+        0
+    ),
+    check!(
+        "overlap.fence_road",
+        "overlap",
+        "compound fence or gate on a carriageway",
+        "urban parcels (compounds)",
+        2,
+        2,
+        0
+    ),
     // (c) bridges and grade separation
-    check!("bridge.clear_water", "bridge", "bridge deck less than 1.5 m over the water", "network deck", 3, 3, 0),
-    check!("bridge.clear_road", "bridge", "deck over a road with less than 4.5 m headroom", "network deck", 3, 3, 0),
-    check!("bridge.at_grade_crossing", "bridge", "two roads cross at the same level with no junction", "urban roads / expressway", 3, 3, 0),
-    check!("bridge.step", "bridge", "road end not level with its junction (a step)", "network", 2, 2, 0),
-    check!("bridge.gap", "bridge", "road end not meeting its junction in plan (a gap)", "network", 2, 2, 0),
-    check!("bridge.grade", "bridge", "grade above the standard for the road", "network deck", 2, 3, 0),
-    check!("network.warning", "bridge", "engineering problem the network derivation itself reported", "network", 2, 2, 0),
+    check!(
+        "bridge.clear_water",
+        "bridge",
+        "bridge deck less than 1.5 m over the water",
+        "network deck",
+        3,
+        3,
+        0
+    ),
+    check!(
+        "bridge.clear_road",
+        "bridge",
+        "deck over a road with less than 4.5 m headroom",
+        "network deck",
+        3,
+        3,
+        0
+    ),
+    check!(
+        "bridge.at_grade_crossing",
+        "bridge",
+        "two roads cross at the same level with no junction",
+        "urban roads / expressway",
+        3,
+        3,
+        0
+    ),
+    check!(
+        "bridge.step",
+        "bridge",
+        "road end not level with its junction (a step)",
+        "network",
+        2,
+        2,
+        0
+    ),
+    check!(
+        "bridge.gap",
+        "bridge",
+        "road end not meeting its junction in plan (a gap)",
+        "network",
+        2,
+        2,
+        0
+    ),
+    check!(
+        "bridge.grade",
+        "bridge",
+        "grade above the standard for the road",
+        "network deck",
+        2,
+        3,
+        0
+    ),
+    check!(
+        "network.warning",
+        "bridge",
+        "engineering problem the network derivation itself reported",
+        "network",
+        2,
+        2,
+        0
+    ),
     // (d) road network
-    check!("net.orphan", "network", "road component not connected to the main network", "urban graph", 3, 3, 0),
-    check!("net.dead_end", "network", "dead end implausible for its class or length", "urban graph", 2, 2, 2),
-    check!("net.lane_width", "network", "lane or footway width outside the standard", "worldgen-contracts", 2, 2, 0),
-    check!("net.junction_angle", "network", "junction arms closer than 30 degrees", "urban graph / tidy", 2, 2, 0),
-    check!("net.junction_control", "network", "junction with the wrong or no control for its class", "network / street::signals", 2, 2, 0),
+    check!(
+        "net.orphan",
+        "network",
+        "road component not connected to the main network",
+        "urban graph",
+        3,
+        3,
+        0
+    ),
+    check!(
+        "net.dead_end",
+        "network",
+        "dead end implausible for its class or length",
+        "urban graph",
+        2,
+        2,
+        2
+    ),
+    check!(
+        "net.lane_width",
+        "network",
+        "lane or footway width outside the standard",
+        "worldgen-contracts",
+        2,
+        2,
+        0
+    ),
+    check!(
+        "net.junction_angle",
+        "network",
+        "junction arms closer than 30 degrees",
+        "urban graph / tidy",
+        2,
+        2,
+        0
+    ),
+    check!(
+        "net.junction_control",
+        "network",
+        "junction with the wrong or no control for its class",
+        "network / street::signals",
+        2,
+        2,
+        0
+    ),
     // (e) buildings
-    check!("bldg.storey", "building", "floor-to-floor height outside the range for the use", "urban parcels / buildings", 2, 2, 1),
-    check!("bldg.height_use", "building", "height or storeys beyond what the use allows", "urban parcels", 2, 3, 0),
-    check!("bldg.street_access", "building", "no street or footway within reach of the building", "urban parcels", 2, 1, 0),
-    check!("bldg.spacing_highrise", "building", "two high-rises closer than 13 m (GB 50016)", "urban parcels", 2, 2, 0),
-    check!("bldg.sliver", "building", "gap between two buildings narrower than 4 m but not touching", "urban parcels", 1, 2, 0),
-    check!("bldg.degenerate", "building", "footprint under 12 square metres or self-crossing", "urban parcels", 1, 1, 0),
+    check!(
+        "bldg.storey",
+        "building",
+        "floor-to-floor height outside the range for the use",
+        "urban parcels / buildings",
+        2,
+        2,
+        1
+    ),
+    check!(
+        "bldg.height_use",
+        "building",
+        "height or storeys beyond what the use allows",
+        "urban parcels",
+        2,
+        3,
+        0
+    ),
+    check!(
+        "bldg.street_access",
+        "building",
+        "no street or footway within reach of the building",
+        "urban parcels",
+        2,
+        1,
+        0
+    ),
+    check!(
+        "bldg.spacing_highrise",
+        "building",
+        "two high-rises closer than 13 m (GB 50016)",
+        "urban parcels",
+        2,
+        2,
+        0
+    ),
+    check!(
+        "bldg.sliver",
+        "building",
+        "gap between two buildings narrower than 4 m but not touching",
+        "urban parcels",
+        1,
+        2,
+        0
+    ),
+    check!(
+        "bldg.degenerate",
+        "building",
+        "footprint under 12 square metres or self-crossing",
+        "urban parcels",
+        1,
+        1,
+        0
+    ),
     // (f) vegetation
-    check!("veg.species_climate", "vegetation", "species not in the planting zone of the site climate", "trees::zones / plant", 2, 2, 0),
-    check!("veg.size", "vegetation", "tree height or crown outside the species range", "trees::plant", 2, 2, 0),
+    check!(
+        "veg.species_climate",
+        "vegetation",
+        "species not in the planting zone of the site climate",
+        "trees::zones / plant",
+        2,
+        2,
+        0
+    ),
+    check!(
+        "veg.size",
+        "vegetation",
+        "tree height or crown outside the species range",
+        "trees::plant",
+        2,
+        2,
+        0
+    ),
     // (h) land use
-    check!("land.industrial_core", "landuse", "industrial building amid a dense residential core", "urban parcels", 2, 2, 0),
-    check!("land.village_water", "landuse", "village far from any water", "urban suburb", 1, 1, 0),
+    check!(
+        "land.industrial_core",
+        "landuse",
+        "industrial building amid a dense residential core",
+        "urban parcels",
+        2,
+        2,
+        0
+    ),
+    check!(
+        "land.village_water",
+        "landuse",
+        "village far from any water",
+        "urban suburb",
+        1,
+        1,
+        0
+    ),
     // (i) interchange
-    check!("ramp.grade", "interchange", "ramp grade above 5 percent", "network deck / expressway", 3, 3, 0),
-    check!("ramp.continuity", "interchange", "ramp end that joins no road", "urban expressway", 3, 3, 0),
+    check!(
+        "ramp.grade",
+        "interchange",
+        "ramp grade above 5 percent",
+        "network deck / expressway",
+        3,
+        3,
+        0
+    ),
+    check!(
+        "ramp.continuity",
+        "interchange",
+        "ramp end that joins no road",
+        "urban expressway",
+        3,
+        3,
+        0
+    ),
     // (j) level of detail
-    check!("lod.roof", "lod", "far roof height differs from the detail roof", "buildings::far", 2, 3, 9),
-    check!("lod.count", "lod", "buildings dropped from the detail but present in the far mass", "scene budget", 2, 3, 0),
+    check!(
+        "lod.roof",
+        "lod",
+        "far roof height differs from the detail roof",
+        "buildings::far",
+        2,
+        3,
+        9
+    ),
+    check!(
+        "lod.count",
+        "lod",
+        "buildings dropped from the detail but present in the far mass",
+        "scene budget",
+        2,
+        3,
+        0
+    ),
 ];
 
 pub fn info(id: &str) -> &'static CheckInfo {
@@ -213,20 +573,42 @@ impl Report {
         let i = &self.inventory;
         println!(
             "audited {} buildings, {} roads ({} bridges, {} ramps), {} junctions ({} signalised), {} trees, {} furniture, {} vehicles, {} fields, {} waterways (scene {}, terrain {})",
-            i.buildings, i.roads, i.bridges, i.ramps, i.junctions, i.signalised, i.trees, i.furniture, i.vehicles, i.fields, i.rivers,
+            i.buildings,
+            i.roads,
+            i.bridges,
+            i.ramps,
+            i.junctions,
+            i.signalised,
+            i.trees,
+            i.furniture,
+            i.vehicles,
+            i.fields,
+            i.rivers,
             if i.scene_checked { "yes" } else { "no" },
             if i.terrain_checked { "yes" } else { "no" }
         );
-        println!("{:<28} {:>6} {:>5} {:>3}  {}", "check", "count", "gate", "sev", "title");
+        println!(
+            "{:<28} {:>6} {:>5} {:>3}  {}",
+            "check", "count", "gate", "sev", "title"
+        );
         for s in &self.summaries {
-            let mark = if s.count > s.gate { "FAIL" } else if s.count > 0 { "ok" } else { "" };
+            let mark = if s.count > s.gate {
+                "FAIL"
+            } else if s.count > 0 {
+                "ok"
+            } else {
+                ""
+            };
             println!(
                 "{:<28} {:>6} {:>5} {:>3}  {} {}",
                 s.id, s.count, s.gate, s.severity, s.title, mark
             );
         }
         for s in self.ranked() {
-            println!("\n{} ({}, {} found, owner: {})", s.id, s.title, s.count, s.owner);
+            println!(
+                "\n{} ({}, {} found, owner: {})",
+                s.id, s.title, s.count, s.owner
+            );
             for v in s.worst.iter().take(top) {
                 println!(
                     "  at ({:.1}, {:.1})  {:.2}  {}  [{}]",

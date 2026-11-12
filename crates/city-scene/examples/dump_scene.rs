@@ -84,7 +84,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (None, None) if flag("--world").is_some() => {
             use terrain_core::{Landform, SimulationConfig, TerrainPreset, generate};
             let config = SimulationConfig {
-                seed: flag("--world").and_then(|v| v.parse().ok()).unwrap_or(284_735),
+                seed: flag("--world")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(284_735),
                 preset: TerrainPreset::Temperate,
                 landform: match flag("--landform").as_deref() {
                     Some("plateau") => Landform::Plateau,

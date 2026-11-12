@@ -162,8 +162,7 @@ pub fn asphalt_texture(size: usize) -> BakedTexture {
             // Two scales of aggregate: sand-sized grain, and stones two to three
             // texels across. Real wearing course is rough at both; a single
             // fine grain averages out to a smooth, flat grey at street distance.
-            let grain = (hash(17, ix, iy) - 0.5) * 40.0
-                + (hash(19, ix / 2, iy / 2) - 0.5) * 22.0;
+            let grain = (hash(17, ix, iy) - 0.5) * 40.0 + (hash(19, ix / 2, iy / 2) - 0.5) * 22.0;
             let chip = if hash(109, ix, iy) < 0.032 {
                 22.0 + hash(113, ix, iy) * 26.0
             } else {
@@ -514,7 +513,8 @@ pub fn grass_texture_in(size: usize, lush: f32) -> BakedTexture {
             // Patches of dry turf at a scale of a metre or two, yellower where
             // the sprinklers miss.
             let straw_share = (dry_amount * 0.85
-                + 0.30 * (signed_noise(47, u * 7.0, v * 7.0, 7.0) + 0.5).clamp(0.0, 1.0)
+                + 0.30
+                    * (signed_noise(47, u * 7.0, v * 7.0, 7.0) + 0.5).clamp(0.0, 1.0)
                     * (0.25 + dry_amount))
                 .clamp(0.0, 0.95);
             let base = [

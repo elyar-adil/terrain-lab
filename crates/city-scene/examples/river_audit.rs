@@ -28,8 +28,12 @@ fn dist_to_polyline(p: [f32; 2], line: &[[f32; 2]]) -> f32 {
 }
 
 fn main() {
-    let seed = flag("--seed").and_then(|v| v.parse().ok()).unwrap_or(42_u32);
-    let radius_km = flag("--radius-km").and_then(|v| v.parse().ok()).unwrap_or(0.5_f32);
+    let seed = flag("--seed")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(42_u32);
+    let radius_km = flag("--radius-km")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.5_f32);
     let city = generate_modern_chinese_city(ModernChinaSpec {
         seed,
         radius_km,
@@ -52,7 +56,12 @@ fn main() {
         water,
         setting
     );
-    println!("river line (local m): {:?}", line.iter().map(|p| [p[0].round(), p[1].round()]).collect::<Vec<_>>());
+    println!(
+        "river line (local m): {:?}",
+        line.iter()
+            .map(|p| [p[0].round(), p[1].round()])
+            .collect::<Vec<_>>()
+    );
     let mut bad = 0;
     for road in &network.roads {
         let length = road.carriageway.length();
@@ -103,8 +112,16 @@ fn main() {
             at_xz[0],
             at_xz[1],
             if over > 0 { min_over } else { f32::NAN },
-            if over > 0 { min_over - girder } else { f32::NAN },
-            if over > 0 { min_over - girder - water } else { f32::NAN },
+            if over > 0 {
+                min_over - girder
+            } else {
+                f32::NAN
+            },
+            if over > 0 {
+                min_over - girder - water
+            } else {
+                f32::NAN
+            },
             verdict
         );
     }

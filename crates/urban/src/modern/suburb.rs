@@ -689,7 +689,11 @@ pub(super) fn roadside_fields(
                         });
                         if !hit && !frame.near_water(&[p, p, p], 4.0) {
                             belt_trees.push(super::country::belt_tree(
-                                frame, p, &sample, seed, key * 977 + belts as i32 % 977,
+                                frame,
+                                p,
+                                &sample,
+                                seed,
+                                key * 977 + belts as i32 % 977,
                             ));
                             belts += 1;
                         }
@@ -768,7 +772,11 @@ pub(super) fn roadside_fields(
                     // Shelterbelt: a row of trees along the field's outer long edge on
                     // the fertile, watered plain.
                     if let Some(sample) = frame.country_at(c.0, c.1) {
-                        if super::country::belts_here(&sample) && depth == 2 && noise(1319) < 0.6 && belts < 1500 {
+                        if super::country::belts_here(&sample)
+                            && depth == 2
+                            && noise(1319) < 0.6
+                            && belts < 1500
+                        {
                             let (p, q) = (corners[3], corners[2]);
                             let el = (q.0 - p.0).hypot(q.1 - p.1);
                             let out = (n.0, n.1);
@@ -783,7 +791,11 @@ pub(super) fn roadside_fields(
                                 });
                                 if !hit && !frame.near_water(&[at, at, at], 4.0) {
                                     belt_trees.push(super::country::belt_tree(
-                                        frame, at, &sample, seed, k2 * 64 + belts as i32 % 64,
+                                        frame,
+                                        at,
+                                        &sample,
+                                        seed,
+                                        k2 * 64 + belts as i32 % 64,
                                     ));
                                     belts += 1;
                                 }

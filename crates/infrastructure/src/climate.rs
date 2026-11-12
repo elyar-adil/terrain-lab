@@ -17,11 +17,19 @@ const COAST_SEARCH_KM: f32 = 80.0;
 /// Window radius over which the climate fields are averaged, kilometres.
 const WINDOW_KM: f32 = 1.5;
 
-pub(crate) fn site_climate(terrain: &TerrainData, grid: WorldGrid, city: &ModernCity) -> SiteClimate {
+pub(crate) fn site_climate(
+    terrain: &TerrainData,
+    grid: WorldGrid,
+    city: &ModernCity,
+) -> SiteClimate {
     let n = grid.size;
     let km_per_cell = grid.cell_metres() / 1000.0;
-    let cx = (city.frame.origin.x_km / km_per_cell).round().clamp(0.0, (n - 1) as f32) as i64;
-    let cy = (city.frame.origin.y_km / km_per_cell).round().clamp(0.0, (n - 1) as f32) as i64;
+    let cx = (city.frame.origin.x_km / km_per_cell)
+        .round()
+        .clamp(0.0, (n - 1) as f32) as i64;
+    let cy = (city.frame.origin.y_km / km_per_cell)
+        .round()
+        .clamp(0.0, (n - 1) as f32) as i64;
     let reach = ((WINDOW_KM / km_per_cell).ceil() as i64).max(1);
     let mut sums = [0.0_f32; 4];
     let mut count = 0.0_f32;

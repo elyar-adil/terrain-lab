@@ -9,7 +9,8 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let (input, output) = (&args[1], &args[2]);
     let mut fixture: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(input).expect("read fixture")).expect("parse fixture");
+        serde_json::from_slice(&std::fs::read(input).expect("read fixture"))
+            .expect("parse fixture");
     let cities = fixture["result"]["modernCities"]
         .as_array_mut()
         .expect("result.modernCities");

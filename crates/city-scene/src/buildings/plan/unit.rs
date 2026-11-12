@@ -169,7 +169,12 @@ pub(super) struct Item {
 }
 
 fn item(func: Func, range: (f32, f32)) -> Item {
-    Item { func, min: range.0, max: range.1, absorb: false }
+    Item {
+        func,
+        min: range.0,
+        max: range.1,
+        absorb: false,
+    }
 }
 
 fn ceil_grid(v: f32) -> f32 {
@@ -202,7 +207,9 @@ pub(super) fn fill_row(rng: &mut Rng, w: f32, items: &[Item]) -> Option<Vec<f32>
     }
     // The sub-module remainder.
     let k = absorber.unwrap_or_else(|| {
-        (0..items.len()).max_by(|&a, &b| width[a].total_cmp(&width[b])).unwrap_or(0)
+        (0..items.len())
+            .max_by(|&a, &b| width[a].total_cmp(&width[b]))
+            .unwrap_or(0)
     });
     width[k] += slack;
     if let Some(a) = absorber {
@@ -247,13 +254,25 @@ pub(super) fn through_unit(
     let s_beds = match nb {
         1 => 1,
         2 => {
-            if old || rng.unit() < 0.4 { 1 } else { 2 }
+            if old || rng.unit() < 0.4 {
+                1
+            } else {
+                2
+            }
         }
         3 => {
-            if p.ws > 11.4 && rng.unit() < 0.35 { 3 } else { 2 }
+            if p.ws > 11.4 && rng.unit() < 0.35 {
+                3
+            } else {
+                2
+            }
         }
         _ => {
-            if rng.unit() < 0.6 { 3 } else { 2 }
+            if rng.unit() < 0.6 {
+                3
+            } else {
+                2
+            }
         }
     };
     let n_beds = nb - s_beds;
@@ -269,7 +288,10 @@ pub(super) fn through_unit(
         absorb: true,
     }];
     for b in 0..s_beds {
-        south.push(item(if b == 0 { Func::MasterBed } else { Func::Bed }, if b == 0 { er.master } else { er.bed }));
+        south.push(item(
+            if b == 0 { Func::MasterBed } else { Func::Bed },
+            if b == 0 { er.master } else { er.bed },
+        ));
     }
     shuffle(rng, &mut south);
     let sw = fill_row(rng, p.ws, &south)?;
@@ -299,7 +321,9 @@ pub(super) fn through_unit(
     shuffle(rng, &mut north);
     let last = north.len() - 1;
     if north[last].func.is_bedroom() {
-        let swap = (0..north.len()).filter(|&k| !north[k].func.is_bedroom()).collect::<Vec<_>>();
+        let swap = (0..north.len())
+            .filter(|&k| !north[k].func.is_bedroom())
+            .collect::<Vec<_>>();
         let k = swap[rng.int(swap.len() as u32) as usize];
         north.swap(last, k);
     }
@@ -347,9 +371,24 @@ pub(super) fn through_unit(
             }
         }
         let dark = matches!(it.func, Func::Store);
-        rooms.push(LRoom { func: it.func, rect, dark, enclosed: false });
+        rooms.push(LRoom {
+            func: it.func,
+            rect,
+            dark,
+            enclosed: false,
+        });
     }
-    finish(rng, er, cl, rooms, hall, p.ws, p.d, [true, false, true, p.west_gable], Entry::Hall(p.wn))
+    finish(
+        rng,
+        er,
+        cl,
+        rooms,
+        hall,
+        p.ws,
+        p.d,
+        [true, false, true, p.west_gable],
+        Entry::Hall(p.wn),
+    )
 }
 
 pub(super) struct Corner {
@@ -372,7 +411,10 @@ pub(super) fn corner_unit(rng: &mut Rng, er: &EraRules, cl: Climate, p: &Corner)
         absorb: true,
     }];
     for b in 0..nb {
-        front.push(item(if b == 0 { Func::MasterBed } else { Func::Bed }, if b == 0 { er.master } else { er.bed }));
+        front.push(item(
+            if b == 0 { Func::MasterBed } else { Func::Bed },
+            if b == 0 { er.master } else { er.bed },
+        ));
     }
     shuffle(rng, &mut front);
     let fw = fill_row(rng, p.w, &front)?;
@@ -384,14 +426,24 @@ pub(super) fn corner_unit(rng: &mut Rng, er: &EraRules, cl: Climate, p: &Corner)
     } else {
         back.push(item(Func::Store, (1.2, 1.8)));
     }
-    back.push(Item { func: Func::Hall, min: 2.4, max: 99.0, absorb: true });
+    back.push(Item {
+        func: Func::Hall,
+        min: 2.4,
+        max: 99.0,
+        absorb: true,
+    });
     // Kitchen first (it holds the gable window); bath and the rest follow.
     let bw = fill_row(rng, p.w, &back)?;
 
     let mut rooms = Vec::new();
     let mut x = 0.0;
     for (it, w) in front.iter().zip(&fw) {
-        rooms.push(LRoom { func: it.func, rect: Rect::new(x, 0.0, x + w, p.ds), dark: false, enclosed: false });
+        rooms.push(LRoom {
+            func: it.func,
+            rect: Rect::new(x, 0.0, x + w, p.ds),
+            dark: false,
+            enclosed: false,
+        });
         x += w;
     }
     let mut x = 0.0;
@@ -401,7 +453,12 @@ pub(super) fn corner_unit(rng: &mut Rng, er: &EraRules, cl: Climate, p: &Corner)
         if it.func == Func::Hall {
             hall = rooms.len();
         }
-        rooms.push(LRoom { func: it.func, rect: Rect::new(x, p.ds, x + w, p.d), dark, enclosed: false });
+        rooms.push(LRoom {
+            func: it.func,
+            rect: Rect::new(x, p.ds, x + w, p.d),
+            dark,
+            enclosed: false,
+        });
         x += w;
     }
     let _ = dr;
@@ -409,7 +466,17 @@ pub(super) fn corner_unit(rng: &mut Rng, er: &EraRules, cl: Climate, p: &Corner)
     if p.entry_u < h.x0 + 0.5 || p.entry_u > h.x1 - 0.5 {
         return None;
     }
-    finish(rng, er, cl, rooms, hall, p.w, p.d, [true, false, false, true], Entry::Back(p.entry_u))
+    finish(
+        rng,
+        er,
+        cl,
+        rooms,
+        hall,
+        p.w,
+        p.d,
+        [true, false, false, true],
+        Entry::Back(p.entry_u),
+    )
 }
 
 enum Entry {
@@ -482,7 +549,17 @@ fn finish(
     let doors = connect(rng, &rooms, interior, hall, &balcony_of)?;
     let mut openings = Vec::new();
     for i in 0..interior {
-        windows(rng, er, &rooms, i, balcony_of[i], bw, bd, ext, &mut openings);
+        windows(
+            rng,
+            er,
+            &rooms,
+            i,
+            balcony_of[i],
+            bw,
+            bd,
+            ext,
+            &mut openings,
+        );
     }
     // Entry door, left for the assembler to attach to the lobby.
     let mut doors = doors;
@@ -491,8 +568,19 @@ fn finish(
         Entry::Hall(wn) => ([wn, (h.y0 + h.y1) * 0.5], true),
         Entry::Back(u) => ([u, bd], false),
     };
-    doors.push(LDoor { a: hall, b: NONE, at, width: 1.0, vertical_wall, kind: DoorKind::Entry });
-    Some(Layout { rooms, doors, openings })
+    doors.push(LDoor {
+        a: hall,
+        b: NONE,
+        at,
+        width: 1.0,
+        vertical_wall,
+        kind: DoorKind::Entry,
+    });
+    Some(Layout {
+        rooms,
+        doors,
+        openings,
+    })
 }
 
 fn door_cost(from: Func, to: Func) -> u32 {
@@ -552,8 +640,19 @@ fn connect(
                 let slack = ((s.hi - s.lo) - 1.2).max(0.0) * 0.5;
                 let c = mid + (rng.unit() - 0.5) * slack;
                 let at = if s.vertical { [s.at, c] } else { [c, s.at] };
-                let width = if matches!(rooms[i].func, Func::Bath | Func::Wc | Func::Store) { 0.8 } else { 0.9 };
-                doors.push(LDoor { a: i, b: j, at, width, vertical_wall: s.vertical, kind: DoorKind::Internal });
+                let width = if matches!(rooms[i].func, Func::Bath | Func::Wc | Func::Store) {
+                    0.8
+                } else {
+                    0.9
+                };
+                doors.push(LDoor {
+                    a: i,
+                    b: j,
+                    at,
+                    width,
+                    vertical_wall: s.vertical,
+                    kind: DoorKind::Internal,
+                });
             }
             None => break,
         }
@@ -568,7 +667,14 @@ fn connect(
             let w = (s.hi - s.lo).min(1.8).max(0.9);
             let mid = (s.lo + s.hi) * 0.5;
             let at = if s.vertical { [s.at, mid] } else { [mid, s.at] };
-            doors.push(LDoor { a: i, b, at, width: w, vertical_wall: s.vertical, kind: DoorKind::Balcony });
+            doors.push(LDoor {
+                a: i,
+                b,
+                at,
+                width: w,
+                vertical_wall: s.vertical,
+                kind: DoorKind::Balcony,
+            });
         }
     }
     Some(doors)
@@ -592,8 +698,20 @@ fn windows(
     // coordinate of the face, outward normal.
     let faces: [(bool, f32, f32, [f32; 2], bool); 4] = [
         (r.y0.abs() < 1e-3 && ext[0], r.x0, r.x1, [0.0, -1.0], true),
-        ((r.x1 - bw).abs() < 1e-3 && ext[1], r.y0, r.y1, [1.0, 0.0], false),
-        ((r.y1 - bd).abs() < 1e-3 && ext[2], r.x0, r.x1, [0.0, 1.0], true),
+        (
+            (r.x1 - bw).abs() < 1e-3 && ext[1],
+            r.y0,
+            r.y1,
+            [1.0, 0.0],
+            false,
+        ),
+        (
+            (r.y1 - bd).abs() < 1e-3 && ext[2],
+            r.x0,
+            r.x1,
+            [0.0, 1.0],
+            true,
+        ),
         (r.x0.abs() < 1e-3 && ext[3], r.y0, r.y1, [-1.0, 0.0], false),
     ];
     let need = (r.w() - 0.2) * (r.d() - 0.2) / 7.0 * 1.12;
@@ -610,11 +728,24 @@ fn windows(
             _ => 0.0,
         };
         let mid = (lo + hi) * 0.5;
-        let mut put = |rng: &mut Rng, centre: f32, width: f32, sill: f32, head: f32, kind: OpeningKind| {
-            let at = if *along_x { [centre, coord] } else { [coord, centre] };
-            let _ = rng;
-            out.push(LOpening { at, normal: *normal, width, sill, head, kind, room: i });
-        };
+        let mut put =
+            |rng: &mut Rng, centre: f32, width: f32, sill: f32, head: f32, kind: OpeningKind| {
+                let at = if *along_x {
+                    [centre, coord]
+                } else {
+                    [coord, centre]
+                };
+                let _ = rng;
+                out.push(LOpening {
+                    at,
+                    normal: *normal,
+                    width,
+                    sill,
+                    head,
+                    kind,
+                    room: i,
+                });
+            };
         let margin = 0.3;
         let max_w = (len - 2.0 * margin).max(0.0);
         let jitter = |rng: &mut Rng, w: f32| {
@@ -635,7 +766,11 @@ fn windows(
             }
             Func::Living | Func::Dining => {
                 let w = quant((2.1f32).max(need / (head - 0.9)).min(max_w));
-                let w = if primary || room.func == Func::Dining { w } else { w.min(1.8) };
+                let w = if primary || room.func == Func::Dining {
+                    w
+                } else {
+                    w.min(1.8)
+                };
                 let c = jitter(rng, w);
                 put(rng, c, w, 0.9, head, OpeningKind::Window);
                 if room.func == Func::Living {
@@ -648,7 +783,11 @@ fn windows(
                 }
                 let base = rng.range(er.bed_win.0, er.bed_win.1);
                 let bay = primary && rng.unit() < er.bay_window;
-                let (sill, kind): (f32, OpeningKind) = if bay { (0.45, OpeningKind::Bay) } else { (0.9, OpeningKind::Window) };
+                let (sill, kind): (f32, OpeningKind) = if bay {
+                    (0.45, OpeningKind::Bay)
+                } else {
+                    (0.9, OpeningKind::Window)
+                };
                 let hh = if bay { head + 0.1 } else { head };
                 let w = quant(base.max(need / (hh - sill.max(0.5))).min(max_w));
                 let c = jitter(rng, w);
@@ -699,9 +838,20 @@ fn ac_ledge(
     let w = 0.9;
     let right = hi - (centre + width * 0.5);
     let left = (centre - width * 0.5) - lo;
-    let (room, dir) = if right >= left { (right, 1.0) } else { (left, -1.0) };
+    let (room, dir) = if right >= left {
+        (right, 1.0)
+    } else {
+        (left, -1.0)
+    };
     if room < w + 0.2 {
         return;
     }
-    put(rng, centre + dir * (width * 0.5 + 0.1 + w * 0.5), w, 0.0, 0.9, OpeningKind::AcLedge);
+    put(
+        rng,
+        centre + dir * (width * 0.5 + 0.1 + w * 0.5),
+        w,
+        0.0,
+        0.9,
+        OpeningKind::AcLedge,
+    );
 }

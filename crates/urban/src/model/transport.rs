@@ -317,9 +317,9 @@ impl ModernCity {
                 occupied([(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5])
             });
             hit_edge
-                || zones.iter().any(|(line, _)| {
-                    line.iter().any(|q| in_ring(*q, &pts))
-                })
+                || zones
+                    .iter()
+                    .any(|(line, _)| line.iter().any(|q| in_ring(*q, &pts)))
         };
         let before = self.buildings.len();
         let gone: std::collections::HashSet<u32> = self
@@ -329,9 +329,8 @@ impl ModernCity {
             .map(|p| p.id)
             .collect();
         self.parcels.retain(|p| !gone.contains(&p.id));
-        self.buildings.retain(|b| {
-            !gone.contains(&b.parcel_id) && !ring_hit(&b.footprint)
-        });
+        self.buildings
+            .retain(|b| !gone.contains(&b.parcel_id) && !ring_hit(&b.footprint));
         self.compounds.retain(|c| !gone.contains(&c.parcel_id));
         self.blocks.retain(|b| !ring_hit(&b.boundary));
         self.trees.retain(|t| !occupied(local(&t.point)));
@@ -380,7 +379,11 @@ impl ModernCity {
 }
 
 /// Position and unit direction of the corridor line at chainage `s`.
-pub fn point_at(vertices: &[RailVertex], local: &[[f32; 2]], s: f32) -> Option<([f32; 2], [f32; 2])> {
+pub fn point_at(
+    vertices: &[RailVertex],
+    local: &[[f32; 2]],
+    s: f32,
+) -> Option<([f32; 2], [f32; 2])> {
     if vertices.len() < 2 || vertices.len() != local.len() {
         return None;
     }
@@ -393,10 +396,7 @@ pub fn point_at(vertices: &[RailVertex], local: &[[f32; 2]], s: f32) -> Option<(
     let t = ((s - vertices[i].s_m) / span).clamp(0.0, 1.0);
     let d = [b[0] - a[0], b[1] - a[1]];
     let l = d[0].hypot(d[1]).max(1.0e-6);
-    Some((
-        [a[0] + d[0] * t, a[1] + d[1] * t],
-        [d[0] / l, d[1] / l],
-    ))
+    Some(([a[0] + d[0] * t, a[1] + d[1] * t], [d[0] / l, d[1] / l]))
 }
 
 // --- airfields -------------------------------------------------------------
@@ -607,7 +607,10 @@ impl AirfieldPlan {
         };
         let stands: Vec<[f32; 2]> = (0..stand_count)
             .map(|i| {
-                [apron_cx - apron_half + 40.0 + pitch * (i as f32 + 0.5), apron_z1 - 45.0]
+                [
+                    apron_cx - apron_half + 40.0 + pitch * (i as f32 + 0.5),
+                    apron_z1 - 45.0,
+                ]
             })
             .collect();
         let term_half = stand_count as f32 * pitch * 0.5 * 0.9;

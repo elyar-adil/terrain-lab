@@ -472,7 +472,11 @@ pub(crate) fn far_look(
         roof_m: stack.top(),
         start_m: podium.map_or(0.0, |(top, _)| top),
         storey_m: shaft.storey_m,
-        shop_m: if podium.is_some() { 0.0 } else { GROUND_STOREY_M },
+        shop_m: if podium.is_some() {
+            0.0
+        } else {
+            GROUND_STOREY_M
+        },
         wall: stone,
         base_band: stone,
         base_n: 0,

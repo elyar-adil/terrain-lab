@@ -5,7 +5,6 @@ mod model;
 pub mod modern;
 
 pub use legacy::{BarcelonaGenerator, ManhattanGenerator, ParisianGenerator, UrbanGenerator};
-pub use modern::{CountryFn, CountrySample, generate_modern_chinese_city_from_streets_with_country};
 pub use model::transport::{
     AerodromeCode, AirfieldPlan, RailCorridor, RailGround, RailKind, RailLimits, RailStationPlan,
     RailVertex,
@@ -16,16 +15,19 @@ pub use model::{
     Field, GrowthState, HdLane, HdRoad, JunctionKind, JunctionPhase, JurisdictionId, LaneMarking,
     LaneUse, MarkingKind, ModelWeights, ModernBuilding, ModernChinaSpec, ModernCity,
     ModernRoadClass, MorphologyPrior, MorphologyStats, Movement, Parcel, ParcelUse, Point,
-    RoadConnector, RoadCrossSection, RoofStyle, SdNode, SiteClimate, SdRoad, SignalHead, SignalStyle,
-    SplitMix64, StreetClass, StreetSegment, TrafficRules, TreeInstance, TreeSpecies, Tributary, RiverSetting,
-    TurnArrow, UrbanBlock, UrbanModel, cross_section, measure, ramp_cross_section, sample_action,
-    synthesize_junction,
+    RiverSetting, RoadConnector, RoadCrossSection, RoofStyle, SdNode, SdRoad, SignalHead,
+    SignalStyle, SiteClimate, SplitMix64, StreetClass, StreetSegment, TrafficRules, TreeInstance,
+    TreeSpecies, Tributary, TurnArrow, UrbanBlock, UrbanModel, cross_section, measure,
+    ramp_cross_section, sample_action, synthesize_junction,
 };
 pub use modern::{
     CityOptions, ExternalFields, ExternalNode, ExternalRoad, ExternalStreets,
     REGIONAL_ROAD_HANDOVER, RegionalApproach, generate_modern_chinese_city,
     generate_modern_chinese_city_from_streets, generate_modern_chinese_city_with_approaches,
     generate_modern_chinese_city_with_options, hash_u32, junction_trim_m,
+};
+pub use modern::{
+    CountryFn, CountrySample, generate_modern_chinese_city_from_streets_with_country,
 };
 
 /// Public style dispatcher. Modern Chinese generation stays in `modern`,

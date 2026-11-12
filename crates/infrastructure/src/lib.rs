@@ -278,7 +278,8 @@ pub fn generate_infrastructure_with(
     let cultivated_land =
         realize_cultivated_land(grid, &agricultural_suitability, &urban_land, &settlements);
     let crossings = find_crossings(terrain, grid, &roads);
-    let (railways, airport) = plan_transport(terrain, config, grid, &settlements, &roads, &urban_land);
+    let (railways, airport) =
+        plan_transport(terrain, config, grid, &settlements, &roads, &urban_land);
     let legacy_city = |settlement: &SettlementSite| {
         let radius_km = settlement_radius_km(settlement.class);
         let centre = settlement_centre_km(grid, settlement);
@@ -351,7 +352,14 @@ pub fn generate_infrastructure_with(
         .into_iter()
         .zip(&settlements)
         .map(|(mut city, settlement)| {
-            apply_transport(terrain, grid, &mut city, settlement, &railways, airport.as_ref());
+            apply_transport(
+                terrain,
+                grid,
+                &mut city,
+                settlement,
+                &railways,
+                airport.as_ref(),
+            );
             city
         })
         .collect();
@@ -394,7 +402,10 @@ fn plan_transport(
     settlements: &[SettlementSite],
     roads: &[Road],
     urban_land: &[f32],
-) -> (Vec<transport::rail::Railway>, Option<transport::airport::Airport>) {
+) -> (
+    Vec<transport::rail::Railway>,
+    Option<transport::airport::Airport>,
+) {
     let world = transport::World::new(terrain, config.world_size_km);
     let lines: Vec<transport::rail::RoadLine> = roads
         .iter()
@@ -512,7 +523,10 @@ fn river_setting(terrain: &TerrainData, grid: WorldGrid, city: &ModernCity) -> u
     let max_flow = terrain.flow.iter().copied().fold(1.0_f32, f32::max);
     let count = river.len() as f32;
     let mean = |field: &[f32]| river.iter().map(|p| field[cell(p)]).sum::<f32>() / count;
-    let flow = river.iter().map(|p| terrain.flow[cell(p)]).fold(0.0_f32, f32::max);
+    let flow = river
+        .iter()
+        .map(|p| terrain.flow[cell(p)])
+        .fold(0.0_f32, f32::max);
     let discharge = (flow.ln_1p() / max_flow.ln_1p()).clamp(0.0, 1.0);
     let (first, last) = (&river[0], &river[river.len() - 1]);
     let length_m: f32 = river
@@ -545,7 +559,11 @@ fn river_setting(terrain: &TerrainData, grid: WorldGrid, city: &ModernCity) -> u
         temperature_c: mean(&terrain.temperature),
         discharge,
         slope,
-        relief_m: if hi > lo { (hi - lo).clamp(2.0, 400.0) } else { default.relief_m },
+        relief_m: if hi > lo {
+            (hi - lo).clamp(2.0, 400.0)
+        } else {
+            default.relief_m
+        },
         sediment: mean(&terrain.sediment).clamp(0.0, 1.0),
     }
 }
@@ -1386,7 +1404,10 @@ mod tests {
         let mut terraced = 0;
         let mut fields = 0;
         for landform in [Landform::Plains, Landform::Plateau, Landform::Coastal] {
-            let config = SimulationConfig { landform, ..config() };
+            let config = SimulationConfig {
+                landform,
+                ..config()
+            };
             let terrain = generate(&config, |_, _| {}).unwrap();
             let grid = WorldGrid::new(terrain.size, config.world_size_km).unwrap();
             let sample = country_sampler(&terrain, grid);

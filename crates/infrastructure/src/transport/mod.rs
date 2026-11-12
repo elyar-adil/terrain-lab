@@ -107,15 +107,19 @@ mod tests {
     }
 
     fn worlds() -> Vec<(SimulationConfig, InfrastructureData)> {
-        [(7, Landform::Plains, 256), (11, Landform::Plateau, 192), (99, Landform::Plains, 192)]
-            .into_iter()
-            .map(|(seed, form, size)| {
-                let c = config(seed, form, size);
-                let t = generate(&c, |_, _| {}).unwrap();
-                let d = generate_infrastructure(&t, &c).unwrap();
-                (c, d)
-            })
-            .collect()
+        [
+            (7, Landform::Plains, 256),
+            (11, Landform::Plateau, 192),
+            (99, Landform::Plains, 192),
+        ]
+        .into_iter()
+        .map(|(seed, form, size)| {
+            let c = config(seed, form, size);
+            let t = generate(&c, |_, _| {}).unwrap();
+            let d = generate_infrastructure(&t, &c).unwrap();
+            (c, d)
+        })
+        .collect()
     }
 
     /// Grade and curvature stay inside the limits of the line's own class;
@@ -131,19 +135,25 @@ mod tests {
                 assert!(
                     r.max_grade <= limits.mountain_grade + 1.0e-4,
                     "{:?} grade {} over {}",
-                    r.kind, r.max_grade, limits.mountain_grade
+                    r.kind,
+                    r.max_grade,
+                    limits.mountain_grade
                 );
                 // Steeper than the ruling grade only on mountain sections.
                 assert!(
                     r.max_grade <= limits.max_grade + 1.0e-4 || r.mountain_m > 0.0,
                     "{:?} grade {} over the ruling {} without a mountain section",
-                    r.kind, r.max_grade, limits.max_grade
+                    r.kind,
+                    r.max_grade,
+                    limits.max_grade
                 );
                 // Three-point circles over 100 m on 25 m samples are slightly tight on arcs.
                 assert!(
                     r.min_radius_m >= limits.min_radius_m * 0.93,
                     "{:?} radius {} under {}",
-                    r.kind, r.min_radius_m, limits.min_radius_m
+                    r.kind,
+                    r.min_radius_m,
+                    limits.min_radius_m
                 );
                 for st in &r.stations {
                     let around: Vec<f32> = r
@@ -155,7 +165,10 @@ mod tests {
                     let spread = around.iter().cloned().fold(f32::MIN, f32::max)
                         - around.iter().cloned().fold(f32::MAX, f32::min);
                     // 2.5 per mille over the platform length at most.
-                    assert!(spread <= st.plan.platform_length_m * 0.0025 + 0.01, "station not level: {spread}");
+                    assert!(
+                        spread <= st.plan.platform_length_m * 0.0025 + 0.01,
+                        "station not level: {spread}"
+                    );
                     assert!(st.plan.platform_length_m >= limits.platform_length_m);
                 }
                 for c in &r.crossings {
@@ -166,7 +179,10 @@ mod tests {
                             assert!(over >= 5.0, "rail over road with only {over} m")
                         }
                         super::rail::CrossingTreatment::RoadOverRail => {
-                            assert!(over <= -6.5, "road over rail with the line only {over} m down")
+                            assert!(
+                                over <= -6.5,
+                                "road over rail with the line only {over} m down"
+                            )
                         }
                         super::rail::CrossingTreatment::LevelProtected => {
                             assert!(!limits.closed, "level crossing on a closed line")
@@ -208,8 +224,10 @@ mod tests {
             // No water or built-up land in the graded platform.
             let grid = data.urban_land.grid;
             for k in 0..200 {
-                let x = a.plan.platform.x0 + (a.plan.platform.x1 - a.plan.platform.x0) * (k % 20) as f32 / 19.0;
-                let z = a.plan.platform.z0 + (a.plan.platform.z1 - a.plan.platform.z0) * (k / 20) as f32 / 9.0;
+                let x = a.plan.platform.x0
+                    + (a.plan.platform.x1 - a.plan.platform.x0) * (k % 20) as f32 / 19.0;
+                let z = a.plan.platform.z0
+                    + (a.plan.platform.z1 - a.plan.platform.z0) * (k / 20) as f32 / 9.0;
                 let p = a.plan.to_world(x, z);
                 let gx = (p.x_km / grid.world_size_km * (grid.size - 1) as f32).round() as usize;
                 let gy = (p.y_km / grid.world_size_km * (grid.size - 1) as f32).round() as usize;
@@ -224,7 +242,10 @@ mod tests {
         let plan = urban::AirfieldPlan::layout(
             urban::AerodromeCode::C4C,
             1,
-            urban::Point { x_km: 40.0, y_km: 40.0 },
+            urban::Point {
+                x_km: 40.0,
+                y_km: 40.0,
+            },
             0.0,
             1.0,
             100.0,
@@ -236,7 +257,10 @@ mod tests {
         let q = plan.to_world(0.0, 150.0 + 100.0);
         assert!((plan.surface_height_limit(q).unwrap() - 14.3).abs() < 0.3);
         // Far away: no surface.
-        assert!(plan.surface_height_limit(plan.to_world(0.0, 20_000.0)).is_none());
+        assert!(
+            plan.surface_height_limit(plan.to_world(0.0, 20_000.0))
+                .is_none()
+        );
     }
 
     #[test]
@@ -279,7 +303,8 @@ mod tests {
                             .map(|w| {
                                 let (vx, vy) = (w[1][0] - w[0][0], w[1][1] - w[0][1]);
                                 let l2 = (vx * vx + vy * vy).max(1.0e-6);
-                                let t = (((q[0] - w[0][0]) * vx + (q[1] - w[0][1]) * vy) / l2).clamp(0.0, 1.0);
+                                let t = (((q[0] - w[0][0]) * vx + (q[1] - w[0][1]) * vy) / l2)
+                                    .clamp(0.0, 1.0);
                                 (q[0] - w[0][0] - vx * t).hypot(q[1] - w[0][1] - vy * t)
                             })
                             .fold(f32::INFINITY, f32::min);
@@ -290,7 +315,12 @@ mod tests {
             if built < 1 {
                 let scene = data.build_city_scene(i).unwrap();
                 let s = &scene.stats;
-                assert!(s.rail_sleepers > 100 && s.rail_masts > 4, "{} {}", s.rail_sleepers, s.rail_masts);
+                assert!(
+                    s.rail_sleepers > 100 && s.rail_masts > 4,
+                    "{} {}",
+                    s.rail_sleepers,
+                    s.rail_masts
+                );
                 assert!(
                     !s.warnings.iter().any(|w| w.starts_with("rail:")),
                     "{:?}",

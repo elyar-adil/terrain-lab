@@ -112,7 +112,9 @@ mod tests {
 
     #[test]
     fn inline_json_is_parsed() {
-        let spec = read_spec(Some(r#"{"view":"city","city":0}"#)).unwrap().unwrap();
+        let spec = read_spec(Some(r#"{"view":"city","city":0}"#))
+            .unwrap()
+            .unwrap();
         assert_eq!(spec["view"], "city");
     }
 

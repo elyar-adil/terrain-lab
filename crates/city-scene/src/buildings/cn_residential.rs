@@ -1076,7 +1076,10 @@ mod tests {
 
 /// The far form of a residential block: the design the detail is built from,
 /// summarised for the merged mass (`far::FarLook`).
-pub(crate) fn far_look(building: &ModernBuilding, podium: Option<(f32, u16)>) -> super::far::FarLook {
+pub(crate) fn far_look(
+    building: &ModernBuilding,
+    podium: Option<(f32, u16)>,
+) -> super::far::FarLook {
     use super::far::{FarLook, bay_of, crown_code, glass_code, skin_code};
     let mut table = FacadeTable::new();
     let (design, _) = design_of(building, &mut table);
@@ -1097,7 +1100,11 @@ pub(crate) fn far_look(building: &ModernBuilding, podium: Option<(f32, u16)>) ->
         roof_m: base + storeys as f32 * storey,
         start_m: podium.map_or(0.0, |(top, _)| top),
         storey_m: storey,
-        shop_m: if podium.is_none() && shop_storey(building) { GROUND_STOREY_M } else { 0.0 },
+        shop_m: if podium.is_none() && shop_storey(building) {
+            GROUND_STOREY_M
+        } else {
+            0.0
+        },
         wall: ctx.paint_at(bands[1]),
         base_band: ctx.paint_at(0),
         base_n: bands[1],

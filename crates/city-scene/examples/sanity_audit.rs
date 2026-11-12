@@ -19,7 +19,7 @@
 //!   --lite                small scene budget (fewer trees and buildings)
 
 use city_scene::audit::{self, Terrain};
-use city_scene::{SceneBudget, derive_city, build_city_scene};
+use city_scene::{SceneBudget, build_city_scene, derive_city};
 use urban::{
     CityOptions, ModernChinaSpec, ModernRoadClass, Point, RegionalApproach,
     generate_modern_chinese_city_with_options,
@@ -93,7 +93,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (None, None) if flag("--world").is_some() => {
             use terrain_core::{Landform, SimulationConfig, TerrainPreset, generate};
             let config = SimulationConfig {
-                seed: flag("--world").and_then(|v| v.parse().ok()).unwrap_or(284_735),
+                seed: flag("--world")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(284_735),
                 preset: TerrainPreset::Temperate,
                 landform: match flag("--landform").as_deref() {
                     Some("plateau") => Landform::Plateau,
@@ -202,7 +204,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }),
         }
     });
-    let report = audit::audit(&city, &network, Some(&scene), terrain.as_ref(), budget.max_buildings);
+    let report = audit::audit(
+        &city,
+        &network,
+        Some(&scene),
+        terrain.as_ref(),
+        budget.max_buildings,
+    );
     let top: usize = flag("--top").and_then(|v| v.parse().ok()).unwrap_or(5);
     report.print(top);
     if let Some(path) = flag("--json") {

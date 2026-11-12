@@ -150,8 +150,18 @@ fn render_rail_lines(infrastructure: &InfrastructureData) -> Vec<RenderRailLine>
         .iter()
         .map(|rw| RenderRailLine {
             id: rw.id,
-            path_km: rw.points.iter().step_by(4).map(|p| [p.x_km, p.y_km]).collect(),
-            fill_m: rw.points.iter().step_by(4).map(|p| p.design_m - p.ground_m).collect(),
+            path_km: rw
+                .points
+                .iter()
+                .step_by(4)
+                .map(|p| [p.x_km, p.y_km])
+                .collect(),
+            fill_m: rw
+                .points
+                .iter()
+                .step_by(4)
+                .map(|p| p.design_m - p.ground_m)
+                .collect(),
         })
         .collect()
 }
@@ -160,7 +170,8 @@ fn render_railways(infrastructure: &InfrastructureData) -> Vec<RenderRailway> {
     let towns = infrastructure.footprints();
     let inside = |x: f32, y: f32| {
         towns.iter().any(|f| {
-            (x - f.centre_km[0]).hypot(y - f.centre_km[1]) < f.radius_km * urban::REGIONAL_ROAD_HANDOVER
+            (x - f.centre_km[0]).hypot(y - f.centre_km[1])
+                < f.radius_km * urban::REGIONAL_ROAD_HANDOVER
         })
     };
     let mut out = Vec::new();
@@ -176,7 +187,10 @@ fn render_railways(infrastructure: &InfrastructureData) -> Vec<RenderRailway> {
                     kind: rw.kind,
                     track_spacing_m: limits.track_spacing_m,
                     formation_width_m: limits.formation_width_m,
-                    path_km: run.iter().map(|i| [rw.points[*i].x_km, rw.points[*i].y_km]).collect(),
+                    path_km: run
+                        .iter()
+                        .map(|i| [rw.points[*i].x_km, rw.points[*i].y_km])
+                        .collect(),
                     s_m: run.iter().map(|i| rw.points[*i].s_m).collect(),
                     ground_m: run.iter().map(|i| rw.points[*i].ground_m).collect(),
                     design_m: run.iter().map(|i| rw.points[*i].design_m).collect(),
@@ -217,7 +231,10 @@ fn render_airport(infrastructure: &InfrastructureData) -> Option<serde_json::Val
     let a = infrastructure.airport.as_ref()?;
     let mut value = serde_json::to_value(&a.plan).ok()?;
     let object = value.as_object_mut()?;
-    object.insert("accessPathKm".into(), serde_json::to_value(&a.access_path_km).ok()?);
+    object.insert(
+        "accessPathKm".into(),
+        serde_json::to_value(&a.access_path_km).ok()?,
+    );
     object.insert("windUsability".into(), a.wind_usability.into());
     object.insert("distanceToCityKm".into(), a.distance_to_city_km.into());
     Some(value)
@@ -721,7 +738,10 @@ fn paint_transport(
     let world_km = infrastructure.urban_land.grid.world_size_km;
     let (w, h) = (image.width().max(2), image.height().max(2));
     let to_px = |x_km: f32, y_km: f32| {
-        (x_km / world_km * (w - 1) as f32, y_km / world_km * (h - 1) as f32)
+        (
+            x_km / world_km * (w - 1) as f32,
+            y_km / world_km * (h - 1) as f32,
+        )
     };
     for rw in &infrastructure.railways {
         // Ballast and formation read as a thin pale-grey line; the width is
@@ -730,7 +750,10 @@ fn paint_transport(
         for pair in rw.points.windows(2) {
             let a = to_px(pair[0].x_km, pair[0].y_km);
             let b = to_px(pair[1].x_km, pair[1].y_km);
-            let colour = if matches!(pair[0].ground, urban::RailGround::Viaduct | urban::RailGround::Bridge) {
+            let colour = if matches!(
+                pair[0].ground,
+                urban::RailGround::Viaduct | urban::RailGround::Bridge
+            ) {
                 [92.0, 90.0, 86.0]
             } else {
                 [62.0, 58.0, 52.0]
@@ -746,7 +769,11 @@ fn paint_transport(
     }
     if let Some(airport) = &infrastructure.airport {
         let plan = &airport.plan;
-        let half_diag = plan.platform.x1.hypot(plan.platform.z1.max(-plan.platform.z0)) / 1000.0;
+        let half_diag = plan
+            .platform
+            .x1
+            .hypot(plan.platform.z1.max(-plan.platform.z0))
+            / 1000.0;
         let (cx, cy) = to_px(plan.centre.x_km, plan.centre.y_km);
         let span = (half_diag / world_km * (w - 1) as f32).ceil() as i32 + 2;
         let mut paint = |rect: (f32, f32, f32, f32), colour: [f32; 3], alpha: f32, grow: f32| {
@@ -757,7 +784,11 @@ fn paint_transport(
                         y_km: py as f32 / (h - 1) as f32 * world_km,
                     };
                     let [x, z] = plan.to_local(km);
-                    if x >= rect.0 - grow && x <= rect.1 + grow && z >= rect.2 - grow && z <= rect.3 + grow {
+                    if x >= rect.0 - grow
+                        && x <= rect.1 + grow
+                        && z >= rect.2 - grow
+                        && z <= rect.3 + grow
+                    {
                         blend_surface(image.get_pixel_mut(px as u32, py as u32), colour, alpha);
                     }
                 }
@@ -766,23 +797,87 @@ fn paint_transport(
         let px_m = metres_per_pixel * 0.5;
         let l = plan.runway_length_m * 0.5;
         // Graded land, apron, taxiway, runway (drawn at least one pixel wide).
-        paint((plan.platform.x0, plan.platform.x1, plan.platform.z0, plan.platform.z1), [128.0, 140.0, 96.0], 0.55, 0.0);
-        paint((plan.apron.x0, plan.apron.x1, plan.apron.z0, plan.apron.z1), [158.0, 156.0, 150.0], 0.95, px_m);
-        paint((-l + 60.0, l - 60.0, plan.taxiway_z - plan.taxiway_width_m * 0.5, plan.taxiway_z + plan.taxiway_width_m * 0.5), [96.0, 96.0, 98.0], 0.95, px_m);
-        paint((-l, l, -plan.paved_width_m * 0.5, plan.paved_width_m * 0.5), [74.0, 74.0, 78.0], 1.0, px_m);
-        paint((-l + 30.0, l - 30.0, -0.9, 0.9), [236.0, 236.0, 230.0], 0.9, px_m * 0.5);
+        paint(
+            (
+                plan.platform.x0,
+                plan.platform.x1,
+                plan.platform.z0,
+                plan.platform.z1,
+            ),
+            [128.0, 140.0, 96.0],
+            0.55,
+            0.0,
+        );
+        paint(
+            (plan.apron.x0, plan.apron.x1, plan.apron.z0, plan.apron.z1),
+            [158.0, 156.0, 150.0],
+            0.95,
+            px_m,
+        );
+        paint(
+            (
+                -l + 60.0,
+                l - 60.0,
+                plan.taxiway_z - plan.taxiway_width_m * 0.5,
+                plan.taxiway_z + plan.taxiway_width_m * 0.5,
+            ),
+            [96.0, 96.0, 98.0],
+            0.95,
+            px_m,
+        );
+        paint(
+            (-l, l, -plan.paved_width_m * 0.5, plan.paved_width_m * 0.5),
+            [74.0, 74.0, 78.0],
+            1.0,
+            px_m,
+        );
+        paint(
+            (-l + 30.0, l - 30.0, -0.9, 0.9),
+            [236.0, 236.0, 230.0],
+            0.9,
+            px_m * 0.5,
+        );
         for link in &plan.links {
             let steps = 12;
             for k in 0..=steps {
                 let t = k as f32 / steps as f32;
                 let x = link.from[0] + (link.to[0] - link.from[0]) * t;
                 let z = link.from[1] + (link.to[1] - link.from[1]) * t;
-                paint((x, x, z, z), [96.0, 96.0, 98.0], 0.95, plan.taxiway_width_m * 0.5);
+                paint(
+                    (x, x, z, z),
+                    [96.0, 96.0, 98.0],
+                    0.95,
+                    plan.taxiway_width_m * 0.5,
+                );
             }
         }
-        paint((plan.terminal.x0, plan.terminal.x1, plan.terminal.z0, plan.terminal.z1), [205.0, 205.0, 200.0], 1.0, 0.0);
-        paint((plan.car_park.x0, plan.car_park.x1, plan.car_park.z0, plan.car_park.z1), [110.0, 110.0, 112.0], 0.9, 0.0);
-        let access: Vec<(f32, f32)> = airport.access_path_km.iter().map(|p| to_px(p[0], p[1])).collect();
+        paint(
+            (
+                plan.terminal.x0,
+                plan.terminal.x1,
+                plan.terminal.z0,
+                plan.terminal.z1,
+            ),
+            [205.0, 205.0, 200.0],
+            1.0,
+            0.0,
+        );
+        paint(
+            (
+                plan.car_park.x0,
+                plan.car_park.x1,
+                plan.car_park.z0,
+                plan.car_park.z1,
+            ),
+            [110.0, 110.0, 112.0],
+            0.9,
+            0.0,
+        );
+        let access: Vec<(f32, f32)> = airport
+            .access_path_km
+            .iter()
+            .map(|p| to_px(p[0], p[1]))
+            .collect();
         for pair in access.windows(2) {
             draw_line_alpha(
                 image,
@@ -1181,7 +1276,9 @@ pub fn ensure_city_tile(
     let mut budget = infrastructure::scene_budget(class);
     // The shared texture set is not part of a tile (see `city_tile_bytes`).
     budget.standard_textures = false;
-    let scene = std::sync::Arc::new(city_scene::build_city_scene_tile(&city, network, min, max, budget));
+    let scene = std::sync::Arc::new(city_scene::build_city_scene_tile(
+        &city, network, min, max, budget,
+    ));
     if KEEP_BUILT_GEOMETRY {
         let mut guard = CITY_WORLD
             .lock()
@@ -1202,18 +1299,31 @@ pub fn ensure_city_tile(
 /// A tile carries its own textures only (the facade table); the standard set, about
 /// 50 MB of pixels identical for every tile of a city, is attached when
 /// `with_textures` is set, which the host does once per city and then reuses.
-pub fn city_tile_bytes(index: usize, column: i32, row: i32, with_textures: bool) -> Result<Vec<u8>, String> {
+pub fn city_tile_bytes(
+    index: usize,
+    column: i32,
+    row: i32,
+    with_textures: bool,
+) -> Result<Vec<u8>, String> {
     let scene = ensure_city_tile(index, column, row)?;
     if !with_textures {
         return city_scene::scene::encode_binary(&scene);
     }
     let (class, city) = {
-        let guard = CITY_WORLD.lock().map_err(|_| "the city cache is poisoned")?;
-        let world = guard.as_ref().ok_or_else(|| "no cities: generate the world first".to_owned())?;
-        let (class, city) = world.plans.get(index).ok_or_else(|| format!("city {index} does not exist"))?;
+        let guard = CITY_WORLD
+            .lock()
+            .map_err(|_| "the city cache is poisoned")?;
+        let world = guard
+            .as_ref()
+            .ok_or_else(|| "no cities: generate the world first".to_owned())?;
+        let (class, city) = world
+            .plans
+            .get(index)
+            .ok_or_else(|| format!("city {index} does not exist"))?;
         (*class, city.clone())
     };
-    let textures = city_scene::scene::standard_textures(&city.climate, &infrastructure::scene_budget(class));
+    let textures =
+        city_scene::scene::standard_textures(&city.climate, &infrastructure::scene_budget(class));
     city_scene::scene::encode_binary_with(&scene, &textures)
 }
 

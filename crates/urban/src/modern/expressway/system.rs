@@ -577,7 +577,11 @@ fn deck_end(ramp: &SysRamp, end: bool, axes: [V; 2]) -> (usize, f32) {
     } else {
         sub(ramp.line[1], ramp.line[0])
     };
-    let travel = if dot(tangent, axes[axis]) >= 0.0 { 1.0 } else { -1.0 };
+    let travel = if dot(tangent, axes[axis]) >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
     let moved = if end {
         station + travel * TAPER_M
     } else {

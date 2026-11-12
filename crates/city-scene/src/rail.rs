@@ -171,12 +171,15 @@ impl Line {
             .partition_point(|st| *st <= s)
             .saturating_sub(1)
             .min(pts.len() - 2);
-        let seg = |k: usize| {
-            Vec2::new(pts[k + 1].x - pts[k].x, pts[k + 1].z - pts[k].z).normalize()
-        };
+        let seg =
+            |k: usize| Vec2::new(pts[k + 1].x - pts[k].x, pts[k + 1].z - pts[k].z).normalize();
         let at_vertex = |k: usize| {
             let a = if k > 0 { seg(k - 1) } else { seg(0) };
-            let b = if k + 1 < pts.len() { seg(k) } else { seg(pts.len() - 2) };
+            let b = if k + 1 < pts.len() {
+                seg(k)
+            } else {
+                seg(pts.len() - 2)
+            };
             (a + b).normalize()
         };
         let span = (self.stations[i + 1] - self.stations[i]).max(1.0e-3);
@@ -262,7 +265,11 @@ fn tracks_for(
             .iter()
             .map(|st| {
                 let t = station_tracks(&st.plan, limits);
-                let target = if side < 0.0 { t.through[0] } else { t.through[1] };
+                let target = if side < 0.0 {
+                    t.through[0]
+                } else {
+                    t.through[1]
+                };
                 (st.s, st.plan.platform_length_m * 0.5, target)
             })
             .collect();
@@ -368,9 +375,15 @@ fn find_crossings(line: &Line, network: &Network) -> Vec<Crossing> {
         let rp = road.carriageway.points();
         let rs = road.carriageway.stations();
         for w in 0..rp.len().saturating_sub(1) {
-            let (c, d) = (Vec2::new(rp[w].x, rp[w].z), Vec2::new(rp[w + 1].x, rp[w + 1].z));
+            let (c, d) = (
+                Vec2::new(rp[w].x, rp[w].z),
+                Vec2::new(rp[w + 1].x, rp[w + 1].z),
+            );
             for i in 0..pts.len() - 1 {
-                let (a, bb) = (Vec2::new(pts[i].x, pts[i].z), Vec2::new(pts[i + 1].x, pts[i + 1].z));
+                let (a, bb) = (
+                    Vec2::new(pts[i].x, pts[i].z),
+                    Vec2::new(pts[i + 1].x, pts[i + 1].z),
+                );
                 if a.x.max(bb.x) < c.x.min(d.x) - 1.0
                     || a.x.min(bb.x) > c.x.max(d.x) + 1.0
                     || a.y.max(bb.y) < c.y.min(d.y) - 1.0
@@ -382,7 +395,10 @@ fn find_crossings(line: &Line, network: &Network) -> Vec<Crossing> {
                     let s = line.stations[i] + (line.stations[i + 1] - line.stations[i]) * t;
                     let at = rs[w] + (rs[w + 1] - rs[w]) * u;
                     let centre = a + (bb - a) * t;
-                    if out.iter().any(|x| (x.s - s).abs() < 6.0 && x.centre.distance(centre) < 12.0) {
+                    if out
+                        .iter()
+                        .any(|x| (x.s - s).abs() < 6.0 && x.centre.distance(centre) < 12.0)
+                    {
                         continue;
                     }
                     out.push(Crossing {
@@ -402,7 +418,9 @@ fn find_crossings(line: &Line, network: &Network) -> Vec<Crossing> {
 
 fn along_half_extent(c: &Crossing, line: &Line) -> f32 {
     let tangent = line.path.tangent_at(c.s);
-    let sin = (tangent.x * c.street_dir.y - tangent.y * c.street_dir.x).abs().max(0.35);
+    let sin = (tangent.x * c.street_dir.y - tangent.y * c.street_dir.x)
+        .abs()
+        .max(0.35);
     (c.half_width + 1.5) / sin
 }
 
@@ -433,7 +451,9 @@ fn build_corridor(
         .filter(|st| st.s > -200.0 && st.s < len + 200.0)
         .collect();
     stats.stations += stations.len();
-    let tracks = tracks_for(&limits, len, &stations, |st| -f32::from(st.plan.building_side));
+    let tracks = tracks_for(&limits, len, &stations, |st| {
+        -f32::from(st.plan.building_side)
+    });
 
     // --- crossings with the streets ---
     let crossings = find_crossings(&line, network);
@@ -445,9 +465,10 @@ fn build_corridor(
             stats.overpasses += 1;
         } else if head <= 0.9 {
             if limits.closed {
-                stats
-                    .warnings
-                    .push(format!("rail: closed line meets a street at grade at {:.0} m", c.s));
+                stats.warnings.push(format!(
+                    "rail: closed line meets a street at grade at {:.0} m",
+                    c.s
+                ));
             }
             level.push((c.s - half, c.s + half, i));
             stats.level_crossings += 1;
@@ -499,8 +520,14 @@ fn build_corridor(
             let deck_top = -0.50 + 0.0;
             let soffit = deck_top - GIRDER_DEPTH;
             // Ballast trough floor / slab.
-            let (a0, a1) = (line.point(s0, -deck_half, deck_top), line.point(s0, deck_half, deck_top));
-            let (c0, c1) = (line.point(s1, -deck_half, deck_top), line.point(s1, deck_half, deck_top));
+            let (a0, a1) = (
+                line.point(s0, -deck_half, deck_top),
+                line.point(s0, deck_half, deck_top),
+            );
+            let (c0, c1) = (
+                line.point(s1, -deck_half, deck_top),
+                line.point(s1, deck_half, deck_top),
+            );
             quad_facing(b, "viaduct.concrete", [a0, a1, c1, c0], UP, Some(CONCRETE));
             // Fascia, web and soffit on both sides.
             for side in [-1.0_f32, 1.0] {
@@ -513,7 +540,12 @@ fn build_corridor(
                 quad_facing(
                     b,
                     "viaduct.concrete",
-                    [p(s0, deck_half, deck_top), p(s1, deck_half, deck_top), p(s1, deck_half, deck_top - 0.55), p(s0, deck_half, deck_top - 0.55)],
+                    [
+                        p(s0, deck_half, deck_top),
+                        p(s1, deck_half, deck_top),
+                        p(s1, deck_half, deck_top - 0.55),
+                        p(s0, deck_half, deck_top - 0.55),
+                    ],
                     outward,
                     Some(CONCRETE),
                 );
@@ -521,7 +553,12 @@ fn build_corridor(
                 quad_facing(
                     b,
                     "viaduct.concrete",
-                    [p(s0, deck_half, deck_top - 0.55), p(s1, deck_half, deck_top - 0.55), p(s1, web_half, soffit), p(s0, web_half, soffit)],
+                    [
+                        p(s0, deck_half, deck_top - 0.55),
+                        p(s1, deck_half, deck_top - 0.55),
+                        p(s1, web_half, soffit),
+                        p(s0, web_half, soffit),
+                    ],
                     Vec3::new(outward.x, -0.7, outward.z),
                     Some(CONCRETE_SHADE),
                 );
@@ -530,21 +567,36 @@ fn build_corridor(
                 quad_facing(
                     b,
                     "barrier.concrete",
-                    [p(s0, deck_half - 0.15, deck_top), p(s1, deck_half - 0.15, deck_top), p(s1, deck_half - 0.15, deck_top + 1.15), p(s0, deck_half - 0.15, deck_top + 1.15)],
+                    [
+                        p(s0, deck_half - 0.15, deck_top),
+                        p(s1, deck_half - 0.15, deck_top),
+                        p(s1, deck_half - 0.15, deck_top + 1.15),
+                        p(s0, deck_half - 0.15, deck_top + 1.15),
+                    ],
                     outward,
                     None,
                 );
                 quad_facing(
                     b,
                     "barrier.concrete",
-                    [p(s0, deck_half - 0.15, deck_top + 1.15), p(s1, deck_half - 0.15, deck_top + 1.15), p(s1, deck_half - 0.55, deck_top + 1.15), p(s0, deck_half - 0.55, deck_top + 1.15)],
+                    [
+                        p(s0, deck_half - 0.15, deck_top + 1.15),
+                        p(s1, deck_half - 0.15, deck_top + 1.15),
+                        p(s1, deck_half - 0.55, deck_top + 1.15),
+                        p(s0, deck_half - 0.55, deck_top + 1.15),
+                    ],
                     UP,
                     None,
                 );
                 quad_facing(
                     b,
                     "barrier.concrete",
-                    [p(s0, deck_half - 0.55, deck_top), p(s1, deck_half - 0.55, deck_top), p(s1, deck_half - 0.55, deck_top + 1.15), p(s0, deck_half - 0.55, deck_top + 1.15)],
+                    [
+                        p(s0, deck_half - 0.55, deck_top),
+                        p(s1, deck_half - 0.55, deck_top),
+                        p(s1, deck_half - 0.55, deck_top + 1.15),
+                        p(s0, deck_half - 0.55, deck_top + 1.15),
+                    ],
                     Vec3::new(-outward.x, 0.0, -outward.z),
                     None,
                 );
@@ -553,13 +605,28 @@ fn build_corridor(
             quad_facing(
                 b,
                 "viaduct.concrete",
-                [line.point(s0, -web_half, soffit), line.point(s1, -web_half, soffit), line.point(s1, web_half, soffit), line.point(s0, web_half, soffit)],
+                [
+                    line.point(s0, -web_half, soffit),
+                    line.point(s1, -web_half, soffit),
+                    line.point(s1, web_half, soffit),
+                    line.point(s0, web_half, soffit),
+                ],
                 Vec3::new(0.0, -1.0, 0.0),
                 Some(CONCRETE_SHADE),
             );
             // Ballast on conventional viaducts, slab track on high speed.
             if !skip_bed && !limits.closed {
-                strip(b, "rail.ballast", &line, s0, s1, -bed_outer, bed_outer, bed_lift, None);
+                strip(
+                    b,
+                    "rail.ballast",
+                    &line,
+                    s0,
+                    s1,
+                    -bed_outer,
+                    bed_outer,
+                    bed_lift,
+                    None,
+                );
             }
             // Piers at span centres where no street runs.
             let span = (mid / SPAN_M).floor();
@@ -569,8 +636,26 @@ fn build_corridor(
                 let angle = tan.y.atan2(tan.x);
                 let top = pos.y + deck_top - GIRDER_DEPTH;
                 if top > 1.0 {
-                    box_at(b, "viaduct.concrete", Vec2::new(pos.x, pos.z), top * 0.5, 2.6, top, 6.2, angle);
-                    box_at(b, "viaduct.concrete", Vec2::new(pos.x, pos.z), top - 0.4, 3.0, 0.8, 7.4, angle);
+                    box_at(
+                        b,
+                        "viaduct.concrete",
+                        Vec2::new(pos.x, pos.z),
+                        top * 0.5,
+                        2.6,
+                        top,
+                        6.2,
+                        angle,
+                    );
+                    box_at(
+                        b,
+                        "viaduct.concrete",
+                        Vec2::new(pos.x, pos.z),
+                        top - 0.4,
+                        3.0,
+                        0.8,
+                        7.4,
+                        angle,
+                    );
                     stats.piers += 1;
                 }
             }
@@ -589,8 +674,16 @@ fn build_corridor(
                         [
                             p(s0, formation_half + spread, top + 0.75),
                             p(s1, formation_half + spread, top + 0.75),
-                            p(s1, formation_half + spread + w + 0.6, -(head + HEAD_ABOVE_GROUND) - 0.05),
-                            p(s0, formation_half + spread + w + 0.6, -(head + HEAD_ABOVE_GROUND) - 0.05),
+                            p(
+                                s1,
+                                formation_half + spread + w + 0.6,
+                                -(head + HEAD_ABOVE_GROUND) - 0.05,
+                            ),
+                            p(
+                                s0,
+                                formation_half + spread + w + 0.6,
+                                -(head + HEAD_ABOVE_GROUND) - 0.05,
+                            ),
                         ],
                         UP,
                         Some(EARTH),
@@ -610,8 +703,28 @@ fn build_corridor(
                     );
                 }
                 // Formation top between the shoulders.
-                strip(b, "bank.earth", &line, s0, s1, -(formation_half + spread), formation_half + spread, bed_lift - 0.5, Some(EARTH));
-                strip(b, "rail.ballast", &line, s0, s1, -bed_outer, bed_outer, bed_lift, None);
+                strip(
+                    b,
+                    "bank.earth",
+                    &line,
+                    s0,
+                    s1,
+                    -(formation_half + spread),
+                    formation_half + spread,
+                    bed_lift - 0.5,
+                    Some(EARTH),
+                );
+                strip(
+                    b,
+                    "rail.ballast",
+                    &line,
+                    s0,
+                    s1,
+                    -bed_outer,
+                    bed_outer,
+                    bed_lift,
+                    None,
+                );
             }
             let _ = ground;
         }
@@ -622,7 +735,11 @@ fn build_corridor(
         let (t0, t1) = (track.from.max(0.0), track.to.min(len));
         let mut s = t0;
         // Sleepers every 0.6 m (1 667 per km).
-        let ballasted = !limits.closed || !matches!(line.kind_at((t0 + t1) * 0.5), RailGround::Viaduct | RailGround::Bridge);
+        let ballasted = !limits.closed
+            || !matches!(
+                line.kind_at((t0 + t1) * 0.5),
+                RailGround::Viaduct | RailGround::Bridge
+            );
         while s < t1 {
             if !in_crossing(s) {
                 let on_slab = limits.closed && line.elevated_at(s);
@@ -674,8 +791,17 @@ fn build_corridor(
         let outer = (limits.track_spacing_m * 0.5 + 3.2).max(spread + 0.5);
         let elevated = line.elevated_at(s);
         for side in [-1.0_f32, 1.0] {
-            let base = if elevated { -0.5 + 0.0 } else { -(line.head_at(s)) + 0.12 };
-            let off = side * if elevated { (limits.formation_width_m * 0.5 - 1.4).min(outer) } else { outer };
+            let base = if elevated {
+                -0.5 + 0.0
+            } else {
+                -(line.head_at(s)) + 0.12
+            };
+            let off = side
+                * if elevated {
+                    (limits.formation_width_m * 0.5 - 1.4).min(outer)
+                } else {
+                    outer
+                };
             let pole_base = line.point(s, off, base);
             let pole_top = line.point(s, off, 8.1);
             b.tube("steel", pole_base, pole_top, 0.17, 0.12, 6, None);
@@ -684,7 +810,15 @@ fn build_corridor(
             let arm_from = line.point(s, off, 7.2);
             b.tube("steel", arm_from, arm_to, 0.06, 0.05, 4, None);
             let brace_to = line.point(s, side * (limits.track_spacing_m * 0.5 + 1.2), 7.3);
-            b.tube("steel", line.point(s, off, 6.0), brace_to, 0.04, 0.035, 3, None);
+            b.tube(
+                "steel",
+                line.point(s, off, 6.0),
+                brace_to,
+                0.04,
+                0.035,
+                3,
+                None,
+            );
         }
         stats.masts += 2;
     }
@@ -694,7 +828,11 @@ fn build_corridor(
         while s < len {
             let e = (s + 12.5).min(len);
             if !in_crossing((s + e) * 0.5) {
-                let zig = if ((s / 50.0) as i64) % 2 == 0 { 0.2 } else { -0.2 };
+                let zig = if ((s / 50.0) as i64) % 2 == 0 {
+                    0.2
+                } else {
+                    -0.2
+                };
                 let o = |s: f32| {
                     let w = tracks[if side < 0.0 { 0 } else { 1 }].offset.as_ref()(s);
                     w + zig
@@ -702,10 +840,27 @@ fn build_corridor(
                 let cw = limits.contact_wire_m;
                 let sag = |s: f32| {
                     let phase = (s % 50.0) / 50.0;
-                    0.9 + 1.4 * (1.0 - (2.0 * phase - 1.0).powi(2)) * 0.0 - 0.35 * (1.0 - (2.0 * phase - 1.0).powi(2))
+                    0.9 + 1.4 * (1.0 - (2.0 * phase - 1.0).powi(2)) * 0.0
+                        - 0.35 * (1.0 - (2.0 * phase - 1.0).powi(2))
                 };
-                b.tube("wire", line.point(s, o(s), cw), line.point(e, o(e), cw), 0.012, 0.012, 3, None);
-                b.tube("wire", line.point(s, o(s), cw + sag(s) + 0.3), line.point(e, o(e), cw + sag(e) + 0.3), 0.009, 0.009, 3, None);
+                b.tube(
+                    "wire",
+                    line.point(s, o(s), cw),
+                    line.point(e, o(e), cw),
+                    0.012,
+                    0.012,
+                    3,
+                    None,
+                );
+                b.tube(
+                    "wire",
+                    line.point(s, o(s), cw + sag(s) + 0.3),
+                    line.point(e, o(e), cw + sag(e) + 0.3),
+                    0.009,
+                    0.009,
+                    3,
+                    None,
+                );
             }
             s = e;
         }
@@ -749,7 +904,10 @@ fn build_corridor(
     }
     // Colour-light signals every 1.2 km, and a pair at each station throat.
     {
-        let mut marks: Vec<f32> = (1..).map(|k| k as f32 * 1200.0).take_while(|s| *s < len).collect();
+        let mut marks: Vec<f32> = (1..)
+            .map(|k| k as f32 * 1200.0)
+            .take_while(|s| *s < len)
+            .collect();
         for st in &stations {
             marks.push(st.s - st.plan.platform_length_m * 0.5 - 330.0);
             marks.push(st.s + st.plan.platform_length_m * 0.5 + 330.0);
@@ -760,13 +918,26 @@ fn build_corridor(
             }
             let side = 1.0;
             let off = side * (limits.track_spacing_m * 0.5 + 2.6);
-            let base = if line.elevated_at(s) { -0.5 + 0.0 } else { -line.head_at(s) + 0.1 };
+            let base = if line.elevated_at(s) {
+                -0.5 + 0.0
+            } else {
+                -line.head_at(s) + 0.1
+            };
             let foot = line.point(s, off, base);
             let top = line.point(s, off, 4.5);
             b.tube("steel", foot, top, 0.07, 0.07, 5, None);
             let head = line.point(s, off - 0.3, 4.6);
             let tan = line.path.tangent_at(s);
-            box_at(b, "signal.body", Vec2::new(head.x, head.z), head.y, 0.32, 0.95, 0.32, tan.y.atan2(tan.x));
+            box_at(
+                b,
+                "signal.body",
+                Vec2::new(head.x, head.z),
+                head.y,
+                0.32,
+                0.95,
+                0.32,
+                tan.y.atan2(tan.x),
+            );
         }
     }
 
@@ -802,21 +973,53 @@ fn build_corridor(
                     let t1 = (seg + 1) as f32 / 4.0;
                     let dir = -left * lane_side;
                     let arm_len = c.half_width - 0.6;
-                    let p0 = mast_top + Vec3::new(dir.x * arm_len * 0.0, 0.0, dir.y * arm_len * 0.0);
+                    let p0 =
+                        mast_top + Vec3::new(dir.x * arm_len * 0.0, 0.0, dir.y * arm_len * 0.0);
                     let tilt = 0.25; // raised: mostly vertical, leaning over the road
-                    let a0 = Vec3::new(p0.x + dir.x * arm_len * tilt * t0, p0.y - 0.5 + arm_len * 0.9 * t0, p0.z + dir.y * arm_len * tilt * t0);
-                    let a1 = Vec3::new(p0.x + dir.x * arm_len * tilt * t1, p0.y - 0.5 + arm_len * 0.9 * t1, p0.z + dir.y * arm_len * tilt * t1);
-                    b.tube(if seg % 2 == 0 { "marking.white" } else { "furniture/lantern" }, a0, a1, 0.05, 0.04, 4, None);
+                    let a0 = Vec3::new(
+                        p0.x + dir.x * arm_len * tilt * t0,
+                        p0.y - 0.5 + arm_len * 0.9 * t0,
+                        p0.z + dir.y * arm_len * tilt * t0,
+                    );
+                    let a1 = Vec3::new(
+                        p0.x + dir.x * arm_len * tilt * t1,
+                        p0.y - 0.5 + arm_len * 0.9 * t1,
+                        p0.z + dir.y * arm_len * tilt * t1,
+                    );
+                    b.tube(
+                        if seg % 2 == 0 {
+                            "marking.white"
+                        } else {
+                            "furniture/lantern"
+                        },
+                        a0,
+                        a1,
+                        0.05,
+                        0.04,
+                        4,
+                        None,
+                    );
                 }
                 // Twin red lamps.
-                box_at(b, "furniture/lantern", base + Vec2::new(0.0, 0.0), 2.35, 0.34, 0.16, 0.16, 0.0);
+                box_at(
+                    b,
+                    "furniture/lantern",
+                    base + Vec2::new(0.0, 0.0),
+                    2.35,
+                    0.34,
+                    0.16,
+                    0.16,
+                    0.0,
+                );
             }
         }
     }
 
     // --- stations ---
     for st in &stations {
-        build_station(city, corridor, &line, &limits, st, &tracks, b, &mut rng, stats);
+        build_station(
+            city, corridor, &line, &limits, st, &tracks, b, &mut rng, stats,
+        );
     }
 }
 
@@ -849,7 +1052,17 @@ fn strip(
             line.point(w[1], off_b, lift),
             line.point(w[1], off_a, lift),
         ];
-        quad_facing(b, material, p, if off_a < off_b { UP } else { Vec3::new(0.0, -1.0, 0.0) }, color);
+        quad_facing(
+            b,
+            material,
+            p,
+            if off_a < off_b {
+                UP
+            } else {
+                Vec3::new(0.0, -1.0, 0.0)
+            },
+            color,
+        );
     }
 }
 
@@ -888,11 +1101,33 @@ fn rail_run(b: &mut MeshBuilder, line: &Line, s0: f32, s1: f32, rel: f32, track:
     let top = |s: f32, o: f32, d: f32| line.point(s, o + d, 0.0);
     let low = |s: f32, o: f32, d: f32| line.point(s, o + d, -RAIL_HEIGHT);
     // Head top and two sides.
-    quad_facing(b, "rail.steel", [top(s0, o0, -hw), top(s0, o0, hw), top(s1, o1, hw), top(s1, o1, -hw)], UP, None);
+    quad_facing(
+        b,
+        "rail.steel",
+        [
+            top(s0, o0, -hw),
+            top(s0, o0, hw),
+            top(s1, o1, hw),
+            top(s1, o1, -hw),
+        ],
+        UP,
+        None,
+    );
     for d in [-hw, hw] {
         let n = line.path.tangent_at((s0 + s1) * 0.5).left_normal();
         let toward = Vec3::new(n.x * d.signum(), 0.0, n.y * d.signum());
-        quad_facing(b, "rail.steel", [top(s0, o0, d), low(s0, o0, d), low(s1, o1, d), top(s1, o1, d)], toward, None);
+        quad_facing(
+            b,
+            "rail.steel",
+            [
+                top(s0, o0, d),
+                low(s0, o0, d),
+                low(s1, o1, d),
+                top(s1, o1, d),
+            ],
+            toward,
+            None,
+        );
     }
 }
 
@@ -926,7 +1161,12 @@ fn build_station(
             quad_facing(
                 b,
                 "rail.platform",
-                [line.point(s0, edge, platform_top), line.point(s1, edge, platform_top), line.point(s1, edge, -0.6), line.point(s0, edge, -0.6)],
+                [
+                    line.point(s0, edge, platform_top),
+                    line.point(s1, edge, platform_top),
+                    line.point(s1, edge, -0.6),
+                    line.point(s0, edge, -0.6),
+                ],
                 toward,
                 None,
             );
@@ -934,15 +1174,55 @@ fn build_station(
         // Tactile safety strip 0.8 m from the track-side edge.
         let (e0, e1) = (lo + 0.05, lo + 0.65);
         let (f0, f1) = (hi - 0.65, hi - 0.05);
-        strip(b, "marking.yellow", line, s0, s1, e0, e1, platform_top + 0.012, None);
-        strip(b, "marking.yellow", line, s0, s1, f0, f1, platform_top + 0.012, None);
+        strip(
+            b,
+            "marking.yellow",
+            line,
+            s0,
+            s1,
+            e0,
+            e1,
+            platform_top + 0.012,
+            None,
+        );
+        strip(
+            b,
+            "marking.yellow",
+            line,
+            s0,
+            s1,
+            f0,
+            f1,
+            platform_top + 0.012,
+            None,
+        );
         // Canopy: columns every 14 m and a roof 70 % of the platform length.
         let c_mid = (lo + hi) * 0.5;
         let roof_half = half * 0.7;
         let roof_w = (hi - lo) * 0.5 + 1.0;
         let roof_lift = platform_top + 5.6;
-        strip(b, "station.roof", line, st.s - roof_half, st.s + roof_half, c_mid - roof_w, c_mid + roof_w, roof_lift, None);
-        strip(b, "station.roof", line, st.s - roof_half, st.s + roof_half, c_mid + roof_w, c_mid - roof_w, roof_lift - 0.35, None);
+        strip(
+            b,
+            "station.roof",
+            line,
+            st.s - roof_half,
+            st.s + roof_half,
+            c_mid - roof_w,
+            c_mid + roof_w,
+            roof_lift,
+            None,
+        );
+        strip(
+            b,
+            "station.roof",
+            line,
+            st.s - roof_half,
+            st.s + roof_half,
+            c_mid + roof_w,
+            c_mid - roof_w,
+            roof_lift - 0.35,
+            None,
+        );
         let mut s = st.s - roof_half;
         while s <= st.s + roof_half {
             let foot = line.point(s, c_mid, platform_top);
@@ -953,7 +1233,11 @@ fn build_station(
     }
     // Station building and forecourt on the town's side.
     let side = f32::from(st.plan.building_side);
-    let outer = t.platforms.iter().map(|p| p.0.abs().max(p.1.abs())).fold(0.0_f32, f32::max);
+    let outer = t
+        .platforms
+        .iter()
+        .map(|p| p.0.abs().max(p.1.abs()))
+        .fold(0.0_f32, f32::max);
     let (pos, tan) = line.path.sample(st.s);
     let angle = tan.y.atan2(tan.x);
     let left = tan.left_normal();
@@ -964,23 +1248,65 @@ fn build_station(
         (rng.range(50.0, 70.0), 20.0, rng.range(7.5, 9.5))
     };
     let across = outer + 20.0 + depth * 0.5;
-    let centre = Vec2::new(pos.x + left.x * side * across, pos.z + left.y * side * across);
+    let centre = Vec2::new(
+        pos.x + left.x * side * across,
+        pos.z + left.y * side * across,
+    );
     let ground_y = pos.y + base;
-    box_at(b, "station.wall", centre, ground_y + height * 0.5, len_b, height, depth, angle);
+    box_at(
+        b,
+        "station.wall",
+        centre,
+        ground_y + height * 0.5,
+        len_b,
+        height,
+        depth,
+        angle,
+    );
     // Roof slab overhanging, glass band wrapped round the middle storeys.
-    box_at(b, "station.roof", centre, ground_y + height + 0.25, len_b + 3.0, 0.5, depth + 3.0, angle);
-    box_at(b, "station.glass", centre, ground_y + height * 0.45, len_b + 0.3, height * 0.42, depth + 0.3, angle);
+    box_at(
+        b,
+        "station.roof",
+        centre,
+        ground_y + height + 0.25,
+        len_b + 3.0,
+        0.5,
+        depth + 3.0,
+        angle,
+    );
+    box_at(
+        b,
+        "station.glass",
+        centre,
+        ground_y + height * 0.45,
+        len_b + 0.3,
+        height * 0.42,
+        depth + 0.3,
+        angle,
+    );
     if elevated {
         // The hall under the tracks: the station is a bridge-type building.
         let hall_h = (pos.y - HEAD_ABOVE_GROUND - 3.8).max(4.0);
         let hall_centre = Vec2::new(pos.x, pos.z);
-        box_at(b, "station.glass", hall_centre, hall_h * 0.5, (len_b * 0.8).min(half * 1.2), hall_h, outer * 2.0 + 6.0, angle);
+        box_at(
+            b,
+            "station.glass",
+            hall_centre,
+            hall_h * 0.5,
+            (len_b * 0.8).min(half * 1.2),
+            hall_h,
+            outer * 2.0 + 6.0,
+            angle,
+        );
     }
     // Forecourt plaza: paved, with a car park beyond it.
     let plaza_depth = 70.0;
     let plaza_centre = across + depth * 0.5 + plaza_depth * 0.5;
     let corner = |a: f32, z: f32| {
-        Vec2::new(pos.x + tan.x * a + left.x * side * z, pos.z + tan.y * a + left.y * side * z)
+        Vec2::new(
+            pos.x + tan.x * a + left.x * side * z,
+            pos.z + tan.y * a + left.y * side * z,
+        )
     };
     let hl = len_b * 0.65;
     let ring = vec![
@@ -999,16 +1325,44 @@ fn build_station(
     if st.plan.yard {
         let far = -side;
         let shed_across = 34.0 + 5.0 * 5.0 + 22.0;
-        let shed_centre = Vec2::new(pos.x + left.x * far * shed_across - tan.x * 160.0, pos.z + left.y * far * shed_across - tan.y * 160.0);
-        box_at(b, "station.wall", shed_centre, ground_y + 5.5, 90.0, 11.0, 26.0, angle);
-        box_at(b, "station.roof", shed_centre, ground_y + 11.2, 92.0, 0.5, 28.0, angle);
+        let shed_centre = Vec2::new(
+            pos.x + left.x * far * shed_across - tan.x * 160.0,
+            pos.z + left.y * far * shed_across - tan.y * 160.0,
+        );
+        box_at(
+            b,
+            "station.wall",
+            shed_centre,
+            ground_y + 5.5,
+            90.0,
+            11.0,
+            26.0,
+            angle,
+        );
+        box_at(
+            b,
+            "station.roof",
+            shed_centre,
+            ground_y + 11.2,
+            92.0,
+            0.5,
+            28.0,
+            angle,
+        );
         // A freight train standing on the first siding.
         if let Some(track) = tracks.iter().filter(|t| t.siding).nth(2) {
             freight_train(b, line, track, st.s - 60.0, rng, stats);
         }
     }
     // A passenger train at the platform: on the loop where there is one.
-    let train_track = if big { tracks.iter().filter(|t| !t.siding).nth(2 + (rng.int(2) as usize)) } else { tracks.iter().filter(|t| !t.siding).nth(rng.int(2) as usize) };
+    let train_track = if big {
+        tracks
+            .iter()
+            .filter(|t| !t.siding)
+            .nth(2 + (rng.int(2) as usize))
+    } else {
+        tracks.iter().filter(|t| !t.siding).nth(rng.int(2) as usize)
+    };
     if let Some(track) = train_track {
         passenger_train(b, line, corridor.kind, track, st.s, rng, stats);
     }
@@ -1045,7 +1399,10 @@ fn sweep(
         let shape = f.powf(0.55);
         let scale_x = 0.12 + 0.88 * shape;
         let scale_y = 0.62 + 0.38 * shape;
-        let mut pts: Vec<(f32, f32)> = profile.iter().map(|(x, y)| (-x * scale_x, y * scale_y)).collect();
+        let mut pts: Vec<(f32, f32)> = profile
+            .iter()
+            .map(|(x, y)| (-x * scale_x, y * scale_y))
+            .collect();
         pts.reverse();
         pts.extend(profile.iter().map(|(x, y)| (x * scale_x, y * scale_y)));
         pts
@@ -1062,7 +1419,12 @@ fn sweep(
         .collect();
     for i in 0..n {
         for k in 0..rows[i].len() - 1 {
-            let p = [rows[i][k], rows[i + 1][k], rows[i + 1][k + 1], rows[i][k + 1]];
+            let p = [
+                rows[i][k],
+                rows[i + 1][k],
+                rows[i + 1][k + 1],
+                rows[i][k + 1],
+            ];
             // Outward: away from the centre of the section.
             let mid = Vec3::new(
                 (p[0].x + p[2].x) * 0.5 - (rows[i][0].x + rows[i][rows[i].len() - 1].x) * 0.5,
@@ -1079,7 +1441,13 @@ fn sweep(
         let ring: Vec<Vec3> = row.clone();
         let centre = ring.iter().fold(Vec3::default(), |a, p| a + *p) / ring.len() as f32;
         for k in 0..ring.len() - 1 {
-            quad_facing(b, material, [centre, ring[k], ring[k + 1], centre], toward, Some(color));
+            quad_facing(
+                b,
+                material,
+                [centre, ring[k], ring[k + 1], centre],
+                toward,
+                Some(color),
+            );
         }
     }
 }
@@ -1100,7 +1468,13 @@ fn side_band(
         let left = line.path.tangent_at((s0 + s1) * 0.5).left_normal();
         let toward = Vec3::new(left.x * side, 0.0, left.y * side);
         let p = |s: f32, y: f32| line.point(s, (track.offset)(s) + side * x, y + 0.15);
-        quad_facing(b, material, [p(s0, y0), p(s1, y0), p(s1, y1), p(s0, y1)], toward, color);
+        quad_facing(
+            b,
+            material,
+            [p(s0, y0), p(s1, y0), p(s1, y1), p(s0, y1)],
+            toward,
+            color,
+        );
     }
 }
 
@@ -1114,12 +1488,27 @@ fn passenger_train(
     stats: &mut RailStats,
 ) {
     let hsr = kind == RailKind::HighSpeed;
-    let (cars, length, width, roof) = if hsr { (8, 25.2, 1.68, 3.75) } else { (7, 25.5, 1.55, 4.3) };
+    let (cars, length, width, roof) = if hsr {
+        (8, 25.2, 1.68, 3.75)
+    } else {
+        (7, 25.5, 1.55, 4.3)
+    };
     let total = cars as f32 * length;
     let start = centre - total * 0.5;
-    let profile_hsr = [(1.2, 0.0), (1.68, 0.35), (1.68, 2.9), (1.45, 3.45), (0.85, 3.72), (0.0, 3.78)];
+    let profile_hsr = [
+        (1.2, 0.0),
+        (1.68, 0.35),
+        (1.68, 2.9),
+        (1.45, 3.45),
+        (0.85, 3.72),
+        (0.0, 3.78),
+    ];
     let profile_conv = [(1.4, 0.0), (1.55, 0.3), (1.55, 3.7), (1.3, 4.1), (0.0, 4.3)];
-    let profile: Vec<(f32, f32)> = if hsr { profile_hsr.to_vec() } else { profile_conv.to_vec() };
+    let profile: Vec<(f32, f32)> = if hsr {
+        profile_hsr.to_vec()
+    } else {
+        profile_conv.to_vec()
+    };
     let _ = (width, roof);
     let body: [f32; 3] = if hsr {
         [0.93, 0.94, 0.95]
@@ -1134,14 +1523,32 @@ fn passenger_train(
         if a < track.from || e > track.to {
             continue;
         }
-        let nose = (if car == 0 { 9.0 } else { 0.0 }, if car == cars - 1 { 9.0 } else { 0.0 });
-        let colour = if !hsr && car == 0 { [0.20, 0.30, 0.55] } else { body };
+        let nose = (
+            if car == 0 { 9.0 } else { 0.0 },
+            if car == cars - 1 { 9.0 } else { 0.0 },
+        );
+        let colour = if !hsr && car == 0 {
+            [0.20, 0.30, 0.55]
+        } else {
+            body
+        };
         sweep(b, "train.body", line, track, a, e, &profile, colour, nose);
         let (wa, we) = (a + nose.0.max(1.0), e - nose.1.max(1.0));
         let wx = if hsr { 1.695 } else { 1.56 };
         if we > wa {
             side_band(b, "train.glass", line, track, wa, we, wx, 1.85, 2.75, None);
-            side_band(b, "train.stripe", line, track, a + nose.0, e - nose.1, wx + 0.005, 0.95, 1.25, None);
+            side_band(
+                b,
+                "train.stripe",
+                line,
+                track,
+                a + nose.0,
+                e - nose.1,
+                wx + 0.005,
+                0.95,
+                1.25,
+                None,
+            );
         }
         stats.train_cars += 1;
     }
@@ -1163,10 +1570,25 @@ fn freight_train(
     let loco = [(1.5, 0.0), (1.55, 0.4), (1.55, 3.9), (1.2, 4.3), (0.0, 4.3)];
     let wagon = [(1.4, 0.0), (1.45, 0.55), (1.45, 3.4), (0.0, 3.4)];
     if start >= track.from && start + loco_len <= track.to {
-        sweep(b, "train.body", line, track, start, start + loco_len - 0.4, &loco, [0.78, 0.35, 0.10], (0.0, 0.0));
+        sweep(
+            b,
+            "train.body",
+            line,
+            track,
+            start,
+            start + loco_len - 0.4,
+            &loco,
+            [0.78, 0.35, 0.10],
+            (0.0, 0.0),
+        );
         stats.train_cars += 1;
     }
-    let palette = [[0.38, 0.20, 0.14], [0.30, 0.34, 0.40], [0.22, 0.30, 0.22], [0.45, 0.43, 0.38]];
+    let palette = [
+        [0.38, 0.20, 0.14],
+        [0.30, 0.34, 0.40],
+        [0.22, 0.30, 0.22],
+        [0.45, 0.43, 0.38],
+    ];
     for w in 0..wagons {
         let a = start + loco_len + w as f32 * wagon_len + 0.3;
         let e = a + wagon_len - 0.6;
@@ -1174,7 +1596,17 @@ fn freight_train(
             continue;
         }
         let colour = palette[rng.int(palette.len() as u32) as usize];
-        sweep(b, "train.body", line, track, a, e, &wagon, colour, (0.0, 0.0));
+        sweep(
+            b,
+            "train.body",
+            line,
+            track,
+            a,
+            e,
+            &wagon,
+            colour,
+            (0.0, 0.0),
+        );
         stats.train_cars += 1;
     }
 }

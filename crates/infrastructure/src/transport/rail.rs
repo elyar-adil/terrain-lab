@@ -192,7 +192,8 @@ impl PartialOrd for Node {
 }
 impl Ord for Node {
     fn cmp(&self, o: &Self) -> Ordering {
-        o.f.total_cmp(&self.f).then_with(|| o.state.cmp(&self.state))
+        o.f.total_cmp(&self.f)
+            .then_with(|| o.state.cmp(&self.state))
     }
 }
 
@@ -228,7 +229,10 @@ impl Router {
                     if tr.river_order[gi] >= 2 || tr.water[gi] > 0.35 {
                         c += 10.0;
                     }
-                    if !nodes.iter().any(|s| g::dist([px, py], s.centre) < s.radius_m * 1.3) {
+                    if !nodes
+                        .iter()
+                        .any(|s| g::dist([px, py], s.centre) < s.radius_m * 1.3)
+                    {
                         c += 6.0 * urban_land[gi].clamp(0.0, 1.0);
                     }
                 }
@@ -282,7 +286,14 @@ impl Router {
     /// (straight-line distance, so an upper bound) can only be passed in
     /// tunnel; its cost grows with that excess height, which steers the
     /// line to low passes and around ranges instead of under them.
-    fn route(&self, from: P, to: P, dir0: Option<P>, dir1: Option<P>, grade: f32) -> Option<Vec<P>> {
+    fn route(
+        &self,
+        from: P,
+        to: P,
+        dir0: Option<P>,
+        dir1: Option<P>,
+        grade: f32,
+    ) -> Option<Vec<P>> {
         let (sx, sy) = self.cell(from);
         let (ex, ey) = self.cell(to);
         let n = self.n;
@@ -323,7 +334,10 @@ impl Router {
         let start = (sy * n + sx) * states + start_dir;
         dist[start] = 0.0;
         let mut q = BinaryHeap::new();
-        q.push(Node { f: 0.0, state: start });
+        q.push(Node {
+            f: 0.0,
+            state: start,
+        });
         let mut end_state = usize::MAX;
         while let Some(node) = q.pop() {
             let cell = node.state / states;
@@ -386,7 +400,10 @@ impl Router {
             return None;
         }
         if std::env::var("RAIL_DEBUG").is_ok() {
-            eprintln!("route ({sx},{sy})->({ex},{ey}) cost {} hs {hs} he {he}", dist[end_state]);
+            eprintln!(
+                "route ({sx},{sy})->({ex},{ey}) cost {} hs {hs} he {he}",
+                dist[end_state]
+            );
         }
         let mut path = vec![end_state / states];
         let mut cur = end_state;
@@ -411,7 +428,10 @@ impl Router {
         let mut dist = vec![f32::INFINITY; n * n];
         let mut q = BinaryHeap::new();
         dist[sy * n + sx] = 0.0;
-        q.push(Node { f: 0.0, state: sy * n + sx });
+        q.push(Node {
+            f: 0.0,
+            state: sy * n + sx,
+        });
         while let Some(Node { f, state: cell }) = q.pop() {
             if f > dist[cell] {
                 continue;
@@ -425,8 +445,10 @@ impl Router {
                     }
                     let ncell = y as usize * n + x as usize;
                     let len = if ox != 0 && oy != 0 { 1.414 } else { 1.0 };
-                    let grade = ((self.height[ncell] - self.height[cell]) / (len * self.cell_m)).abs();
-                    let t = f + len * 0.5 * (self.cost[cell] + self.cost[ncell])
+                    let grade =
+                        ((self.height[ncell] - self.height[cell]) / (len * self.cell_m)).abs();
+                    let t = f
+                        + len * 0.5 * (self.cost[cell] + self.cost[ncell])
                         + 90.0 * (grade - 0.012).max(0.0) * len;
                     if t < dist[ncell] {
                         dist[ncell] = t;
@@ -497,7 +519,8 @@ fn site_on_side(node: &StationNode, nidx: usize, dir: P, side: f32) -> Site {
 }
 
 fn site_for(router: &Router, node: &StationNode, nidx: usize, dir: P) -> Site {
-    let side = if side_score(router, node, dir, -1.0) < side_score(router, node, dir, 1.0) - 1.0e-3 {
+    let side = if side_score(router, node, dir, -1.0) < side_score(router, node, dir, 1.0) - 1.0e-3
+    {
         -1.0
     } else {
         1.0
@@ -538,7 +561,10 @@ pub fn plan_railways(
     // terrain, so towns on the same side of a range join up first and the
     // range is crossed once, where it is cheapest.
     let m = nodes.len();
-    let reach: Vec<Vec<f32>> = nodes.iter().map(|nd| router.travel_costs(nd.centre)).collect();
+    let reach: Vec<Vec<f32>> = nodes
+        .iter()
+        .map(|nd| router.travel_costs(nd.centre))
+        .collect();
     let link_cost = |a: usize, b: usize| -> f32 {
         let (bx, by) = router.cell(nodes[b].centre);
         let (ax, ay) = router.cell(nodes[a].centre);
@@ -590,7 +616,15 @@ pub fn plan_railways(
             }
             path.pop();
         }
-        walk(s, usize::MAX, &adj, &nodes, &mut Vec::new(), 0.0, &mut best_chain);
+        walk(
+            s,
+            usize::MAX,
+            &adj,
+            &nodes,
+            &mut Vec::new(),
+            0.0,
+            &mut best_chain,
+        );
     }
     let mut chain = best_chain.1;
     // A chain that turns sharply at a town ends there: the rest leaves it as
@@ -610,7 +644,11 @@ pub fn plan_railways(
     let k = chain.len();
     let dir_at = |j: usize| -> P {
         let prev = if j > 0 { chain[j - 1] } else { chain[0] };
-        let next = if j + 1 < k { chain[j + 1] } else { chain[k - 1] };
+        let next = if j + 1 < k {
+            chain[j + 1]
+        } else {
+            chain[k - 1]
+        };
         let (a, b) = if j == 0 {
             (nodes[chain[0]].centre, nodes[chain[1]].centre)
         } else if j + 1 == k {
@@ -628,7 +666,11 @@ pub fn plan_railways(
                 .map(|j| side_score(&router, &nodes[chain[j]], dir_at(j), side))
                 .sum()
         };
-        if total(-1.0) < total(1.0) - 1.0e-3 { -1.0 } else { 1.0 }
+        if total(-1.0) < total(1.0) - 1.0e-3 {
+            -1.0
+        } else {
+            1.0
+        }
     };
     let sites: Vec<Site> = (0..k)
         .map(|j| site_on_side(&nodes[chain[j]], chain[j], dir_at(j), chain_side))
@@ -636,7 +678,9 @@ pub fn plan_railways(
     let chain_length: f32 = (0..k - 1)
         .map(|j| g::dist(nodes[chain[j]].centre, nodes[chain[j + 1]].centre))
         .sum();
-    let has_centre = chain.iter().any(|c| nodes[*c].class == SettlementClass::RegionalCentre);
+    let has_centre = chain
+        .iter()
+        .any(|c| nodes[*c].class == SettlementClass::RegionalCentre);
     let kinds: &[RailKind] = if has_centre && chain_length >= 30_000.0 {
         &[RailKind::HighSpeed, RailKind::Mainline, RailKind::Branch]
     } else {
@@ -649,7 +693,11 @@ pub fn plan_railways(
     for j in 0..k {
         let site = &sites[j];
         let back = if j == 0 { TERMINAL_OVERRUN_M } else { STUB_M };
-        let fwd = if j + 1 == k { TERMINAL_OVERRUN_M } else { STUB_M };
+        let fwd = if j + 1 == k {
+            TERMINAL_OVERRUN_M
+        } else {
+            STUB_M
+        };
         let a = g::add_scaled(site.s, site.dir, -back);
         let b = g::add_scaled(site.s, site.dir, fwd);
         if j > 0 {
@@ -717,8 +765,16 @@ pub fn plan_railways(
             };
             progress = true;
             built.push(child);
-            if let Some(rw) = branch(world, &router, &nodes, &railways, parent, child, roads, railways.len() as u32 + 1)
-            {
+            if let Some(rw) = branch(
+                world,
+                &router,
+                &nodes,
+                &railways,
+                parent,
+                child,
+                roads,
+                railways.len() as u32 + 1,
+            ) {
                 railways.push(rw);
             }
         }
@@ -792,7 +848,11 @@ fn branch(
         let t = g::unit(g::sub(target, k));
         d[0] * t[0] + d[1] * t[1]
     };
-    let ki = if ahead(pick(1)) >= ahead(pick(-1)) { pick(1) } else { pick(-1) };
+    let ki = if ahead(pick(1)) >= ahead(pick(-1)) {
+        pick(1)
+    } else {
+        pick(-1)
+    };
     let kp0 = rw.point_xy_m(ki);
     let along = g::unit(g::sub(kp0, jp));
     let n = perp(along);
@@ -951,7 +1011,10 @@ fn finish(
         (limits.min_radius_m * 1.5).min(9000.0),
     );
     if curve.is_none() && std::env::var("RAIL_DEBUG").is_ok() {
-        eprintln!("rail {id} {kind:?}: fillet failed ({} vertices)", verts.len());
+        eprintln!(
+            "rail {id} {kind:?}: fillet failed ({} vertices)",
+            verts.len()
+        );
     }
     let curve = curve?;
     let (pts, s) = g::resample(&curve, STEP_M);
@@ -1015,7 +1078,10 @@ fn finish(
     }
     // A regional centre's built-up area: continuous viaduct, every street passes under.
     let mut elevated_urban = vec![false; n];
-    for node in nodes.iter().filter(|nd| nd.class == SettlementClass::RegionalCentre) {
+    for node in nodes
+        .iter()
+        .filter(|nd| nd.class == SettlementClass::RegionalCentre)
+    {
         for i in 0..n {
             if g::dist(pts[i], node.centre) < node.radius_m * 0.9 {
                 elevated_urban[i] = true;
@@ -1041,7 +1107,11 @@ fn finish(
             let (lo_y, hi_y) = (w[0][1].min(w[1][1]) - 30.0, w[0][1].max(w[1][1]) + 30.0);
             for i in 0..n - 1 {
                 let (a, b) = (pts[i], pts[i + 1]);
-                if a[0].max(b[0]) < lo_x || a[0].min(b[0]) > hi_x || a[1].max(b[1]) < lo_y || a[1].min(b[1]) > hi_y {
+                if a[0].max(b[0]) < lo_x
+                    || a[0].min(b[0]) > hi_x
+                    || a[1].max(b[1]) < lo_y
+                    || a[1].min(b[1]) > hi_y
+                {
                     continue;
                 }
                 if let Some(t) = seg_intersection(a, b, w[0], w[1]) {
@@ -1059,7 +1129,10 @@ fn finish(
     }
     let must_separate = |class: RoadClass| {
         limits.closed
-            || matches!(class, RoadClass::Motorway | RoadClass::Arterial | RoadClass::Collector)
+            || matches!(
+                class,
+                RoadClass::Motorway | RoadClass::Arterial | RoadClass::Collector
+            )
     };
     let mut crossing_bridge = vec![false; n];
     for c in &raw {
@@ -1102,7 +1175,11 @@ fn finish(
             RailStationPlan {
                 s_m,
                 platform_length_m: plan_len,
-                tracks: if *class == SettlementClass::RegionalCentre { 4 } else { 2 },
+                tracks: if *class == SettlementClass::RegionalCentre {
+                    4
+                } else {
+                    2
+                },
                 building_side: if left { 1 } else { -1 },
                 terminal: *terminal,
                 yard: *class == SettlementClass::RegionalCentre,
@@ -1126,7 +1203,11 @@ fn finish(
             // The approach long enough to climb that depth at the extra grade.
             let gain = (limits.mountain_grade - limits.max_grade).max(1.0e-3);
             let pad = (((ground[i] - design[i]) / gain).clamp(3000.0, 25_000.0) / STEP_M) as usize;
-            for flag in mountain.iter_mut().take((i + pad + 1).min(n)).skip(i.saturating_sub(pad)) {
+            for flag in mountain
+                .iter_mut()
+                .take((i + pad + 1).min(n))
+                .skip(i.saturating_sub(pad))
+            {
                 *flag = true;
             }
         }
@@ -1155,7 +1236,10 @@ fn finish(
         let surface = d > -TUNNEL_DEPTH_M;
         kinds[i] = if bridge[i] && surface {
             RailGround::Bridge
-        } else if (surface && (crossing_bridge[i] || elevated_urban[i])) || d > 9.0 || (lo[i].is_finite() && d >= 5.0) {
+        } else if (surface && (crossing_bridge[i] || elevated_urban[i]))
+            || d > 9.0
+            || (lo[i].is_finite() && d >= 5.0)
+        {
             RailGround::Viaduct
         } else if d > 1.0 {
             RailGround::Embankment
@@ -1174,7 +1258,11 @@ fn finish(
                 j += 1;
             }
             if (j - i) as f32 * STEP_M >= 300.0 {
-                for k in kinds.iter_mut().take((j + 2).min(n)).skip(i.saturating_sub(2)) {
+                for k in kinds
+                    .iter_mut()
+                    .take((j + 2).min(n))
+                    .skip(i.saturating_sub(2))
+                {
                     *k = RailGround::Tunnel;
                 }
             }
@@ -1191,7 +1279,10 @@ fn finish(
         while j + 1 < n && kinds[j + 1] == k {
             j += 1;
         }
-        if !matches!(k, RailGround::AtGrade | RailGround::Embankment | RailGround::Cutting) {
+        if !matches!(
+            k,
+            RailGround::AtGrade | RailGround::Embankment | RailGround::Cutting
+        ) {
             structures.push(RailStructure {
                 kind: k,
                 start_m: s[i],
