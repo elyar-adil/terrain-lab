@@ -188,6 +188,19 @@ fn intake_field(form: &Form, p: Vec3) -> f32 {
     .max(form.nose - 0.3 - p.x)
 }
 
+const FOG_R: f32 = 0.040;
+
+/// Where a fog lamp sits on the front's drawing: out beyond the intake.
+fn fog_place(form: &Form) -> (f32, f32) {
+    let intake = &form.spec.intake;
+    let half = form.face_half(true);
+    let s = (intake.half.0.max(intake.half.1) * half + 0.085).min(half * 0.90);
+    (
+        s,
+        form.floor(form.nose) + (intake.y.0 + intake.y.1) * 0.5 + 0.01,
+    )
+}
+
 /// Cut the lamps and openings out of the shell.
 pub(super) fn cut(soup: &mut Soup, form: &Form) {
     let spec = form.spec;
@@ -237,6 +250,25 @@ pub(super) fn cut(soup: &mut Soup, form: &Form) {
     // Openings: the grille and the intake under the bumper.
     soup.cut(&|p| grille_field(form, p), &body, label::GRILLE);
     soup.cut(&|p| intake_field(form, p), &body, label::INTAKE);
+    if spec.fog {
+        let (s, y) = fog_place(form);
+        soup.cut(
+            &|p: Vec3| {
+                let (ps, py) = form.unwrap(true, p);
+                ((ps - s).powi(2) + (py - y).powi(2)).sqrt() - FOG_R
+            },
+            &body,
+            label::FOG,
+        );
+        soup.cut(
+            &|p: Vec3| {
+                let (ps, py) = form.unwrap(true, p);
+                (((ps - s).powi(2) + (py - y).powi(2)).sqrt() - FOG_R - 0.004).max(-p.x)
+            },
+            &body,
+            label::SEAM,
+        );
+    }
     // Reflectors low in the rear bumper, and a repeater on the wing if the
     // mirror does not carry it.
     let half = form.face_half(false);
@@ -495,7 +527,7 @@ pub(super) fn build(
     let spec = form.spec;
     // Lenses: the shell's own triangles, drawn as glass.
     for (labels, part) in [
-        (&[label::HEAD, label::CLEAR][..], "lens"),
+        (&[label::HEAD, label::CLEAR, label::FOG][..], "lens"),
         (&[label::TAIL, label::REFLECT][..], "lens.red"),
         (&[label::AMBER, label::MARKER][..], "lamp.amber"),
     ] {
@@ -506,6 +538,15 @@ pub(super) fn build(
     pocket(builder, &small, 0.006, &key("chrome"), &key("chrome"));
 
     for side in [-1.0_f32, 1.0] {
+        // --- fog lamp: a small projector in a round housing ---
+        let fog = soup.take(&|t| t.label == label::FOG && t.centre().z * side > 0.0);
+        if !fog.tris.is_empty() {
+            pocket(builder, &fog, 0.05, &key("well"), &key("chrome"));
+            if let Some(at) = fog.locate(&|_| true, &|p| form.unwrap(true, p), fog_place(form)) {
+                let axis = (Vec3::new(1.0, 0.0, 0.0) + at.n * 0.5).normalized_or_up();
+                projector(builder, key, at.p - at.n * 0.034, axis, FOG_R * 0.55);
+            }
+        }
         // --- headlamp ---
         let slim = spec.head_style == HeadStyle::Slim;
         let lamp = bay(form, soup, true, side, if slim { 0.04 } else { 0.065 });
@@ -735,7 +776,7 @@ fn on_centre(
             && t.centre().z >= 0.0
             && (!in_grille || t.label == label::GRILLE)
     });
-    let at = here.locate(&|_| true, &|p| form.unwrap(front, p), (0.004, y))?;
+    let at = here.locate(&|_| true, &|p| form.unwrap(front, p), (0.03, y))?;
     // Things on the centre line stand nearly upright whatever the face does.
     let normal = Vec3::new(at.n.x, at.n.y * 0.35, 0.0).normalized_or_up();
     let sink = if in_grille { 0.022 } else { 0.0 };
@@ -747,17 +788,9 @@ fn plates(builder: &mut MeshBuilder, soup: &Soup, form: &Form, key: &dyn Fn(&str
     let spec = form.spec;
     for front in [true, false] {
         let y = if front {
-            // On the bar between the grille and the intake if there is room
-            // for it there, and over the intake if there is not.
-            let bar = form.floor(form.nose) + spec.intake.y.1;
-            let grille_low =
-                fitted_grille(form).map_or(form.face_top(true), |g| form.face_top(true) + g.y.0);
-            if grille_low - bar > 0.17 {
-                (grille_low + bar) * 0.5
-            } else {
-                (form.floor(form.nose) + (spec.intake.y.0 + spec.intake.y.1) * 0.5 + 0.02)
-                    .max(form.floor(form.nose) + 0.125)
-            }
+            // On the bumper, over the intake.
+            let floor = form.floor(form.nose);
+            (floor + spec.intake.y.1 + 0.085).max(floor + (form.face_top(true) - floor) * 0.34)
         } else {
             let lamp_low = form.face_top(false) + spec.tail.y.0 - spec.tail.h.0 * 0.5;
             if spec.tail_style == TailStyle::Stack {
@@ -776,8 +809,8 @@ fn plates(builder: &mut MeshBuilder, soup: &Soup, form: &Form, key: &dyn Fn(&str
         let here = soup.take(&|t| (t.centre().x > 0.0) == front && t.centre().z >= 0.0);
         let mut proud = 0.0_f32;
         for (s, dy) in [
-            (0.004, -0.07),
-            (0.004, 0.07),
+            (0.03, -0.07),
+            (0.03, 0.07),
             (0.22, -0.07),
             (0.22, 0.0),
             (0.22, 0.07),

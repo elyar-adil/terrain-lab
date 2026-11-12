@@ -58,6 +58,7 @@ mod label {
     pub const INTAKE: u8 = 16;
     /// The dish behind a door handle.
     pub const POCKET: u8 = 17;
+    pub const FOG: u8 = 18;
 }
 
 /// Within this distance a car is drawn in full; beyond it, by its far model.

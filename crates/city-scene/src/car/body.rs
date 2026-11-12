@@ -127,6 +127,22 @@ pub(super) fn build(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -
             label::BLACK,
         );
     }
+    // The fixed quarter lights: a slim bar divides each from the glass that
+    // winds down, ahead of the front door's and behind the rear door's.
+    if !spec.mirror.on_sail {
+        soup.cut(
+            &|p| (p.x - (side_front - 0.19)).abs() - 0.011,
+            &glass,
+            label::BLACK,
+        );
+    }
+    if spec.boot && lines.rear_door + 0.02 > side_rear + 0.10 {
+        soup.cut(
+            &|p| (p.x - lines.rear_door - 0.02).abs() - 0.013,
+            &glass,
+            label::BLACK,
+        );
+    }
     if spec.mirror.on_sail {
         soup.cut(&|p| side_front - 0.13 - p.x, &glass, label::BLACK);
     }

@@ -170,7 +170,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
     let nose_top = match kind {
         Van => cowl - rng.range(0.20, 0.26),
         Suv | Crossover | Mpv => cowl - rng.range(0.19, 0.25),
-        _ => cowl - rng.range(0.20, 0.25),
+        _ => cowl - rng.range(0.24, 0.31),
     };
     let nose_low = nose_top - rng.range(0.13, 0.17);
     let deck = match kind {
@@ -182,7 +182,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Saloon | Fastback => deck - rng.range(0.05, 0.08),
         _ => deck - rng.range(0.03, 0.06),
     };
-    let tail_low = tail_top - rng.range(0.30, 0.36);
+    let tail_low = tail_top - rng.range(0.20, 0.26);
     // The glasshouse.
     let half_base = wheelbase * 0.5;
     let front_foot = match kind {
@@ -221,7 +221,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
     let rear_foot = rear_foot.min(rear_head - 0.06);
     let top = vec![
         (tail, tail_low),
-        (tail + rng.range(0.035, 0.06), tail_top),
+        (tail + rng.range(0.08, 0.11), tail_top),
         (rear_foot.max(tail + 0.5) + 0.12, deck),
         (front_foot - 0.08, cowl),
         (
@@ -526,5 +526,6 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         tyre,
         rim,
         mirror,
+        fog: kind != Van && rng.chance(0.6),
     }
 }

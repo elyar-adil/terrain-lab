@@ -46,6 +46,8 @@ pub(super) struct Spec {
     pub tyre: Tyre,
     pub rim: Rim,
     pub mirror: Mirror,
+    /// Fog lamps in the corners of the front bumper.
+    pub fog: bool,
 }
 
 /// A door mirror: its glass's width and height, and how it is carried.
@@ -106,7 +108,7 @@ pub(super) fn lines_of(spec: &Spec) -> Lines {
 pub(super) const ARCH_GAP: f32 = 0.055;
 /// The rings a face is closed with, and how far it stands beyond the last section.
 const FACE_RINGS: usize = 12;
-const FACE_DEPTH_M: f32 = 0.13;
+const FACE_DEPTH_M: f32 = 0.15;
 /// Where the corner of the car is taken to be, back from its end, when a lamp
 /// drawn on the face is carried round onto the wing.
 const CORNER_M: f32 = 0.03;
@@ -193,8 +195,11 @@ impl<'a> Form<'a> {
     /// Half the width at the widest of the section: full between the wheels,
     /// rounding in to the corners at both ends.
     fn half_width_exact(&self, x: f32) -> f32 {
-        let t = 1.0 - (self.to_end(x) / 0.62).min(1.0);
-        self.spec.width * 0.5 * (1.0 - 0.22 * t.powf(2.4))
+        // The nose draws in over a short length; the tail over a longer,
+        // gentler one, as the air wants it.
+        let front = 1.0 - ((self.nose - x).max(0.0) / 0.72).min(1.0);
+        let rear = 1.0 - ((x - self.tail).max(0.0) / 1.05).min(1.0);
+        self.spec.width * 0.5 * (1.0 - 0.23 * front.powf(2.3) - 0.19 * rear.powf(2.0))
     }
     /// How much of a cabin stands on the body here: 0 over the bonnet and the
     /// boot, 1 under the roof, between along the raked glass.
@@ -426,20 +431,34 @@ impl Shell {
                 .map(|j| {
                     let angle = j as f32 / FACE_RINGS as f32 * std::f32::consts::FRAC_PI_2;
                     let scale = if j == FACE_RINGS { 0.0 } else { angle.cos() };
-                    let out = (1.0 - scale.powf(2.3)).powf(1.0 / 2.3);
+                    let out = (1.0 - scale.powf(2.0)).powf(1.0 / 2.0);
                     ring.iter()
                         .map(|p| {
-                            let (y, z) = (mid + (p.y - mid) * scale, p.z * scale);
+                            // The rings draw in across the car faster than
+                            // down it: the corners are round in plan, while
+                            // the top edge (the bonnet's lip, the boot lid's)
+                            // stays an edge.
+                            let (y, z) = (mid + (p.y - mid) * scale.powf(0.68), p.z * scale);
                             // A face is not a wall: the bumper stands out of it
                             // below the middle, and in plan it sweeps back
                             // toward the corners.
-                            let bumper = floor + (belt - floor) * 0.34;
-                            let bulge = (1.0 - ((y - bumper) / ((belt - floor) * 0.40)).powi(2))
-                                .max(0.0)
-                                .powi(2);
+                            // In elevation, from the road up: the valance
+                            // tucks under, the bumper stands proud, and above
+                            // it the panel (grille and lamps, or the boot's
+                            // back) leans away toward its top edge.
+                            let v = ((y - floor) / (belt - floor)).clamp(0.0, 1.0);
+                            let step = |a: f32, b: f32| {
+                                let t = ((v - a) / (b - a)).clamp(0.0, 1.0);
+                                t * t * (3.0 - 2.0 * t)
+                            };
+                            let tuck = -0.075 * (1.0 - step(0.0, 0.26));
+                            let bumper = 0.040 * step(0.10, 0.30) * (1.0 - step(0.42, 0.60));
+                            let lean = if toward > 0.0 { -0.075 } else { -0.050 } * step(0.48, 1.0);
                             let swept = (z / half).powi(2);
                             Vec3::new(
-                                x + toward * out * (FACE_DEPTH_M + 0.040 * bulge - 0.055 * swept),
+                                x + toward
+                                    * out
+                                    * (FACE_DEPTH_M + tuck + bumper + lean - 0.075 * swept),
                                 y,
                                 z,
                             )

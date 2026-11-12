@@ -2,17 +2,12 @@
 //! door handles, wipers, roof rails, the aerial, the exhaust.
 use crate::math::Vec3;
 use crate::mesh::MeshBuilder;
-use crate::model::{bar, skin, soft_block};
+use crate::model::{bar, soft_block};
 
 use super::form::{ARCH_GAP, Form};
 use super::label;
-use super::parts::{lathe, round_and, sd_box, wall};
-use super::surface::Soup;
-
-fn pole_of(ring: &[Vec3]) -> Vec<Vec3> {
-    let centre = ring.iter().fold(Vec3::new(0.0, 0.0, 0.0), |a, p| a + *p) / ring.len() as f32;
-    vec![centre; ring.len()]
-}
+use super::parts::{cap, grid, lathe, round_and, sd_box, wall};
+use super::surface::{Soup, Vert};
 
 /// A door mirror, built in its own frame (x forward, y up, z out from the
 /// car) and stood on the door: a housing lofted from the door outward, its
@@ -184,9 +179,22 @@ pub(super) fn build(
                         .collect()
                 })
                 .collect();
-            skin(builder, &key("well"), &rings);
-            let back: Vec<Vec3> = rings[0].clone();
-            skin(builder, &key("well"), &[pole_of(&back), back]);
+            // Open below: an arc, not a ring, so nothing spans the wheel.
+            let inward = |ring: &Vec<Vec3>| -> Vec<Vert> {
+                ring.iter()
+                    .map(|p| {
+                        let d = *p - centre;
+                        Vert::new(*p, Vec3::new(-d.x, -d.y, 0.0).normalized_or_up())
+                    })
+                    .collect()
+            };
+            grid(
+                builder,
+                &key("well"),
+                &[inward(&rings[0]), inward(&rings[1])],
+                false,
+            );
+            cap(builder, &key("well"), &rings[0], Vec3::new(0.0, 0.0, side));
         }
     }
     for side in [-1.0_f32, 1.0] {
@@ -290,6 +298,26 @@ pub(super) fn build(
         Vec3::new(0.0, 0.0, 0.13),
         4.0,
     );
+    // A tailgate has a wiper of its own, parked along the foot of its glass.
+    if !spec.boot {
+        let low = form.belt(spec.cabin[0]) + 0.058;
+        let rear = soup.take(&|t| t.centre().x < 0.0 && t.centre().z >= 0.0);
+        let on = |s: f32, y: f32| rear.locate(&|_| true, &|p| form.unwrap(false, p), (s, y));
+        if let (Some(pivot), Some(tip)) = (on(0.004, low - 0.02), on(0.30, low + 0.035)) {
+            let (a, b) = (pivot.p + pivot.n * 0.016, tip.p + tip.n * 0.012);
+            let (a, b) = (Vec3::new(a.x, a.y, 0.0), b);
+            bar(builder, &key("trim"), a, b, 0.008, 0.005, 6);
+            lathe(
+                builder,
+                &key("trim"),
+                a - pivot.n * 0.016,
+                pivot.n,
+                &[(0.0, 0.024), (0.014, 0.022), (0.017, 0.0)],
+                12,
+                true,
+            );
+        }
+    }
     // Tail pipes.
     let places: &[f32] = match spec.exhausts {
         0 => &[],
