@@ -105,7 +105,9 @@ pub(super) fn lines_of(spec: &Spec) -> Lines {
 }
 
 /// The gap between a tyre and its arch.
-pub(super) const ARCH_GAP: f32 = 0.055;
+pub(super) const ARCH_GAP: f32 = 0.042;
+/// How far the body swells over a wheel.
+pub(super) const HIP_M: f32 = 0.038;
 /// The rings a face is closed with, and how far it stands beyond the last section.
 const FACE_RINGS: usize = 12;
 const FACE_DEPTH_M: f32 = 0.15;
@@ -201,6 +203,14 @@ impl<'a> Form<'a> {
         let rear = 1.0 - ((x - self.tail).max(0.0) / 1.05).min(1.0);
         self.spec.width * 0.5 * (1.0 - 0.23 * front.powf(2.3) - 0.19 * rear.powf(2.0))
     }
+    /// How far the flank swells here over a wheel: `HIP_M` at an axle, nothing
+    /// between them.
+    pub fn hip(&self, x: f32) -> f32 {
+        let reach = (self.spec.wheel_r + ARCH_GAP) * 1.15;
+        let half_base = self.spec.wheelbase * 0.5;
+        let near = (x.abs() - half_base).abs() / reach;
+        HIP_M * (-near * near).exp()
+    }
     /// How much of a cabin stands on the body here: 0 over the bonnet and the
     /// boot, 1 under the roof, between along the raked glass.
     pub fn cabin(&self, x: f32) -> f32 {
@@ -213,7 +223,7 @@ impl<'a> Form<'a> {
             1.0
         };
         let rise = rise.clamp(0.0, 1.0);
-        1.0 - (1.0 - rise).powf(1.25)
+        1.0 - (1.0 - rise).powf(1.5)
     }
     /// The top of the car: the deck, or the roof line over the cabin.
     fn top_exact(&self, x: f32) -> f32 {
@@ -221,7 +231,7 @@ impl<'a> Form<'a> {
         // The roof is not flat: it crowns a little between the screens.
         let [_, rear_head, front_head, _] = self.spec.cabin;
         let along = ((x - rear_head) / (front_head - rear_head).max(0.1)).clamp(0.0, 1.0);
-        let crown = 0.022 * (1.0 - (2.0 * along - 1.0).powi(2)) - 0.012;
+        let crown = 0.060 * (1.0 - (2.0 * along - 1.0).powi(2)) - 0.035;
         deck + (self.spec.roof + crown - deck) * self.cabin(x)
     }
     /// The section's control points at a station, as `(z, y)` from the middle
@@ -235,20 +245,24 @@ impl<'a> Form<'a> {
             self.cabin(x),
         );
         let deck = belt + 0.012;
-        let roof_half = self.spec.width * 0.5 - 0.25;
+        let roof_half = self.spec.width * 0.5 - 0.31;
         let lerp = |a: f32, b: f32| a + (b - a) * g;
         let glass_head = (
             lerp(wide - 0.22, roof_half.min(wide - 0.16)),
             deck + (top - deck) * 0.90 + 0.004,
         );
+        // The body is not a slab: it swells over each wheel and is drawn in
+        // between them, most of all along the sill.
+        let hip = self.hip(x);
+        let waist = HIP_M - hip;
         [
             (0.0, floor),
-            (wide - 0.11, floor),
-            (wide - 0.018, floor + 0.075),
-            (wide, floor + (belt - floor) * 0.46),
-            (wide - 0.008, belt - 0.11),
-            (wide - 0.040, belt - 0.004),
-            (lerp(wide - 0.10, wide - 0.066), deck + 0.004 + 0.012 * g),
+            (wide - 0.11 - waist, floor),
+            (wide - 0.018 - waist * 1.5, floor + 0.075),
+            (wide + hip - waist * 0.35, floor + (belt - floor) * 0.46),
+            (wide - 0.010 + hip * 0.55, belt - 0.11),
+            (wide - 0.050, belt - 0.004),
+            (lerp(wide - 0.11, wide - 0.090), deck + 0.004 + 0.012 * g),
             glass_head,
             (glass_head.0 - 0.10, top + 0.004),
             (0.0, top + 0.022),
@@ -453,7 +467,7 @@ impl Shell {
                             };
                             let tuck = -0.075 * (1.0 - step(0.0, 0.26));
                             let bumper = 0.040 * step(0.10, 0.30) * (1.0 - step(0.42, 0.60));
-                            let lean = if toward > 0.0 { -0.075 } else { -0.050 } * step(0.48, 1.0);
+                            let lean = if toward > 0.0 { -0.045 } else { -0.050 } * step(0.48, 1.0);
                             let swept = (z / half).powi(2);
                             Vec3::new(
                                 x + toward

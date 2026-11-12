@@ -50,13 +50,13 @@ async function main() {
   renderer.setSize(root.clientWidth, root.clientHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.95;
+  renderer.toneMappingExposure = 0.8;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   root.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x8d9499);
+  scene.background = new THREE.Color(0xb9bcc0);
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.03).texture;
   const sun = new THREE.DirectionalLight(0xfff4e2, 2.2);
@@ -72,7 +72,7 @@ async function main() {
   scene.add(sun);
   const ground = new THREE.Mesh(
     new THREE.CircleGeometry(30, 64),
-    new THREE.MeshStandardMaterial({ color: 0x6f7477, roughness: 0.85 }),
+    new THREE.MeshStandardMaterial({ color: 0xb4b7bb, roughness: 0.9 }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
@@ -98,7 +98,9 @@ async function main() {
     const colour = (material as THREE.MeshStandardMaterial).color;
     // The city multiplies the material colour by the instance tint, in linear space.
     colour.multiply(new THREE.Color().setRGB(tint[0], tint[1], tint[2], THREE.LinearSRGBColorSpace));
-    if (paint && (part === "body" || part === "far.body")) colour.set(`#${paint}`);
+    // A showroom of its own colour per design unless one is asked for.
+    const showroom = ["8f9498", "1f4fa8", "c0221c", "eef0ee", "56634e", "15171a"];
+    if (part === "body" || part === "far.body") colour.set(`#${paint ?? showroom[variant % showroom.length]}`);
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(mesh.p, 3));
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(mesh.n, 3));

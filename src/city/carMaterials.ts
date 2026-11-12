@@ -19,7 +19,7 @@ export function carMaterials(): Array<[string, THREE.Material]> {
     ["car/body", new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.34, metalness: 0.4, clearcoat: 1.0, clearcoatRoughness: 0.06, envMapIntensity: 1.0 })],
     // Glazing you can see through: the seats and the wheel behind it are modelled.
     ["car/glass", new THREE.MeshPhysicalMaterial({
-      color: 0x2a3a3f, roughness: 0.04, metalness: 0.0, transparent: true, opacity: 0.4,
+      color: 0x1a2428, roughness: 0.03, metalness: 0.0, transparent: true, opacity: 0.8,
       side: THREE.DoubleSide, depthWrite: false, envMapIntensity: 1.3,
     })],
     // Tyre rubber, and the rim's paint (tinted per design: silver, gunmetal, black).

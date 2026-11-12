@@ -134,12 +134,12 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Van => rng.range(0.31, 0.35),
     };
     let wheel_r = match kind {
-        Saloon => rng.range(0.305, 0.335),
-        Fastback => rng.range(0.325, 0.350),
-        Hatchback => rng.range(0.290, 0.315),
-        Crossover => rng.range(0.325, 0.350),
-        Suv => rng.range(0.345, 0.380),
-        Mpv => rng.range(0.320, 0.345),
+        Saloon => rng.range(0.325, 0.350),
+        Fastback => rng.range(0.340, 0.365),
+        Hatchback => rng.range(0.305, 0.330),
+        Crossover => rng.range(0.345, 0.370),
+        Suv => rng.range(0.360, 0.395),
+        Mpv => rng.range(0.330, 0.355),
         Van => rng.range(0.280, 0.300),
     };
     // The faces that close the ends stand beyond the profile.
@@ -170,9 +170,9 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
     let nose_top = match kind {
         Van => cowl - rng.range(0.20, 0.26),
         Suv | Crossover | Mpv => cowl - rng.range(0.19, 0.25),
-        _ => cowl - rng.range(0.24, 0.31),
+        _ => cowl - rng.range(0.19, 0.25),
     };
-    let nose_low = nose_top - rng.range(0.13, 0.17);
+    let nose_low = nose_top - rng.range(0.09, 0.12);
     let deck = match kind {
         Saloon => cowl + rng.range(0.00, 0.04),
         Fastback => cowl + rng.range(0.02, 0.06),
@@ -194,12 +194,12 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         - match kind {
             Van => rng.range(0.52, 0.62),
             Mpv => rng.range(0.86, 0.98),
-            Fastback => rng.range(0.90, 1.00),
-            Suv => rng.range(0.74, 0.84),
-            _ => rng.range(0.80, 0.92),
+            Fastback => rng.range(1.00, 1.12),
+            Suv => rng.range(0.80, 0.92),
+            _ => rng.range(0.90, 1.04),
         };
     let rear_foot = match kind {
-        Saloon => tail + rng.range(0.56, 0.78),
+        Saloon => tail + rng.range(0.38, 0.60),
         Fastback => tail + rng.range(0.34, 0.48),
         Hatchback => tail + rng.range(0.07, 0.12),
         Crossover => tail + rng.range(0.08, 0.14),
@@ -208,7 +208,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
     };
     let rear_head = rear_foot
         + match kind {
-            Saloon => rng.range(0.62, 0.80),
+            Saloon => rng.range(0.78, 1.00),
             Fastback => rng.range(0.98, 1.20),
             Hatchback => rng.range(0.36, 0.50),
             Crossover => rng.range(0.40, 0.62),
@@ -364,16 +364,20 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
             (GrilleKind::Bars(bars), 0.28),
         ]);
         // Between the lamps, or (a big-mouthed one) dropping below them.
-        let deep = rng.chance(if tall { 0.6 } else { 0.35 });
+        let deep = rng.chance(if tall { 0.85 } else { 0.7 });
         let top = -rng.range(0.022, 0.04);
         let bottom = if deep {
-            lamp_low - rng.range(0.03, 0.10)
+            lamp_low - rng.range(0.12, 0.24)
         } else {
             (lamp_low + rng.range(-0.01, 0.02)).min(top - 0.05)
         };
         let half = (head.s.0 - rng.range(0.035, 0.06)).max(0.3);
         Some(Grille {
-            half: (half, half * rng.range(0.72, 1.0)),
+            half: if deep {
+                (half, half * rng.range(1.05, 1.30))
+            } else {
+                (half, half * rng.range(0.72, 1.0))
+            },
             y: (bottom, top),
             r: rng.range(0.012, 0.035),
             kind: kind_of,
@@ -381,12 +385,12 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         })
     };
     let intake = {
-        let low = rng.range(0.06, 0.085);
+        let low = rng.range(0.045, 0.06);
         let half = rng.range(0.44, 0.62);
         let slats = rng.count(1, 3);
         Grille {
             half: (half * rng.range(0.85, 1.15), half),
-            y: (low, low + rng.range(0.07, 0.11)),
+            y: (low, low + rng.range(0.055, 0.085)),
             r: rng.range(0.015, 0.03),
             kind: rng.pick(&[(GrilleKind::Slats(slats), 0.6), (GrilleKind::Mesh, 0.4)]),
             bright: false,
@@ -398,8 +402,8 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
     let rim_share = match kind {
         Van => rng.range(0.60, 0.63),
         Hatchback => rng.range(0.63, 0.67),
-        Fastback => rng.range(0.69, 0.73),
-        _ => rng.range(0.65, 0.71),
+        Fastback => rng.range(0.72, 0.76),
+        _ => rng.range(0.68, 0.74),
     };
     let tyre = Tyre {
         width: (match kind {

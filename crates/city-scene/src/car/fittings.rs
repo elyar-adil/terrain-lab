@@ -163,7 +163,7 @@ pub(super) fn build(
         let wide = form.half_width(axle);
         for side in [-1.0_f32, 1.0] {
             let centre = Vec3::new(axle, spec.wheel_r, 0.0);
-            let rings: Vec<Vec<Vec3>> = [wide - 0.44, wide - 0.004]
+            let rings: Vec<Vec<Vec3>> = [wide - 0.44, wide + super::form::HIP_M - 0.006]
                 .iter()
                 .map(|z| {
                     (0..=32)

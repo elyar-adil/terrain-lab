@@ -217,13 +217,24 @@ pub(super) fn build(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -
     );
 
     // The valance under the rear bumper, where the pipes come out.
-    let valance = (0.0, form.floor(form.tail) + 0.085);
-    let valance_half = (form.face_half(false) * 0.66, 0.075);
+    let valance = (0.0, form.floor(form.tail) + 0.10);
+    let valance_half = (form.face_half(false) * 0.80, 0.105);
     soup.cut(
         &|p| sd_box(valance, valance_half, (p.z, p.y), 0.03).max(p.x - form.tail - 0.2),
         &body,
         label::BLACK,
     );
+
+    // Air curtains: an upright black slot in each corner of the front bumper.
+    if !spec.fog {
+        let half = form.face_half(true);
+        let at = (half * 0.90, form.floor(form.nose) + 0.19);
+        soup.cut(
+            &|p| sd_box(at, (0.028, 0.085), form.unwrap(true, p), 0.022).max(-p.x),
+            &body,
+            label::BLACK,
+        );
+    }
 
     super::lamps::cut(&mut soup, form);
 
@@ -434,7 +445,7 @@ fn sculpt(soup: &mut Soup, form: &Form) {
     // The shoulder: rising a little toward the tail, as a wedge does.
     let shoulder = |p: Vec3| p.y - (form.belt(p.x) - 0.150 + 0.035 * (form.nose - p.x) / length);
     // The hollow above the sill.
-    let hollow = |p: Vec3| p.y - (form.floor(p.x) + 0.215);
+    let hollow = |p: Vec3| p.y - (form.floor(p.x) + 0.26);
     let from_axle = |p: Vec3| {
         let d = |axle: f32| ((p.x - axle).powi(2) + (p.y - spec.wheel_r).powi(2)).sqrt();
         d(-half_base).min(d(half_base))
@@ -455,8 +466,8 @@ fn sculpt(soup: &mut Soup, form: &Form) {
         let side = flank(p);
         let mut h = 0.0;
         if side > 0.0 {
-            h += ridge(shoulder(p), 0.0065, 0.05) * side * ends(p, 0.30, 0.75) * between(p);
-            h -= ridge(hollow(p), 0.0050, 0.07) * side * ends(p, 0.5, 0.9) * between(p);
+            h += ridge(shoulder(p), 0.011, 0.06) * side * ends(p, 0.30, 0.75) * between(p);
+            h -= ridge(hollow(p), 0.010, 0.10) * side * ends(p, 0.5, 0.9) * between(p);
             if !spec.cladding {
                 let t = ((from_axle(p) - arch) / lip_wide).clamp(0.0, 1.0);
                 h += 0.0075 * (1.0 - t).powi(2) * side;
@@ -470,8 +481,8 @@ fn sculpt(soup: &mut Soup, form: &Form) {
     };
     // Vertices along every line and across every slope of the relief.
     let lines: [(&dyn Fn(Vec3) -> f32, f32); 4] = [
-        (&shoulder, 0.05),
-        (&hollow, 0.07),
+        (&shoulder, 0.06),
+        (&hollow, 0.10),
         (&bonnet_line, 0.06),
         (&|p| from_axle(p) - arch - lip_wide * 0.5, lip_wide * 0.5),
     ];
