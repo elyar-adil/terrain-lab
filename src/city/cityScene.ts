@@ -994,9 +994,25 @@ roughnessFactor = clamp(roughnessFactor + smoothstep(60.0, 700.0, waterDist) * 0
   // for `vertexColors` with no `color` attribute makes WebGL supply the default
   // generic attribute, which is (0,0,0,1) — so every car renders pure black, and
   // the draw-call counter is perfectly happy about it.
-  standard("car/body", { roughness: 0.3, metalness: 0.35, envMapIntensity: 1.0 }, 0xffffff);
-  standard("car/glass", { roughness: 0.12, metalness: 0.5, envMapIntensity: 1.1 }, 0x1c2429);
-  standard("car/wheel", { roughness: 0.9 }, 0x101012);
+  // Paint is a metallic base under a clear coat: the lacquer is what gives a
+  // car its second, sharper reflection.
+  register("car/body", new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.34, metalness: 0.4, clearcoat: 1.0, clearcoatRoughness: 0.06, envMapIntensity: 1.0 }));
+  // Glazing you can see through: the seats and the wheel behind it are modelled.
+  register("car/glass", new THREE.MeshPhysicalMaterial({
+    color: 0x2a3a3f, roughness: 0.04, metalness: 0.0, transparent: true, opacity: 0.4,
+    side: THREE.DoubleSide, depthWrite: false, envMapIntensity: 1.3,
+  }));
+  standard("car/wheel", { roughness: 0.92 }, 0x6a6a70);
+  standard("car/trim", { roughness: 0.7 }, 0x18191a);
+  standard("car/chrome", { roughness: 0.22, metalness: 1.0, envMapIntensity: 1.1 }, 0xc9cdd1);
+  register("car/lamp.front", new THREE.MeshPhysicalMaterial({ color: 0xe9eef2, roughness: 0.08, metalness: 0.2, clearcoat: 1.0 }));
+  register("car/lamp.rear", new THREE.MeshPhysicalMaterial({ color: 0x8a0d0d, roughness: 0.15, clearcoat: 1.0, emissive: 0x200000 }));
+  standard("car/interior", { roughness: 0.95, side: THREE.DoubleSide }, 0xffffff);
+  standard("car/plate", { roughness: 0.5 }, 0x1b3f9c);
+  // The far model (beyond `CAR_NEAR_M`): plain paint, glass as a dark solid.
+  standard("car/far.body", { roughness: 0.3, metalness: 0.35, envMapIntensity: 1.0 }, 0xffffff);
+  standard("car/far.glass", { roughness: 0.12, metalness: 0.5, envMapIntensity: 1.1 }, 0x1c2429);
+  standard("car/far.wheel", { roughness: 0.92 }, 0x6a6a70);
   patchBark(standard("bark", { roughness: 0.95, vertexColors: true }, 0xffffff));
 
   // Foliage: alpha-cut, double-sided, tinted per instance and per vertex.
@@ -1069,6 +1085,10 @@ roughnessFactor = clamp(roughnessFactor + smoothstep(60.0, 700.0, waterDist) * 0
       }
       const found = table.get(key);
       if (found) return found;
+      // A design variant of a prototype (`car/body~3`, see the generator's
+      // `car_key`) is the same material as the plain one.
+      const tilde = key.indexOf("~");
+      if (tilde >= 0) return this.get(key.slice(0, tilde) + key.slice(tilde).replace(/^~\d+/, ""));
 
       /**
        * A prototype's parts are keyed `<instance-list-key>#<part>`, so a tree
@@ -1224,6 +1244,7 @@ export interface CityHandles {
   /** The prototype geometry for the car, used for the moving traffic fleet. */
   carBody?: THREE.BufferGeometry;
   carGlass?: THREE.BufferGeometry;
+  carWheel?: THREE.BufferGeometry;
   vehicleCount: number;
   /** Static (non-instanced) draw pieces; large groups are split into grid cells. */
   statics: THREE.Mesh[];
@@ -1714,6 +1735,11 @@ export function beginCityBuild(
     if (carGlass) ownedGeometries.push(carGlass);
     handles.carBody = carBody;
     handles.carGlass = carGlass;
+    const wheelPrototype = instanced.get("car/wheel");
+    if (wheelPrototype) {
+      handles.carWheel = wheelPrototype.geometry.clone();
+      ownedGeometries.push(handles.carWheel);
+    }
   }
 
   const generator = run();

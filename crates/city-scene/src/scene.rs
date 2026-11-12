@@ -489,6 +489,32 @@ fn build_scene(
         .map(|group| group.indices.len() / 3)
         .sum();
     let draw_calls = geometry.meshes.len();
+    let traffic = traffic::simulate(&network, signals.clone(), city.seed, budget.vehicles);
+    let traffic_state = match &traffic {
+        Some(sim) => traffic::initial_state(sim),
+        None => TrafficState::default(),
+    };
+    let vehicles = traffic.as_ref().map(|sim| sim.agent_count()).unwrap_or(0);
+    // The vehicles on the carriageway, where the first instant of the
+    // simulation left them (queued at the lights, spaced down the lanes), as
+    // cars like the parked ones: the same designs, the same two levels of
+    // detail. A tile draws the ones standing on it.
+    let mut geometry = geometry;
+    for pose in &traffic_state.agents {
+        let here = crop.is_none_or(|(min, max)| {
+            pose.x >= min[0] && pose.x < max[0] && pose.z >= min[1] && pose.z < max[1]
+        });
+        if here {
+            crate::car::add_car_to(
+                &mut geometry.instances,
+                pose.x,
+                pose.y,
+                pose.z,
+                pose.heading,
+                crate::car::fleet_paint(pose.colour),
+            );
+        }
+    }
     let (meshes, instances) = encode_geometry(geometry);
     let mut texture_set = if budget.standard_textures {
         standard_textures(&city.climate, &budget)
@@ -500,12 +526,6 @@ fn build_scene(
     texture_set.push(facade_table.bake());
     let textures = encode_textures(&texture_set);
 
-    let traffic = traffic::simulate(&network, signals.clone(), city.seed, budget.vehicles);
-    let traffic_state = match &traffic {
-        Some(sim) => traffic::initial_state(sim),
-        None => TrafficState::default(),
-    };
-    let vehicles = traffic.as_ref().map(|sim| sim.agent_count()).unwrap_or(0);
     // A tile keeps the signals of its own junctions, with their aspects, and
     // the vehicles standing on it.
     let (signals, traffic_state) = match crop {
@@ -974,7 +994,9 @@ mod tests {
             // the eleven plants (palms, bamboo, reed, bushes, cushion) make 139.
             // These are groups emitted per prototype whether or not this city
             // plants it; a list with no instances has count 0 and draws nothing.
-            instanced < 145,
+            // Six car designs of twelve parts each (nine of the full model,
+            // three of the far one), where one design had three, make 208.
+            instanced < 215,
             "the city needs {instanced} instanced draw calls"
         );
     }

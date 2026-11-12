@@ -78,8 +78,17 @@ const D = (() => {
 const FINE = /^(trim\.|wire|sign\/|signal\.|awning|balcony)/;
 const FLAT = /^(kerb|marking\.|barrier|median)/;
 
+/** A car is its full model within this distance and its far model beyond (the generator's `CAR_NEAR_M`). */
+const CAR_NEAR_M = 45;
+
+/** Instances nearer than this are not drawn from this set (far models only). */
+function instanceMinimum(set: LodInstanceSet): number {
+  return set.key.startsWith("car/far.") ? CAR_NEAR_M : 0;
+}
+
 function instanceRadius(set: LodInstanceSet): number {
   const { key, part } = set;
+  if (key.startsWith("car/")) return key.startsWith("car/far.") ? Number.POSITIVE_INFINITY : CAR_NEAR_M;
   if (key.startsWith("tree/")) return Number.POSITIVE_INFINITY; // handled by part
   if (key === "hedge") return D.hedge;
   if (key === "tuft") return D.tuft;
@@ -107,6 +116,7 @@ export class CityLod {
   private readonly statics: StaticEntry[] = [];
   private readonly sets: LodInstanceSet[];
   private readonly setRadius: number[];
+  private readonly setMinimum: number[];
   private readonly lastCamera = new THREE.Vector3(Number.NaN, 0, 0);
   private readonly lastForward = new THREE.Vector3(0, 0, -1);
   private frustum: THREE.Frustum | null = null;
@@ -122,6 +132,7 @@ export class CityLod {
     }
     this.sets = handles.lodSets;
     this.setRadius = this.sets.map(instanceRadius);
+    this.setMinimum = this.sets.map(instanceMinimum);
     for (const set of this.sets) set.mesh.userData.cast = set.mesh.castShadow;
   }
 
@@ -170,6 +181,7 @@ export class CityLod {
     for (let s = 0; s < this.sets.length; s += 1) {
       const set = this.sets[s];
       const limit = this.setRadius[s];
+      const minimum = this.setMinimum[s];
       const isTree = set.key.startsWith("tree/");
       const isCore = isTree && set.part === "mass";
       const target = set.mesh;
@@ -211,7 +223,7 @@ export class CityLod {
           } else if (d >= D.treeDetail) {
             continue;
           }
-        } else if (d >= limit) {
+        } else if (d >= limit || d < minimum) {
           continue;
         }
         const from = i * 16;

@@ -50,9 +50,9 @@ mod cn_shopsigns;
 pub(crate) mod details;
 pub mod far;
 pub(crate) mod house;
-pub mod plan;
 mod industrial;
 mod parking;
+pub mod plan;
 pub(crate) mod roofscape;
 mod shell;
 
@@ -1931,7 +1931,7 @@ mod tests {
     /// junctions, and the blocks round them changed.
     /// And again when car parks gained real bays, paint and parked cars
     /// (`parking.rs`).
-    const WESTERN_MIXED_LAYER_HASH: u64 = 9_683_178_963_260_586_803;
+    const WESTERN_MIXED_LAYER_HASH: u64 = 6_381_725_440_363_612_071;
 
     #[test]
     fn western_mixed_building_layer_is_bit_identical() {

@@ -22,6 +22,7 @@ import { bakeSkyEnvironment } from "../city/sky";
 import { createHorizonLand, extendRim } from "./horizonLand";
 import { createAtmosphereFog, createAtmosphereSky, hazeCoefficient, installAtmosphere } from "./atmosphere";
 import { createLensPass } from "./lensPass";
+import { createStreetProbe } from "./streetProbe";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { buildFarTreeSet } from "./farTrees";
 import { createGroundCover } from "./groundCover";
@@ -361,6 +362,11 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
 
     // 路口工坊移植:写实天空穹顶(同一份材质烘成 PMREM 环境贴图,玻璃与
     // 水面反射真实天色),跟随相机的巨大球壳,renderOrder 最先绘制。
+    let skyEnvironment: THREE.Texture | null = null;
+    // On foot the environment is what is really round the eye (streetProbe.ts).
+    const streetProbe = !lightRender && halfFloatTargets && new URLSearchParams(window.location.search).get("probe") !== "0"
+      ? createStreetProbe(renderer, scene)
+      : null;
     const { material: skyMaterial, uniforms: skyUniforms } = createAtmosphereSky(SUN_DIR, config.haze, config.cloudCoverage / 100);
     const skyDome = new THREE.Mesh(new THREE.SphereGeometry(9000, 48, 28), skyMaterial);
     skyDome.frustumCulled = false;
@@ -373,6 +379,7 @@ export function Terrain3D({ result, config, cameraMode, cityFocus, cityScene, on
       skyUniforms.uAmbientBake.value = 1;
       scene.environment = bakeSkyEnvironment(renderer, skyMaterial);
       skyUniforms.uAmbientBake.value = 0;
+      skyEnvironment = scene.environment;
     } catch (error) {
       // Without the baked sky the lights alone shade the scene.
       console.warn("[terrain3d] sky environment skipped", error);
@@ -4168,6 +4175,23 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       sun.shadow.camera.updateProjectionMatrix();
       terrainShadowUniforms.uSunViewDir.value.copy(SUN_DIR).transformDirection(camera.matrixWorldInverse);
       requestNearbyCity();
+      if (streetProbe && skyEnvironment) {
+        const eyeHeightM = (camera.position.y - terrainHeightAt(camera.position.x, camera.position.z)) * sceneToMetres;
+        const local = streetProbe.update(
+          Boolean(roam?.active) && eyeHeightM < 60 && cameraMode === "3d",
+          camera.position, 18 * metresToScene, 0.3 * metresToScene, 30, worldTime,
+        );
+        const environment = local ?? skyEnvironment;
+        if (scene.environment !== environment) {
+          scene.environment = environment;
+          // The probe holds the real bounce off walls and ground, so the hemisphere
+          // light that stood in for it steps back, but not out: one probe speaks
+          // for the whole view, and taken under a tree it is darker than the
+          // street beyond the tree is.
+          scene.environmentIntensity = local ? 1.15 : 1.0;
+          ambient.intensity = local ? 0.30 : 0.40;
+        }
+      }
       frameCounter += 1;
       // Redrawn at intervals, not per frame; oftener while the eye itself moves.
       if (frameCounter % (roam?.active ? 10 : 45) === 1) renderer.shadowMap.needsUpdate = true;
@@ -4310,6 +4334,7 @@ void erodedRelief(vec2 p, float footprint, float amplitude) {
       cloudMaterial.dispose();
       shadowGeometry.dispose();
       shadowMaterial.dispose();
+      streetProbe?.dispose();
       renderer.dispose();
       // A browser keeps a limited number of live contexts (and their memory) per page;
       // on a phone a view switch must hand the old one back.

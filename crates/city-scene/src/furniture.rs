@@ -14,6 +14,7 @@ use urban::ModernRoadClass;
 
 use crate::math::{Path, Rng, Vec2, Vec3};
 use crate::mesh::{GroupStyle, Instance, MeshBuilder, box_at};
+use crate::model::{bar, rounded, skin, turn};
 use crate::network::{Junction, Network};
 use crate::street::level;
 
@@ -100,20 +101,20 @@ fn street_lamp(builder: &mut MeshBuilder, key: &str) {
     let pole_height = 9.0_f32;
     let reach = 2.4_f32;
     // A tapered column: 240 mm at the base, 120 mm at the head.
-    builder.tube(
+    bar(
+        builder,
         key,
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(0.0, pole_height, 0.0),
         0.12,
         0.06,
         8,
-        None,
     );
     // A short, straight, near-horizontal bracket.  It rises 350 mm over its
     // reach — a lamp bracket, not a curve.
     let shoulder = Vec3::new(0.0, pole_height - 0.35, 0.0);
     let tip = Vec3::new(0.0, pole_height, reach);
-    builder.tube(key, shoulder, tip, 0.055, 0.045, 6, None);
+    bar(builder, key, shoulder, tip, 0.055, 0.045, 6);
     // The luminaire: a shallow box slung under the tip, long axis across the arm.
     box_at(
         builder,
@@ -146,19 +147,19 @@ fn median_lamp(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
     let height = 12.0_f32;
     let reach = 2.8_f32;
-    builder.tube(
+    bar(
+        builder,
         key,
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(0.0, height, 0.0),
         0.15,
         0.07,
         8,
-        None,
     );
     for side in [-1.0_f32, 1.0] {
         let shoulder = Vec3::new(0.0, height - 0.5, 0.0);
         let tip = Vec3::new(0.0, height, side * reach);
-        builder.tube(key, shoulder, tip, 0.06, 0.045, 6, None);
+        bar(builder, key, shoulder, tip, 0.06, 0.045, 6);
         box_at(
             builder,
             key,
@@ -176,19 +177,37 @@ fn median_lamp(builder: &mut MeshBuilder, key: &str) {
 /// A solid of revolution about a vertical axis through `at`: `profile` is
 /// (radius, height) from the bottom up.
 fn lathe(builder: &mut MeshBuilder, key: &str, at: Vec3, profile: &[(f32, f32)], sides: u8) {
+    // Each step of a turned profile is its own band, so a collar keeps its
+    // crisp edge; bands are round, not faceted.
+    let sides = if sides >= 8 { 28 } else { 12 };
     for w in profile.windows(2) {
-        let (r0, y0) = w[0];
-        let (r1, y1) = w[1];
-        builder.tube(
+        turn(
+            builder,
             key,
-            at + Vec3::new(0.0, y0, 0.0),
-            at + Vec3::new(0.0, y1, 0.0),
-            r0,
-            r1,
+            at,
+            Vec3::new(0.0, 1.0, 0.0),
+            &[w[0], w[1]],
             sides,
-            None,
         );
     }
+}
+
+/// A turned profile as one curved surface (a bud, a lantern), not a stack of bands.
+fn lathe_round(
+    builder: &mut MeshBuilder,
+    key: &str,
+    at: Vec3,
+    profile: &[(f32, f32)],
+    sides: usize,
+) {
+    turn(
+        builder,
+        key,
+        at,
+        Vec3::new(0.0, 1.0, 0.0),
+        &rounded(profile, 5),
+        sides,
+    );
 }
 
 /// The ornamental footway lamp of a Chinese town's main streets (玉兰灯):
@@ -218,14 +237,14 @@ fn deco_lamp(builder: &mut MeshBuilder) {
         ],
         10,
     );
-    builder.tube(
+    bar(
+        builder,
         metal,
         Vec3::new(0.0, 0.7, 0.0),
         Vec3::new(0.0, 5.0, 0.0),
         0.075,
         0.055,
         10,
-        None,
     );
     for y in [2.4_f32, 4.85] {
         lathe(
@@ -252,7 +271,7 @@ fn deco_lamp(builder: &mut MeshBuilder) {
         .collect()
     };
     // The crown: a central bud, and six arms curving out and up to six more.
-    lathe(builder, globe, Vec3::new(0.0, 5.18, 0.0), &bud(0.16), 10);
+    lathe_round(builder, globe, Vec3::new(0.0, 5.18, 0.0), &bud(0.16), 28);
     lathe(
         builder,
         metal,
@@ -266,7 +285,7 @@ fn deco_lamp(builder: &mut MeshBuilder) {
         let p = |r: f32, y: f32| Vec3::new(c * r, y, s * r);
         let arm = [p(0.0, 4.8), p(0.28, 4.86), p(0.48, 4.98), p(0.56, 5.12)];
         for w in arm.windows(2) {
-            builder.tube(metal, w[0], w[1], 0.022, 0.02, 5, None);
+            bar(builder, metal, w[0], w[1], 0.022, 0.02, 5);
         }
         lathe(
             builder,
@@ -275,30 +294,30 @@ fn deco_lamp(builder: &mut MeshBuilder) {
             &[(0.03, 0.0), (0.06, 0.06)],
             6,
         );
-        lathe(builder, globe, p(0.56, 5.16), &bud(0.11), 8);
+        lathe_round(builder, globe, p(0.56, 5.16), &bud(0.11), 24);
     }
     // Two lanterns across the footway's line (local ±X), each on a short
     // bracket: a red drum with gold caps and a tassel.
     for side in [-1.0_f32, 1.0] {
         let x = side * 0.42;
-        builder.tube(
+        bar(
+            builder,
             metal,
             Vec3::new(0.0, 3.55, 0.0),
             Vec3::new(x, 3.6, 0.0),
             0.018,
             0.015,
             5,
-            None,
         );
         let top = Vec3::new(x, 3.0, 0.0);
-        builder.tube(
+        bar(
+            builder,
             metal,
             Vec3::new(x, 3.6, 0.0),
             top + Vec3::new(0.0, 0.5, 0.0),
             0.006,
             0.006,
             4,
-            None,
         );
         lathe(
             builder,
@@ -307,21 +326,36 @@ fn deco_lamp(builder: &mut MeshBuilder) {
             &[(0.08, 0.0), (0.08, 0.06)],
             10,
         );
-        lathe(
-            builder,
-            lantern,
-            top,
-            &[
-                (0.08, 0.0),
-                (0.17, 0.05),
-                (0.22, 0.14),
-                (0.23, 0.22),
-                (0.22, 0.3),
-                (0.17, 0.39),
-                (0.08, 0.44),
-            ],
-            12,
-        );
+        // The lantern: a paper skin over bamboo ribs, so it bulges between
+        // sixteen ribs instead of being a turned solid.
+        {
+            let profile = rounded(
+                &[
+                    (0.08, 0.0),
+                    (0.17, 0.05),
+                    (0.22, 0.14),
+                    (0.235, 0.22),
+                    (0.22, 0.3),
+                    (0.17, 0.39),
+                    (0.08, 0.44),
+                ],
+                5,
+            );
+            let around = 64;
+            let rings: Vec<Vec<Vec3>> = profile
+                .iter()
+                .map(|(r, y)| {
+                    (0..around)
+                        .map(|k| {
+                            let angle = k as f32 / around as f32 * std::f32::consts::TAU;
+                            let rib = 1.0 - 0.035 * (0.5 + 0.5 * (angle * 16.0).cos()).powf(3.0);
+                            top + Vec3::new(angle.cos() * r * rib, *y, angle.sin() * r * rib)
+                        })
+                        .collect()
+                })
+                .collect();
+            skin(builder, lantern, &rings);
+        }
         lathe(
             builder,
             metal,
@@ -334,7 +368,7 @@ fn deco_lamp(builder: &mut MeshBuilder) {
             lantern,
             top + Vec3::new(0.0, -0.34, 0.0),
             &[(0.0, 0.0), (0.035, 0.05), (0.02, 0.28)],
-            6,
+            12,
         );
     }
 }
@@ -359,14 +393,14 @@ fn utility_pole(builder: &mut MeshBuilder, key: &str) {
     // is in true metres, a spun-concrete pole 0.30 m at the foot and 0.19 m
     // at the head, with cross-arms 3.8 m and 3.0 m long. Scaled whole by its
     // height it was a slab two metres thick.
-    builder.tube(
+    bar(
+        builder,
         key,
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(0.0, 1.0, 0.0),
         0.15,
         0.095,
         8,
-        None,
     );
     for (height, span) in [(POLE_ARM_TOP, POLE_SPAN_TOP), (POLE_ARM_LOW, POLE_SPAN_LOW)] {
         builder.quad(
@@ -396,34 +430,34 @@ const POLE_SPAN_LOW: f32 = 1.5;
 /// does not.
 fn bollard(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
-    builder.tube(
+    bar(
+        builder,
         key,
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(0.0, 0.78, 0.0),
         0.085,
         0.078,
         8,
-        None,
     );
     for height in [0.60_f32, 0.70] {
-        builder.tube(
+        bar(
+            builder,
             key,
             Vec3::new(0.0, height, 0.0),
             Vec3::new(0.0, height + 0.055, 0.0),
             0.092,
             0.092,
             8,
-            None,
         );
     }
-    builder.tube(
+    bar(
+        builder,
         key,
         Vec3::new(0.0, 0.78, 0.0),
         Vec3::new(0.0, 0.83, 0.0),
         0.088,
         0.088,
         8,
-        None,
     );
 }
 
@@ -436,24 +470,24 @@ fn bollard(builder: &mut MeshBuilder, key: &str) {
 fn rubbish_bin(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
     // The drum, 700 mm across and 900 mm tall, with a slight taper.
-    builder.tube(
+    bar(
+        builder,
         key,
         Vec3::new(0.0, 0.06, 0.0),
         Vec3::new(0.0, 0.88, 0.0),
         0.30,
         0.35,
         12,
-        None,
     );
     // A foot ring and a rolled rim, so it is a bin and not a cylinder.
-    builder.tube(
+    bar(
+        builder,
         key,
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(0.0, 0.07, 0.0),
         0.26,
         0.26,
         10,
-        None,
     );
     // The lid, tilted back on its hinge — the pose every street bin is in.
     box_at(
@@ -467,14 +501,14 @@ fn rubbish_bin(builder: &mut MeshBuilder, key: &str) {
         0.0,
     );
     // A liner bag collar showing above the rim.
-    builder.tube(
+    bar(
+        builder,
         key,
         Vec3::new(0.0, 0.86, 0.0),
         Vec3::new(0.0, 0.90, 0.0),
         0.30,
         0.26,
         12,
-        None,
     );
 }
 
@@ -523,14 +557,14 @@ fn phone_kiosk(builder: &mut MeshBuilder, key: &str) {
     );
     // Four feet, so it stands on the footway rather than being let into it.
     for (x, z) in [(0.44, 0.34), (-0.44, 0.34), (0.44, -0.34), (-0.44, -0.34)] {
-        builder.tube(
+        bar(
+            builder,
             key,
             Vec3::new(x, 0.0, z),
             Vec3::new(x, 0.14, z),
             0.06,
             0.06,
             5,
-            None,
         );
     }
 }
@@ -548,14 +582,14 @@ fn railing_segment(builder: &mut MeshBuilder, key: &str) {
             None,
         );
     }
-    builder.tube(
+    bar(
+        builder,
         key,
         Vec3::new(-1.5, 0.0, 0.0),
         Vec3::new(-1.5, 1.06, 0.0),
         0.022,
         0.022,
         5,
-        None,
     );
 }
 
@@ -563,14 +597,14 @@ fn railing_segment(builder: &mut MeshBuilder, key: &str) {
 fn guide_sign(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
     for post in [-1.4_f32, 1.4] {
-        builder.tube(
+        bar(
+            builder,
             key,
             Vec3::new(post, 0.0, 0.0),
             Vec3::new(post, 3.4, 0.0),
             0.055,
             0.045,
             5,
-            None,
         );
     }
     builder.quad(
@@ -586,14 +620,14 @@ fn guide_sign(builder: &mut MeshBuilder, key: &str) {
 /// A pedestrian-crossing warning sign.
 fn crossing_sign(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
-    builder.tube(
+    bar(
+        builder,
         key,
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(0.0, 2.4, 0.0),
         0.05,
         0.04,
         5,
-        None,
     );
     builder.quad(
         key,
@@ -610,14 +644,14 @@ fn crossing_sign(builder: &mut MeshBuilder, key: &str) {
 /// the prototype's XY plane facing local `+Z`.
 fn roundabout_sign(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
-    builder.tube(
+    bar(
+        builder,
         key,
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(0.0, 2.3, 0.0),
         0.04,
         0.035,
         6,
-        None,
     );
     let centre = Vec3::new(0.0, 2.3, 0.03);
     let rim: Vec<Vec3> = (0..24)
@@ -682,37 +716,37 @@ fn gantry_steel(builder: &mut MeshBuilder, key: &str) {
     declare(builder);
     let span = 16.5_f32;
     for side in [-1.0_f32, 1.0] {
-        builder.tube(
+        bar(
+            builder,
             key,
             Vec3::new(side * span, 0.0, 0.0),
             Vec3::new(side * span, 7.45, 0.0),
             0.14,
             0.10,
             7,
-            None,
         );
     }
     for y in [6.6_f32, 7.45] {
-        builder.tube(
+        bar(
+            builder,
             key,
             Vec3::new(-span, y, 0.0),
             Vec3::new(span, y, 0.0),
             0.07,
             0.07,
             2,
-            None,
         );
     }
     let mut x = -span;
     while x <= span + 0.01 {
-        builder.tube(
+        bar(
+            builder,
             key,
             Vec3::new(x, 6.6, 0.0),
             Vec3::new(x, 7.45, 0.0),
             0.05,
             0.05,
             4,
-            None,
         );
         x += 33.0 / 14.0;
     }
@@ -763,14 +797,14 @@ fn bus_shelter(builder: &mut MeshBuilder, key: &str) {
         0.0,
     );
     for post in [-2.2_f32, 2.2] {
-        builder.tube(
+        bar(
+            builder,
             key,
             Vec3::new(post, 0.0, 0.7),
             Vec3::new(post, 2.3, 0.7),
             0.06,
             0.06,
             5,
-            None,
         );
     }
     box_at(
@@ -791,156 +825,6 @@ fn bus_shelter(builder: &mut MeshBuilder, key: &str) {
 /// a Corolla: 4.67 m long, 1.81 m wide, 1.47 m high on a 2.69 m wheelbase and
 /// 0.63 m wheels). Authored nose along local `+X`, up `+Y`, so `yaw_along_x`
 /// points it down its lane; its wheels stand on `y = 0`.
-const CAR_WHEELBASE: f32 = 2.69;
-const CAR_TRACK: f32 = 1.54;
-const CAR_WHEEL_R: f32 = 0.315;
-
-/// A face wound to look along `out`.
-fn face_out(builder: &mut MeshBuilder, key: &str, q: &[Vec3], out: Vec3) {
-    let n = crate::mesh::face_normal(q[0], q[1], q[2]);
-    let flip = n.dot(out) < 0.0;
-    let at = |i: usize| if flip { q[q.len() - 1 - i] } else { q[i] };
-    for k in 1..q.len() - 1 {
-        builder.tri_flat(key, at(0), at(k), at(k + 1), None);
-    }
-}
-
-/// A side profile `(x, y)` extruded across the car, `width(y)` wide at each
-/// height so the sides lean in toward the top as a car's do.
-fn extrude_profile(
-    builder: &mut MeshBuilder,
-    key: &str,
-    profile: &[Vec2],
-    width: impl Fn(f32) -> f32,
-) {
-    let side = |p: Vec2, s: f32| Vec3::new(p.x, p.y, s * width(p.y) * 0.5);
-    let centre = profile.iter().fold(Vec2::new(0.0, 0.0), |a, p| a + *p) / profile.len() as f32;
-    for s in [-1.0_f32, 1.0] {
-        for [a, b, c] in crate::math::triangulate(profile) {
-            face_out(
-                builder,
-                key,
-                &[
-                    side(profile[a], s),
-                    side(profile[b], s),
-                    side(profile[c], s),
-                ],
-                Vec3::new(0.0, 0.0, s),
-            );
-        }
-    }
-    for k in 0..profile.len() {
-        let (p, q) = (profile[k], profile[(k + 1) % profile.len()]);
-        let mid = (p + q) * 0.5 - centre;
-        face_out(
-            builder,
-            key,
-            &[side(p, -1.0), side(q, -1.0), side(q, 1.0), side(p, 1.0)],
-            Vec3::new(mid.x, mid.y, 0.0),
-        );
-    }
-}
-
-fn car_body(builder: &mut MeshBuilder, key: &str) {
-    declare(builder);
-    let half_base = CAR_WHEELBASE * 0.5;
-    let arch = |profile: &mut Vec<Vec2>, x: f32| {
-        // Over the wheel, front to back along the sill: a half circle a
-        // little larger than the tyre.
-        for k in 0..=8 {
-            let angle = std::f32::consts::PI * (1.0 - k as f32 / 8.0);
-            profile.push(Vec2::new(
-                x + angle.cos() * 0.40,
-                CAR_WHEEL_R + angle.sin() * 0.40,
-            ));
-        }
-    };
-    // Counter-clockwise from the bottom of the rear bumper: the sill with its
-    // two arches, the nose, the bonnet to the foot of the windscreen, the
-    // waist back to the boot, the boot lid and the tail.
-    let mut profile = vec![Vec2::new(-2.30, 0.34), Vec2::new(-1.90, 0.30)];
-    arch(&mut profile, -half_base);
-    arch(&mut profile, half_base);
-    profile.extend([
-        Vec2::new(1.95, 0.30),
-        Vec2::new(2.30, 0.34),
-        Vec2::new(2.35, 0.56),
-        Vec2::new(2.27, 0.78),
-        Vec2::new(1.90, 0.90),
-        Vec2::new(1.15, 0.97),
-        Vec2::new(-1.55, 0.98),
-        Vec2::new(-2.05, 1.00),
-        Vec2::new(-2.30, 0.88),
-        Vec2::new(-2.35, 0.58),
-    ]);
-    extrude_profile(builder, key, &profile, |y| {
-        if y < 0.5 {
-            1.78
-        } else {
-            1.81 - (y - 0.5) * 0.12
-        }
-    });
-    // The roof panel over the glass.
-    let roof = [
-        Vec2::new(-0.80, 1.43),
-        Vec2::new(0.32, 1.43),
-        Vec2::new(0.27, 1.47),
-        Vec2::new(-0.76, 1.47),
-    ];
-    extrude_profile(builder, key, &roof, |_| 1.27);
-}
-
-fn car_glass(builder: &mut MeshBuilder, key: &str) {
-    declare(builder);
-    // The glasshouse: windscreen, side windows and rear window as one solid,
-    // narrowing from the waist to the roof.
-    let cabin = [
-        Vec2::new(-1.55, 0.97),
-        Vec2::new(1.15, 0.96),
-        Vec2::new(0.33, 1.435),
-        Vec2::new(-0.82, 1.435),
-    ];
-    extrude_profile(builder, key, &cabin, |y| 1.70 - (y - 0.96) * 0.85);
-}
-
-fn car_wheel(builder: &mut MeshBuilder, key: &str) {
-    declare(builder);
-    let half_base = CAR_WHEELBASE * 0.5;
-    for x in [-half_base, half_base] {
-        for side in [-1.0_f32, 1.0] {
-            let (inner, outer) = (
-                side * (CAR_TRACK * 0.5 - 0.10),
-                side * (CAR_TRACK * 0.5 + 0.10),
-            );
-            let centre = |z: f32| Vec3::new(x, CAR_WHEEL_R, z);
-            builder.tube(
-                key,
-                centre(inner),
-                centre(outer),
-                CAR_WHEEL_R,
-                CAR_WHEEL_R,
-                12,
-                None,
-            );
-            let rim: Vec<Vec3> = (0..12)
-                .map(|k| {
-                    let angle = k as f32 / 12.0 * std::f32::consts::TAU;
-                    centre(outer)
-                        + Vec3::new(angle.cos() * CAR_WHEEL_R, angle.sin() * CAR_WHEEL_R, 0.0)
-                })
-                .collect();
-            let face = Vec3::new(0.0, 0.0, side);
-            for k in 0..rim.len() {
-                face_out(
-                    builder,
-                    key,
-                    &[centre(outer), rim[k], rim[(k + 1) % rim.len()]],
-                    face,
-                );
-            }
-        }
-    }
-}
 
 /// The ornamental lamps down both footways, in facing pairs every 25 m, set
 /// back from the kerb by the width of the lamp's lanterns.
@@ -1058,9 +942,7 @@ pub fn build_prototypes(builder: &mut MeshBuilder) {
     bus_shelter(builder, "furniture/shelter");
     rubbish_bin(builder, "furniture/bin");
     phone_kiosk(builder, "furniture/kiosk");
-    car_body(builder, "car/body");
-    car_glass(builder, "car/glass");
-    car_wheel(builder, "car/wheel");
+    crate::car::build_prototypes(builder);
     for key in [
         "furniture/lamp",
         "furniture/lamp.double",
@@ -1077,9 +959,6 @@ pub fn build_prototypes(builder: &mut MeshBuilder) {
         "furniture/shelter",
         "furniture/bin",
         "furniture/kiosk",
-        "car/body",
-        "car/glass",
-        "car/wheel",
     ] {
         builder.bind(key, key);
     }
@@ -1741,18 +1620,7 @@ pub fn park_cars(network: &Network, builder: &mut MeshBuilder, seed: u32) -> usi
                     let heading = path.tangent_at(station) * if side > 0.0 { 1.0 } else { -1.0 };
                     let yaw = yaw_along_x(heading);
                     let colour = car_paint(&mut rng);
-                    builder.add_instance(
-                        "car/body",
-                        Instance::new(point.x, level::ROAD, point.z, yaw, 1.0, colour),
-                    );
-                    builder.add_instance(
-                        "car/glass",
-                        Instance::new(point.x, level::ROAD, point.z, yaw, 1.0, [0.6, 0.7, 0.78]),
-                    );
-                    builder.add_instance(
-                        "car/wheel",
-                        Instance::new(point.x, level::ROAD, point.z, yaw, 1.0, [0.15, 0.15, 0.16]),
-                    );
+                    crate::car::add_car(builder, point.x, level::ROAD, point.z, yaw, colour);
                     count += 1;
                     station += 6.4 + rng.unit() * 1.4;
                     continue;
@@ -1769,32 +1637,7 @@ pub fn park_cars(network: &Network, builder: &mut MeshBuilder, seed: u32) -> usi
                             std::f32::consts::FRAC_PI_2
                         };
                     let colour = car_paint(&mut rng);
-                    builder.add_instance(
-                        "car/body",
-                        Instance::new(point.x, level::KERB - 0.03, point.z, yaw, 1.0, colour),
-                    );
-                    builder.add_instance(
-                        "car/glass",
-                        Instance::new(
-                            point.x,
-                            level::KERB - 0.03,
-                            point.z,
-                            yaw,
-                            1.0,
-                            [0.6, 0.7, 0.78],
-                        ),
-                    );
-                    builder.add_instance(
-                        "car/wheel",
-                        Instance::new(
-                            point.x,
-                            level::KERB - 0.03,
-                            point.z,
-                            yaw,
-                            1.0,
-                            [0.15, 0.15, 0.16],
-                        ),
-                    );
+                    crate::car::add_car(builder, point.x, level::KERB - 0.03, point.z, yaw, colour);
                     count += 1;
                     station += 6.0 + rng.unit() * 3.0;
                     continue;
@@ -1810,9 +1653,7 @@ pub fn park_cars(network: &Network, builder: &mut MeshBuilder, seed: u32) -> usi
 /// car prototypes, nose along local `+X`, standing on `y`.
 pub(crate) fn add_parked_car(builder: &mut MeshBuilder, point: Vec2, y: f32, yaw: f32, rng: &mut Rng) {
     let colour = car_paint(rng);
-    builder.add_instance("car/body", Instance::new(point.x, y, point.y, yaw, 1.0, colour));
-    builder.add_instance("car/glass", Instance::new(point.x, y, point.y, yaw, 1.0, [0.6, 0.7, 0.78]));
-    builder.add_instance("car/wheel", Instance::new(point.x, y, point.y, yaw, 1.0, [0.15, 0.15, 0.16]));
+    crate::car::add_car(builder, point.x, y, point.y, yaw, colour);
 }
 
 /// A polyline helper the wire pass and the traffic model both need.
@@ -1908,10 +1749,9 @@ mod tests {
             "furniture/shelter",
             "furniture/bin",
             "furniture/kiosk",
-            "car/body",
-            "car/glass",
-            "car/wheel",
         ];
+        let mut prototypes: Vec<String> = prototypes.iter().map(|key| (*key).to_owned()).collect();
+        prototypes.extend(crate::car::prototype_keys());
         // One list per prototype.  Report both sides on failure: a bare "13 != 14"
         // does not say which prototype is missing.
         let present: Vec<&str> = scene
@@ -1925,12 +1765,12 @@ mod tests {
             "one transform list per prototype. Present: {present:?}. Missing: {:?}",
             prototypes
                 .iter()
-                .filter(|key| !present.contains(key))
+                .filter(|key| !present.contains(&key.as_str()))
                 .collect::<Vec<_>>()
         );
         for key in prototypes {
             assert!(
-                present.contains(&key),
+                present.contains(&key.as_str()),
                 "{key} has no instance list; present: {present:?}"
             );
         }
@@ -2353,7 +2193,10 @@ mod tests {
         // Its roof's height over the road its wheels stand on.
         let (length, width, height) = (hi[0] - lo[0], hi[2] - lo[2], hi[1]);
         assert!((4.5..4.9).contains(&length), "a car {length:.2} m long");
-        assert!((1.7..1.9).contains(&width), "a car {width:.2} m wide");
+        assert!(
+            (1.7..2.1).contains(&width),
+            "a car {width:.2} m wide over its mirrors"
+        );
         assert!((1.35..1.6).contains(&height), "a car {height:.2} m high");
         let (wlo, whi) = extent("car/wheel");
         assert!(

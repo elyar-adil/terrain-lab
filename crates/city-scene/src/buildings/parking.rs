@@ -247,13 +247,15 @@ mod tests {
         lay(&[rect(0.0, 0.0, 60.0, 40.0)], &[], 7, &mut builder);
         assert!(builder.index_count("marking.white") > 0);
         let scene = builder.build();
-        let cars = scene
+        // Every design of car (`car/body`, `car/body~1`, ...).
+        let cars: Vec<_> = scene
             .instances
             .iter()
-            .find(|g| g.key == "car/body")
-            .expect("cars");
-        assert!(cars.instances.len() >= 8, "{} cars", cars.instances.len());
-        for car in &cars.instances {
+            .filter(|g| g.key.starts_with("car/body"))
+            .flat_map(|g| g.instances.iter())
+            .collect();
+        assert!(cars.len() >= 8, "{} cars", cars.len());
+        for car in &cars {
             assert!(car.x > 0.0 && car.x < 60.0 && car.z > 0.0 && car.z < 40.0);
         }
     }

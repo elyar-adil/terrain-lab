@@ -9,6 +9,7 @@
 pub mod audit;
 pub mod bake;
 pub mod buildings;
+pub mod car;
 pub mod corner;
 pub mod crops;
 pub mod facades;
@@ -21,6 +22,7 @@ pub mod leaf_cards {
 }
 pub mod math;
 pub mod mesh;
+mod model;
 pub mod network;
 pub mod rail;
 pub mod scene;
