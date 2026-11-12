@@ -88,6 +88,12 @@ thread_local! {
     static FLEET_SEED: Cell<u64> = const { Cell::new(0) };
 }
 
+/// The city a fleet is registered in, as a number in `0..1`: the plate shader
+/// turns it into a province's character and a city's letter.
+fn registry(fleet: u64) -> f32 {
+    (fleet.wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 40) as f32 / (1u64 << 24) as f32
+}
+
 /// The design of a variant of a fleet.
 fn fleet_design(fleet: u64, variant: usize) -> Spec {
     let seed = fleet
@@ -177,16 +183,24 @@ fn interior_tone(x: f32, z: f32) -> [f32; 3] {
 
 /// The tint a part is drawn with: the body's paint and the upholstery belong
 /// to the car, the rims' finish and the plate's colour to its design.
-fn part_tint(part: &str, spec: &Spec, paint: [f32; 3], tone: [f32; 3]) -> [f32; 3] {
+fn part_tint(
+    part: &str,
+    spec: &Spec,
+    paint: [f32; 3],
+    tone: [f32; 3],
+    plate: [f32; 2],
+) -> [f32; 3] {
     match part {
         "body" | "far.body" => paint,
         "glass" | "far.glass" => [0.6, 0.7, 0.78],
         "wheel" | "far.wheel" => [0.15, 0.15, 0.16],
         "rim" => spec.rim.tint,
         "interior" => tone,
-        // Blue plates, and the green of a new-energy car's.
-        "plate" if spec.electric => [0.42, 0.72, 0.50],
-        "plate" => [0.012, 0.050, 0.33],
+        // A plate's tint is not a colour but its registration: the number it
+        // carries, whether it is a blue plate or a new-energy green one, and
+        // the city that issued it. The renderer's plate shader reads the three
+        // and draws the plate (`carMaterials.ts`).
+        "plate" => [plate[0], if spec.electric { 1.0 } else { 0.0 }, plate[1]],
         _ => [1.0, 1.0, 1.0],
     }
 }
@@ -201,7 +215,13 @@ pub fn part_tints(fleet: u64, variant: usize) -> Vec<(&'static str, [f32; 3])> {
         .map(|part| {
             (
                 *part,
-                part_tint(part, &spec, [0.33, 0.03, 0.025], [0.115, 0.115, 0.12]),
+                part_tint(
+                    part,
+                    &spec,
+                    [0.33, 0.03, 0.025],
+                    [0.115, 0.115, 0.12],
+                    [0.137 + variant as f32 * 0.171, registry(fleet)],
+                ),
             )
         })
         .collect()
@@ -210,14 +230,30 @@ pub fn part_tints(fleet: u64, variant: usize) -> Vec<(&'static str, [f32; 3])> {
 fn instances_of(x: f32, y: f32, z: f32, yaw: f32, paint: [f32; 3]) -> Vec<(String, Instance)> {
     let variant = car_variant_at(x, z);
     let tone = interior_tone(x, z);
-    let spec = fleet_design(FLEET_SEED.get(), variant);
+    let fleet = FLEET_SEED.get();
+    let spec = fleet_design(fleet, variant);
+    // Every car its own number, from where it stands.
+    let number = worldgen_core::hash::avalanche01(
+        0x9_1a7e,
+        (x * 11.0).round() as i32,
+        (z * 11.0).round() as i32,
+        5,
+    );
+    let plate = [number, registry(fleet)];
     NEAR_PARTS
         .iter()
         .chain(FAR_PARTS.iter())
         .map(|part| {
             (
                 car_key(part, variant),
-                Instance::new(x, y, z, yaw, 1.0, part_tint(part, &spec, paint, tone)),
+                Instance::new(
+                    x,
+                    y,
+                    z,
+                    yaw,
+                    1.0,
+                    part_tint(part, &spec, paint, tone, plate),
+                ),
             )
         })
         .collect()
@@ -314,6 +350,7 @@ pub fn build_prototypes(builder: &mut MeshBuilder, fleet: u64) {
             &mesh.material,
             &mesh.positions,
             &mesh.normals,
+            mesh.uvs.as_deref(),
             &mesh.indices,
         );
     }

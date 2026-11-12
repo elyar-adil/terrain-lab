@@ -158,10 +158,18 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
     let wheelbase = length - front_overhang - rear_overhang;
     // The nose and the tail are modelled as faces standing beyond the lofted
     // body: the loft stops this far short of each end.
+    // (Never so far that the loft would end inside a wheel arch.)
+    let room = wheel_r + 0.20;
     let face = if kind == Van {
-        (0.15, 0.13)
+        (
+            0.15_f32.min(front_overhang - room),
+            0.13_f32.min(rear_overhang - room),
+        )
     } else {
-        (0.30, 0.22)
+        (
+            0.30_f32.min(front_overhang - room),
+            0.22_f32.min(rear_overhang - room),
+        )
     };
     let nose = wheelbase * 0.5 + front_overhang - face.0;
     let tail = -wheelbase * 0.5 - rear_overhang + face.1;

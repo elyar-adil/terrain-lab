@@ -46,11 +46,12 @@ fn main() {
         let join = |values: &mut dyn Iterator<Item = String>| values.collect::<Vec<_>>().join(",");
         write!(
             out,
-            "\"{}\":{{\"p\":[{}],\"n\":[{}],\"i\":[{}]}}",
+            "\"{}\":{{\"p\":[{}],\"n\":[{}],\"i\":[{}],\"uv\":[{}]}}",
             mesh.material,
             join(&mut mesh.positions.iter().map(|v| format!("{v:.5}"))),
             join(&mut mesh.normals.iter().map(|v| format!("{v:.4}"))),
             join(&mut mesh.indices.iter().map(|v| v.to_string())),
+            join(&mut mesh.uvs.iter().flatten().map(|v| format!("{v:.4}"))),
         )
         .unwrap();
         bytes += mesh.positions.len() * 8 + mesh.indices.len() * 4;

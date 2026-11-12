@@ -426,10 +426,24 @@ impl MeshBuilder {
 
     /// Append a finished mesh as it stands: flat position and normal buffers
     /// and the indices into them.
-    pub fn append(&mut self, material: &str, positions: &[f32], normals: &[f32], indices: &[u32]) {
+    pub fn append(
+        &mut self,
+        material: &str,
+        positions: &[f32],
+        normals: &[f32],
+        uvs: Option<&[f32]>,
+        indices: &[u32],
+    ) {
         let buffers = self.buffers(material);
-        if buffers.with_colors || buffers.with_uvs || positions.len() != normals.len() {
+        if buffers.with_colors
+            || positions.len() != normals.len()
+            || buffers.with_uvs != uvs.is_some() && !buffers.positions.is_empty()
+        {
             return;
+        }
+        if let Some(uvs) = uvs {
+            buffers.with_uvs = true;
+            buffers.uvs.get_or_insert_with(Vec::new).extend_from_slice(uvs);
         }
         let base = (buffers.positions.len() / 3) as u32;
         buffers.positions.extend_from_slice(positions);

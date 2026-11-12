@@ -820,23 +820,28 @@ fn plates(builder: &mut MeshBuilder, soup: &Soup, form: &Form, key: &dyn Fn(&str
             }
         }
         let face = at + normal * (proud + 0.010);
+        // A blue plate is 440 mm wide; a new-energy one, with a character
+        // more, 480. Its face is one quad that the plate shader writes on.
+        let wide = if spec.electric { 0.24 } else { 0.22 };
+        let right = up.cross(normal).normalized_or_up();
         slab(
             builder,
             &key("trim"),
-            face - normal * 0.003,
+            face - normal * 0.002,
             normal,
-            up * 0.076,
-            across * 0.228,
+            up * 0.074,
+            across * (wide + 0.006),
             0.012,
         );
-        slab(
-            builder,
+        let corner = |u: f32, v: f32| face + right * (wide * u) + up * (0.070 * v);
+        builder.quad_uv(
             &key("plate"),
-            face,
-            normal,
-            up * 0.070,
-            across * 0.220,
-            0.003,
+            corner(-1.0, -1.0),
+            corner(1.0, -1.0),
+            corner(1.0, 1.0),
+            corner(-1.0, 1.0),
+            [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
+            None,
         );
     }
 }

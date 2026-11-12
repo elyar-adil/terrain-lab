@@ -20,7 +20,7 @@ import { carMaterials } from "./city/carMaterials";
 interface Dump {
   variants: number;
   tints: Array<Record<string, [number, number, number]>>;
-  meshes: Record<string, { p: number[]; n: number[]; i: number[] }>;
+  meshes: Record<string, { p: number[]; n: number[]; i: number[]; uv?: number[] }>;
 }
 
 /** Camera position and target, per named view, in car lengths-ish metres. */
@@ -88,28 +88,31 @@ async function main() {
     const plain = tilde >= 0 ? key.slice(0, tilde) : key;
     if ((tilde >= 0 ? key.slice(tilde) : "") !== suffix) continue;
     if (plain.startsWith("car/far.") !== far) continue;
-    const material = materials.get(plain)?.clone();
+    const material = materials.get(plain);
     if (!material) {
       console.error(`no material for ${plain}`);
       continue;
     }
     const part = plain.slice(4);
     const tint = dump.tints[variant]?.[part] ?? [1, 1, 1];
-    const colour = (material as THREE.MeshStandardMaterial).color;
-    // The city multiplies the material colour by the instance tint, in linear space.
-    colour.multiply(new THREE.Color().setRGB(tint[0], tint[1], tint[2], THREE.LinearSRGBColorSpace));
-    // A showroom of its own colour per design unless one is asked for.
+    // As the city draws it: one instance, its tint in the instance colour.
+    const colour = new THREE.Color().setRGB(tint[0], tint[1], tint[2]);
+    // A showroom colour of its own per design unless one is asked for.
     const showroom = ["8f9498", "1f4fa8", "c0221c", "eef0ee", "56634e", "15171a"];
     if (part === "body" || part === "far.body") colour.set(`#${paint ?? showroom[variant % showroom.length]}`);
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(mesh.p, 3));
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(mesh.n, 3));
+    if (mesh.uv && mesh.uv.length > 0) geometry.setAttribute("uv", new THREE.Float32BufferAttribute(mesh.uv, 2));
     geometry.setIndex(mesh.i);
-    const object = new THREE.Mesh(geometry, material);
+    const object = new THREE.InstancedMesh(geometry, material, 1);
+    object.setMatrixAt(0, new THREE.Matrix4());
+    object.setColorAt(0, colour);
+    object.frustumCulled = false;
     object.name = plain;
     object.castShadow = !material.transparent;
-    object.renderOrder = material.transparent ? (plain === "car/glass" ? 1 : 2) : 0;
     object.receiveShadow = !material.transparent;
+    object.renderOrder = material.transparent ? (plain === "car/glass" ? 1 : 2) : 0;
     scene.add(object);
     triangles += mesh.i.length / 3;
   }
