@@ -1933,7 +1933,7 @@ mod tests {
     /// (`parking.rs`).
     /// And again when the cars became a fleet of generated designs, each with
     /// more parts and its own share of the street (`car/`).
-    const WESTERN_MIXED_LAYER_HASH: u64 = 16_491_363_551_177_076_815;
+    const WESTERN_MIXED_LAYER_HASH: u64 = 6_950_601_170_761_741_262;
 
     #[test]
     fn western_mixed_building_layer_is_bit_identical() {

@@ -49,6 +49,56 @@ pub(super) struct Spec {
     pub fog: bool,
     /// How far the nose and the tail stand beyond the lofted body.
     pub face: (f32, f32),
+    /// Two doors a side, or one.
+    pub four_doors: bool,
+    pub style: Style,
+}
+
+/// The hand that drew the body: what makes two cars of one kind and one size
+/// different cars. Every number is a freedom of the form, not a part.
+#[derive(Clone, Copy)]
+pub(super) struct Style {
+    /// How far the roof stands in from the body's side: an upright cabin, or
+    /// one that leans in.
+    pub tumble: f32,
+    /// How far the body side leans in at the shoulder.
+    pub shoulder: f32,
+    /// How far the flank swells over each wheel, and is drawn in between them.
+    pub hip: f32,
+    pub waist: f32,
+    /// How much the roof arches, and where along it the arch peaks (0 over
+    /// the middle, positive toward the screen).
+    pub crown: f32,
+    pub peak: f32,
+    /// How the screens run out into the roof: near 1 flat and angular,
+    /// higher bowed.
+    pub bow: f32,
+    /// How much the body draws in toward the nose and the tail, in plan.
+    pub taper: (f32, f32),
+    /// The crease along the shoulder: how far under the belt, how much it
+    /// rises toward the tail, and how sharp. And the hollow in the doors.
+    pub crease_drop: f32,
+    pub wedge: f32,
+    pub crease: f32,
+    pub hollow: f32,
+    /// The creases down the bonnet.
+    pub bonnet: f32,
+    pub nose: Face,
+    pub tail: Face,
+}
+
+/// The shape of an end of the car.
+#[derive(Clone, Copy)]
+pub(super) struct Face {
+    /// How far it sweeps back to its corners in plan.
+    pub sweep: f32,
+    /// How far the chin tucks under, and the panel over the bumper leans away.
+    pub chin: f32,
+    pub lean: f32,
+    /// How proud the bumper stands.
+    pub proud: f32,
+    /// How round the edge is: near 1.5 soft, above 2.5 square-shouldered.
+    pub square: f32,
 }
 
 /// A door mirror: its glass's width and height, and how it is carried.
@@ -128,7 +178,8 @@ pub(super) fn lines_of(spec: &Spec) -> Lines {
     let arch = spec.wheel_r + ARCH_GAP;
     Lines {
         front_door: (front_foot - 0.10).min(spec.wheelbase * 0.5 - arch - 0.07),
-        b_pillar: (rear_head + front_head) * 0.5 + 0.12,
+        // A two-door car's doors are long ones.
+        b_pillar: (rear_head + front_head) * 0.5 + if spec.four_doors { 0.12 } else { -0.12 },
         rear_door: (rear_head + 0.10).max(-spec.wheelbase * 0.5 + spec.wheel_r * 0.4),
         boot: rear_foot - 0.07,
     }
@@ -136,8 +187,6 @@ pub(super) fn lines_of(spec: &Spec) -> Lines {
 
 /// The gap between a tyre and its arch.
 pub(super) const ARCH_GAP: f32 = 0.042;
-/// How far the body swells over a wheel.
-pub(super) const HIP_M: f32 = 0.038;
 /// The rings a face is closed with, and how far it stands beyond the last section.
 const FACE_RINGS: usize = 18;
 /// Where the corner of the car is taken to be, back from its end, when a lamp
@@ -230,15 +279,16 @@ impl<'a> Form<'a> {
         // gentler one, as the air wants it.
         let front = 1.0 - ((self.nose - x).max(0.0) / 0.9).min(1.0);
         let rear = 1.0 - ((x - self.tail).max(0.0) / 1.2).min(1.0);
-        self.spec.width * 0.5 * (1.0 - 0.10 * front.powf(2.2) - 0.11 * rear.powf(2.0))
+        let (nose, tail) = self.spec.style.taper;
+        self.spec.width * 0.5 * (1.0 - nose * front.powf(2.2) - tail * rear.powf(2.0))
     }
-    /// How far the flank swells here over a wheel: `HIP_M` at an axle, nothing
+    /// How far the flank swells here over a wheel: all of it at an axle, nothing
     /// between them.
     pub fn hip(&self, x: f32) -> f32 {
         let reach = (self.spec.wheel_r + ARCH_GAP) * 1.15;
         let half_base = self.spec.wheelbase * 0.5;
         let near = (x.abs() - half_base).abs() / reach;
-        HIP_M * (-near * near).exp()
+        self.spec.style.hip * (-near * near).exp()
     }
     /// How much of a cabin stands on the body here: 0 over the bonnet and the
     /// boot, 1 under the roof, between along the raked glass.
@@ -253,7 +303,7 @@ impl<'a> Form<'a> {
         };
         let rise = rise.clamp(0.0, 1.0);
         // Eased at the head, where the screen runs out into the roof.
-        let eased = 1.0 - (1.0 - rise).powf(1.7);
+        let eased = 1.0 - (1.0 - rise).powf(self.spec.style.bow);
         eased * (0.75 + 0.25 * eased)
     }
     /// The top of the car: the deck, or the roof line over the cabin.
@@ -264,7 +314,9 @@ impl<'a> Form<'a> {
         // the roof has no corner where a screen meets it.
         let [rear_foot, _, _, front_foot] = self.spec.cabin;
         let along = ((x - rear_foot) / (front_foot - rear_foot).max(0.1)).clamp(0.0, 1.0);
-        let crown = 0.085 * (1.0 - (2.0 * along - 1.1).abs().min(1.0).powi(2)) - 0.055;
+        let style = &self.spec.style;
+        let crown =
+            style.crown * ((1.0 - (2.0 * along - 1.0 - style.peak).abs().min(1.0).powi(2)) - 0.65);
         deck + (self.spec.roof + crown - deck) * self.cabin(x)
     }
     /// The section's control points at a station, as `(z, y)` from the middle
@@ -278,7 +330,7 @@ impl<'a> Form<'a> {
             self.cabin(x),
         );
         let deck = belt + 0.012;
-        let roof_half = self.spec.width * 0.5 - 0.31;
+        let roof_half = self.spec.width * 0.5 - self.spec.style.tumble;
         let lerp = |a: f32, b: f32| a + (b - a) * g;
         let glass_head = (
             lerp(wide - 0.22, roof_half.min(wide - 0.16)),
@@ -287,14 +339,14 @@ impl<'a> Form<'a> {
         // The body is not a slab: it swells over each wheel and is drawn in
         // between them, most of all along the sill.
         let hip = self.hip(x);
-        let waist = HIP_M - hip;
+        let waist = self.spec.style.waist * (1.0 - hip / self.spec.style.hip.max(1.0e-3));
         [
             (0.0, floor),
             (wide - 0.11 - waist, floor),
             (wide - 0.018 - waist * 1.5, floor + 0.075),
             (wide + hip - waist * 0.35, floor + (belt - floor) * 0.46),
             (wide - 0.010 + hip * 0.55, belt - 0.11),
-            (wide - 0.050, belt - 0.004),
+            (wide - self.spec.style.shoulder, belt - 0.004),
             (lerp(wide - 0.11, wide - 0.090), deck + 0.004 + 0.012 * g),
             glass_head,
             (glass_head.0 - 0.10, top + 0.004),
@@ -478,7 +530,12 @@ impl Shell {
                 .map(|j| {
                     let angle = j as f32 / FACE_RINGS as f32 * std::f32::consts::FRAC_PI_2;
                     let scale = if j == FACE_RINGS { 0.0 } else { angle.cos() };
-                    let out = (1.0 - scale.powf(1.9)).powf(1.0 / 1.9);
+                    let shape_of = if toward > 0.0 {
+                        form.spec.style.nose
+                    } else {
+                        form.spec.style.tail
+                    };
+                    let out = (1.0 - scale.powf(shape_of.square)).powf(1.0 / shape_of.square);
                     ring.iter()
                         .map(|p| {
                             // The rings draw in across the car faster than
@@ -498,15 +555,16 @@ impl Shell {
                             // stands proud, and above it the panel (lamps and
                             // grille, or the boot's back) leans away to the
                             // edge of the bonnet or the lid.
-                            let (depth, sweep, chin, lean) = if toward > 0.0 {
-                                (form.spec.face.0, 0.60, 0.36, 0.52)
+                            let depth = if toward > 0.0 {
+                                form.spec.face.0
                             } else {
-                                (form.spec.face.1, 0.50, 0.42, 0.26)
+                                form.spec.face.1
                             };
-                            let shape =
-                                1.0 - sweep * across.powf(2.4) - chin * (1.0 - step(0.0, 0.22))
-                                    + 0.07 * step(0.10, 0.26) * (1.0 - step(0.36, 0.52))
-                                    - lean * step(0.38, 1.0);
+                            let shape = 1.0
+                                - shape_of.sweep * across.powf(2.4)
+                                - shape_of.chin * (1.0 - step(0.0, 0.22))
+                                + shape_of.proud * step(0.10, 0.26) * (1.0 - step(0.36, 0.52))
+                                - shape_of.lean * step(0.38, 1.0);
                             Vec3::new(x + toward * out * depth * shape.max(0.05), y, z)
                         })
                         .collect()

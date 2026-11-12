@@ -68,18 +68,17 @@ pub const CAR_NEAR_M: f32 = 45.0;
 /// How many designs a city's fleet has; variant `n > 0` is keyed `car/<part>~n`.
 pub const CAR_VARIANTS: usize = 6;
 
-/// The kinds a fleet is made of, and the share of the street each variant
-/// takes: saloons most of all, an SUV, the small van (面包车) that does every
-/// delivery, and three drawn freely in the proportions of a Chinese street.
-/// Variant 0, which the unsuffixed prototype keys draw, is always a saloon.
-/// Within its kind every design is free.
+/// What a fleet is made of, and the share of the street each variant takes.
+/// Variant 0, which the unsuffixed prototype keys draw, is always a saloon,
+/// the commonest car there is; the rest are drawn freely, kind and all, in the
+/// proportions of a Chinese street, so one city's fleet is not another's.
 const FLEET: [(Option<Kind>, f32); CAR_VARIANTS] = [
-    (Some(Kind::Saloon), 0.21),
-    (Some(Kind::Suv), 0.19),
-    (None, 0.18),
+    (Some(Kind::Saloon), 0.20),
     (None, 0.17),
     (None, 0.17),
-    (Some(Kind::Van), 0.08),
+    (None, 0.16),
+    (None, 0.15),
+    (None, 0.15),
 ];
 
 thread_local! {

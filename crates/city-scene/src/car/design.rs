@@ -8,7 +8,7 @@
 //! a bonnet, how tall a roof, how much tyre), and inside those bounds every
 //! dimension and every part is chosen freely. Any seed gives a car that could
 //! be parked outside; no two seeds give the same one.
-use super::form::{Mirror, Spec};
+use super::form::{Face, Mirror, Spec, Style};
 use super::lamps::{Grille, GrilleKind, HeadStyle, TailStyle, Wing};
 use super::wheels::{Rim, RimStyle, Tread, Tyre};
 
@@ -22,6 +22,12 @@ pub(super) enum Kind {
     Suv,
     Mpv,
     Van,
+    /// An estate: a saloon whose roof runs to the tail.
+    Wagon,
+    /// Two long doors under a low roof.
+    Coupe,
+    /// The city runabout, barely three metres long.
+    Micro,
 }
 
 /// A small deterministic stream of numbers (splitmix64).
@@ -68,13 +74,16 @@ impl Rng {
 /// The kind a seed draws, in the proportions of the street.
 fn kind_of(rng: &mut Rng) -> Kind {
     rng.pick(&[
-        (Kind::Saloon, 0.34),
-        (Kind::Suv, 0.20),
-        (Kind::Crossover, 0.14),
-        (Kind::Hatchback, 0.11),
-        (Kind::Fastback, 0.07),
-        (Kind::Mpv, 0.06),
-        (Kind::Van, 0.08),
+        (Kind::Saloon, 0.28),
+        (Kind::Suv, 0.18),
+        (Kind::Crossover, 0.13),
+        (Kind::Hatchback, 0.10),
+        (Kind::Fastback, 0.06),
+        (Kind::Mpv, 0.05),
+        (Kind::Van, 0.06),
+        (Kind::Wagon, 0.04),
+        (Kind::Coupe, 0.03),
+        (Kind::Micro, 0.07),
     ])
 }
 
@@ -88,6 +97,15 @@ pub(super) fn design(seed: u64) -> Spec {
 /// A design of a given kind.
 pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
     use Kind::*;
+    // An estate, a coupe and a runabout are each drawn from the kind nearest
+    // to them and then changed where they differ.
+    let shape = kind;
+    let kind = match shape {
+        Wagon => Saloon,
+        Coupe => Fastback,
+        Micro => Hatchback,
+        other => other,
+    };
     let electric = rng.chance(match kind {
         Saloon => 0.30,
         Fastback => 0.60,
@@ -96,6 +114,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Suv => 0.30,
         Mpv => 0.25,
         Van => 0.10,
+        Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
     });
     // --- proportions -------------------------------------------------------
     let length = match kind {
@@ -106,6 +125,12 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Suv => rng.range(4.55, 4.98),
         Mpv => rng.range(4.60, 5.05),
         Van => rng.range(3.85, 4.40),
+        Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
+    };
+    let length = match shape {
+        Micro => rng.range(2.95, 3.55),
+        Coupe => length - rng.range(0.15, 0.40),
+        _ => length,
     };
     let width = match kind {
         Saloon => rng.range(1.78, 1.88),
@@ -115,6 +140,12 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Suv => rng.range(1.84, 1.96),
         Mpv => rng.range(1.80, 1.90),
         Van => rng.range(1.56, 1.68),
+        Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
+    };
+    let width = if shape == Micro {
+        rng.range(1.50, 1.62)
+    } else {
+        width
     };
     let roof = match kind {
         Saloon => rng.range(1.42, 1.49),
@@ -124,6 +155,12 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Suv => rng.range(1.66, 1.78),
         Mpv => rng.range(1.70, 1.82),
         Van => rng.range(1.80, 1.92),
+        Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
+    };
+    let roof = match shape {
+        Micro => rng.range(1.54, 1.66),
+        Coupe => roof - rng.range(0.05, 0.10),
+        _ => roof,
     };
     let wheel_r = match kind {
         Saloon => rng.range(0.325, 0.350),
@@ -133,6 +170,12 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Suv => rng.range(0.360, 0.395),
         Mpv => rng.range(0.330, 0.355),
         Van => rng.range(0.280, 0.300),
+        Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
+    };
+    let wheel_r = if shape == Micro {
+        rng.range(0.262, 0.290)
+    } else {
+        wheel_r
     };
     // The underside of the body stands a quarter of the way up the wheel: a
     // little more for what is meant to leave the road.
@@ -148,19 +191,30 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Van => rng.range(0.52, 0.66),
         _ => rng.range(0.84, 0.98) - if electric { 0.06 } else { 0.0 },
     };
+    let front_overhang = if shape == Micro {
+        rng.range(0.50, 0.58)
+    } else {
+        front_overhang
+    };
     let rear_overhang = match kind {
         Saloon | Fastback => rng.range(0.98, 1.12),
         Hatchback => rng.range(0.66, 0.80),
         Crossover | Suv => rng.range(0.86, 1.02),
         Mpv => rng.range(0.92, 1.04),
         Van => rng.range(0.62, 0.76),
+        Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
     } - if electric { 0.05 } else { 0.0 };
+    let rear_overhang = if shape == Micro {
+        rng.range(0.46, 0.54)
+    } else {
+        rear_overhang
+    };
     let wheelbase = length - front_overhang - rear_overhang;
     // The nose and the tail are modelled as faces standing beyond the lofted
     // body: the loft stops this far short of each end.
     // (Never so far that the loft would end inside a wheel arch.)
     let room = wheel_r + 0.20;
-    let face = if kind == Van {
+    let face = if kind == Van || shape == Micro {
         (
             0.15_f32.min(front_overhang - room),
             0.13_f32.min(rear_overhang - room),
@@ -200,6 +254,11 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Mpv => half_base - rng.range(-0.10, 0.06),
         _ => half_base - rng.range(0.16, 0.30) + if electric { 0.06 } else { 0.0 },
     };
+    let front_foot = if shape == Micro {
+        nose - rng.range(0.36, 0.48)
+    } else {
+        front_foot
+    };
     let front_head = front_foot
         - match kind {
             Van => rng.range(0.52, 0.62),
@@ -215,6 +274,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Crossover => tail + rng.range(0.08, 0.14),
         Suv | Mpv => tail + rng.range(0.07, 0.11),
         Van => tail + rng.range(0.04, 0.06),
+        Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
     };
     let rear_head = rear_foot
         + match kind {
@@ -225,9 +285,27 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
             Suv => rng.range(0.26, 0.40),
             Mpv => rng.range(0.22, 0.32),
             Van => rng.range(0.07, 0.10),
+            Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
         };
+    // An estate's roof runs to an upright tailgate; a runabout's cabin is
+    // most of the car.
+    let (front_head, rear_foot, rear_head) = match shape {
+        Wagon => {
+            let foot = tail + rng.range(0.07, 0.12);
+            (front_head, foot, foot + rng.range(0.32, 0.58))
+        }
+        Micro => {
+            let foot = tail + rng.range(0.05, 0.09);
+            (
+                front_foot - rng.range(0.58, 0.72),
+                foot,
+                foot + rng.range(0.16, 0.30),
+            )
+        }
+        _ => (front_head, rear_foot, rear_head),
+    };
     // Whatever the rakes, a roof is left between the screens.
-    let rear_head = rear_head.min(front_head - 1.25);
+    let rear_head = rear_head.min(front_head - if shape == Micro { 0.75 } else { 1.25 });
     let rear_foot = rear_foot.min(rear_head - 0.06);
     let top = vec![
         (tail, tail_top - 0.03),
@@ -241,7 +319,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         (nose - 0.20, nose_top + 0.035),
         (nose, nose_top),
     ];
-    let boot = matches!(kind, Saloon | Fastback);
+    let boot = matches!(kind, Saloon | Fastback) && shape != Wagon;
     let tall = matches!(kind, Suv | Crossover);
     let cladding = match kind {
         Suv => rng.chance(0.65),
@@ -424,6 +502,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
             Crossover => 0.225,
             Fastback => 0.245,
             Suv => 0.245,
+            Wagon | Coupe | Micro => unreachable!("drawn from another kind"),
         }) + rng.range(-0.01, 0.01),
         rim_r: wheel_r * rim_share,
         tread: match kind {
@@ -508,6 +587,57 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
             repeater: rng.chance(0.7),
         }
     };
+    // --- the hand that drew it ---------------------------------------------
+    // Sharp-edged or soft, slab-sided or hipped, wedge or level: the same
+    // freedoms whatever the kind, with a few leanings.
+    let soft = rng.unit();
+    let sporty = matches!(shape, Fastback | Coupe) || rng.chance(0.25);
+    let boxy = matches!(shape, Van | Micro | Suv | Mpv);
+    let face_of = |rng: &mut Rng, front: bool| Face {
+        sweep: rng.range(0.30, 0.72),
+        chin: rng.range(0.22, 0.50),
+        lean: if front {
+            rng.range(0.20, 0.62)
+        } else {
+            rng.range(0.08, 0.40)
+        } * if boxy { 0.6 } else { 1.0 },
+        proud: rng.range(0.02, 0.11),
+        square: 1.55 + (1.0 - soft) * rng.range(0.2, 1.3),
+    };
+    let style = Style {
+        tumble: if boxy {
+            rng.range(0.20, 0.28)
+        } else {
+            rng.range(0.26, 0.37)
+        },
+        shoulder: rng.range(0.030, 0.075),
+        hip: if sporty {
+            rng.range(0.035, 0.058)
+        } else {
+            rng.range(0.012, 0.042)
+        },
+        waist: rng.range(0.0, 0.045),
+        crown: if boxy {
+            rng.range(0.03, 0.06)
+        } else {
+            rng.range(0.05, 0.11)
+        },
+        peak: rng.range(-0.15, 0.30),
+        bow: rng.range(1.25, 2.3),
+        taper: (rng.range(0.05, 0.16), rng.range(0.05, 0.17)),
+        crease_drop: rng.range(0.09, 0.24),
+        wedge: rng.range(-0.03, 0.07),
+        crease: (1.0 - soft) * rng.range(0.006, 0.016) + 0.002,
+        hollow: rng.range(0.0, 0.014),
+        bonnet: rng.range(0.0, 0.010),
+        nose: face_of(rng, true),
+        tail: face_of(rng, false),
+    };
+    let four_doors = match shape {
+        Coupe => false,
+        Micro => rng.chance(0.4),
+        _ => true,
+    };
     Spec {
         top,
         cabin: [rear_foot, rear_head, front_head, front_foot],
@@ -517,7 +647,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         wheelbase,
         wheel_r,
         rows: if matches!(kind, Mpv | Van) { 3 } else { 2 },
-        roof_rails: matches!(kind, Suv | Crossover | Mpv) && rng.chance(0.6),
+        roof_rails: (matches!(kind, Suv | Crossover | Mpv) || shape == Wagon) && rng.chance(0.6),
         boot,
         cladding,
         glass_roof: kind != Van && rng.chance(if electric { 0.7 } else { 0.3 }),
@@ -542,6 +672,8 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         rim,
         mirror,
         face,
+        four_doors,
+        style,
         fog: kind != Van && rng.chance(0.6),
     }
 }

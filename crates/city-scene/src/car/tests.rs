@@ -28,8 +28,8 @@ fn every_design_is_a_car_sized_car_standing_on_its_wheels() {
             // Length along +X (placed with `yaw_along_x`), width over the mirrors.
             let (lo, hi) = extent(&scene, &car_key("body", variant));
             let (length, width, height) = (hi[0] - lo[0], hi[2] - lo[2], hi[1]);
-            assert!((3.8..5.3).contains(&length), "{name} is {length:.2} m long");
-            assert!((1.5..2.35).contains(&width), "{name} is {width:.2} m wide");
+            assert!((2.8..5.3).contains(&length), "{name} is {length:.2} m long");
+            assert!((1.45..2.35).contains(&width), "{name} is {width:.2} m wide");
             assert!(
                 (1.35..2.0).contains(&height),
                 "{name} is {height:.2} m high"
@@ -41,7 +41,7 @@ fn every_design_is_a_car_sized_car_standing_on_its_wheels() {
                 wlo[1]
             );
             assert!(
-                whi[0] - wlo[0] > 2.6 && whi[2] - wlo[2] < width,
+                whi[0] - wlo[0] > 2.3 && whi[2] - wlo[2] < width,
                 "{name}: axles across the car"
             );
             // The tyres are inside the body's width, and clear of the arches.
@@ -123,7 +123,7 @@ fn a_seed_is_a_design_and_seeds_differ() {
             -reach > tail && reach < nose,
             "seed {seed}: wheels past the bumpers"
         );
-        assert!(front_head - rear_head > 1.0, "seed {seed}: no roof");
+        assert!(front_head - rear_head > 0.7, "seed {seed}: no roof");
         assert!(
             d.tyre.rim_r < d.wheel_r - 0.05,
             "seed {seed}: no tyre on the rim"

@@ -280,7 +280,9 @@ pub(super) fn build(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -
         )
     };
     seam(&mut soup, &front_door, &below_glass);
-    seam(&mut soup, &rear_door, &below_glass);
+    if spec.four_doors {
+        seam(&mut soup, &rear_door, &below_glass);
+    }
     // The bonnet: its sides along the wings and its leading edge.
     let above_floor = |p: Vec3| form.floor(p.x) + 0.22 - p.y;
     let bonnet = |p: Vec3| {
@@ -443,7 +445,10 @@ fn sculpt(soup: &mut Soup, form: &Form) {
             * smoothstep(form.nose - from, form.nose - to, p.x)
     };
     // The shoulder: rising a little toward the tail, as a wedge does.
-    let shoulder = |p: Vec3| p.y - (form.belt(p.x) - 0.150 + 0.035 * (form.nose - p.x) / length);
+    let style = spec.style;
+    let shoulder = |p: Vec3| {
+        p.y - (form.belt(p.x) - style.crease_drop + style.wedge * (form.nose - p.x) / length)
+    };
     // The hollow above the sill.
     let hollow = |p: Vec3| p.y - (form.floor(p.x) + 0.26);
     let from_axle = |p: Vec3| {
@@ -466,8 +471,8 @@ fn sculpt(soup: &mut Soup, form: &Form) {
         let side = flank(p);
         let mut h = 0.0;
         if side > 0.0 {
-            h += ridge(shoulder(p), 0.011, 0.06) * side * ends(p, 0.30, 0.75) * between(p);
-            h -= ridge(hollow(p), 0.010, 0.10) * side * ends(p, 0.5, 0.9) * between(p);
+            h += ridge(shoulder(p), style.crease, 0.06) * side * ends(p, 0.30, 0.75) * between(p);
+            h -= ridge(hollow(p), style.hollow, 0.10) * side * ends(p, 0.5, 0.9) * between(p);
             if !spec.cladding {
                 let t = ((from_axle(p) - arch) / lip_wide).clamp(0.0, 1.0);
                 h += 0.0075 * (1.0 - t).powi(2) * side;
@@ -475,7 +480,7 @@ fn sculpt(soup: &mut Soup, form: &Form) {
         }
         let top = on_bonnet(p);
         if top > 0.0 {
-            h += ridge(bonnet_line(p), 0.0055, 0.06) * top;
+            h += ridge(bonnet_line(p), style.bonnet, 0.06) * top;
         }
         h
     };
@@ -552,8 +557,9 @@ fn shell_soup(form: &Form, shell: &Shell) -> Soup {
 /// Where the door handles are: the station of each, front door then rear.
 pub(super) fn handle_places(form: &Form) -> Vec<(f32, bool)> {
     let lines = lines_of(form.spec);
-    vec![
-        (lines.b_pillar + 0.17, true),
-        (lines.rear_door + 0.17, false),
-    ]
+    let mut places = vec![(lines.b_pillar + 0.17, true)];
+    if form.spec.four_doors {
+        places.push((lines.rear_door + 0.17, false));
+    }
+    places
 }
