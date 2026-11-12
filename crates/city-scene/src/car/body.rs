@@ -517,19 +517,31 @@ fn shell_soup(form: &Form, shell: &Shell) -> Soup {
             } else {
                 0.0
             };
-            // The last small ring round the middle of a face is as good as flat.
-            let middle = i == 1 || i + 2 == rings.len();
+            let around = ring.len();
             ring.iter()
                 .zip(normals)
-                .map(|(p, n)| {
-                    let n = if middle {
-                        Vec3::new(toward, 0.0, 0.0)
-                    } else if n.x * toward < 0.0 {
-                        -*n
-                    } else {
-                        *n
-                    };
-                    super::surface::Vert::new(*p, n)
+                .enumerate()
+                .map(|(k, (p, n))| {
+                    if toward == 0.0 {
+                        return super::surface::Vert::new(*p, *n);
+                    }
+                    // On a face: the surface's own normal from its
+                    // neighbours along and around (the middle point
+                    // included), looking away from the inside of the car.
+                    let before = &rings[i.saturating_sub(1)];
+                    let after = &rings[(i + 1).min(rings.len() - 1)];
+                    let du = ring[(k + 1) % around] - ring[(k + around - 1) % around];
+                    let dv = after[k] - before[k];
+                    let inside = Vec3::new(p.x - toward * 0.6, (p.y + 0.6) * 0.5, 0.0);
+                    let mut normal = du.cross(dv);
+                    if normal.length() < 1.0e-9 {
+                        normal = Vec3::new(toward, 0.0, 0.0);
+                    }
+                    let mut normal = normal.normalized_or_up();
+                    if normal.dot(*p - inside) < 0.0 {
+                        normal = -normal;
+                    }
+                    super::surface::Vert::new(*p, normal)
                 })
                 .collect()
         })

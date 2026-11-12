@@ -125,14 +125,6 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Mpv => rng.range(1.70, 1.82),
         Van => rng.range(1.80, 1.92),
     };
-    let sill = match kind {
-        Saloon | Hatchback => rng.range(0.27, 0.31),
-        Fastback => rng.range(0.25, 0.29),
-        Crossover => rng.range(0.32, 0.36),
-        Suv => rng.range(0.34, 0.40),
-        Mpv => rng.range(0.29, 0.33),
-        Van => rng.range(0.31, 0.35),
-    };
     let wheel_r = match kind {
         Saloon => rng.range(0.325, 0.350),
         Fastback => rng.range(0.340, 0.365),
@@ -142,9 +134,15 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Mpv => rng.range(0.330, 0.355),
         Van => rng.range(0.280, 0.300),
     };
-    // The faces that close the ends stand beyond the profile.
-    let length = length - 0.30;
-    let (tail, nose) = (-length * 0.5, length * 0.5);
+    // The underside of the body stands a quarter of the way up the wheel: a
+    // little more for what is meant to leave the road.
+    let sill = wheel_r
+        * match kind {
+            Suv => rng.range(0.60, 0.68),
+            Crossover => rng.range(0.54, 0.60),
+            Van => rng.range(0.52, 0.58),
+            _ => rng.range(0.47, 0.53),
+        };
     // Overhangs: an electric car's wheels sit nearer its corners.
     let front_overhang = match kind {
         Van => rng.range(0.52, 0.66),
@@ -158,11 +156,17 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Van => rng.range(0.62, 0.76),
     } - if electric { 0.05 } else { 0.0 };
     let wheelbase = length - front_overhang - rear_overhang;
-    // The body is placed so the axles are either side of the origin.
-    let shift = (front_overhang - rear_overhang) * 0.5;
-    let (tail, nose) = (tail + shift, nose + shift);
+    // The nose and the tail are modelled as faces standing beyond the lofted
+    // body: the loft stops this far short of each end.
+    let face = if kind == Van {
+        (0.15, 0.13)
+    } else {
+        (0.30, 0.22)
+    };
+    let nose = wheelbase * 0.5 + front_overhang - face.0;
+    let tail = -wheelbase * 0.5 - rear_overhang + face.1;
     // Heights of the shoulder line: nose, cowl, rear deck.
-    let raise = sill - 0.29 + (roof - 1.45) * 0.42;
+    let raise = (roof - 1.45) * 0.50;
     let cowl = match kind {
         Van => rng.range(1.00, 1.05),
         _ => rng.range(0.955, 1.0) + raise,
@@ -172,7 +176,6 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Suv | Crossover | Mpv => cowl - rng.range(0.19, 0.25),
         _ => cowl - rng.range(0.19, 0.25),
     };
-    let nose_low = nose_top - rng.range(0.09, 0.12);
     let deck = match kind {
         Saloon => cowl + rng.range(0.00, 0.04),
         Fastback => cowl + rng.range(0.02, 0.06),
@@ -182,7 +185,6 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         Saloon | Fastback => deck - rng.range(0.05, 0.08),
         _ => deck - rng.range(0.03, 0.06),
     };
-    let tail_low = tail_top - rng.range(0.20, 0.26);
     // The glasshouse.
     let half_base = wheelbase * 0.5;
     let front_foot = match kind {
@@ -220,16 +222,16 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
     let rear_head = rear_head.min(front_head - 1.25);
     let rear_foot = rear_foot.min(rear_head - 0.06);
     let top = vec![
-        (tail, tail_low),
-        (tail + rng.range(0.08, 0.11), tail_top),
-        (rear_foot.max(tail + 0.5) + 0.12, deck),
+        (tail, tail_top - 0.03),
+        (tail + 0.24, tail_top),
+        (rear_foot.max(tail + 0.45) + 0.12, deck),
         (front_foot - 0.08, cowl),
         (
-            nose - (nose - front_foot) * 0.36,
-            cowl - (cowl - nose_top) * 0.38,
+            nose - (nose - front_foot) * 0.42,
+            cowl - (cowl - nose_top) * 0.36,
         ),
-        (nose - rng.range(0.07, 0.10), nose_top),
-        (nose, nose_low),
+        (nose - 0.20, nose_top + 0.035),
+        (nose, nose_top),
     ];
     let boot = matches!(kind, Saloon | Fastback);
     let tall = matches!(kind, Suv | Crossover);
@@ -305,7 +307,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
             (TailStyle::Bar, 0.22),
         ])
     };
-    let face_h = tail_top - tail_low;
+    let face_h = tail_top - sill;
     let tail_lamp = match tail_style {
         TailStyle::Stack => {
             // Upright lamps up the corners of a tailgate.
@@ -365,13 +367,14 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         ]);
         // Between the lamps, or (a big-mouthed one) dropping below them.
         let deep = rng.chance(if tall { 0.85 } else { 0.7 });
-        let top = -rng.range(0.022, 0.04);
+        // Its top edge is the lamps' top edge: one line across the face.
+        let top = head.y.0 + head.h.0 * 0.5 - rng.range(0.0, 0.012);
         let bottom = if deep {
             lamp_low - rng.range(0.12, 0.24)
         } else {
             (lamp_low + rng.range(-0.01, 0.02)).min(top - 0.05)
         };
-        let half = (head.s.0 - rng.range(0.035, 0.06)).max(0.3);
+        let half = (head.s.0 - rng.range(0.025, 0.04)).max(0.3);
         Some(Grille {
             half: if deep {
                 (half, half * rng.range(1.05, 1.30))
@@ -530,6 +533,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng) -> Spec {
         tyre,
         rim,
         mirror,
+        face,
         fog: kind != Van && rng.chance(0.6),
     }
 }

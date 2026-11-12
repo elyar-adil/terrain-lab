@@ -5,7 +5,6 @@
 //! turns the profile into the lines a car is drawn with (shoulder, sill, roof) as functions of the station along it, and
 //! into the rings of the one skin everything else is cut from.
 use crate::math::Vec3;
-use crate::model::rounded;
 
 use super::lamps::{Grille, HeadStyle, TailStyle, Wing};
 use super::wheels::{Rim, Tyre};
@@ -48,6 +47,8 @@ pub(super) struct Spec {
     pub mirror: Mirror,
     /// Fog lamps in the corners of the front bumper.
     pub fog: bool,
+    /// How far the nose and the tail stand beyond the lofted body.
+    pub face: (f32, f32),
 }
 
 /// A door mirror: its glass's width and height, and how it is carried.
@@ -61,6 +62,35 @@ pub(super) struct Mirror {
     pub painted: bool,
     /// A turn repeater in the housing (otherwise it is on the wing).
     pub repeater: bool,
+}
+
+/// A line through control points as a designer's sweep would draw it: a cubic
+/// B-spline, which is fair (its curvature has no jumps) where a curve made to
+/// pass through every point is lumpy. It starts and ends on the first and last
+/// points and is drawn toward the ones between.
+fn faired(points: &[(f32, f32)], per: usize) -> Vec<(f32, f32)> {
+    let mut control = vec![points[0]; 2];
+    control.extend_from_slice(points);
+    control.extend_from_slice(&[points[points.len() - 1]; 2]);
+    let mut out = Vec::new();
+    for w in control.windows(4) {
+        for step in 0..per {
+            let t = step as f32 / per as f32;
+            let (t2, t3) = (t * t, t * t * t);
+            let b = [
+                (1.0 - 3.0 * t + 3.0 * t2 - t3) / 6.0,
+                (4.0 - 6.0 * t2 + 3.0 * t3) / 6.0,
+                (1.0 + 3.0 * t + 3.0 * t2 - 3.0 * t3) / 6.0,
+                t3 / 6.0,
+            ];
+            out.push((
+                (0..4).map(|k| w[k].0 * b[k]).sum(),
+                (0..4).map(|k| w[k].1 * b[k]).sum(),
+            ));
+        }
+    }
+    out.push(points[points.len() - 1]);
+    out
 }
 
 pub(super) fn sample_line(line: &[(f32, f32)], x: f32) -> f32 {
@@ -109,8 +139,7 @@ pub(super) const ARCH_GAP: f32 = 0.042;
 /// How far the body swells over a wheel.
 pub(super) const HIP_M: f32 = 0.038;
 /// The rings a face is closed with, and how far it stands beyond the last section.
-const FACE_RINGS: usize = 12;
-const FACE_DEPTH_M: f32 = 0.15;
+const FACE_RINGS: usize = 18;
 /// Where the corner of the car is taken to be, back from its end, when a lamp
 /// drawn on the face is carried round onto the wing.
 const CORNER_M: f32 = 0.03;
@@ -132,7 +161,7 @@ const TABLE_MARGIN_M: f32 = 0.3;
 
 impl<'a> Form<'a> {
     pub fn new(spec: &'a Spec) -> Self {
-        let belt = rounded(&spec.top, 8);
+        let belt = faired(&spec.top, 10);
         let (tail, nose) = (belt[0].0, belt[belt.len() - 1].0);
         let mut form = Self {
             spec,
@@ -191,17 +220,17 @@ impl<'a> Form<'a> {
         sample_line(&self.belt, x.clamp(self.tail + 0.04, self.nose - 0.04))
     }
     fn floor_exact(&self, x: f32) -> f32 {
-        // The bumpers hang a little below the sill.
-        self.spec.sill - 0.05 * (1.0 - (self.to_end(x) / 0.5).min(1.0)).powi(2)
+        // The underside rises a little toward each end, to clear a ramp.
+        self.spec.sill + 0.03 * (1.0 - (self.to_end(x) / 0.6).min(1.0)).powi(2)
     }
     /// Half the width at the widest of the section: full between the wheels,
     /// rounding in to the corners at both ends.
     fn half_width_exact(&self, x: f32) -> f32 {
         // The nose draws in over a short length; the tail over a longer,
         // gentler one, as the air wants it.
-        let front = 1.0 - ((self.nose - x).max(0.0) / 0.72).min(1.0);
-        let rear = 1.0 - ((x - self.tail).max(0.0) / 1.05).min(1.0);
-        self.spec.width * 0.5 * (1.0 - 0.23 * front.powf(2.3) - 0.19 * rear.powf(2.0))
+        let front = 1.0 - ((self.nose - x).max(0.0) / 0.9).min(1.0);
+        let rear = 1.0 - ((x - self.tail).max(0.0) / 1.2).min(1.0);
+        self.spec.width * 0.5 * (1.0 - 0.10 * front.powf(2.2) - 0.11 * rear.powf(2.0))
     }
     /// How far the flank swells here over a wheel: `HIP_M` at an axle, nothing
     /// between them.
@@ -223,15 +252,19 @@ impl<'a> Form<'a> {
             1.0
         };
         let rise = rise.clamp(0.0, 1.0);
-        1.0 - (1.0 - rise).powf(1.5)
+        // Eased at the head, where the screen runs out into the roof.
+        let eased = 1.0 - (1.0 - rise).powf(1.7);
+        eased * (0.75 + 0.25 * eased)
     }
     /// The top of the car: the deck, or the roof line over the cabin.
     fn top_exact(&self, x: f32) -> f32 {
         let deck = self.belt_exact(x) + 0.012;
         // The roof is not flat: it crowns a little between the screens.
-        let [_, rear_head, front_head, _] = self.spec.cabin;
-        let along = ((x - rear_head) / (front_head - rear_head).max(0.1)).clamp(0.0, 1.0);
-        let crown = 0.060 * (1.0 - (2.0 * along - 1.0).powi(2)) - 0.035;
+        // One arc from the foot of one screen to the foot of the other, so
+        // the roof has no corner where a screen meets it.
+        let [rear_foot, _, _, front_foot] = self.spec.cabin;
+        let along = ((x - rear_foot) / (front_foot - rear_foot).max(0.1)).clamp(0.0, 1.0);
+        let crown = 0.085 * (1.0 - (2.0 * along - 1.1).abs().min(1.0).powi(2)) - 0.055;
         deck + (self.spec.roof + crown - deck) * self.cabin(x)
     }
     /// The section's control points at a station, as `(z, y)` from the middle
@@ -445,37 +478,36 @@ impl Shell {
                 .map(|j| {
                     let angle = j as f32 / FACE_RINGS as f32 * std::f32::consts::FRAC_PI_2;
                     let scale = if j == FACE_RINGS { 0.0 } else { angle.cos() };
-                    let out = (1.0 - scale.powf(2.0)).powf(1.0 / 2.0);
+                    let out = (1.0 - scale.powf(1.9)).powf(1.0 / 1.9);
                     ring.iter()
                         .map(|p| {
                             // The rings draw in across the car faster than
-                            // down it: the corners are round in plan, while
-                            // the top edge (the bonnet's lip, the boot lid's)
-                            // stays an edge.
-                            let (y, z) = (mid + (p.y - mid) * scale.powf(0.68), p.z * scale);
-                            // A face is not a wall: the bumper stands out of it
-                            // below the middle, and in plan it sweeps back
-                            // toward the corners.
-                            // In elevation, from the road up: the valance
-                            // tucks under, the bumper stands proud, and above
-                            // it the panel (grille and lamps, or the boot's
-                            // back) leans away toward its top edge.
+                            // down it, so the top edge (the bonnet's lip, the
+                            // boot lid's) turns over more tightly than the
+                            // corners do in plan.
+                            let (y, z) = (mid + (p.y - mid) * scale.powf(0.72), p.z * scale);
                             let v = ((y - floor) / (belt - floor)).clamp(0.0, 1.0);
+                            let across = (z / half).abs().min(1.0);
                             let step = |a: f32, b: f32| {
                                 let t = ((v - a) / (b - a)).clamp(0.0, 1.0);
                                 t * t * (3.0 - 2.0 * t)
                             };
-                            let tuck = -0.075 * (1.0 - step(0.0, 0.26));
-                            let bumper = 0.040 * step(0.10, 0.30) * (1.0 - step(0.42, 0.60));
-                            let lean = if toward > 0.0 { -0.045 } else { -0.050 } * step(0.48, 1.0);
-                            let swept = (z / half).powi(2);
-                            Vec3::new(
-                                x + toward
-                                    * out
-                                    * (FACE_DEPTH_M + tuck + bumper + lean - 0.075 * swept),
-                                y,
-                                z,
-                            )
+                            // The end of a car is not a wall. In plan it
+                            // sweeps back to its corners. In elevation, from
+                            // the road up: the chin tucks under, the bumper
+                            // stands proud, and above it the panel (lamps and
+                            // grille, or the boot's back) leans away to the
+                            // edge of the bonnet or the lid.
+                            let (depth, sweep, chin, lean) = if toward > 0.0 {
+                                (form.spec.face.0, 0.60, 0.36, 0.52)
+                            } else {
+                                (form.spec.face.1, 0.50, 0.42, 0.26)
+                            };
+                            let shape =
+                                1.0 - sweep * across.powf(2.4) - chin * (1.0 - step(0.0, 0.22))
+                                    + 0.07 * step(0.10, 0.26) * (1.0 - step(0.36, 0.52))
+                                    - lean * step(0.38, 1.0);
+                            Vec3::new(x + toward * out * depth * shape.max(0.05), y, z)
                         })
                         .collect()
                 })
