@@ -483,10 +483,13 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
             (_, Hood::None) if small => rng.range(0.58, 0.72),
             // One box: the screen is long and laid back, running out of the nose.
             (_, Hood::None) => rng.range(0.95, 1.15),
-            (Stance::Low, _) => rng.range(1.00, 1.15),
-            (Stance::Car, _) => rng.range(0.90, 1.04),
-            (Stance::Raised, _) => rng.range(0.84, 0.96),
-            (Stance::Tall, _) => rng.range(0.76, 0.90),
+            // The driver sits a metre and a little more behind the screen's
+            // foot, and the roof is at its full height before it reaches
+            // him: a screen is no longer than that allows.
+            (Stance::Low, _) => rng.range(0.86, 1.00),
+            (Stance::Car, _) => rng.range(0.74, 0.90),
+            (Stance::Raised, _) => rng.range(0.70, 0.84),
+            (Stance::Tall, _) => rng.range(0.62, 0.78),
         } * if small { 0.72 } else { 1.0 };
     // And where the roof ends follows from the tail.
     let rear_foot = tail
@@ -506,6 +509,15 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
             Roof::Square if arch.stance == Stance::Car => rng.range(0.32, 0.56),
             Roof::Square => rng.range(0.18, 0.38),
         } * if small { 0.6 } else { 1.0 };
+    // People sit in the back. Where there are doors for them the roof holds
+    // its height over their heads, which are a little ahead of the rear axle,
+    // and only then falls: the rear glass's head is never ahead of them. (A
+    // fast roof takes some of that room, as fast roofs do.)
+    let rear_head = if arch.doors != Doors::Two {
+        rear_head.min(-half_base + if arch.roof == Roof::Fast { 0.34 } else { 0.12 })
+    } else {
+        rear_head
+    };
     // Whatever the rakes, a roof is left between the screens.
     let rear_head = rear_head.min(
         front_head
@@ -598,6 +610,13 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
                 r: rng.range(0.014, 0.032),
             }
         }
+    };
+    // On a tall, blunt face (a runabout's, a one-box car's) the lamps do not
+    // sit at the very top of it: they come down toward its middle.
+    let drop = ((nose_top - sill - 0.50) * 0.45).max(0.0);
+    let head = Wing {
+        y: (head.y.0 - drop, head.y.1 - drop),
+        ..head
     };
     // What a make's headlamps are besides a wing. With a second tier the
     // wing is only the running light, and is drawn slim.
@@ -853,9 +872,9 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         // A nose is run into from the bonnet in one curve; a tail is more
         // often cut off over an edge.
         flow: if front {
-            rng.range(1.15, 1.75)
+            rng.range(1.9, 2.6)
         } else {
-            rng.range(1.5, 2.8)
+            rng.range(2.0, 3.2)
         },
     };
     let style = Style {
@@ -876,13 +895,18 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         } else {
             rng.range(0.05, 0.11)
         },
-        peak: rng.range(-0.15, 0.30),
+        // The roof peaks over the front seats' backs or behind them, never
+        // over the screen.
+        peak: rng.range(-0.25, 0.10),
         bow: rng.range(1.25, 2.3),
         taper: (rng.range(0.05, 0.16), rng.range(0.05, 0.17)),
         crease_drop: rng.range(0.09, 0.24),
         wedge: rng.range(-0.03, 0.07),
         crease: (1.0 - soft) * rng.range(0.006, 0.016) + 0.002,
-        hollow: rng.range(0.0, 0.014),
+        hollow: rng.range(0.003, 0.014),
+        waist_rise: rng.range(0.0, 0.11),
+        skirt: rng.range(0.003, 0.009),
+        skirt_rise: rng.range(0.0, 0.035),
         bonnet: rng.range(0.0, 0.010),
         deck_crown: rng.range(0.020, 0.048),
         barrel: rng.range(0.020, 0.055),

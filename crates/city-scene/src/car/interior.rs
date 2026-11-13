@@ -8,7 +8,7 @@ use super::form::{Spec, sample_line};
 /// What the windows show: floor, seats, dashboard, steering wheel, console.
 pub(super) fn build(builder: &mut MeshBuilder, spec: &Spec, key: &dyn Fn(&str) -> String) {
     let top: Vec<(f32, f32)> = rounded(&spec.top, 6);
-    let [rear_foot, rear_head, _, front_foot] = spec.cabin;
+    let [rear_foot, rear_head, front_head, front_foot] = spec.cabin;
     let floor = spec.sill + 0.12;
     let half = spec.width * 0.5;
     let cloth = key("interior");
@@ -63,7 +63,9 @@ pub(super) fn build(builder: &mut MeshBuilder, spec: &Spec, key: &dyn Fn(&str) -
         }
     };
     // Front seats either side of the console; the driver sits on the left (-z).
-    let front = front_foot - 0.98;
+    // The front seats: a driver's reach behind the screen's foot, and never
+    // so far forward that a head would be under the glass and not the roof.
+    let front = (front_foot - 0.98).min(front_head + 0.22);
     for z in [-0.37_f32, 0.37] {
         seat(builder, front, z, 0.235);
         headrest(builder, front, z);

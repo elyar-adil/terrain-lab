@@ -479,8 +479,16 @@ fn sculpt(soup: &mut Soup, form: &Form) {
         .max(0.05);
     let shoulder =
         |p: Vec3| p.y - (form.belt(p.x) - drop + style.wedge * (form.nose - p.x) / length);
-    // The hollow above the sill.
-    let hollow = |p: Vec3| p.y - (form.floor(p.x) + 0.26);
+    // The waist line: a hollow pressed along the doors, from behind the front
+    // wheel to ahead of the rear one, rising as it goes.
+    let hollow = |p: Vec3| {
+        p.y - (form.floor(p.x) + 0.25 + style.waist_rise * (half_base - p.x) / spec.wheelbase)
+    };
+    // The skirt line: the edge the sill is turned under along, lower and
+    // nearly level, rising a little the same way.
+    let skirt = |p: Vec3| {
+        p.y - (form.floor(p.x) + 0.125 + style.skirt_rise * (half_base - p.x) / spec.wheelbase)
+    };
     let from_axle = |p: Vec3| {
         form.to_axle(p.x, p.y, -half_base)
             .min(form.to_axle(p.x, p.y, half_base))
@@ -514,6 +522,7 @@ fn sculpt(soup: &mut Soup, form: &Form) {
         if side > 0.0 {
             h += ridge(shoulder(p), style.crease, 0.06) * side * ends(p, 0.10, 0.45);
             h -= ridge(hollow(p), style.hollow, 0.10) * side * ends(p, 0.35, 0.8) * between(p);
+            h += ridge(skirt(p), style.skirt, 0.04) * side * ends(p, 0.35, 0.8) * between(p);
             let t = ((from_axle(p) - arch) / lip_wide).clamp(0.0, 1.0);
             let lip = (1.0 - (from_axle(p) - arch) / 0.035).clamp(0.0, 1.0);
             h += (style.flare * (1.0 - t).powi(2) * (1.0 + 2.0 * t) + 0.005 * lip * lip) * side;
@@ -529,10 +538,11 @@ fn sculpt(soup: &mut Soup, form: &Form) {
         h
     };
     // Vertices along every line and across every slope of the relief.
-    let lines: [(&dyn Fn(Vec3) -> f32, f32); 6] = [
+    let lines: [(&dyn Fn(Vec3) -> f32, f32); 7] = [
         (&spoiler_line, 0.07),
         (&shoulder, 0.06),
         (&hollow, 0.10),
+        (&skirt, 0.04),
         (&bonnet_line, 0.06),
         (&|p| from_axle(p) - arch - lip_wide * 0.5, lip_wide * 0.5),
         (&|p| from_axle(p) - arch - 0.035, 0.035),

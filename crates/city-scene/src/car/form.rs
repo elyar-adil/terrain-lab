@@ -95,6 +95,11 @@ pub(super) struct Style {
     pub wedge: f32,
     pub crease: f32,
     pub hollow: f32,
+    /// How much the waist line rises from the front wheel to the rear.
+    pub waist_rise: f32,
+    /// The edge along the sill: its height as relief, and its rise rearward.
+    pub skirt: f32,
+    pub skirt_rise: f32,
     /// The creases down the bonnet.
     pub bonnet: f32,
     /// How far the middle of the bonnet and the boot stands above their edges.
@@ -256,7 +261,10 @@ impl<'a> Form<'a> {
         let style = &spec.style;
         let peak = (rear_head + front_head) * 0.5 + (front_head - rear_head) * 0.5 * style.peak;
         let (rear, front) = (deck(rear_foot), deck(front_foot));
-        let head = spec.roof - style.crown * 0.35;
+        let head = spec.roof - style.crown * 0.18;
+        // The roof is carried higher to the rear glass than to the screen:
+        // there are heads under it there.
+        let back = spec.roof - style.crown * 0.10;
         // How far up a screen its guiding point stands: low, and the screen
         // bows into the roof; high, and it runs straight to an edge.
         let screen = 0.38 + 0.16 * (style.bow - 1.25);
@@ -265,9 +273,13 @@ impl<'a> Form<'a> {
         form.roofline = faired(
             &[
                 (rear_foot, rear),
-                part((rear_foot, rear), (rear_head, head), screen),
-                (rear_head, head),
+                part((rear_foot, rear), (rear_head, back), screen),
+                // Each head is given twice: the roof is drawn up to it, and is
+                // at its height there, not somewhere short of it.
+                (rear_head, back),
+                (rear_head, back),
                 (peak, spec.roof + style.crown * 0.45),
+                (front_head, head),
                 (front_head, head),
                 part((front_foot, front), (front_head, head), screen),
                 (front_foot, front),
@@ -607,6 +619,13 @@ impl Shell {
             let (floor, belt) = (form.floor(x), form.belt(x));
             let mid = (floor + belt) * 0.5;
             let half = form.half_width(x);
+            // The body arrives at its end still moving: the bonnet falling,
+            // the flanks drawing in. The end carries both on, so the bonnet
+            // runs into the nose and the wing round the corner without a
+            // break in either line.
+            let back = x - toward * 0.10;
+            let fall = (form.top(back) - form.top(x)) / 0.10;
+            let draw = (form.half_width(back) - form.half_width(x)) / 0.10;
             (1..=FACE_RINGS)
                 .map(|j| {
                     let angle = j as f32 / FACE_RINGS as f32 * std::f32::consts::FRAC_PI_2;
@@ -629,37 +648,41 @@ impl Shell {
                                 let t = t.clamp(0.0, 1.0);
                                 t * t * (3.0 - 2.0 * t)
                             };
-                            // The rounding is a matter of height on the face,
-                            // changing smoothly up it, so no line of the mesh
-                            // carries a change of it across the face.
-                            let up = ease((v - 0.55) / 0.45);
-                            let down = ease((0.30 - v) / 0.30);
-                            let n = shape_of.flow * up
-                                + shape_of.square * (1.0 - up - down)
-                                + 3.2 * down;
-                            let out = (1.0 - scale.powf(n)).powf(1.0 / n);
                             let across = (z / half).abs().min(1.0);
-                            let step = |a: f32, b: f32| {
-                                let t = ((v - a) / (b - a)).clamp(0.0, 1.0);
-                                t * t * (3.0 - 2.0 * t)
-                            };
-                            // The end of a car is not a wall. In plan it
-                            // sweeps back to its corners. In elevation, from
-                            // the road up: the chin tucks under, the bumper
-                            // stands proud, and above it the panel (lamps and
-                            // grille, or the boot's back) leans away to the
-                            // edge of the bonnet or the lid.
                             let depth = if toward > 0.0 {
                                 form.spec.face.0
                             } else {
                                 form.spec.face.1
                             };
-                            let shape = 1.0
-                                - shape_of.sweep * across.powf(2.4)
-                                - shape_of.chin * (1.0 - step(0.0, 0.22))
-                                + shape_of.proud * step(0.10, 0.26) * (1.0 - step(0.36, 0.52))
-                                - shape_of.lean * step(0.38, 1.0);
-                            Vec3::new(x + toward * out * depth * shape.max(0.05), y, z)
+                            // An end is drawn as two profiles multiplied: one
+                            // across the car (how it sweeps back and turns
+                            // its corners in plan) and one up it (the chin
+                            // tucked under, the bumper proud at about a third
+                            // of its height, the panel above leaning away to
+                            // the bonnet's edge, which it meets in a curve).
+                            // A product of two fair curves has no line in it
+                            // from a corner to the middle, as a face shrunk
+                            // ring by ring toward a point has.
+                            let turn = |t: f32, n: f32| (1.0 - t.clamp(0.0, 1.0).powf(n)).powf(1.0 / n);
+                            let plan = turn(across, shape_of.square) * (1.0 - shape_of.sweep * across.powi(2) * 0.5);
+                            let bumper = 0.34;
+                            let up = ((v - bumper) / (1.0 - bumper)).max(0.0);
+                            let rise = if v >= bumper {
+                                turn(up, shape_of.flow) * (1.0 - shape_of.lean * ease(up) * 0.55)
+                            } else {
+                                turn((bumper - v) / bumper, 3.2)
+                                    * (1.0 - shape_of.chin * ease((bumper - v) / bumper) * 0.5)
+                            };
+                            // Only at its very rim does the face answer to the
+                            // rim itself, to leave the body's own section
+                            // exactly as it finds it.
+                            let rim = turn(scale, 6.0);
+                            let reach = depth * (1.0 + shape_of.proud) * plan * rise * rim;
+                            Vec3::new(
+                                x + toward * reach,
+                                y - fall * reach * v * v,
+                                z * (1.0 - draw * reach * across / half.max(0.1)),
+                            )
                         })
                         .collect()
                 })

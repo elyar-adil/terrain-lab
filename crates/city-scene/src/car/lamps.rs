@@ -972,7 +972,9 @@ fn plates(builder: &mut MeshBuilder, soup: &Soup, form: &Form, key: &dyn Fn(&str
                 proud = proud.max((v.p - at).dot(normal));
             }
         }
-        let face = at + normal * (proud + 0.010);
+        // (On a nose swept hard back its ends stand clear of the face rather
+        // than the whole plate standing off on a bracket.)
+        let face = at + normal * (proud.min(0.022) + 0.010);
         // A blue plate is 440 mm wide; a new-energy one, with a character
         // more, 480. Its face is one quad that the plate shader writes on.
         let wide = if spec.electric { 0.24 } else { 0.22 };
