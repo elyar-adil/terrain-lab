@@ -393,7 +393,6 @@ impl<'a> Form<'a> {
         let deck = belt + 0.012;
         let roof_half = self.spec.width * 0.5 - style.tumble;
         let lerp = |a: f32, b: f32| a + (b - a) * g;
-        let lerp2 = |a: (f32, f32), b: (f32, f32)| (lerp(a.0, b.0), lerp(a.1, b.1));
         // The body is not a slab. Its side is a barrel: widest a little above
         // its middle, leaning in to the shoulder above and under to the sill
         // below. It swells further over each wheel and is drawn in between
