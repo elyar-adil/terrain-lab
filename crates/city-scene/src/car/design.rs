@@ -843,6 +843,11 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         } else {
             rng.range(0.008, 0.024)
         },
+        spoiler: if arch.roof != Roof::Square && rng.chance(if sporty { 0.7 } else { 0.3 }) {
+            rng.range(0.008, 0.022)
+        } else {
+            0.0
+        },
         arch_square: if boxy && rng.chance(0.6) {
             rng.range(2.8, 4.2)
         } else {

@@ -251,17 +251,6 @@ pub(super) fn build(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -
         label::BLACK,
     );
 
-    // Air curtains: an upright black slot in each corner of the front bumper.
-    if !spec.fog {
-        let half = form.face_half(true);
-        let at = (half * 0.90, form.floor(form.nose) + 0.19);
-        soup.cut(
-            &|p| sd_box(at, (0.028, 0.085), form.unwrap(true, p), 0.022).max(-p.x),
-            &body,
-            label::BLACK,
-        );
-    }
-
     super::lamps::cut(&mut soup, form);
 
     // --- shut lines. Each is the edge of a panel, pressed in as a groove.
@@ -495,6 +484,15 @@ fn sculpt(soup: &mut Soup, form: &Form) {
         let t = ((p.x - front_foot) / (form.nose - front_foot)).clamp(0.0, 1.0);
         p.z.abs() - form.half_width(p.x) * (0.66 - 0.20 * t)
     };
+    let spoiler_line = |p: Vec3| p.x - (form.tail + 0.045);
+    let on_tail = |p: Vec3| {
+        smoothstep(form.belt(p.x) - 0.02, form.belt(p.x) + 0.01, p.y)
+            * smoothstep(
+                form.half_width(p.x) - 0.10,
+                form.half_width(p.x) - 0.22,
+                p.z.abs(),
+            )
+    };
     let on_bonnet = |p: Vec3| {
         smoothstep(form.belt(p.x) - 0.03, form.belt(p.x) + 0.0, p.y)
             * smoothstep(front_foot + 0.06, front_foot + 0.25, p.x)
@@ -517,10 +515,15 @@ fn sculpt(soup: &mut Soup, form: &Form) {
         if top > 0.0 {
             h += ridge(bonnet_line(p), style.bonnet, 0.06) * top;
         }
+        // A lip turned up along the trailing edge of the boot or the roof.
+        if style.spoiler > 0.0 {
+            h += ridge(spoiler_line(p), style.spoiler, 0.07) * on_tail(p);
+        }
         h
     };
     // Vertices along every line and across every slope of the relief.
-    let lines: [(&dyn Fn(Vec3) -> f32, f32); 5] = [
+    let lines: [(&dyn Fn(Vec3) -> f32, f32); 6] = [
+        (&spoiler_line, 0.07),
         (&shoulder, 0.06),
         (&hollow, 0.10),
         (&bonnet_line, 0.06),
@@ -532,7 +535,8 @@ fn sculpt(soup: &mut Soup, form: &Form) {
             // Only where there is relief to carry.
             soup.score_in(&|p| line(p) - level * wide, &|t| {
                 let c = t.centre();
-                line(c).abs() < wide + 0.12 && (flank(c) > 0.0 || on_bonnet(c) > 0.0)
+                line(c).abs() < wide + 0.12
+                    && (flank(c) > 0.0 || on_bonnet(c) > 0.0 || on_tail(c) > 0.0)
             });
         }
     }

@@ -6,7 +6,7 @@ use crate::model::{bar, soft_block};
 
 use super::form::{ARCH_GAP, Form};
 use super::label;
-use super::parts::{cap, grid, lathe, round_and, sd_box, wall};
+use super::parts::{cap, grid, lathe, round_and, sd_box, slab, wall};
 use super::surface::{Soup, Vert};
 
 /// A door mirror, built in its own frame (x forward, y up, z out from the
@@ -318,13 +318,42 @@ pub(super) fn build(
             );
         }
     }
-    // Tail pipes.
+    // Where the exhaust comes out: a bright-framed outlet let into the
+    // valance each side, or on a van just the pipe.
     let places: &[f32] = match spec.exhausts {
         0 => &[],
         1 => &[1.0],
         _ => &[-1.0, 1.0],
     };
+    let valance = soup.take(&|t| t.centre().x < 0.0);
     for side in places {
+        let place = (form.face_half(false) * 0.56, form.floor(form.tail) + 0.105);
+        let here = valance.take(&|t| t.centre().z * side >= 0.0);
+        let found = here.locate(&|_| true, &|p| form.unwrap(false, p), place);
+        if let (Some(at), true) = (found, spec.rows < 3) {
+            let normal = Vec3::new(at.n.x, at.n.y * 0.3, 0.0).normalized_or_up();
+            let up = Vec3::new(-normal.y, normal.x, 0.0) * if normal.x >= 0.0 { 1.0 } else { -1.0 };
+            let across = Vec3::new(0.0, 0.0, 1.0);
+            slab(
+                builder,
+                &key("chrome"),
+                at.p + normal * 0.010,
+                normal,
+                up * 0.034,
+                across * 0.085,
+                0.03,
+            );
+            slab(
+                builder,
+                &key("well"),
+                at.p + normal * 0.0105,
+                normal,
+                up * 0.024,
+                across * 0.075,
+                0.002,
+            );
+            continue;
+        }
         let at = Vec3::new(
             form.tail + 0.045,
             form.floor(form.tail) + 0.045,

@@ -187,13 +187,33 @@ fn grille_field(form: &Form, p: Vec3) -> f32 {
 }
 
 fn intake_field(form: &Form, p: Vec3) -> f32 {
-    opening(
+    let middle = opening(
         &form.spec.intake,
         form.face_half(true),
         form.floor(form.nose),
         (p.z, p.y),
     )
-    .max(form.nose - 0.3 - p.x)
+    .max(form.nose - 0.3 - p.x);
+    if form.spec.fog {
+        return middle;
+    }
+    // A pocket in each corner of the bumper where there is no fog lamp: the
+    // intake that feeds the brakes, its inner edge leaning with the grille's.
+    let half = form.face_half(true);
+    let floor = form.floor(form.nose);
+    let high = form.face_top(true) - floor;
+    let pocket = sd_convex(
+        &[
+            (half * 0.64, floor + high * 0.12 + 0.03),
+            (half * 0.94, floor + high * 0.16 + 0.03),
+            (half * 0.94, floor + high * 0.46),
+            (half * 0.74, floor + high * 0.38),
+        ],
+        form.unwrap(true, p),
+        0.018,
+    )
+    .max(-p.x);
+    middle.min(pocket)
 }
 
 const FOG_R: f32 = 0.040;
@@ -746,6 +766,55 @@ pub(super) fn build(
                 sweep(builder, &key("chrome"), &edge, 0.007, 0.005, 0.001, 8);
             }
         }
+    }
+    // Parking sensors: four small discs let into each bumper.
+    for front in [true, false] {
+        let (end, top) = (
+            if front { form.nose } else { form.tail },
+            form.face_top(front),
+        );
+        let floor = form.floor(end);
+        let half = form.face_half(front);
+        let paint = soup.take(&|t| t.label == label::BODY && (t.centre().x > 0.0) == front);
+        for side in [-1.0_f32, 1.0] {
+            let here = paint.take(&|t| t.centre().z * side >= 0.0);
+            for share in [0.24_f32, 0.60] {
+                let place = (half * share, floor + (top - floor) * 0.30);
+                if let Some(at) = here.locate(&|_| true, &|p| form.unwrap(front, p), place) {
+                    lathe(
+                        builder,
+                        &key("trim"),
+                        at.p,
+                        at.n,
+                        &[(0.0, 0.0018), (0.0095, 0.0016), (0.0115, 0.0)],
+                        12,
+                        true,
+                    );
+                }
+            }
+        }
+    }
+    // The radar's panel, low in the middle of the grille.
+    if let Some(grille) = fitted_grille(form)
+        && !grille.twin
+        && let Some((at, normal)) = on_centre(
+            soup,
+            form,
+            true,
+            form.face_top(true) + grille.y.0 + 0.045,
+            true,
+        )
+    {
+        let up = Vec3::new(-normal.y, normal.x, 0.0) * if normal.x >= 0.0 { 1.0 } else { -1.0 };
+        slab(
+            builder,
+            &key("trim"),
+            at + normal * 0.012,
+            normal,
+            up * 0.028,
+            Vec3::new(0.0, 0.0, 0.05),
+            0.01,
+        );
     }
     // The maker's badge on the nose, and on the tail.
     for front in [true, false] {

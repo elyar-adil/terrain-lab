@@ -101,6 +101,8 @@ pub(super) struct Style {
     pub flare: f32,
     /// The arches' shape: 2 a circle, higher squared off.
     pub arch_square: f32,
+    /// The height of a lip along the tail's top edge, if it has one.
+    pub spoiler: f32,
     pub nose: Face,
     pub tail: Face,
 }

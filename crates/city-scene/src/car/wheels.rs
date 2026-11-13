@@ -385,7 +385,7 @@ fn rim(builder: &mut MeshBuilder, key: &dyn Fn(&str) -> String, hub: &Hub, spec:
     );
     // The face: a dished disc from the hub out to the barrel.
     let outer = rr - 0.014;
-    let face_out = half * if steel { 0.52 } else { 0.72 };
+    let face_out = half * if steel { 0.52 } else { 0.80 };
     let dish = if steel { -0.018 } else { r * 0.085 };
     let hub_r = r * 0.185;
     let profile = |rho: f32| -> f32 {
@@ -551,7 +551,7 @@ fn rim(builder: &mut MeshBuilder, key: &dyn Fn(&str) -> String, hub: &Hub, spec:
 /// Four wheels.
 pub(super) fn build(builder: &mut MeshBuilder, spec: &Spec, key: &dyn Fn(&str) -> String) {
     let r = spec.wheel_r;
-    let track = spec.width * 0.5 - spec.tyre.width * 0.5 - 0.016;
+    let track = spec.width * 0.5 - spec.tyre.width * 0.5 + spec.style.hip * 0.5 - 0.012;
     for x in [-spec.wheelbase * 0.5, spec.wheelbase * 0.5] {
         for side in [-1.0_f32, 1.0] {
             let hub = Hub {
@@ -569,7 +569,7 @@ pub(super) fn build(builder: &mut MeshBuilder, spec: &Spec, key: &dyn Fn(&str) -
 pub(super) fn build_far(builder: &mut MeshBuilder, spec: &Spec, key: &str) {
     let r = spec.wheel_r;
     let half = spec.tyre.width * 0.5;
-    let track = spec.width * 0.5 - half - 0.016;
+    let track = spec.width * 0.5 - half + spec.style.hip * 0.5 - 0.012;
     for x in [-spec.wheelbase * 0.5, spec.wheelbase * 0.5] {
         for side in [-1.0_f32, 1.0] {
             lathe(
