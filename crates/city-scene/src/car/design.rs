@@ -865,7 +865,11 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         } else {
             rng.range(0.012, 0.042)
         },
-        waist: if boxy { rng.range(0.006, 0.030) } else { rng.range(0.018, 0.052) },
+        waist: if boxy {
+            rng.range(0.006, 0.030)
+        } else {
+            rng.range(0.018, 0.052)
+        },
         crown: if boxy {
             rng.range(0.03, 0.06)
         } else {
@@ -889,7 +893,11 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         hollow: rng.range(0.004, 0.015),
         bonnet: rng.range(0.0, 0.010),
         deck_crown: rng.range(0.035, 0.075),
-        barrel: if boxy { rng.range(0.025, 0.050) } else { rng.range(0.035, 0.070) },
+        barrel: if boxy {
+            rng.range(0.025, 0.050)
+        } else {
+            rng.range(0.035, 0.070)
+        },
         flare: if sporty {
             rng.range(0.018, 0.034)
         } else {
