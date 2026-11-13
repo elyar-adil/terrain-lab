@@ -125,11 +125,13 @@ pub(super) fn build(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -
     }
     // Pillars: black over the glass, as they are now.
     let glass = |l: u8| l == label::GLASS;
-    soup.cut(
-        &|p| (p.x - lines.b_pillar).abs() - 0.045,
-        &glass,
-        label::BLACK,
-    );
+    if !spec.pillarless {
+        soup.cut(
+            &|p| (p.x - lines.b_pillar).abs() - 0.045,
+            &glass,
+            label::BLACK,
+        );
+    }
     if !spec.boot && lines.rear_door + 0.03 > side_rear + 0.12 {
         soup.cut(
             &|p| (p.x - lines.rear_door - 0.03).abs() - 0.04,
@@ -207,6 +209,20 @@ pub(super) fn build(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -
         );
         soup.rename(label::SEAM_NEW, label::SCREEN);
         soup.cut(&|p| field(p) - 0.006, &body, label::BLACK);
+    }
+    // Pillars blacked out: the glass reads as one band round the car, and
+    // the roof stands on it as if on nothing.
+    if spec.wrapped {
+        soup.cut(
+            &|p| {
+                let (foot, (_, head)) = form.glass(p.x);
+                (foot + 0.006 - p.y)
+                    .max(p.y - head - 0.004)
+                    .max(0.22 - form.cabin(p.x))
+            },
+            &|l| l == label::BODY || l == label::SURROUND,
+            label::BLACK,
+        );
     }
     // The cowl the wipers park on.
     soup.cut(
@@ -292,6 +308,14 @@ pub(super) fn build(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -
     seam(&mut soup, &front_door, &below_glass);
     if spec.four_doors {
         seam(&mut soup, &rear_door, &below_glass);
+    }
+    // A sliding door's rail: a groove along the rear quarter, under the glass.
+    if spec.sliding {
+        let from = (lines.rear_door - 0.70).max(form.tail + 0.25);
+        let at = form.belt(lines.rear_door) - 0.060;
+        seam(&mut soup, &|p| p.y - at, &|p| {
+            (from - p.x).max(p.x - lines.rear_door + 0.01).max(flank(p))
+        });
     }
     // The bonnet: its sides along the wings and its leading edge.
     let above_floor = |p: Vec3| form.floor(p.x) + 0.22 - p.y;
@@ -571,7 +595,17 @@ pub(super) fn handle_places(form: &Form) -> Vec<(f32, bool)> {
     let lines = lines_of(form.spec);
     let mut places = vec![(lines.b_pillar + 0.17, true)];
     if form.spec.four_doors {
-        places.push((lines.rear_door + 0.17, false));
+        // A rear door hinged at its back edge, or on a rail, is opened from
+        // its front: its handle is beside the front door's.
+        let meets = form.spec.coach || form.spec.sliding;
+        places.push((
+            if meets {
+                lines.b_pillar - 0.17
+            } else {
+                lines.rear_door + 0.17
+            },
+            false,
+        ));
     }
     places
 }

@@ -163,11 +163,186 @@ pub(super) fn design(seed: u64, marque: &Marque) -> Spec {
     design_of(kind, &mut rng, marque)
 }
 
+/// How big a car is on the road.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Size {
+    Micro,
+    Small,
+    Medium,
+    Large,
+}
+
+/// How high it stands and sits.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Stance {
+    /// A sports car's: the roof at a standing man's ribs.
+    Low,
+    Car,
+    /// A crossover's: a car lifted a hand.
+    Raised,
+    /// An off-roader's, a people carrier's, a van's.
+    Tall,
+}
+
+/// What is ahead of the screen.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Hood {
+    /// A long bonnet, the cabin set back behind the front wheels.
+    Long,
+    /// A short one, the screen's foot over the front wheels.
+    Short,
+    /// None to speak of: one box, the screen running down to the nose.
+    None,
+}
+
+/// How the roof ends.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Roof {
+    /// A step down to a boot: three boxes.
+    Notch,
+    /// One line falling to the tail.
+    Fast,
+    /// Cut off short over a tailgate.
+    Hatch,
+    /// Carried level to an upright tail: an estate, an off-roader, a van.
+    Square,
+}
+
+/// The doors down one side.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Doors {
+    Two,
+    Four,
+    /// The rear one hinged at its back edge.
+    Coach,
+    /// The rear one sliding back along a rail.
+    Sliding,
+}
+
+/// The architecture of a car: the decisions taken before a line of its body
+/// is drawn, from which its proportions follow. Each is a choice of its own.
+/// A kind of car is a habit of choosing them (a saloon is usually a long
+/// bonnet, a notched roof and four doors) and no more than that: a saloon may
+/// be given a fast roof, an off-roader a falling one, a people carrier no
+/// bonnet at all.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Architecture {
+    pub size: Size,
+    pub stance: Stance,
+    pub hood: Hood,
+    pub roof: Roof,
+    pub doors: Doors,
+    /// No pillar between the doors' glass.
+    pub pillarless: bool,
+    /// The pillars blacked out, so the glass reads as one band round the car.
+    pub wrapped: bool,
+}
+
+impl Architecture {
+    fn of(kind: Kind, rng: &mut Rng) -> Self {
+        use Kind::*;
+        let (size, stance, hood, roof, doors) = match kind {
+            Saloon => (
+                rng.pick(&[(Size::Medium, 0.6), (Size::Large, 0.4)]),
+                Stance::Car,
+                Hood::Long,
+                rng.pick(&[(Roof::Notch, 0.7), (Roof::Fast, 0.3)]),
+                rng.pick(&[(Doors::Four, 0.96), (Doors::Coach, 0.04)]),
+            ),
+            Fastback => (
+                Size::Large,
+                Stance::Car,
+                Hood::Long,
+                Roof::Fast,
+                Doors::Four,
+            ),
+            Hatchback => (
+                Size::Small,
+                Stance::Car,
+                rng.pick(&[(Hood::Long, 0.5), (Hood::Short, 0.5)]),
+                Roof::Hatch,
+                rng.pick(&[(Doors::Four, 0.85), (Doors::Two, 0.15)]),
+            ),
+            Crossover => (
+                Size::Medium,
+                Stance::Raised,
+                rng.pick(&[(Hood::Long, 0.6), (Hood::Short, 0.4)]),
+                rng.pick(&[(Roof::Hatch, 0.6), (Roof::Fast, 0.25), (Roof::Square, 0.15)]),
+                Doors::Four,
+            ),
+            Suv => (
+                Size::Large,
+                Stance::Tall,
+                Hood::Long,
+                rng.pick(&[(Roof::Square, 0.7), (Roof::Hatch, 0.18), (Roof::Fast, 0.12)]),
+                Doors::Four,
+            ),
+            Mpv => (
+                Size::Large,
+                Stance::Tall,
+                rng.pick(&[(Hood::Short, 0.55), (Hood::None, 0.45)]),
+                Roof::Square,
+                rng.pick(&[(Doors::Sliding, 0.75), (Doors::Four, 0.25)]),
+            ),
+            Van => (
+                Size::Small,
+                Stance::Tall,
+                rng.pick(&[(Hood::None, 0.6), (Hood::Short, 0.4)]),
+                Roof::Square,
+                Doors::Sliding,
+            ),
+            Wagon => (
+                rng.pick(&[(Size::Medium, 0.5), (Size::Large, 0.5)]),
+                Stance::Car,
+                Hood::Long,
+                Roof::Square,
+                Doors::Four,
+            ),
+            Coupe => (
+                Size::Medium,
+                Stance::Low,
+                Hood::Long,
+                rng.pick(&[(Roof::Fast, 0.65), (Roof::Notch, 0.35)]),
+                Doors::Two,
+            ),
+            Micro => (
+                Size::Micro,
+                Stance::Raised,
+                rng.pick(&[(Hood::None, 0.5), (Hood::Short, 0.5)]),
+                rng.pick(&[(Roof::Square, 0.5), (Roof::Hatch, 0.5)]),
+                rng.pick(&[(Doors::Two, 0.6), (Doors::Four, 0.4)]),
+            ),
+            Sports => (
+                Size::Medium,
+                Stance::Low,
+                // Engine ahead of the cabin, or behind it.
+                rng.pick(&[(Hood::Long, 0.6), (Hood::Short, 0.4)]),
+                Roof::Fast,
+                Doors::Two,
+            ),
+        };
+        Self {
+            size,
+            stance,
+            hood,
+            roof,
+            doors,
+            pillarless: matches!(doors, Doors::Two | Doors::Coach) && rng.chance(0.6)
+                || rng.chance(0.06),
+            wrapped: rng.chance(match stance {
+                Stance::Tall | Stance::Raised => 0.35,
+                _ => 0.15,
+            }),
+        }
+    }
+}
+
 /// A design of a given kind.
 pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
     use Kind::*;
-    // An estate, a coupe and a runabout are each drawn from the kind nearest
-    // to them and then changed where they differ.
+    let arch = Architecture::of(kind, rng);
+    // What is left of the kind once the architecture is drawn is its trade:
+    // a van is fitted out as cheaply as a van is, whatever its shape.
     let shape = kind;
     let kind = match shape {
         Wagon => Saloon,
@@ -175,217 +350,162 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         Micro => Hatchback,
         other => other,
     };
-    let electric = rng.chance(match kind {
-        Saloon => 0.30,
-        Fastback => 0.60,
-        Hatchback => 0.30,
-        Crossover => 0.40,
-        Suv => 0.30,
-        Mpv => 0.25,
-        Van => 0.10,
-        Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
+    let electric = rng.chance(match (shape, arch.hood) {
+        (Micro, _) => 0.85,
+        (Van, _) => 0.10,
+        // With no engine to house, a bonnet may be as short as it likes.
+        (_, Hood::None) => 0.6,
+        (Fastback | Sports, _) => 0.5,
+        _ => 0.32,
     });
-    // --- proportions -------------------------------------------------------
-    let length = match kind {
-        Saloon => rng.range(4.50, 4.98),
-        Fastback => rng.range(4.60, 5.00),
-        Hatchback => rng.range(3.85, 4.35),
-        Crossover => rng.range(4.25, 4.60),
-        Suv => rng.range(4.55, 4.98),
-        Mpv => rng.range(4.60, 5.05),
-        Van => rng.range(3.85, 4.40),
-        Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
+
+    // --- proportions, from the architecture ---------------------------------
+    let length = match arch.size {
+        Size::Micro => rng.range(2.95, 3.55),
+        Size::Small => rng.range(3.85, 4.35),
+        Size::Medium => rng.range(4.35, 4.75),
+        Size::Large => rng.range(4.72, 5.05),
     };
-    let length = match shape {
-        Micro => rng.range(2.95, 3.55),
-        Coupe => length - rng.range(0.15, 0.40),
-        Sports => rng.range(4.30, 4.62),
-        _ => length,
-    };
-    let width = match kind {
-        Saloon => rng.range(1.78, 1.88),
-        Fastback => rng.range(1.84, 1.95),
-        Hatchback => rng.range(1.68, 1.80),
-        Crossover => rng.range(1.78, 1.86),
-        Suv => rng.range(1.84, 1.96),
-        Mpv => rng.range(1.80, 1.90),
-        Van => rng.range(1.56, 1.68),
-        Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
-    };
-    let width = if shape == Micro {
-        rng.range(1.50, 1.62)
+    let narrow = shape == Van;
+    let width = match arch.size {
+        Size::Micro => rng.range(1.50, 1.62),
+        Size::Small if narrow => rng.range(1.56, 1.68),
+        Size::Small => rng.range(1.70, 1.80),
+        Size::Medium => rng.range(1.78, 1.88),
+        Size::Large => rng.range(1.85, 1.96),
+    } + if arch.stance == Stance::Low {
+        0.05
     } else {
-        width
+        0.0
     };
-    let roof = match kind {
-        Saloon => rng.range(1.42, 1.49),
-        Fastback => rng.range(1.38, 1.45),
-        Hatchback => rng.range(1.45, 1.53),
-        Crossover => rng.range(1.57, 1.65),
-        Suv => rng.range(1.66, 1.78),
-        Mpv => rng.range(1.70, 1.82),
-        Van => rng.range(1.80, 1.92),
-        Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
+    let roof = match arch.stance {
+        Stance::Low => rng.range(1.25, 1.38),
+        Stance::Car => rng.range(1.42, 1.50),
+        Stance::Raised => rng.range(1.55, 1.66),
+        Stance::Tall if shape == Van => rng.range(1.80, 1.92),
+        Stance::Tall => rng.range(1.68, 1.82),
     };
-    let roof = match shape {
-        Micro => rng.range(1.54, 1.66),
-        Coupe => roof - rng.range(0.05, 0.10),
-        Sports => rng.range(1.25, 1.33),
-        _ => roof,
-    };
-    let wheel_r = match kind {
-        Saloon => rng.range(0.325, 0.350),
-        Fastback => rng.range(0.340, 0.365),
-        Hatchback => rng.range(0.305, 0.330),
-        Crossover => rng.range(0.345, 0.370),
-        Suv => rng.range(0.360, 0.395),
-        Mpv => rng.range(0.330, 0.355),
-        Van => rng.range(0.280, 0.300),
-        Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
-    };
-    let wheel_r = if shape == Micro {
-        rng.range(0.262, 0.290)
-    } else {
-        wheel_r
-    };
+    let wheel_r = match arch.size {
+        Size::Micro => 0.275,
+        Size::Small => 0.315,
+        Size::Medium => 0.340,
+        Size::Large => 0.352,
+    } + match arch.stance {
+        Stance::Low => 0.008,
+        Stance::Car => 0.0,
+        Stance::Raised => 0.012,
+        Stance::Tall if shape == Van => -0.028,
+        Stance::Tall if shape == Mpv => -0.006,
+        Stance::Tall => 0.026,
+    } + rng.range(-0.012, 0.012);
     // The underside of the body stands a quarter of the way up the wheel: a
     // little more for what is meant to leave the road.
     let sill = wheel_r
-        * match kind {
-            Suv => rng.range(0.60, 0.68),
-            Crossover => rng.range(0.54, 0.60),
-            Van => rng.range(0.52, 0.58),
-            _ => rng.range(0.47, 0.53),
+        * match arch.stance {
+            Stance::Low => rng.range(0.42, 0.48),
+            Stance::Car => rng.range(0.47, 0.53),
+            Stance::Raised => rng.range(0.54, 0.60),
+            Stance::Tall if shape == Suv => rng.range(0.60, 0.68),
+            Stance::Tall => rng.range(0.50, 0.57),
         };
-    // Overhangs: an electric car's wheels sit nearer its corners.
-    let front_overhang = match kind {
-        Van => rng.range(0.52, 0.66),
-        _ => rng.range(0.84, 0.98) - if electric { 0.06 } else { 0.0 },
-    };
-    let front_overhang = if shape == Micro {
-        rng.range(0.50, 0.58)
-    } else {
-        front_overhang
-    };
-    let rear_overhang = match kind {
-        Saloon | Fastback => rng.range(0.98, 1.12),
-        Hatchback => rng.range(0.66, 0.80),
-        Crossover | Suv => rng.range(0.86, 1.02),
-        Mpv => rng.range(0.92, 1.04),
-        Van => rng.range(0.62, 0.76),
-        Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
-    } - if electric { 0.05 } else { 0.0 };
-    let rear_overhang = if shape == Micro {
-        rng.range(0.46, 0.54)
-    } else {
-        rear_overhang
-    };
+    // Overhangs. With no bonnet the front wheels are at the corner; an
+    // electric car's sit nearer its corners anyway.
+    let small = arch.size == Size::Micro;
+    let front_overhang = match arch.hood {
+        _ if small => rng.range(0.50, 0.58),
+        Hood::Long => rng.range(0.84, 0.98),
+        Hood::Short => rng.range(0.76, 0.90),
+        Hood::None => rng.range(0.56, 0.72),
+    } - if electric && !small { 0.05 } else { 0.0 };
+    let rear_overhang = match arch.roof {
+        _ if small => rng.range(0.46, 0.54),
+        Roof::Notch => rng.range(0.98, 1.12),
+        Roof::Fast => rng.range(0.90, 1.06),
+        Roof::Hatch => rng.range(0.66, 0.86),
+        Roof::Square if shape == Van => rng.range(0.62, 0.76),
+        Roof::Square => rng.range(0.84, 1.04),
+    } - if electric && !small { 0.04 } else { 0.0 };
     let wheelbase = length - front_overhang - rear_overhang;
     // The nose and the tail are modelled as faces standing beyond the lofted
-    // body: the loft stops this far short of each end.
-    // (Never so far that the loft would end inside a wheel arch.)
+    // body: the loft stops this far short of each end (never so far that it
+    // would end inside a wheel arch).
     let room = wheel_r + 0.20;
-    let face = if kind == Van || shape == Micro {
-        (
-            0.15_f32.min(front_overhang - room),
-            0.13_f32.min(rear_overhang - room),
-        )
-    } else {
-        (
-            0.30_f32.min(front_overhang - room),
-            0.22_f32.min(rear_overhang - room),
-        )
-    };
+    let blunt = small || arch.hood == Hood::None;
+    let face = (
+        (if blunt { 0.16_f32 } else { 0.30 }).min(front_overhang - room),
+        (if small || shape == Van {
+            0.13_f32
+        } else {
+            0.22
+        })
+        .min(rear_overhang - room),
+    );
     let nose = wheelbase * 0.5 + front_overhang - face.0;
     let tail = -wheelbase * 0.5 - rear_overhang + face.1;
-    // Heights of the shoulder line: nose, cowl, rear deck.
-    let raise = (roof - 1.45) * 0.50;
-    let cowl = match kind {
-        Van => rng.range(1.00, 1.05),
-        _ => rng.range(0.955, 1.0) + raise,
-    };
-    let nose_top = match kind {
-        Van => cowl - rng.range(0.20, 0.26),
-        Suv | Crossover | Mpv => cowl - rng.range(0.19, 0.25),
-        _ => cowl - rng.range(0.19, 0.25),
-    };
-    let deck = match kind {
-        Saloon => cowl + rng.range(0.00, 0.04),
-        Fastback => cowl + rng.range(0.02, 0.06),
-        _ => cowl + rng.range(0.01, 0.04),
-    };
-    let tail_top = match kind {
-        Saloon | Fastback => deck - rng.range(0.05, 0.08),
-        _ => deck - rng.range(0.03, 0.06),
-    };
-    // The glasshouse.
+    // Heights of the shoulder line: cowl, nose, rear deck. A taller car's
+    // shoulder is higher; a low one's lower.
+    let cowl = rng.range(0.955, 1.0) + (roof - 1.45) * 0.50;
+    let nose_top = cowl
+        - match arch.hood {
+            Hood::Long => rng.range(0.19, 0.26),
+            Hood::Short => rng.range(0.17, 0.23),
+            // One box: the nose is hardly below the screen's foot.
+            Hood::None => rng.range(0.10, 0.17),
+        };
+    let deck = cowl
+        + match arch.roof {
+            Roof::Notch => rng.range(0.00, 0.04),
+            Roof::Fast => rng.range(0.02, 0.07),
+            _ => rng.range(0.01, 0.04),
+        };
+    let tail_top = deck
+        - match arch.roof {
+            Roof::Notch | Roof::Fast => rng.range(0.05, 0.08),
+            _ => rng.range(0.03, 0.06),
+        };
+    // The glasshouse: where the screen stands follows from the bonnet.
     let half_base = wheelbase * 0.5;
-    let front_foot = match kind {
-        Van => nose - rng.range(0.46, 0.56),
-        Mpv => half_base - rng.range(-0.10, 0.06),
-        _ => half_base - rng.range(0.16, 0.30) + if electric { 0.06 } else { 0.0 },
-    };
-    let front_foot = if shape == Micro {
-        nose - rng.range(0.36, 0.48)
-    } else {
-        front_foot
-    };
+    let front_foot = match arch.hood {
+        Hood::Long => half_base - rng.range(0.14, 0.32) + if electric { 0.06 } else { 0.0 },
+        Hood::Short => half_base + rng.range(-0.04, 0.14),
+        Hood::None => nose - rng.range(0.30, 0.46),
+    }
+    .min(nose - 0.30);
     let front_head = front_foot
-        - match kind {
-            Van => rng.range(0.52, 0.62),
-            Mpv => rng.range(0.86, 0.98),
-            Fastback => rng.range(1.00, 1.12),
-            Suv => rng.range(0.80, 0.92),
-            _ => rng.range(0.90, 1.04),
+        - match (arch.stance, arch.hood) {
+            (_, Hood::None) if shape == Van => rng.range(0.50, 0.62),
+            (_, Hood::None) if small => rng.range(0.58, 0.72),
+            // One box: the screen is long and laid back, running out of the nose.
+            (_, Hood::None) => rng.range(0.95, 1.15),
+            (Stance::Low, _) => rng.range(1.00, 1.15),
+            (Stance::Car, _) => rng.range(0.90, 1.04),
+            (Stance::Raised, _) => rng.range(0.84, 0.96),
+            (Stance::Tall, _) => rng.range(0.76, 0.90),
+        } * if small { 0.72 } else { 1.0 };
+    // And where the roof ends follows from the tail.
+    let rear_foot = tail
+        + match arch.roof {
+            Roof::Notch => rng.range(0.38, 0.60),
+            Roof::Fast => rng.range(0.10, 0.34),
+            Roof::Hatch => rng.range(0.07, 0.13),
+            Roof::Square => rng.range(0.04, 0.10),
         };
-    let rear_foot = match kind {
-        Saloon => tail + rng.range(0.38, 0.60),
-        Fastback => tail + rng.range(0.34, 0.48),
-        Hatchback => tail + rng.range(0.07, 0.12),
-        Crossover => tail + rng.range(0.08, 0.14),
-        Suv | Mpv => tail + rng.range(0.07, 0.11),
-        Van => tail + rng.range(0.04, 0.06),
-        Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
-    };
     let rear_head = rear_foot
-        + match kind {
-            Saloon => rng.range(0.78, 1.00),
-            Fastback => rng.range(0.98, 1.20),
-            Hatchback => rng.range(0.36, 0.50),
-            Crossover => rng.range(0.40, 0.62),
-            Suv => rng.range(0.26, 0.40),
-            Mpv => rng.range(0.22, 0.32),
-            Van => rng.range(0.07, 0.10),
-            Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
-        };
-    // An estate's roof runs to an upright tailgate; a runabout's cabin is
-    // most of the car.
-    let (front_head, rear_foot, rear_head) = match shape {
-        Wagon => {
-            let foot = tail + rng.range(0.07, 0.12);
-            (front_head, foot, foot + rng.range(0.32, 0.58))
-        }
-        Sports => {
-            // The roof falls in one line from over the seats to the tail.
-            let foot = tail + rng.range(0.10, 0.20);
-            (front_head, foot, foot + rng.range(1.10, 1.35))
-        }
-        Micro => {
-            let foot = tail + rng.range(0.05, 0.09);
-            (
-                front_foot - rng.range(0.58, 0.72),
-                foot,
-                foot + rng.range(0.16, 0.30),
-            )
-        }
-        _ => (front_head, rear_foot, rear_head),
-    };
+        + match arch.roof {
+            Roof::Notch => rng.range(0.78, 1.00),
+            Roof::Fast if arch.stance == Stance::Low => rng.range(1.05, 1.35),
+            Roof::Fast => rng.range(0.95, 1.25),
+            Roof::Hatch => rng.range(0.36, 0.62),
+            Roof::Square if shape == Van => rng.range(0.07, 0.10),
+            Roof::Square if arch.stance == Stance::Car => rng.range(0.32, 0.56),
+            Roof::Square => rng.range(0.18, 0.38),
+        } * if small { 0.6 } else { 1.0 };
     // Whatever the rakes, a roof is left between the screens.
     let rear_head = rear_head.min(
         front_head
-            - match shape {
-                Micro => 0.75,
-                Sports => 0.55,
+            - match (arch.size, arch.stance) {
+                (Size::Micro, _) => 0.75,
+                (_, Stance::Low) => 0.55,
                 _ => 1.25,
             },
     );
@@ -402,13 +522,16 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         (nose - 0.20, nose_top + 0.035),
         (nose, nose_top),
     ];
-    let boot = matches!(kind, Saloon | Fastback) && !matches!(shape, Wagon | Sports);
-    let tall = matches!(kind, Suv | Crossover);
-    let cladding = match kind {
-        Suv => rng.chance(0.65),
-        Crossover => rng.chance(0.8),
-        _ => false,
-    };
+    // A boot lid where there is a deck behind the glass to lift.
+    let boot = arch.roof == Roof::Notch || arch.roof == Roof::Fast && rear_foot - tail > 0.26;
+    let tall =
+        matches!(arch.stance, Stance::Raised | Stance::Tall) && !matches!(shape, Van | Mpv | Micro);
+    let cladding = tall
+        && rng.chance(if arch.stance == Stance::Tall {
+            0.65
+        } else {
+            0.8
+        });
 
     // --- lamps -------------------------------------------------------------
     // A make's lamps are its own; a van's are what is cheapest.
@@ -674,8 +797,8 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
     // Sharp-edged or soft, slab-sided or hipped, wedge or level: the same
     // freedoms whatever the kind, with a few leanings.
     let soft = rng.unit();
-    let sporty = matches!(shape, Fastback | Coupe | Sports) || rng.chance(0.25);
-    let boxy = matches!(shape, Van | Micro | Suv | Mpv);
+    let sporty = arch.stance == Stance::Low || arch.roof == Roof::Fast || rng.chance(0.25);
+    let boxy = arch.roof == Roof::Square && arch.stance != Stance::Car || arch.size == Size::Micro;
     let face_of = |rng: &mut Rng, front: bool| Face {
         sweep: rng.range(0.30, 0.72),
         chin: rng.range(0.22, 0.50),
@@ -728,11 +851,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         nose: face_of(rng, true),
         tail: face_of(rng, false),
     };
-    let four_doors = match shape {
-        Coupe | Sports => false,
-        Micro => rng.chance(0.4),
-        _ => true,
-    };
+    let four_doors = arch.doors != Doors::Two;
     Spec {
         top,
         cabin: [rear_foot, rear_head, front_head, front_foot],
@@ -768,6 +887,10 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         mirror,
         face,
         four_doors,
+        coach: arch.doors == Doors::Coach,
+        sliding: arch.doors == Doors::Sliding,
+        pillarless: arch.pillarless,
+        wrapped: arch.wrapped,
         style,
         black_roof: marque.black_roof && !matches!(shape, Van | Micro) || tall && rng.chance(0.1),
         fog: kind != Van && rng.chance(0.6),

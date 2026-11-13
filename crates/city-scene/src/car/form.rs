@@ -51,6 +51,14 @@ pub(super) struct Spec {
     pub face: (f32, f32),
     /// Two doors a side, or one.
     pub four_doors: bool,
+    /// The rear door hinged at its back edge, so the handles meet.
+    pub coach: bool,
+    /// The rear door on a rail.
+    pub sliding: bool,
+    /// No pillar between the doors' glass.
+    pub pillarless: bool,
+    /// The pillars blacked out, so the glass reads as one band.
+    pub wrapped: bool,
     /// The roof and pillars black over the body's colour.
     pub black_roof: bool,
     pub style: Style,
