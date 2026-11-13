@@ -1,0 +1,121 @@
+name: Car preview
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/city-scene/src/car/**"
+      - "src/carHarness.ts"
+      - "src/city/carMaterials.ts"
+      - "scripts/car-shot.mjs"
+      - ".github/workflows/car-preview.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+      FLEET_SEED: "20261113"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: browser-actions/setup-chrome@v1
+
+      - run: npm ci
+
+      - name: Check changed car Rust files formatting
+        run: rustfmt --check --edition 2024 crates/city-scene/src/car/form.rs crates/city-scene/src/car/design.rs crates/city-scene/src/car/body.rs
+
+      - name: Test car generator
+        run: cargo test -p city-scene
+
+      - name: Generate baseline and updated car meshes
+        shell: bash
+        run: |
+          git worktree add --detach /tmp/terrain-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/terrain-base
+            cargo run --release -p city-scene --example dump_cars -- /tmp/cars-before.json "$FLEET_SEED"
+          )
+          cargo run --release -p city-scene --example dump_cars -- /tmp/cars-after.json "$FLEET_SEED"
+
+      - name: Prepare isolated car viewers
+        shell: bash
+        run: |
+          mkdir -p /tmp/car-before /tmp/car-after
+          git archive HEAD | tar -x -C /tmp/car-before
+          git archive HEAD | tar -x -C /tmp/car-after
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/car-before/node_modules
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/car-after/node_modules
+          mkdir -p /tmp/car-before/public /tmp/car-after/public
+          cp /tmp/cars-before.json /tmp/car-before/public/audit-cars.json
+          cp /tmp/cars-after.json /tmp/car-after/public/audit-cars.json
+          mkdir -p render-out/before render-out/after
+          (cd /tmp/car-before && nohup "$GITHUB_WORKSPACE/node_modules/.bin/vite" --host 127.0.0.1 --port 1421 --strictPort >/tmp/vite-before.log 2>&1 </dev/null &)
+          (cd /tmp/car-after && nohup "$GITHUB_WORKSPACE/node_modules/.bin/vite" --host 127.0.0.1 --port 1422 --strictPort >/tmp/vite-after.log 2>&1 </dev/null &)
+          for port in 1421 1422; do
+            ready=0
+            for attempt in $(seq 1 60); do
+              if curl -fsS "http://127.0.0.1:$port/car-harness.html" >/dev/null; then ready=1; break; fi
+              sleep 1
+            done
+            test "$ready" = 1
+          done
+
+      - name: Render before and after
+        shell: bash
+        run: |
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium || command -v chrome)"
+          test -n "$CHROMIUM_PATH"
+          node scripts/car-shot.mjs --url http://127.0.0.1:1421/car-harness.html --out render-out/before --variants 0,1,2,3,4,5 --views side,front34,rear34 --size 1440x900
+          node scripts/car-shot.mjs --url http://127.0.0.1:1422/car-harness.html --out render-out/after --variants 0,1,2,3,4,5 --views side,front34,rear34 --size 1440x900
+
+      - name: Create comparison index
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          variants = range(6)
+          views = [("side", "Side"), ("front34", "Front 3/4"), ("rear34", "Rear 3/4")]
+          html = """<!doctype html><meta charset="utf-8"><title>Car surfacing preview</title>
+          <style>
+          body{font:15px system-ui;background:#eef1f4;color:#17212b;margin:24px}
+          h1{font-size:26px}.variant{background:white;border-radius:12px;padding:16px;margin:18px 0}
+          .pair{display:grid;grid-template-columns:130px 1fr 1fr;gap:12px;align-items:start;margin:12px 0}
+          .pair img{width:100%;height:auto;border:1px solid #d8dee5;border-radius:6px}
+          .label{font-weight:700;padding-top:8px}.muted{color:#607080}
+          </style>
+          <h1>Procedural car surfacing — before / after</h1>
+          <p class="muted">Same fleet seed (20261113), camera and renderer. Left: main. Right: branch.</p>"""
+          for v in variants:
+              html += f'<section class="variant"><h2>Generated car {v}</h2>'
+              for view, label in views:
+                  html += f'<div class="pair"><div class="label">{label}</div>'
+                  html += f'<div><b>Before · main</b><img src="before/car{v}-{view}.png"></div>'
+                  html += f'<div><b>After · branch</b><img src="after/car{v}-{view}.png"></div></div>'
+              html += '</section>'
+          Path("render-out/index.html").write_text(html, encoding="utf-8")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: car-surfacing-before-after
+          path: render-out/
+          if-no-files-found: error
+          retention-days: 14
