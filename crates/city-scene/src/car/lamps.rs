@@ -33,6 +33,17 @@ pub(super) struct Wing {
     pub r: f32,
 }
 
+/// What a headlamp is besides its wing.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) enum Extra {
+    None,
+    /// A hook: a blade of light dropping from the outer end, so long and so wide.
+    Fang(f32, f32),
+    /// A second tier: the wing is only the running light, and the lamps
+    /// proper are in a pod of their own this far below it, so wide and so high.
+    Pod(f32, f32, f32),
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum HeadStyle {
     /// Reflector bowls with bulbs, all chrome.
@@ -89,6 +100,9 @@ struct Shape {
     h: (f32, f32),
     r: f32,
     bar: Option<(f32, f32)>,
+    extra: Extra,
+    /// Drawn as a C, open toward the middle of the car.
+    notch: bool,
 }
 
 impl Shape {
@@ -99,6 +113,18 @@ impl Shape {
             h: wing.h,
             r: wing.r,
             bar: bar.map(|(y, h)| (top + y, h)),
+            extra: Extra::None,
+            notch: false,
+        }
+    }
+    /// The middle of the pod of a two-tier lamp, on the drawing.
+    fn pod(&self) -> Option<((f32, f32), (f32, f32))> {
+        match self.extra {
+            Extra::Pod(drop, wide, high) => {
+                let (s, y) = self.at(0.45, 0.0);
+                Some(((s, y - drop), (wide * 0.5, high * 0.5)))
+            }
+            _ => None,
         }
     }
     /// From the lamp's own coordinates (`u` from the inner end to the outer,
@@ -120,6 +146,34 @@ impl Shape {
             (self.s.0, self.y.0 + self.h.0 * 0.5),
         ];
         let mut d = sd_convex(&quad, p, self.r);
+        if self.notch {
+            let (s, y) = self.at(0.16, 0.0);
+            let bite = sd_box(
+                (s, y),
+                ((self.s.1 - self.s.0) * 0.30, self.h.0 * 0.19),
+                p,
+                0.008,
+            );
+            d = d.max(-bite);
+        }
+        match self.extra {
+            Extra::Fang(long, wide) => {
+                let (s, y) = self.at(0.80, -1.0);
+                let blade = sd_box(
+                    (s, y - long * 0.5 + 0.012),
+                    (wide * 0.5, long * 0.5 + 0.012),
+                    p,
+                    wide * 0.4,
+                );
+                d = d.min(blade);
+            }
+            Extra::Pod(..) => {
+                if let Some((at, half)) = self.pod() {
+                    d = d.min(sd_box(at, half, p, half.1 * 0.6));
+                }
+            }
+            Extra::None => {}
+        }
         if let Some((y, h)) = self.bar {
             let half = self.s.0 * 0.5 + 0.03;
             d = d.min(sd_box((half - 0.03, y), (half, h * 0.5), p, h * 0.3));
@@ -130,22 +184,26 @@ impl Shape {
 
 fn head_shape(form: &Form) -> Shape {
     let spec = form.spec;
-    Shape::new(
+    let mut shape = Shape::new(
         &spec.head,
         spec.head_bar,
         form.face_half(true),
         form.face_top(true),
-    )
+    );
+    shape.extra = spec.head_extra;
+    shape
 }
 
 fn tail_shape(form: &Form) -> Shape {
     let spec = form.spec;
-    Shape::new(
+    let mut shape = Shape::new(
         &spec.tail,
         spec.tail_bar,
         form.face_half(false),
         form.face_top(false),
-    )
+    );
+    shape.notch = spec.tail_notch;
+    shape
 }
 
 /// An opening's outline on the front face.
@@ -641,6 +699,18 @@ pub(super) fn build(
                 }
                 let turn = lamp.line((0.70, 0.95), -0.30, 8, lamp.depth - 0.016);
                 beads(builder, &key("lamp.amber"), &[turn], 0.012, 0.0042);
+            }
+        }
+
+        // The lower tier of a two-tier lamp: the lamps proper, in their pod.
+        if let Some((at, half)) = lamp.shape.pod() {
+            let size = (half.1 * 0.62).min(0.03);
+            for k in [-1.0_f32, 0.0, 1.0] {
+                let place = (at.0 + k * half.0 * 0.56, at.1);
+                if let Some(seat) = lamp.lens.locate(&|_| true, &|p| lamp.map(p), place) {
+                    let axis = (Vec3::new(1.0, 0.0, 0.0) * 0.8 + seat.n).normalized_or_up();
+                    module(builder, key, seat.p - seat.n * (size + 0.012), axis, size);
+                }
             }
         }
 

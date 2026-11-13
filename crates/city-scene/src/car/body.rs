@@ -469,9 +469,16 @@ fn sculpt(soup: &mut Soup, form: &Form) {
     };
     // The shoulder: rising a little toward the tail, as a wedge does.
     let style = spec.style;
-    let shoulder = |p: Vec3| {
-        p.y - (form.belt(p.x) - style.crease_drop + style.wedge * (form.nose - p.x) / length)
-    };
+    // The shoulder line runs unbroken from the headlamp to the tail lamp, so
+    // it is kept above the wheel arches it passes over.
+    let clear = 2.0 * spec.wheel_r + ARCH_GAP + 0.075;
+    let drop = style
+        .crease_drop
+        .min(form.belt(half_base) - clear)
+        .min(form.belt(-half_base) + style.wedge * (form.nose + half_base) / length - clear)
+        .max(0.05);
+    let shoulder =
+        |p: Vec3| p.y - (form.belt(p.x) - drop + style.wedge * (form.nose - p.x) / length);
     // The hollow above the sill.
     let hollow = |p: Vec3| p.y - (form.floor(p.x) + 0.26);
     let from_axle = |p: Vec3| {
@@ -505,8 +512,8 @@ fn sculpt(soup: &mut Soup, form: &Form) {
         let side = flank(p);
         let mut h = 0.0;
         if side > 0.0 {
-            h += ridge(shoulder(p), style.crease, 0.06) * side * ends(p, 0.30, 0.75) * between(p);
-            h -= ridge(hollow(p), style.hollow, 0.10) * side * ends(p, 0.5, 0.9) * between(p);
+            h += ridge(shoulder(p), style.crease, 0.06) * side * ends(p, 0.10, 0.45);
+            h -= ridge(hollow(p), style.hollow, 0.10) * side * ends(p, 0.35, 0.8) * between(p);
             let t = ((from_axle(p) - arch) / lip_wide).clamp(0.0, 1.0);
             let lip = (1.0 - (from_axle(p) - arch) / 0.035).clamp(0.0, 1.0);
             h += (style.flare * (1.0 - t).powi(2) * (1.0 + 2.0 * t) + 0.005 * lip * lip) * side;

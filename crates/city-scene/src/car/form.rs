@@ -6,7 +6,7 @@
 //! into the rings of the one skin everything else is cut from.
 use crate::math::Vec3;
 
-use super::lamps::{Grille, HeadStyle, TailStyle, Wing};
+use super::lamps::{Extra, Grille, HeadStyle, TailStyle, Wing};
 use super::wheels::{Rim, Tyre};
 
 pub(super) struct Spec {
@@ -37,6 +37,10 @@ pub(super) struct Spec {
     pub head_style: HeadStyle,
     /// A light bar joining the headlamps: `(height above the face's top, depth)`.
     pub head_bar: Option<(f32, f32)>,
+    /// What the headlamp is besides its wing: a hook, a second tier.
+    pub head_extra: Extra,
+    /// Tail lamps drawn as a C.
+    pub tail_notch: bool,
     pub tail: Wing,
     pub tail_style: TailStyle,
     pub tail_bar: Option<(f32, f32)>,
@@ -80,8 +84,8 @@ pub(super) struct Style {
     /// the middle, positive toward the screen).
     pub crown: f32,
     pub peak: f32,
-    /// How the screens run out into the roof: near 1 flat and angular,
-    /// higher bowed.
+    /// How the screens run out into the roof: near 1 bowed, higher straight
+    /// to an edge.
     pub bow: f32,
     /// How much the body draws in toward the nose and the tail, in plan.
     pub taper: (f32, f32),
@@ -119,6 +123,9 @@ pub(super) struct Face {
     pub proud: f32,
     /// How round the edge is: near 1.5 soft, above 2.5 square-shouldered.
     pub square: f32,
+    /// How the bonnet or the deck runs into it: near 1.2 in one long curve,
+    /// above 2 over an edge.
+    pub flow: f32,
 }
 
 /// A door mirror: its glass's width and height, and how it is carried.
@@ -217,6 +224,7 @@ const CORNER_M: f32 = 0.03;
 pub(super) struct Form<'a> {
     pub spec: &'a Spec,
     belt: Vec<(f32, f32)>,
+    roofline: Vec<(f32, f32)>,
     pub tail: f32,
     pub nose: f32,
     /// The lines below, tabulated every few millimetres: the fields that cut
@@ -235,10 +243,37 @@ impl<'a> Form<'a> {
         let mut form = Self {
             spec,
             belt,
+            roofline: Vec::new(),
             tail,
             nose,
             table: Vec::new(),
         };
+        // The roof line's control points: the screens' feet on the deck, a
+        // point part-way up each screen to keep it a screen, their heads, and
+        // the roof's peak between them.
+        let [rear_foot, rear_head, front_head, front_foot] = spec.cabin;
+        let deck = |x: f32| form.belt_exact(x) + 0.012 + form.deck_crown(x);
+        let style = &spec.style;
+        let peak = (rear_head + front_head) * 0.5 + (front_head - rear_head) * 0.5 * style.peak;
+        let (rear, front) = (deck(rear_foot), deck(front_foot));
+        let head = spec.roof - style.crown * 0.35;
+        // How far up a screen its guiding point stands: low, and the screen
+        // bows into the roof; high, and it runs straight to an edge.
+        let screen = 0.38 + 0.16 * (style.bow - 1.25);
+        let part =
+            |a: (f32, f32), b: (f32, f32), t: f32| (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+        form.roofline = faired(
+            &[
+                (rear_foot, rear),
+                part((rear_foot, rear), (rear_head, head), screen),
+                (rear_head, head),
+                (peak, spec.roof + style.crown * 0.45),
+                (front_head, head),
+                part((front_foot, front), (front_head, head), screen),
+                (front_foot, front),
+            ],
+            12,
+        );
         let count = ((nose - tail + 2.0 * TABLE_MARGIN_M) / TABLE_STEP_M).ceil() as usize + 2;
         form.table = (0..count)
             .map(|k| {
@@ -311,41 +346,31 @@ impl<'a> Form<'a> {
         self.spec.style.hip * (-near * near).exp()
     }
     /// How much of a cabin stands on the body here: 0 over the bonnet and the
-    /// boot, 1 under the roof, between along the raked glass.
+    /// boot, 1 under the roof, between along the raked glass. It is read off
+    /// the roof line, which is one fair curve from the foot of one screen
+    /// over the roof to the foot of the other: a car's roof has no corners.
     pub fn cabin(&self, x: f32) -> f32 {
-        let [rear_foot, rear_head, front_head, front_foot] = self.spec.cabin;
-        let rise = if x < rear_head {
-            (x - rear_foot) / (rear_head - rear_foot).max(0.05)
-        } else if x > front_head {
-            (front_foot - x) / (front_foot - front_head).max(0.05)
-        } else {
-            1.0
-        };
-        let rise = rise.clamp(0.0, 1.0);
-        // Eased at the head, where the screen runs out into the roof.
-        let eased = 1.0 - (1.0 - rise).powf(self.spec.style.bow);
-        eased * (0.75 + 0.25 * eased)
+        let [rear_foot, _, _, front_foot] = self.spec.cabin;
+        if x <= rear_foot || x >= front_foot {
+            return 0.0;
+        }
+        let deck = self.belt_exact(x) + 0.012 + self.deck_crown(x);
+        let line = sample_line(&self.roofline, x);
+        ((line - deck) / (self.spec.roof - deck).max(0.05)).clamp(0.0, 1.0)
     }
     /// The top of the car: the deck, or the roof line over the cabin.
     fn top_exact(&self, x: f32) -> f32 {
-        let deck = self.belt_exact(x) + 0.012;
-        // The roof is not flat: it crowns a little between the screens.
-        // One arc from the foot of one screen to the foot of the other, so
-        // the roof has no corner where a screen meets it.
+        let deck = self.belt_exact(x) + 0.012 + self.deck_crown(x);
         let [rear_foot, _, _, front_foot] = self.spec.cabin;
-        let along = ((x - rear_foot) / (front_foot - rear_foot).max(0.1)).clamp(0.0, 1.0);
-        let style = &self.spec.style;
-        let crown =
-            style.crown * ((1.0 - (2.0 * along - 1.0 - style.peak).abs().min(1.0).powi(2)) - 0.65);
-        // And the bonnet and the boot are not flat either: each rises from
-        // its edges to a crown along the middle of the car.
-        let g = self.cabin(x);
-        deck + self.deck_crown(x) * (1.0 - g) + (self.spec.roof + crown - deck) * g
+        if x <= rear_foot || x >= front_foot {
+            return deck;
+        }
+        deck.max(sample_line(&self.roofline, x))
     }
     /// How far the middle of the bonnet (or the boot) stands above its edges.
     fn deck_crown(&self, x: f32) -> f32 {
         let fade = (self.to_end(x) / 0.35).min(1.0);
-        self.spec.style.deck_crown * (0.35 + 0.65 * fade)
+        self.spec.style.deck_crown * (0.75 + 0.25 * fade)
     }
     /// The distance of a point of the flank from an axle, measured the way
     /// this design's wheel arches are drawn: round, or squared off.
@@ -383,6 +408,10 @@ impl<'a> Form<'a> {
         let crown = top - deck;
         let glass_head = (roof_half.min(wide - 0.16), deck + crown * 0.90 + 0.004);
         let shoulder = wide - style.shoulder - barrel * 0.5;
+        // The bonnet and the boot are one arc across the car, from the
+        // wing's edge over the crown: these points lie on it.
+        let deck_edge = shoulder - 0.075;
+        let arc = |share: f32| 0.10 + 0.90 * (1.0 - share.powf(2.2));
         [
             (0.0, floor),
             (wide - 0.14 - waist, floor),
@@ -395,12 +424,12 @@ impl<'a> Form<'a> {
             (wide - barrel * 0.30 + hip * 0.5, belt - high * 0.17),
             (shoulder, belt - 0.004),
             lerp2(
-                (shoulder - 0.085, deck + crown * 0.16),
+                (deck_edge, deck + crown * arc(1.0)),
                 (shoulder - 0.045, deck + 0.016),
             ),
-            lerp2((wide * 0.62, deck + crown * 0.66), glass_head),
+            lerp2((deck_edge * 0.66, deck + crown * arc(0.66)), glass_head),
             lerp2(
-                (wide * 0.30, deck + crown * 0.93),
+                (deck_edge * 0.33, deck + crown * arc(0.33)),
                 (glass_head.0 - 0.11, top - 0.006),
             ),
             (0.0, lerp(top, top + 0.018)),
@@ -588,15 +617,28 @@ impl Shell {
                     } else {
                         form.spec.style.tail
                     };
-                    let out = (1.0 - scale.powf(shape_of.square)).powf(1.0 / shape_of.square);
                     ring.iter()
                         .map(|p| {
-                            // The rings draw in across the car faster than
-                            // down it, so the top edge (the bonnet's lip, the
-                            // boot lid's) turns over more tightly than the
-                            // corners do in plan.
-                            let (y, z) = (mid + (p.y - mid) * scale.powf(0.72), p.z * scale);
+                            // How an end turns over depends on which edge of
+                            // it this is. The bonnet (or the boot, or the
+                            // roof) flows into it over a long radius; the
+                            // corners turn as the design's style has them;
+                            // the chin is a hard edge.
+                            let (y, z) = (mid + (p.y - mid) * scale, p.z * scale);
                             let v = ((y - floor) / (belt - floor)).clamp(0.0, 1.0);
+                            let ease = |t: f32| {
+                                let t = t.clamp(0.0, 1.0);
+                                t * t * (3.0 - 2.0 * t)
+                            };
+                            // The rounding is a matter of height on the face,
+                            // changing smoothly up it, so no line of the mesh
+                            // carries a change of it across the face.
+                            let up = ease((v - 0.55) / 0.45);
+                            let down = ease((0.30 - v) / 0.30);
+                            let n = shape_of.flow * up
+                                + shape_of.square * (1.0 - up - down)
+                                + 3.2 * down;
+                            let out = (1.0 - scale.powf(n)).powf(1.0 / n);
                             let across = (z / half).abs().min(1.0);
                             let step = |a: f32, b: f32| {
                                 let t = ((v - a) / (b - a)).clamp(0.0, 1.0);

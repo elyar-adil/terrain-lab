@@ -9,7 +9,7 @@
 //! dimension and every part is chosen freely. Any seed gives a car that could
 //! be parked outside; no two seeds give the same one.
 use super::form::{Face, Mirror, Spec, Style};
-use super::lamps::{Grille, GrilleKind, HeadStyle, TailStyle, Wing};
+use super::lamps::{Extra, Grille, GrilleKind, HeadStyle, TailStyle, Wing};
 use super::wheels::{Rim, RimStyle, Tread, Tyre};
 
 /// The kinds of car, which bound everything else.
@@ -48,6 +48,10 @@ pub(super) struct Marque {
     black_roof: bool,
     /// A light bar across the nose.
     head_bar: bool,
+    /// What its headlamps are besides a wing: a hook, a second tier.
+    head_extra: u8,
+    /// Tail lamps drawn as a C, open toward the middle of the car.
+    tail_notch: bool,
 }
 
 /// The shape of a make's grille.
@@ -94,6 +98,8 @@ impl Marque {
             round_lamps: rng.chance(0.2),
             black_roof: rng.chance(0.14),
             head_bar: rng.chance(0.25),
+            head_extra: rng.pick(&[(0, 0.42), (1, 0.30), (2, 0.28)]),
+            tail_notch: rng.chance(0.4),
         }
     }
 }
@@ -588,6 +594,30 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
             }
         }
     };
+    // What a make's headlamps are besides a wing. With a second tier the
+    // wing is only the running light, and is drawn slim.
+    let head_extra = if round || kind == Van {
+        Extra::None
+    } else {
+        match marque.head_extra {
+            1 => Extra::Fang(rng.range(0.10, 0.20), rng.range(0.022, 0.034)),
+            2 => Extra::Pod(
+                rng.range(0.14, 0.20),
+                rng.range(0.17, 0.25),
+                rng.range(0.07, 0.10),
+            ),
+            _ => Extra::None,
+        }
+    };
+    let head = if matches!(head_extra, Extra::Pod(..)) {
+        Wing {
+            h: (head.h.0.min(0.05), head.h.1.min(0.04)),
+            r: head.r.min(0.014),
+            ..head
+        }
+    } else {
+        head
+    };
     let head_bar = (!round
         && (marque.head_bar && head_style != HeadStyle::Halogen || electric && rng.chance(0.25)))
     .then(|| (head.y.0, rng.range(0.016, 0.024)));
@@ -694,22 +724,28 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
 
     // --- wheels ------------------------------------------------------------
     // The rim fills more of a sporting car's wheel, less of a van's.
-    let rim_share = match kind {
-        Van => rng.range(0.60, 0.63),
-        Hatchback => rng.range(0.63, 0.67),
-        Fastback => rng.range(0.72, 0.76),
-        _ => rng.range(0.68, 0.74),
+    // The tyre: how much of the wheel is rim and how much rubber follows from
+    // the stance (a sports car's is all rim, a van's all tyre), and its width
+    // from the size of the car.
+    let rim_share = match arch.stance {
+        _ if shape == Van => rng.range(0.58, 0.62),
+        Stance::Low => rng.range(0.73, 0.78),
+        Stance::Car => rng.range(0.66, 0.73),
+        Stance::Raised => rng.range(0.64, 0.70),
+        Stance::Tall => rng.range(0.62, 0.69),
     };
     let tyre = Tyre {
-        width: (match kind {
-            Van => 0.175,
-            Hatchback => 0.195,
-            Saloon | Mpv => 0.215,
-            Crossover => 0.225,
-            Fastback => 0.245,
-            Suv => 0.245,
-            Wagon | Coupe | Micro | Sports => unreachable!("drawn from another kind"),
-        }) + rng.range(-0.01, 0.01),
+        width: match arch.size {
+            _ if shape == Van => 0.175,
+            Size::Micro => 0.165,
+            Size::Small => 0.205,
+            Size::Medium => 0.228,
+            Size::Large => 0.248,
+        } + if arch.stance == Stance::Low {
+            0.025
+        } else {
+            0.0
+        } + rng.range(-0.008, 0.012),
         rim_r: wheel_r * rim_share,
         tread: match kind {
             Van => Tread::Ribbed,
@@ -809,6 +845,13 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         } * if boxy { 0.6 } else { 1.0 },
         proud: rng.range(0.02, 0.11),
         square: 1.55 + (1.0 - soft) * rng.range(0.2, 1.3),
+        // A nose is run into from the bonnet in one curve; a tail is more
+        // often cut off over an edge.
+        flow: if front {
+            rng.range(1.15, 1.75)
+        } else {
+            rng.range(1.5, 2.8)
+        },
     };
     let style = Style {
         tumble: if boxy {
@@ -882,6 +925,9 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         head,
         head_style,
         head_bar,
+        head_extra,
+        tail_notch: marque.tail_notch
+            && matches!(tail_style, TailStyle::Cluster | TailStyle::Guide),
         tail: tail_lamp,
         tail_style,
         tail_bar,
