@@ -467,20 +467,37 @@ fn sculpt(soup: &mut Soup, form: &Form) {
         smoothstep(form.tail + from, form.tail + to, p.x)
             * smoothstep(form.nose - from, form.nose - to, p.x)
     };
-    // The shoulder: rising a little toward the tail, as a wedge does.
+    // A normalized fore-to-aft coordinate lets each car carry its own
+    // long-wave surfacing rather than receiving the same horizontal crease.
     let style = spec.style;
-    // The shoulder line runs unbroken from the headlamp to the tail lamp, so
-    // it is kept above the wheel arches it passes over.
+    let progress = |x: f32| ((x - form.tail) / length).clamp(0.0, 1.0);
+    // Zero slope at both ends: the bow blends into the front and rear panels
+    // instead of looking like a sine-wave decal laid over the doors.
+    let fair_bow = |t: f32| 16.0 * t * t * (1.0 - t) * (1.0 - t);
+    let shoulder_rise = |x: f32| {
+        let t = progress(x);
+        style.wedge * (1.0 - t) + style.shoulder_bow * fair_bow(t)
+    };
+    // The shoulder is kept clear of both wheel arches even when its sweep
+    // rises or falls; it remains a continuous stamped feature from end to end.
     let clear = 2.0 * spec.wheel_r + ARCH_GAP + 0.075;
     let drop = style
         .crease_drop
-        .min(form.belt(half_base) - clear)
-        .min(form.belt(-half_base) + style.wedge * (form.nose + half_base) / length - clear)
+        .min(form.belt(half_base) + shoulder_rise(half_base) - clear)
+        .min(form.belt(-half_base) + shoulder_rise(-half_base) - clear)
         .max(0.05);
-    let shoulder =
-        |p: Vec3| p.y - (form.belt(p.x) - drop + style.wedge * (form.nose - p.x) / length);
-    // The hollow above the sill.
-    let hollow = |p: Vec3| p.y - (form.floor(p.x) + 0.26);
+    let shoulder = |p: Vec3| p.y - (form.belt(p.x) - drop + shoulder_rise(p.x));
+
+    // The lower door feature follows its own sweep, not a parallel copy of
+    // the shoulder. It dies naturally into the wheel-arch volumes.
+    let hollow = |p: Vec3| {
+        let t = progress(p.x);
+        let line_y = form.floor(p.x)
+            + 0.26
+            + style.lower_sweep * (2.0 * t - 1.0)
+            + style.lower_bow * fair_bow(t);
+        p.y - line_y
+    };
     let from_axle = |p: Vec3| {
         form.to_axle(p.x, p.y, -half_base)
             .min(form.to_axle(p.x, p.y, half_base))
@@ -512,8 +529,17 @@ fn sculpt(soup: &mut Soup, form: &Form) {
         let side = flank(p);
         let mut h = 0.0;
         if side > 0.0 {
-            h += ridge(shoulder(p), style.crease, 0.06) * side * ends(p, 0.10, 0.45);
-            h -= ridge(hollow(p), style.hollow, 0.10) * side * ends(p, 0.35, 0.8) * between(p);
+            let shoulder_mask = side * ends(p, 0.10, 0.45);
+            // Broad shoulder volume creates the flowing highlight band; the
+            // narrower crown gives it a precise, pressed-metal character.
+            h += ridge(shoulder(p), style.crease * 0.58, 0.15) * shoulder_mask;
+            h += ridge(shoulder(p), style.crease * 0.42, 0.055) * shoulder_mask;
+
+            let lower_mask = side * ends(p, 0.35, 0.8) * between(p);
+            // A shallow cove with a softer shoulder, rather than a hard,
+            // ruler-straight groove across the lower door.
+            h -= ridge(hollow(p), style.hollow * 0.70, 0.16) * lower_mask;
+            h -= ridge(hollow(p), style.hollow * 0.30, 0.075) * lower_mask;
             let t = ((from_axle(p) - arch) / lip_wide).clamp(0.0, 1.0);
             let lip = (1.0 - (from_axle(p) - arch) / 0.035).clamp(0.0, 1.0);
             h += (style.flare * (1.0 - t).powi(2) * (1.0 + 2.0 * t) + 0.005 * lip * lip) * side;
@@ -531,8 +557,8 @@ fn sculpt(soup: &mut Soup, form: &Form) {
     // Vertices along every line and across every slope of the relief.
     let lines: [(&dyn Fn(Vec3) -> f32, f32); 6] = [
         (&spoiler_line, 0.07),
-        (&shoulder, 0.06),
-        (&hollow, 0.10),
+        (&shoulder, 0.15),
+        (&hollow, 0.16),
         (&bonnet_line, 0.06),
         (&|p| from_axle(p) - arch - lip_wide * 0.5, lip_wide * 0.5),
         (&|p| from_axle(p) - arch - 0.035, 0.035),

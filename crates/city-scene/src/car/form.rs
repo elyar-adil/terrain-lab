@@ -93,6 +93,12 @@ pub(super) struct Style {
     /// rises toward the tail, and how sharp. And the hollow in the doors.
     pub crease_drop: f32,
     pub wedge: f32,
+    /// A broad, fair rise or fall in the shoulder line, in metres.
+    pub shoulder_bow: f32,
+    /// Fore-to-aft sweep of the lower door feature line, in metres.
+    pub lower_sweep: f32,
+    /// A gentle long-wave bow in the lower door feature line, in metres.
+    pub lower_bow: f32,
     pub crease: f32,
     pub hollow: f32,
     /// The creases down the bonnet.
