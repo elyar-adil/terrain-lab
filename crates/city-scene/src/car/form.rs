@@ -406,12 +406,18 @@ impl<'a> Form<'a> {
         // bonnet and the boot it turns in at the shoulder and rises to the
         // crown along the middle of the car.
         let crown = top - deck;
-        let glass_head = (roof_half.min(wide - 0.16), deck + crown * 0.90 + 0.004);
         let shoulder = wide - style.shoulder - barrel * 0.5;
-        // The bonnet and the boot are one arc across the car, from the
-        // wing's edge over the crown: these points lie on it.
-        let deck_edge = shoulder - 0.075;
-        let arc = |share: f32| 0.10 + 0.90 * (1.0 - share.powf(2.2));
+        // The top of the section is the same four points whatever stands on
+        // the body here. Over the bonnet and the boot they lie on one arc
+        // across the car. Under the cabin the first is the foot of the side
+        // glass, the second its head and the third the roof's rail; and the
+        // head starts out beside the foot, nearly as wide as the body, and
+        // leans in as it rises: a pillar grows from the corner of the bonnet
+        // up and in to the roof, never the other way.
+        let roof_z = roof_half.min(wide - 0.16);
+        let head_z = lerp(shoulder - 0.14, roof_z);
+        let rail_z = head_z - lerp(0.20, 0.11);
+        let on_arc = |z: f32| 1.0 - (z / (shoulder - 0.06)).clamp(0.0, 1.0).powi(2);
         [
             (0.0, floor),
             (wide - 0.14 - waist, floor),
@@ -423,15 +429,9 @@ impl<'a> Form<'a> {
             (wide + hip, floor + high * 0.56),
             (wide - barrel * 0.30 + hip * 0.5, belt - high * 0.17),
             (shoulder, belt - 0.004),
-            lerp2(
-                (deck_edge, deck + crown * arc(1.0)),
-                (shoulder - 0.045, deck + 0.016),
-            ),
-            lerp2((deck_edge * 0.66, deck + crown * arc(0.66)), glass_head),
-            lerp2(
-                (deck_edge * 0.33, deck + crown * arc(0.33)),
-                (glass_head.0 - 0.11, top - 0.006),
-            ),
+            (shoulder - lerp(0.06, 0.045), deck + lerp(0.0, 0.016)),
+            (head_z, deck + crown * lerp(on_arc(head_z), 0.90)),
+            (rail_z, deck + crown * lerp(on_arc(rail_z), 0.985)),
             (0.0, lerp(top, top + 0.018)),
         ]
     }

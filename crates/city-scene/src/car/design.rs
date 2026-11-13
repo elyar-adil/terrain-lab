@@ -521,11 +521,16 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         (tail + 0.24, tail_top),
         (rear_foot.max(tail + 0.45) + 0.12, deck),
         (front_foot - 0.08, cowl),
+        // The bonnet falls away from the screen ever more steeply to the
+        // nose: one convex line, with no flat and no lip in it.
         (
-            nose - (nose - front_foot) * 0.42,
-            cowl - (cowl - nose_top) * 0.36,
+            front_foot + (nose - front_foot) * 0.38,
+            cowl - (cowl - nose_top) * 0.20,
         ),
-        (nose - 0.20, nose_top + 0.035),
+        (
+            front_foot + (nose - front_foot) * 0.72,
+            cowl - (cowl - nose_top) * 0.56,
+        ),
         (nose, nose_top),
     ];
     // A boot lid where there is a deck behind the glass to lift.
@@ -855,9 +860,9 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
     };
     let style = Style {
         tumble: if boxy {
-            rng.range(0.20, 0.28)
+            rng.range(0.13, 0.19)
         } else {
-            rng.range(0.26, 0.37)
+            rng.range(0.17, 0.25)
         },
         shoulder: rng.range(0.030, 0.075),
         hip: if sporty {
@@ -879,7 +884,7 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         crease: (1.0 - soft) * rng.range(0.006, 0.016) + 0.002,
         hollow: rng.range(0.0, 0.014),
         bonnet: rng.range(0.0, 0.010),
-        deck_crown: rng.range(0.035, 0.075),
+        deck_crown: rng.range(0.020, 0.048),
         barrel: rng.range(0.020, 0.055),
         flare: if sporty {
             rng.range(0.018, 0.034)

@@ -96,8 +96,8 @@ pub(super) fn build(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -
     }
 
     // --- glass.
-    let side_front = front_head + (front_foot - front_head) * 0.60;
-    let side_rear = rear_head - (rear_head - rear_foot) * 0.60;
+    let side_front = front_head + (front_foot - front_head) * 0.80;
+    let side_rear = rear_head - (rear_head - rear_foot) * 0.72;
     let side_glass = |p: Vec3| {
         let (foot, (_, head)) = form.glass(p.x);
         round_and(
@@ -166,7 +166,7 @@ pub(super) fn build(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -
         } else {
             (rear_foot, rear_head)
         };
-        let low = form.top(foot_x) + 0.040;
+        let low = form.top(foot_x) + 0.022;
         let high = form.top(head_x) - 0.032;
         let corner = ((high - low) * 0.25).min(0.05);
         move |p: Vec3| {
@@ -231,8 +231,8 @@ pub(super) fn build(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -
             round_and(
                 &[
                     p.z.abs() - (head + 0.03),
-                    front_foot - 0.06 - p.x,
-                    p.x - (front_foot + 0.05),
+                    front_foot - 0.11 - p.x,
+                    p.x - (front_foot + 0.06),
                 ],
                 0.02,
             )

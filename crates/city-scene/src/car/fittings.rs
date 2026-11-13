@@ -17,7 +17,7 @@ fn mirror(builder: &mut MeshBuilder, form: &Form, key: &dyn Fn(&str) -> String, 
     let spec = form.spec;
     let m = spec.mirror;
     let [_, _, front_head, front_foot] = spec.cabin;
-    let side_front = front_head + (front_foot - front_head) * 0.60;
+    let side_front = front_head + (front_foot - front_head) * 0.80;
     let x = if m.on_sail {
         side_front - 0.065
     } else {
