@@ -878,10 +878,14 @@ pub(super) fn design_of(kind: Kind, rng: &mut Rng, marque: &Marque) -> Spec {
         },
     };
     let style = Style {
+        // A cabin is a good deal narrower than the body it stands on: the
+        // roof some two thirds of the car's width, less on a low car.
         tumble: if boxy {
-            rng.range(0.13, 0.19)
+            rng.range(0.17, 0.24)
+        } else if arch.stance == Stance::Low {
+            rng.range(0.30, 0.37)
         } else {
-            rng.range(0.17, 0.25)
+            rng.range(0.25, 0.33)
         },
         shoulder: rng.range(0.030, 0.075),
         hip: if sporty {

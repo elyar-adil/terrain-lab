@@ -274,13 +274,12 @@ impl<'a> Form<'a> {
             &[
                 (rear_foot, rear),
                 part((rear_foot, rear), (rear_head, back), screen),
-                // Each head is given twice: the roof is drawn up to it, and is
-                // at its height there, not somewhere short of it.
-                (rear_head, back),
-                (rear_head, back),
+                // Each head is set a little high, by as much as the curve
+                // falls short of it: the roof is at its height there, and
+                // turns into the screen over a radius, not at a corner.
+                (rear_head, back + (back - rear) * (1.0 - screen) / 5.0),
                 (peak, spec.roof + style.crown * 0.45),
-                (front_head, head),
-                (front_head, head),
+                (front_head, head + (head - front) * (1.0 - screen) / 5.0),
                 part((front_foot, front), (front_head, head), screen),
                 (front_foot, front),
             ],
@@ -425,9 +424,15 @@ impl<'a> Form<'a> {
         // head starts out beside the foot, nearly as wide as the body, and
         // leans in as it rises: a pillar grows from the corner of the bonnet
         // up and in to the roof, never the other way.
-        let roof_z = roof_half.min(wide - 0.16);
+        // In plan the roof is not a rectangle: widest between the doors and
+        // drawn in toward both screens, with round corners.
+        let [rear_foot, _, _, front_foot] = self.spec.cabin;
+        let along = ((x - rear_foot) / (front_foot - rear_foot).max(0.1)).clamp(0.0, 1.0);
+        let drawn = 0.10 * (2.0 * along - 0.95).abs().powf(2.2);
+        let roof_z = (roof_half - drawn).min(wide - 0.16);
         let head_z = lerp(shoulder - 0.14, roof_z);
-        let rail_z = head_z - lerp(0.20, 0.11);
+        // The rail is a generous radius between the glass and the roof.
+        let rail_z = head_z - lerp(0.20, 0.17);
         let on_arc = |z: f32| 1.0 - (z / (shoulder - 0.06)).clamp(0.0, 1.0).powi(2);
         [
             (0.0, floor),
@@ -441,9 +446,9 @@ impl<'a> Form<'a> {
             (wide - barrel * 0.30 + hip * 0.5, belt - high * 0.17),
             (shoulder, belt - 0.004),
             (shoulder - lerp(0.06, 0.045), deck + lerp(0.0, 0.016)),
-            (head_z, deck + crown * lerp(on_arc(head_z), 0.90)),
-            (rail_z, deck + crown * lerp(on_arc(rail_z), 0.985)),
-            (0.0, lerp(top, top + 0.018)),
+            (head_z, deck + crown * lerp(on_arc(head_z), 0.86)),
+            (rail_z, deck + crown * lerp(on_arc(rail_z), 0.975)),
+            (0.0, lerp(top, top + 0.030)),
         ]
     }
     /// The half-section at a station, as `(z, y)` from the middle of the floor,
@@ -663,8 +668,10 @@ impl Shell {
                             // A product of two fair curves has no line in it
                             // from a corner to the middle, as a face shrunk
                             // ring by ring toward a point has.
-                            let turn = |t: f32, n: f32| (1.0 - t.clamp(0.0, 1.0).powf(n)).powf(1.0 / n);
-                            let plan = turn(across, shape_of.square) * (1.0 - shape_of.sweep * across.powi(2) * 0.5);
+                            let turn =
+                                |t: f32, n: f32| (1.0 - t.clamp(0.0, 1.0).powf(n)).powf(1.0 / n);
+                            let plan = turn(across, shape_of.square)
+                                * (1.0 - shape_of.sweep * across.powi(2) * 0.5);
                             let bumper = 0.34;
                             let up = ((v - bumper) / (1.0 - bumper)).max(0.0);
                             let rise = if v >= bumper {
